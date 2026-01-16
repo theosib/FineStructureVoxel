@@ -1,0 +1,145 @@
+#pragma once
+
+#include "finevox/position.hpp"
+#include "finevox/chunk_column.hpp"
+#include "finevox/lru_cache.hpp"
+#include "finevox/coalescing_queue.hpp"
+#include <memory>
+#include <shared_mutex>
+#include <chrono>
+#include <unordered_set>
+#include <functional>
+
+namespace finevox {
+
+// Forward declaration
+class World;
+
+// Lifecycle state for managed columns
+enum class ColumnState {
+    Active,        // In use, may be dirty or clean
+    SaveQueued,    // Dirty, waiting to be saved
+    Saving,        // Currently being saved to disk
+    UnloadQueued,  // Clean, in LRU cache waiting for eviction
+    Evicted        // Not in memory (conceptual, we don't track these)
+};
+
+// Extended column info for lifecycle management
+struct ManagedColumn {
+    std::unique_ptr<ChunkColumn> column;
+    ColumnState state = ColumnState::Active;
+    bool dirty = false;
+    std::chrono::steady_clock::time_point lastModified;
+    std::chrono::steady_clock::time_point lastAccessed;
+    int32_t refCount = 0;  // Number of active references
+
+    explicit ManagedColumn(std::unique_ptr<ChunkColumn> col)
+        : column(std::move(col))
+        , lastModified(std::chrono::steady_clock::now())
+        , lastAccessed(std::chrono::steady_clock::now()) {}
+
+    void touch() {
+        lastAccessed = std::chrono::steady_clock::now();
+    }
+
+    void markDirty() {
+        dirty = true;
+        lastModified = std::chrono::steady_clock::now();
+    }
+
+    void markClean() {
+        dirty = false;
+    }
+};
+
+// SubChunkManager coordinates column lifecycle:
+// - Tracks active columns and their reference counts
+// - Manages save queue for dirty columns
+// - Maintains LRU cache for clean columns awaiting eviction
+// - Prevents loading from disk while saving
+//
+// Thread-safety: Uses internal locking for thread-safe access
+//
+class SubChunkManager {
+public:
+    explicit SubChunkManager(size_t cacheCapacity = 64);
+    ~SubChunkManager();
+
+    // Get a column - checks active, save queue, and unload cache
+    // Returns nullptr if not in memory
+    // Automatically moves retrieved columns to active state
+    ManagedColumn* get(ColumnPos pos);
+
+    // Add a new column to active management
+    // Takes ownership of the column
+    void add(std::unique_ptr<ChunkColumn> column);
+
+    // Mark a column as dirty (needs saving)
+    void markDirty(ColumnPos pos);
+
+    // Increment reference count (caller is using the column)
+    void addRef(ColumnPos pos);
+
+    // Decrement reference count (caller is done with column)
+    // When refs drop to zero, column may be queued for save/unload
+    void release(ColumnPos pos);
+
+    // Check if a column is currently being saved (don't load from disk!)
+    [[nodiscard]] bool isSaving(ColumnPos pos) const;
+
+    // Get columns that are queued for saving
+    // Caller should save these and call onSaveComplete when done
+    std::vector<ColumnPos> getSaveQueue();
+
+    // Called when a save operation completes
+    void onSaveComplete(ColumnPos pos);
+
+    // Periodic maintenance - call from game loop
+    // Processes periodic saves of dirty active columns
+    void tick();
+
+    // Force save of all dirty columns (for shutdown)
+    std::vector<ColumnPos> getAllDirty();
+
+    // Configuration
+    void setPeriodicSaveInterval(std::chrono::seconds interval);
+    void setCacheCapacity(size_t capacity);
+
+    // Statistics
+    [[nodiscard]] size_t activeCount() const;
+    [[nodiscard]] size_t saveQueueSize() const;
+    [[nodiscard]] size_t cacheSize() const;
+
+    // Callback for when a column is evicted from cache
+    using EvictionCallback = std::function<void(std::unique_ptr<ChunkColumn>)>;
+    void setEvictionCallback(EvictionCallback callback);
+
+private:
+    mutable std::shared_mutex mutex_;
+
+    // Active columns (have refs > 0 or recently used)
+    std::unordered_map<uint64_t, std::unique_ptr<ManagedColumn>> active_;
+
+    // Save queue - dirty columns with refs == 0
+    CoalescingQueue<uint64_t> saveQueue_;
+
+    // Currently being saved - CRITICAL: don't load from disk while here!
+    std::unordered_set<uint64_t> currentlySaving_;
+
+    // LRU cache for clean columns with refs == 0
+    LRUCache<uint64_t, std::unique_ptr<ManagedColumn>> unloadCache_;
+
+    // Periodic save tracking
+    std::chrono::steady_clock::time_point lastPeriodicSave_;
+    std::chrono::seconds periodicSaveInterval_{60};
+
+    // Eviction callback
+    EvictionCallback evictionCallback_;
+
+    // Internal helper to move column between states
+    void transitionToSaveQueue(uint64_t key);
+    void transitionToUnloadCache(uint64_t key);
+    void transitionToActive(uint64_t key, std::unique_ptr<ManagedColumn> column);
+};
+
+}  // namespace finevox

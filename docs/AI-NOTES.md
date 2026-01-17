@@ -206,9 +206,10 @@ items[0]                # Array indexing (brackets - future)
   - ChunkColumn serialization (toCBOR/fromCBOR)
   - RegionFile with journal-style ToC (crash-safe)
   - Free space management for region files
-  - 294 tests passing
+  - IOManager with async save/load threads
+  - 302 tests passing
 
-**Next task:** LZ4 compression for region files, I/O threads for async save/load, or Phase 3 (Physics)
+**Next task:** LZ4 compression for region files, IOManager/SubChunkManager integration, or Phase 3 (Physics)
 **Blockers:** None
 
 ---

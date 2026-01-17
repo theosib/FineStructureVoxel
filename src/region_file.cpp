@@ -214,38 +214,41 @@ bool RegionFile::appendTocEntry(const TocEntry& entry) {
     return tocFile_.good();
 }
 
-bool RegionFile::writeChunkData(uint64_t offset, const std::vector<uint8_t>& data) {
+bool RegionFile::writeChunkData(uint64_t offset, const std::vector<uint8_t>& data, uint32_t flags) {
     if (!datFile_.is_open()) {
         return false;
     }
 
-    // Write header: magic (4) + size (4)
-    uint8_t header[8];
+    // Write header: magic (4) + flags (4) + size (4) = 12 bytes
+    uint8_t header[12];
     for (int i = 0; i < 4; ++i) {
         header[i] = static_cast<uint8_t>((DAT_CHUNK_MAGIC >> (i * 8)) & 0xFF);
     }
+    for (int i = 0; i < 4; ++i) {
+        header[4 + i] = static_cast<uint8_t>((flags >> (i * 8)) & 0xFF);
+    }
     uint32_t dataSize = static_cast<uint32_t>(data.size());
     for (int i = 0; i < 4; ++i) {
-        header[4 + i] = static_cast<uint8_t>((dataSize >> (i * 8)) & 0xFF);
+        header[8 + i] = static_cast<uint8_t>((dataSize >> (i * 8)) & 0xFF);
     }
 
     datFile_.seekp(static_cast<std::streamoff>(offset));
-    datFile_.write(reinterpret_cast<const char*>(header), 8);
+    datFile_.write(reinterpret_cast<const char*>(header), 12);
     datFile_.write(reinterpret_cast<const char*>(data.data()), data.size());
     datFile_.flush();
 
     return datFile_.good();
 }
 
-std::vector<uint8_t> RegionFile::readChunkData(uint64_t offset, uint32_t size) {
+std::vector<uint8_t> RegionFile::readChunkData(uint64_t offset, uint32_t size, uint32_t* outFlags) {
     if (!datFile_.is_open()) {
         return {};
     }
 
-    // Read header
-    uint8_t header[8];
+    // Read header: magic (4) + flags (4) + size (4) = 12 bytes
+    uint8_t header[12];
     datFile_.seekg(static_cast<std::streamoff>(offset));
-    datFile_.read(reinterpret_cast<char*>(header), 8);
+    datFile_.read(reinterpret_cast<char*>(header), 12);
 
     if (!datFile_.good()) {
         return {};
@@ -260,14 +263,23 @@ std::vector<uint8_t> RegionFile::readChunkData(uint64_t offset, uint32_t size) {
         return {};
     }
 
+    // Read flags
+    uint32_t flags = 0;
+    for (int i = 0; i < 4; ++i) {
+        flags |= static_cast<uint32_t>(header[4 + i]) << (i * 8);
+    }
+    if (outFlags) {
+        *outFlags = flags;
+    }
+
     // Read size from header (for verification)
     uint32_t storedSize = 0;
     for (int i = 0; i < 4; ++i) {
-        storedSize |= static_cast<uint32_t>(header[4 + i]) << (i * 8);
+        storedSize |= static_cast<uint32_t>(header[8 + i]) << (i * 8);
     }
 
-    // Use the smaller of stored size and expected size
-    uint32_t readSize = std::min(storedSize, size - 8);
+    // Use the smaller of stored size and expected size (minus header)
+    uint32_t readSize = std::min(storedSize, size - 12);
 
     // Read data
     std::vector<uint8_t> data(readSize);
@@ -333,6 +345,12 @@ uint64_t RegionFile::currentTimestamp() {
 }
 
 bool RegionFile::saveColumn(const ChunkColumn& column, ColumnPos pos) {
+    // Serialize the column to CBOR
+    auto cbor = ColumnSerializer::toCBOR(column, pos.x, pos.z);
+    return saveColumnRaw(pos, cbor);
+}
+
+bool RegionFile::saveColumnRaw(ColumnPos pos, std::span<const uint8_t> cborData) {
     // Verify this column belongs to our region
     if (RegionPos::fromColumn(pos) != pos_) {
         return false;
@@ -340,14 +358,12 @@ bool RegionFile::saveColumn(const ChunkColumn& column, ColumnPos pos) {
 
     auto [lx, lz] = RegionPos::toLocal(pos);
 
-    // Serialize the column to CBOR
-    auto cbor = ColumnSerializer::toCBOR(column, pos.x, pos.z);
-
-    // TODO: LZ4 compress here
+    // TODO: LZ4 compress here based on ConfigManager::instance().compressionEnabled()
     // For now, store uncompressed
+    uint32_t flags = ChunkFlags::NONE;
 
-    // Calculate total size (header + data)
-    uint32_t totalSize = 8 + static_cast<uint32_t>(cbor.size());
+    // Calculate total size (header 12 bytes + data)
+    uint32_t totalSize = 12 + static_cast<uint32_t>(cborData.size());
 
     // Find location to write
     uint64_t writeOffset;
@@ -364,7 +380,8 @@ bool RegionFile::saveColumn(const ChunkColumn& column, ColumnPos pos) {
     }
 
     // Write chunk data
-    if (!writeChunkData(writeOffset, cbor)) {
+    std::vector<uint8_t> dataVec(cborData.begin(), cborData.end());
+    if (!writeChunkData(writeOffset, dataVec, flags)) {
         return false;
     }
 

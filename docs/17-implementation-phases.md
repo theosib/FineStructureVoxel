@@ -133,9 +133,11 @@
 - [ ] LZ4 compression for chunk data
 
 ### 2.3 I/O Threads
-- [ ] Save thread (processes save queue)
-- [ ] Load thread (reads from disk)
-- [ ] Coordination with SubChunkManager (don't load while saving)
+- [x] IOManager class with async save/load
+- [x] Save thread (processes save queue with callbacks)
+- [x] Load thread (async load with callbacks)
+- [x] Region file caching with LRU eviction
+- [ ] Integration with SubChunkManager (coordinate lifecycle)
 
 ### Testing
 - [x] RegionPos coordinate conversion (world to region, local indices)
@@ -147,8 +149,11 @@
 - [x] ToC compaction
 - [x] Large columns (192 Y levels, all blocks filled)
 - [x] Full region (1024 columns)
+- [x] IOManager save and load round-trip
+- [x] Multiple region file management
+- [x] Concurrent save/load operations
+- [x] Region file eviction
 - [ ] Round-trip: create world -> save -> load -> verify identical
-- [ ] Concurrent save/load operations
 - [ ] Region file corruption recovery
 
 ---

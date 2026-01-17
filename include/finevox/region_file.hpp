@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -16,6 +17,13 @@ namespace finevox {
 // Region = 32x32 column area (1024 columns per region)
 constexpr int32_t REGION_SIZE = 32;
 constexpr int32_t COLUMNS_PER_REGION = REGION_SIZE * REGION_SIZE;
+
+// Chunk data flags (stored in chunk header)
+namespace ChunkFlags {
+    constexpr uint32_t NONE = 0;
+    constexpr uint32_t COMPRESSED_LZ4 = 1 << 0;  // Data is LZ4 compressed
+    // Reserved: bits 1-31 for future use
+}
 
 // Region position (identifies which region file)
 struct RegionPos {
@@ -107,9 +115,14 @@ public:
     RegionFile(RegionFile&&) = delete;
     RegionFile& operator=(RegionFile&&) = delete;
 
-    // Save a column (compresses and writes)
+    // Save a column (serializes and writes)
     // Returns true on success
     bool saveColumn(const ChunkColumn& column, ColumnPos pos);
+
+    // Save pre-serialized column data (avoids double serialization)
+    // The data should be CBOR-encoded column data
+    // Returns true on success
+    bool saveColumnRaw(ColumnPos pos, std::span<const uint8_t> cborData);
 
     // Load a column
     // Returns nullptr if column doesn't exist or on error
@@ -169,10 +182,12 @@ private:
     bool appendTocEntry(const TocEntry& entry);
 
     // Write chunk data to dat file at given offset
-    bool writeChunkData(uint64_t offset, const std::vector<uint8_t>& data);
+    // flags: ChunkFlags bitmask (e.g., COMPRESSED_LZ4)
+    bool writeChunkData(uint64_t offset, const std::vector<uint8_t>& data, uint32_t flags = 0);
 
     // Read chunk data from dat file
-    [[nodiscard]] std::vector<uint8_t> readChunkData(uint64_t offset, uint32_t size);
+    // outFlags: receives the flags from the chunk header (can be nullptr)
+    [[nodiscard]] std::vector<uint8_t> readChunkData(uint64_t offset, uint32_t size, uint32_t* outFlags = nullptr);
 
     // Find best-fit free span for given size
     // Returns offset, or nullopt if no suitable span (append instead)

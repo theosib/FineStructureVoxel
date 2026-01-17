@@ -25,6 +25,7 @@ add_library(finevox STATIC
     src/region_file.cpp
     src/io_manager.cpp
     src/config.cpp
+    src/resource_locator.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -67,6 +68,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_region_file.cpp
         tests/test_io_manager.cpp
         tests/test_config.cpp
+        tests/test_resource_locator.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

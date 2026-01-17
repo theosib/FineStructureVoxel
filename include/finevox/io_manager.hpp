@@ -42,6 +42,13 @@ public:
 
     // Create IOManager with given world directory
     explicit IOManager(const std::filesystem::path& worldPath);
+
+    // Create IOManager using ResourceLocator for a registered world
+    // Uses regionPath(worldName, dimension) to find the region directory
+    // Returns nullptr if world is not registered with ResourceLocator
+    static std::unique_ptr<IOManager> forWorld(const std::string& worldName,
+                                                const std::string& dimension = "overworld");
+
     ~IOManager();
 
     // Non-copyable, non-movable (owns threads)

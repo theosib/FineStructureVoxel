@@ -139,6 +139,15 @@
 - [x] Region file caching with LRU eviction
 - [ ] Integration with SubChunkManager (coordinate lifecycle)
 
+### 2.4 Configuration & Resource Location
+- [x] ConfigManager - Global engine settings (singleton, CBOR persistence)
+- [x] WorldConfig - Per-world settings with global fallback
+- [x] ResourceLocator - Unified path resolution for all resources
+  - Scopes: engine/, game/, user/, world/<name>/, world/<name>/dim/<dim>/
+  - World/dimension registration
+  - Platform-aware user directory handling
+- [x] ChunkFlags in region file header (compression flag infrastructure)
+
 ### Testing
 - [x] RegionPos coordinate conversion (world to region, local indices)
 - [x] TocEntry serialization round-trip
@@ -153,6 +162,9 @@
 - [x] Multiple region file management
 - [x] Concurrent save/load operations
 - [x] Region file eviction
+- [x] ConfigManager (init, save, reload, typed accessors, generic get/set)
+- [x] WorldConfig (metadata, compression override, persistence)
+- [x] ResourceLocator (scope resolution, world/dimension management)
 - [ ] Round-trip: create world -> save -> load -> verify identical
 - [ ] Region file corruption recovery
 

@@ -196,7 +196,94 @@ On write:
 
 ---
 
-## 11.6 Save/Load Threading
+## 11.6 Resource Locator
+
+The **ResourceLocator** provides a unified path resolution service for all engine resources. It understands the hierarchy of scopes and maps logical paths to physical filesystem paths.
+
+### Scope Hierarchy
+
+```
+engine/              - Engine defaults (shipped with library)
+game/                - Game assets (textures, shaders, etc.) - root provided by game
+user/                - User-level settings (~/.config/finevox or platform equivalent)
+  config.cbor        - Global ConfigManager data
+world/<name>/        - Per-world data
+  world.cbor         - WorldConfig metadata
+  regions/           - Region files for overworld
+  dim/<name>/        - Named dimensions within world
+    regions/         - Region files for this dimension
+```
+
+### Design Principles
+
+1. **Separation of concerns**: ResourceLocator knows *where* things live, not *what* they are
+2. **Scope registration**: Roots are registered dynamically, not hardcoded
+3. **Logical paths**: Consumers use logical paths like `"user/config.cbor"`, not filesystem paths
+4. **Platform abstraction**: Handles platform-specific user directories internally
+
+### API Overview
+
+```cpp
+class ResourceLocator {
+public:
+    static ResourceLocator& instance();
+
+    // Set root paths for built-in scopes
+    void setEngineRoot(const std::filesystem::path& path);
+    void setGameRoot(const std::filesystem::path& path);
+    void setUserRoot(const std::filesystem::path& path);
+
+    // World/dimension management
+    void registerWorld(const std::string& name, const std::filesystem::path& path);
+    void unregisterWorld(const std::string& name);
+    void registerDimension(const std::string& world, const std::string& dim,
+                          const std::string& subpath = "");
+
+    // Path resolution
+    std::filesystem::path resolve(const std::string& logicalPath) const;
+    bool exists(const std::string& logicalPath) const;
+
+    // Convenience methods
+    std::filesystem::path worldPath(const std::string& name) const;
+    std::filesystem::path dimensionPath(const std::string& world, const std::string& dim) const;
+    std::filesystem::path regionPath(const std::string& world, const std::string& dim = "overworld") const;
+};
+```
+
+### Usage Examples
+
+```cpp
+// Game initialization
+ResourceLocator::instance().setEngineRoot("/usr/share/finevox");
+ResourceLocator::instance().setGameRoot("/path/to/game/assets");
+ResourceLocator::instance().setUserRoot("~/.config/finevox");  // Expands ~ automatically
+
+// World management
+ResourceLocator::instance().registerWorld("MyWorld", "/path/to/saves/MyWorld");
+ResourceLocator::instance().registerDimension("MyWorld", "nether");
+ResourceLocator::instance().registerDimension("MyWorld", "the_end");
+
+// Path resolution
+auto configPath = ResourceLocator::instance().resolve("user/config.cbor");
+// → /home/user/.config/finevox/config.cbor
+
+auto worldCfg = ResourceLocator::instance().resolve("world/MyWorld/world.cbor");
+// → /path/to/saves/MyWorld/world.cbor
+
+auto regions = ResourceLocator::instance().regionPath("MyWorld", "nether");
+// → /path/to/saves/MyWorld/dim/nether/regions
+```
+
+### Integration Points
+
+- **ConfigManager**: Uses `resolve("user/config.cbor")` instead of hardcoded paths
+- **WorldConfig**: Uses `resolve("world/<name>/world.cbor")`
+- **IOManager**: Uses `regionPath(world, dimension)` for region file directories
+- **Game assets**: Game layer sets game root, engine uses `resolve("game/textures/...")`
+
+---
+
+## 11.7 Save/Load Threading
 
 ```cpp
 class WorldPersistence {

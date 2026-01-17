@@ -1,4 +1,5 @@
 #include "finevox/io_manager.hpp"
+#include "finevox/resource_locator.hpp"
 #include "finevox/serialization.hpp"
 #include <algorithm>
 
@@ -7,6 +8,15 @@ namespace finevox {
 IOManager::IOManager(const std::filesystem::path& worldPath)
     : worldPath_(worldPath) {
     std::filesystem::create_directories(worldPath_);
+}
+
+std::unique_ptr<IOManager> IOManager::forWorld(const std::string& worldName,
+                                                const std::string& dimension) {
+    auto regionPath = ResourceLocator::instance().regionPath(worldName, dimension);
+    if (regionPath.empty()) {
+        return nullptr;
+    }
+    return std::make_unique<IOManager>(regionPath);
 }
 
 IOManager::~IOManager() {

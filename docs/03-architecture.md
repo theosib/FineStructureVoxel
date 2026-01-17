@@ -39,6 +39,27 @@
 | `voxel::persist` | Save/load, serialization, region files |
 | `voxel::ui` | HUD, menus, inventory (uses FineStructureVK) |
 
+## 3.2.1 Core Services
+
+| Service | Responsibility |
+|---------|----------------|
+| `ResourceLocator` | Logical path → physical path resolution for all resources |
+| `ConfigManager` | Global engine settings (singleton, uses ResourceLocator) |
+| `WorldConfig` | Per-world settings with global fallback |
+| `IOManager` | Async save/load with background threads |
+
+### ResourceLocator Scope Hierarchy
+
+```
+engine/     → Engine defaults (shipped with library)
+game/       → Game assets (root provided by game layer)
+user/       → User settings (~/.config/finevox or platform equivalent)
+world/<n>/  → Per-world data (registered dynamically)
+  dim/<d>/  → Dimensions within world
+```
+
+See [11-persistence.md](11-persistence.md) Section 11.6 for full ResourceLocator documentation.
+
 ## 3.3 Dependency Graph
 
 ```

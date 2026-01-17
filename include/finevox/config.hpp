@@ -27,6 +27,11 @@ public:
     // If file doesn't exist, uses defaults
     void init(const std::filesystem::path& configPath);
 
+    // Initialize using ResourceLocator to find user config
+    // Resolves "user/config.cbor" via ResourceLocator
+    // Requires ResourceLocator::instance().setUserRoot() to be called first
+    void initFromLocator();
+
     // Check if initialized
     [[nodiscard]] bool isInitialized() const;
 
@@ -107,6 +112,11 @@ class WorldConfig {
 public:
     // Create/load world config from world directory
     explicit WorldConfig(const std::filesystem::path& worldDir);
+
+    // Create/load world config using ResourceLocator
+    // Resolves "world/<name>/world.cbor" via ResourceLocator
+    // Requires the world to be registered with ResourceLocator first
+    static std::optional<WorldConfig> fromWorld(const std::string& worldName);
 
     // Save config to disk
     bool save();

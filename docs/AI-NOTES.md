@@ -207,7 +207,10 @@ items[0]                # Array indexing (brackets - future)
   - RegionFile with journal-style ToC (crash-safe)
   - Free space management for region files
   - IOManager with async save/load threads
-  - 302 tests passing
+  - ConfigManager for global settings, WorldConfig for per-world settings
+  - ResourceLocator for unified path resolution (engine/game/user/world scopes)
+  - ChunkFlags in region file header (compression flag infrastructure)
+  - 333 tests passing
 
 **Next task:** LZ4 compression for region files, IOManager/SubChunkManager integration, or Phase 3 (Physics)
 **Blockers:** None

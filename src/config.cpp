@@ -1,4 +1,5 @@
 #include "finevox/config.hpp"
+#include "finevox/resource_locator.hpp"
 #include <fstream>
 #include <chrono>
 
@@ -30,6 +31,15 @@ void ConfigManager::init(const std::filesystem::path& configPath) {
     }
 
     initialized_ = true;
+}
+
+void ConfigManager::initFromLocator() {
+    auto path = ResourceLocator::instance().resolve("user/config.cbor");
+    if (path.empty()) {
+        // Use default user root if not configured
+        path = ResourceLocator::defaultUserRoot() / "config.cbor";
+    }
+    init(path);
 }
 
 bool ConfigManager::isInitialized() const {
@@ -209,6 +219,14 @@ WorldConfig::WorldConfig(const std::filesystem::path& worldDir)
     if (std::filesystem::exists(configPath_)) {
         loadFromFile();
     }
+}
+
+std::optional<WorldConfig> WorldConfig::fromWorld(const std::string& worldName) {
+    auto worldPath = ResourceLocator::instance().worldPath(worldName);
+    if (worldPath.empty()) {
+        return std::nullopt;
+    }
+    return WorldConfig(worldPath);
 }
 
 void WorldConfig::setDefaults() {

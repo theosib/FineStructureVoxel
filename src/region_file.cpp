@@ -1,8 +1,10 @@
 #include "finevox/region_file.hpp"
+#include "finevox/config.hpp"
 #include "finevox/serialization.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <lz4.h>
 
 namespace finevox {
 
@@ -358,12 +360,52 @@ bool RegionFile::saveColumnRaw(ColumnPos pos, std::span<const uint8_t> cborData)
 
     auto [lx, lz] = RegionPos::toLocal(pos);
 
-    // TODO: LZ4 compress here based on ConfigManager::instance().compressionEnabled()
-    // For now, store uncompressed
+    // Determine whether to compress
+    bool shouldCompress = ConfigManager::instance().isInitialized()
+                        ? ConfigManager::instance().compressionEnabled()
+                        : true;  // Default to compression if not initialized
+
+    std::vector<uint8_t> dataToWrite;
     uint32_t flags = ChunkFlags::NONE;
 
+    if (shouldCompress && !cborData.empty()) {
+        // LZ4 compress the data
+        int maxCompressedSize = LZ4_compressBound(static_cast<int>(cborData.size()));
+        std::vector<uint8_t> compressed(maxCompressedSize + 4);  // +4 for uncompressed size
+
+        // Store original size first (4 bytes, little-endian)
+        uint32_t originalSize = static_cast<uint32_t>(cborData.size());
+        compressed[0] = static_cast<uint8_t>(originalSize & 0xFF);
+        compressed[1] = static_cast<uint8_t>((originalSize >> 8) & 0xFF);
+        compressed[2] = static_cast<uint8_t>((originalSize >> 16) & 0xFF);
+        compressed[3] = static_cast<uint8_t>((originalSize >> 24) & 0xFF);
+
+        int compressedSize = LZ4_compress_default(
+            reinterpret_cast<const char*>(cborData.data()),
+            reinterpret_cast<char*>(compressed.data() + 4),
+            static_cast<int>(cborData.size()),
+            maxCompressedSize
+        );
+
+        if (compressedSize > 0) {
+            // Compression succeeded - use compressed data if smaller
+            size_t totalCompressed = 4 + static_cast<size_t>(compressedSize);
+            if (totalCompressed < cborData.size()) {
+                compressed.resize(totalCompressed);
+                dataToWrite = std::move(compressed);
+                flags = ChunkFlags::COMPRESSED_LZ4;
+            }
+        }
+    }
+
+    // If not compressed (either disabled or compression didn't help), use raw data
+    if (dataToWrite.empty()) {
+        dataToWrite.assign(cborData.begin(), cborData.end());
+        flags = ChunkFlags::NONE;
+    }
+
     // Calculate total size (header 12 bytes + data)
-    uint32_t totalSize = 12 + static_cast<uint32_t>(cborData.size());
+    uint32_t totalSize = 12 + static_cast<uint32_t>(dataToWrite.size());
 
     // Find location to write
     uint64_t writeOffset;
@@ -380,8 +422,7 @@ bool RegionFile::saveColumnRaw(ColumnPos pos, std::span<const uint8_t> cborData)
     }
 
     // Write chunk data
-    std::vector<uint8_t> dataVec(cborData.begin(), cborData.end());
-    if (!writeChunkData(writeOffset, dataVec, flags)) {
+    if (!writeChunkData(writeOffset, dataToWrite, flags)) {
         return false;
     }
 
@@ -427,18 +468,45 @@ std::unique_ptr<ChunkColumn> RegionFile::loadColumn(ColumnPos pos) {
 
     const TocEntry& entry = it->second;
 
-    // Read chunk data
-    auto data = readChunkData(entry.offset, entry.size);
+    // Read chunk data with flags
+    uint32_t flags = 0;
+    auto data = readChunkData(entry.offset, entry.size, &flags);
     if (data.empty()) {
         return nullptr;
     }
 
-    // TODO: LZ4 decompress here
-    // For now, data is uncompressed CBOR
+    // Decompress if necessary
+    std::vector<uint8_t> cborData;
+    if (flags & ChunkFlags::COMPRESSED_LZ4) {
+        // LZ4 compressed - first 4 bytes are original size
+        if (data.size() < 4) {
+            return nullptr;  // Invalid compressed data
+        }
+
+        uint32_t originalSize = static_cast<uint32_t>(data[0]) |
+                               (static_cast<uint32_t>(data[1]) << 8) |
+                               (static_cast<uint32_t>(data[2]) << 16) |
+                               (static_cast<uint32_t>(data[3]) << 24);
+
+        cborData.resize(originalSize);
+        int decompressedSize = LZ4_decompress_safe(
+            reinterpret_cast<const char*>(data.data() + 4),
+            reinterpret_cast<char*>(cborData.data()),
+            static_cast<int>(data.size() - 4),
+            static_cast<int>(originalSize)
+        );
+
+        if (decompressedSize < 0 || static_cast<uint32_t>(decompressedSize) != originalSize) {
+            return nullptr;  // Decompression failed
+        }
+    } else {
+        // Uncompressed
+        cborData = std::move(data);
+    }
 
     // Deserialize
     int32_t x, z;
-    return ColumnSerializer::fromCBOR(data, &x, &z);
+    return ColumnSerializer::fromCBOR(cborData, &x, &z);
 }
 
 bool RegionFile::hasColumn(ColumnPos pos) const {

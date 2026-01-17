@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/region_file.hpp"
+#include "finevox/config.hpp"
 #include <filesystem>
 #include <cstdlib>
 
@@ -410,4 +411,169 @@ TEST_F(RegionFileTest, ManyColumns) {
         ASSERT_NE(loaded3, nullptr);
         EXPECT_EQ(loaded3->getBlock(15, 0, 15), stone);
     }
+}
+
+// ============================================================================
+// LZ4 Compression Tests
+// ============================================================================
+
+TEST_F(RegionFileTest, CompressionEnabledByDefault) {
+    // Without ConfigManager initialized, compression should default to enabled
+    RegionFile region(tempDir, RegionPos{0, 0});
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // Create a column with repetitive data (compresses well)
+    ChunkColumn col(ColumnPos{0, 0});
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                col.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    EXPECT_TRUE(region.saveColumn(col, ColumnPos{0, 0}));
+
+    // Load it back - should decompress automatically
+    auto loaded = region.loadColumn(ColumnPos{0, 0});
+    ASSERT_NE(loaded, nullptr);
+
+    // Verify data integrity
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                EXPECT_EQ(loaded->getBlock(x, y, z), stone);
+            }
+        }
+    }
+}
+
+TEST_F(RegionFileTest, CompressionCanBeDisabled) {
+    // Initialize ConfigManager with compression disabled
+    auto configPath = tempDir / "config.cbor";
+    ConfigManager::instance().init(configPath);
+    ConfigManager::instance().setCompressionEnabled(false);
+
+    RegionFile region(tempDir, RegionPos{0, 0});
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    ChunkColumn col(ColumnPos{0, 0});
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                col.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    EXPECT_TRUE(region.saveColumn(col, ColumnPos{0, 0}));
+
+    // Load it back
+    auto loaded = region.loadColumn(ColumnPos{0, 0});
+    ASSERT_NE(loaded, nullptr);
+
+    // Verify data integrity
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                EXPECT_EQ(loaded->getBlock(x, y, z), stone);
+            }
+        }
+    }
+
+    ConfigManager::instance().reset();
+}
+
+TEST_F(RegionFileTest, MixedCompressionRoundTrip) {
+    // Save some columns with compression, some without, then load all
+    auto configPath = tempDir / "config.cbor";
+    ConfigManager::instance().init(configPath);
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("test:dirt");
+
+    // Save with compression enabled
+    ConfigManager::instance().setCompressionEnabled(true);
+    {
+        RegionFile region(tempDir, RegionPos{0, 0});
+
+        ChunkColumn col1(ColumnPos{0, 0});
+        col1.setBlock(0, 0, 0, stone);
+        EXPECT_TRUE(region.saveColumn(col1, ColumnPos{0, 0}));
+
+        ChunkColumn col2(ColumnPos{1, 0});
+        col2.setBlock(0, 0, 0, dirt);
+        EXPECT_TRUE(region.saveColumn(col2, ColumnPos{1, 0}));
+    }
+
+    // Save more columns with compression disabled
+    ConfigManager::instance().setCompressionEnabled(false);
+    {
+        RegionFile region(tempDir, RegionPos{0, 0});
+
+        ChunkColumn col3(ColumnPos{2, 0});
+        col3.setBlock(0, 0, 0, stone);
+        EXPECT_TRUE(region.saveColumn(col3, ColumnPos{2, 0}));
+    }
+
+    // Load all columns (should handle mixed compression transparently)
+    {
+        RegionFile region(tempDir, RegionPos{0, 0});
+
+        auto loaded1 = region.loadColumn(ColumnPos{0, 0});
+        ASSERT_NE(loaded1, nullptr);
+        EXPECT_EQ(loaded1->getBlock(0, 0, 0), stone);
+
+        auto loaded2 = region.loadColumn(ColumnPos{1, 0});
+        ASSERT_NE(loaded2, nullptr);
+        EXPECT_EQ(loaded2->getBlock(0, 0, 0), dirt);
+
+        auto loaded3 = region.loadColumn(ColumnPos{2, 0});
+        ASSERT_NE(loaded3, nullptr);
+        EXPECT_EQ(loaded3->getBlock(0, 0, 0), stone);
+    }
+
+    ConfigManager::instance().reset();
+}
+
+TEST_F(RegionFileTest, CompressionReducesFileSize) {
+    auto configPath = tempDir / "config.cbor";
+    ConfigManager::instance().init(configPath);
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // Create highly repetitive data
+    ChunkColumn col(ColumnPos{0, 0});
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                col.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    // Save with compression
+    ConfigManager::instance().setCompressionEnabled(true);
+    {
+        RegionFile region(tempDir / "compressed", RegionPos{0, 0});
+        EXPECT_TRUE(region.saveColumn(col, ColumnPos{0, 0}));
+    }
+
+    // Save without compression
+    ConfigManager::instance().setCompressionEnabled(false);
+    {
+        RegionFile region(tempDir / "uncompressed", RegionPos{0, 0});
+        EXPECT_TRUE(region.saveColumn(col, ColumnPos{0, 0}));
+    }
+
+    // Compare file sizes
+    auto compressedSize = std::filesystem::file_size(tempDir / "compressed" / "r.0.0.dat");
+    auto uncompressedSize = std::filesystem::file_size(tempDir / "uncompressed" / "r.0.0.dat");
+
+    // Compressed should be significantly smaller for repetitive data
+    EXPECT_LT(compressedSize, uncompressedSize);
+
+    ConfigManager::instance().reset();
 }

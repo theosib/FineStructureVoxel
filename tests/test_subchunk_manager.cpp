@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 #include "finevox/subchunk_manager.hpp"
+#include "finevox/io_manager.hpp"
+#include <filesystem>
+#include <thread>
+#include <atomic>
 
 using namespace finevox;
 
@@ -248,4 +252,178 @@ TEST(SubChunkManagerTest, ColumnState) {
     col = manager.get(ColumnPos(0, 0));
     ASSERT_NE(col, nullptr);
     EXPECT_EQ(col->state, ColumnState::Active);  // Retrieved back to active
+}
+
+// ============================================================================
+// IOManager integration tests
+// ============================================================================
+
+class SubChunkManagerIOTest : public ::testing::Test {
+protected:
+    std::filesystem::path tempDir;
+
+    void SetUp() override {
+        tempDir = std::filesystem::temp_directory_path() / "finevox_test_scm_io";
+        std::filesystem::create_directories(tempDir);
+    }
+
+    void TearDown() override {
+        std::filesystem::remove_all(tempDir);
+    }
+};
+
+TEST_F(SubChunkManagerIOTest, BindUnbindIOManager) {
+    SubChunkManager manager;
+    IOManager io(tempDir);
+    io.start();
+
+    manager.bindIOManager(&io);
+    // Should not crash
+    manager.unbindIOManager();
+
+    io.stop();
+}
+
+TEST_F(SubChunkManagerIOTest, SaveViaIOManager) {
+    SubChunkManager manager;
+    IOManager io(tempDir);
+    io.start();
+
+    manager.bindIOManager(&io);
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // Add a column
+    auto column = std::make_unique<ChunkColumn>(ColumnPos{0, 0});
+    column->setBlock(0, 0, 0, stone);
+    manager.add(std::move(column));
+
+    // Mark dirty and release to queue for save
+    manager.addRef(ColumnPos{0, 0});
+    manager.markDirty(ColumnPos{0, 0});
+    manager.release(ColumnPos{0, 0});
+
+    // Process the save queue
+    manager.processSaveQueue();
+
+    // Wait for save to complete
+    io.flush();
+
+    // Wait a bit for callbacks to process
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    manager.unbindIOManager();
+    io.stop();
+
+    // Verify file was created
+    EXPECT_TRUE(std::filesystem::exists(tempDir / "r.0.0.dat"));
+}
+
+TEST_F(SubChunkManagerIOTest, LoadViaIOManager) {
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // First, save a column directly via IOManager
+    {
+        IOManager io(tempDir);
+        io.start();
+
+        ChunkColumn col(ColumnPos{5, 10});
+        col.setBlock(1, 2, 3, stone);
+        io.queueSave(ColumnPos{5, 10}, col);
+        io.flush();
+        io.stop();
+    }
+
+    // Now use SubChunkManager to load it
+    {
+        SubChunkManager manager;
+        IOManager io(tempDir);
+        io.start();
+
+        manager.bindIOManager(&io);
+
+        std::atomic<bool> loadComplete{false};
+        bool loadSuccess = manager.requestLoad(ColumnPos{5, 10}, [&](ColumnPos pos, std::unique_ptr<ChunkColumn>) {
+            EXPECT_EQ(pos, (ColumnPos{5, 10}));
+            loadComplete = true;
+        });
+
+        EXPECT_TRUE(loadSuccess);
+
+        // Wait for load to complete
+        while (!loadComplete) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        // Column should now be in manager
+        ManagedColumn* col = manager.get(ColumnPos{5, 10});
+        ASSERT_NE(col, nullptr);
+        EXPECT_EQ(col->column->getBlock(1, 2, 3), stone);
+
+        manager.unbindIOManager();
+        io.stop();
+    }
+}
+
+TEST_F(SubChunkManagerIOTest, RoundTripWithCompression) {
+    SubChunkManager manager;
+    IOManager io(tempDir);
+    io.start();
+
+    manager.bindIOManager(&io);
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // Create a larger column with repetitive data (compresses well)
+    auto column = std::make_unique<ChunkColumn>(ColumnPos{0, 0});
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                column->setBlock(x, y, z, stone);
+            }
+        }
+    }
+    manager.add(std::move(column));
+
+    // Save via manager
+    manager.addRef(ColumnPos{0, 0});
+    manager.markDirty(ColumnPos{0, 0});
+    manager.release(ColumnPos{0, 0});
+    manager.processSaveQueue();
+    io.flush();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    manager.unbindIOManager();
+    io.stop();
+
+    // Create new manager and load back
+    SubChunkManager manager2;
+    IOManager io2(tempDir);
+    io2.start();
+
+    manager2.bindIOManager(&io2);
+
+    std::atomic<bool> loaded{false};
+    manager2.requestLoad(ColumnPos{0, 0}, [&](ColumnPos, std::unique_ptr<ChunkColumn>) {
+        loaded = true;
+    });
+
+    while (!loaded) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    ManagedColumn* col = manager2.get(ColumnPos{0, 0});
+    ASSERT_NE(col, nullptr);
+
+    // Verify all blocks
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                EXPECT_EQ(col->column->getBlock(x, y, z), stone);
+            }
+        }
+    }
+
+    manager2.unbindIOManager();
+    io2.stop();
 }

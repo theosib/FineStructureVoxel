@@ -1,4 +1,5 @@
 #include "finevox/subchunk_manager.hpp"
+#include "finevox/io_manager.hpp"
 
 namespace finevox {
 
@@ -242,6 +243,118 @@ void SubChunkManager::transitionToActive(uint64_t key, std::unique_ptr<ManagedCo
     // Assumes lock is held
     column->state = ColumnState::Active;
     active_[key] = std::move(column);
+}
+
+// ============================================================================
+// IOManager integration
+// ============================================================================
+
+void SubChunkManager::bindIOManager(IOManager* io) {
+    std::unique_lock lock(mutex_);
+    ioManager_ = io;
+}
+
+void SubChunkManager::unbindIOManager() {
+    std::unique_lock lock(mutex_);
+    ioManager_ = nullptr;
+}
+
+bool SubChunkManager::requestLoad(ColumnPos pos, LoadCallback callback) {
+    std::unique_lock lock(mutex_);
+
+    // Can't load if currently saving this column
+    if (currentlySaving_.contains(pos.pack())) {
+        return false;
+    }
+
+    // Can't load without bound IOManager
+    if (!ioManager_) {
+        return false;
+    }
+
+    // Request load from IOManager
+    ioManager_->requestLoad(pos, [this, callback](ColumnPos loadedPos, std::unique_ptr<ChunkColumn> col) {
+        // Handle the loaded column
+        if (col) {
+            // Add to manager if not already present
+            std::unique_lock lock(mutex_);
+            uint64_t key = loadedPos.pack();
+
+            // Check if column appeared while we were loading
+            if (!active_.contains(key) && !unloadCache_.contains(key)) {
+                auto managed = std::make_unique<ManagedColumn>(std::move(col));
+                managed->state = ColumnState::Active;
+                active_[key] = std::move(managed);
+
+                // Column was added - callback gets nullptr since we took ownership
+                // Caller should use get() to access the managed column
+                if (callback) {
+                    lock.unlock();
+                    callback(loadedPos, nullptr);
+                }
+                return;
+            }
+        }
+
+        // Call user callback
+        if (callback) {
+            callback(loadedPos, std::move(col));
+        }
+    });
+
+    return true;
+}
+
+void SubChunkManager::processSaveQueue() {
+    IOManager* io = nullptr;
+    std::vector<std::pair<ColumnPos, ChunkColumn*>> toSave;
+
+    {
+        std::unique_lock lock(mutex_);
+
+        if (!ioManager_) {
+            return;
+        }
+        io = ioManager_;
+
+        // Process save queue
+        while (true) {
+            auto key = saveQueue_.pop();
+            if (!key) break;
+
+            auto it = active_.find(*key);
+            if (it == active_.end()) {
+                continue;  // Column was removed while in queue
+            }
+
+            // Mark as currently saving
+            it->second->state = ColumnState::Saving;
+            currentlySaving_.insert(*key);
+            toSave.emplace_back(ColumnPos::unpack(*key), it->second->column.get());
+        }
+    }
+
+    // Queue saves outside the lock
+    for (auto& [pos, col] : toSave) {
+        io->queueSave(pos, *col, [this](ColumnPos savedPos, bool success) {
+            if (success) {
+                onSaveComplete(savedPos);
+            } else {
+                // Save failed - remove from saving set but keep dirty
+                std::unique_lock lock(mutex_);
+                uint64_t key = savedPos.pack();
+                currentlySaving_.erase(key);
+
+                auto it = active_.find(key);
+                if (it != active_.end()) {
+                    it->second->state = ColumnState::Active;
+                    // Re-queue for retry on next tick
+                    saveQueue_.push(key);
+                    it->second->state = ColumnState::SaveQueued;
+                }
+            }
+        });
+    }
 }
 
 }  // namespace finevox

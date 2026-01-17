@@ -12,8 +12,9 @@
 
 namespace finevox {
 
-// Forward declaration
+// Forward declarations
 class World;
+class IOManager;
 
 // Lifecycle state for managed columns
 enum class ColumnState {
@@ -105,6 +106,29 @@ public:
     void setPeriodicSaveInterval(std::chrono::seconds interval);
     void setCacheCapacity(size_t capacity);
 
+    // ========================================================================
+    // IOManager integration
+    // ========================================================================
+
+    // Bind an IOManager for automatic persistence
+    // When bound, SubChunkManager will:
+    // - Queue saves to IOManager when columns need saving
+    // - Handle IOManager callbacks for save completion
+    void bindIOManager(IOManager* io);
+
+    // Unbind IOManager (for shutdown)
+    void unbindIOManager();
+
+    // Request async load of a column via bound IOManager
+    // Callback is invoked when load completes (or with nullptr if not found)
+    // Returns false if no IOManager is bound or column is currently being saved
+    using LoadCallback = std::function<void(ColumnPos pos, std::unique_ptr<ChunkColumn>)>;
+    bool requestLoad(ColumnPos pos, LoadCallback callback);
+
+    // Process pending saves via bound IOManager
+    // Call this from game loop or dedicated thread
+    void processSaveQueue();
+
     // Statistics
     [[nodiscard]] size_t activeCount() const;
     [[nodiscard]] size_t saveQueueSize() const;
@@ -135,6 +159,9 @@ private:
 
     // Eviction callback
     EvictionCallback evictionCallback_;
+
+    // IOManager for persistence (optional, not owned)
+    IOManager* ioManager_ = nullptr;
 
     // Internal helper to move column between states
     void transitionToSaveQueue(uint64_t key);

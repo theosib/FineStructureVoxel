@@ -8,6 +8,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Options
 option(FINEVOX_BUILD_TESTS "Build unit tests" ON)
 
+# Dependencies
+include(FetchContent)
+
+# LZ4 compression library
+FetchContent_Declare(
+    lz4
+    GIT_REPOSITORY https://github.com/lz4/lz4.git
+    GIT_TAG v1.9.4
+    SOURCE_SUBDIR build/cmake
+)
+FetchContent_MakeAvailable(lz4)
+
 # Main library
 add_library(finevox STATIC
     src/position.cpp
@@ -37,6 +49,8 @@ target_compile_options(finevox PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
+
+target_link_libraries(finevox PUBLIC lz4_static)
 
 # Tests
 if(FINEVOX_BUILD_TESTS)

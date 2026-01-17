@@ -200,7 +200,7 @@ items[0]                # Array indexing (brackets - future)
 - Phase 1: World, SubChunkManager, LRUCache, BatchBuilder implemented and tested
 - Added BlockDisplacement for off-grid block placement
 - Documented mesh update pipeline (4 stages)
-- Phase 2 (nearly complete):
+- Phase 2 (complete):
   - DataContainer with interned keys and CBOR serialization
   - SubChunk serialization (toCBOR/fromCBOR)
   - ChunkColumn serialization (toCBOR/fromCBOR)
@@ -210,9 +210,12 @@ items[0]                # Array indexing (brackets - future)
   - ConfigManager for global settings, WorldConfig for per-world settings
   - ResourceLocator for unified path resolution (engine/game/user/world scopes)
   - ChunkFlags in region file header (compression flag infrastructure)
-  - 333 tests passing
+  - LZ4 compression for region files (configurable via ConfigManager)
+  - IOManager/SubChunkManager integration (bindIOManager, requestLoad, processSaveQueue)
+  - Round-trip integration tests
+  - 341 tests passing
 
-**Next task:** LZ4 compression for region files, IOManager/SubChunkManager integration, or Phase 3 (Physics)
+**Next task:** Phase 3 (Physics) - AABB, collision detection, raycasting
 **Blockers:** None
 
 ---

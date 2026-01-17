@@ -200,9 +200,13 @@ items[0]                # Array indexing (brackets - future)
 - Phase 1: World, SubChunkManager, LRUCache, BatchBuilder implemented and tested
 - Added BlockDisplacement for off-grid block placement
 - Documented mesh update pipeline (4 stages)
-- Phase 2 (partial): DataContainer with interned keys and CBOR serialization (261 tests passing)
+- Phase 2 (partial):
+  - DataContainer with interned keys and CBOR serialization
+  - SubChunk serialization (toCBOR/fromCBOR)
+  - ChunkColumn serialization (toCBOR/fromCBOR)
+  - 277 tests passing
 
-**Next task:** Phase 2 continuation (Region files, column serialization, I/O threads) or Phase 3 (Physics)
+**Next task:** Phase 2 continuation (Region files with journal ToC, LZ4 compression, I/O threads) or Phase 3 (Physics)
 **Blockers:** None
 
 ---

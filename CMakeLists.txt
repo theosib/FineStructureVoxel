@@ -21,6 +21,7 @@ add_library(finevox STATIC
     src/subchunk_manager.cpp
     src/batch_builder.cpp
     src/data_container.cpp
+    src/serialization.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -59,6 +60,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_subchunk_manager.cpp
         tests/test_batch_builder.cpp
         tests/test_data_container.cpp
+        tests/test_serialization.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

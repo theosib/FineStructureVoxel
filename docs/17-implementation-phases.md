@@ -123,13 +123,13 @@
 ### 2.1 Serialization
 - [x] CBOR encoder/decoder (custom implementation, no external library)
 - [x] DataContainer serialization (entity data, tile entities)
-- [ ] SubChunk serialization (palette + compressed blocks)
-- [ ] ChunkColumn serialization
+- [x] SubChunk serialization (palette + 8/16-bit block indices)
+- [x] ChunkColumn serialization (sparse subchunk storage)
 
 ### 2.2 Region Files
-- [ ] Region file format (groups of columns)
-- [ ] Column offset table
-- [ ] Append-mode writing (defragmentation later)
+- [ ] Region file format with journal-style ToC
+- [ ] Free space management (best-fit allocation)
+- [ ] LZ4 compression for chunk data
 
 ### 2.3 I/O Threads
 - [ ] Save thread (processes save queue)

@@ -127,8 +127,9 @@
 - [x] ChunkColumn serialization (sparse subchunk storage)
 
 ### 2.2 Region Files
-- [ ] Region file format with journal-style ToC
-- [ ] Free space management (best-fit allocation)
+- [x] Region file format with journal-style ToC
+- [x] Free space management (best-fit allocation)
+- [x] ToC compaction (removes obsolete entries)
 - [ ] LZ4 compression for chunk data
 
 ### 2.3 I/O Threads
@@ -137,6 +138,15 @@
 - [ ] Coordination with SubChunkManager (don't load while saving)
 
 ### Testing
+- [x] RegionPos coordinate conversion (world to region, local indices)
+- [x] TocEntry serialization round-trip
+- [x] Region file create, save, load single column
+- [x] Multiple columns in same region
+- [x] Column overwrite (journal ToC correctly picks latest)
+- [x] Negative coordinates
+- [x] ToC compaction
+- [x] Large columns (192 Y levels, all blocks filled)
+- [x] Full region (1024 columns)
 - [ ] Round-trip: create world -> save -> load -> verify identical
 - [ ] Concurrent save/load operations
 - [ ] Region file corruption recovery

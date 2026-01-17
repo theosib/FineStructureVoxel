@@ -22,6 +22,7 @@ add_library(finevox STATIC
     src/batch_builder.cpp
     src/data_container.cpp
     src/serialization.cpp
+    src/region_file.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -61,6 +62,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_batch_builder.cpp
         tests/test_data_container.cpp
         tests/test_serialization.cpp
+        tests/test_region_file.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

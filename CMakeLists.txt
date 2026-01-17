@@ -20,6 +20,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(lz4)
 
+# GLM math library (header-only)
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 1.0.1
+)
+FetchContent_MakeAvailable(glm)
+
 # Main library
 add_library(finevox STATIC
     src/position.cpp
@@ -38,6 +46,7 @@ add_library(finevox STATIC
     src/io_manager.cpp
     src/config.cpp
     src/resource_locator.cpp
+    src/physics.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -50,7 +59,7 @@ target_compile_options(finevox PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
-target_link_libraries(finevox PUBLIC lz4_static)
+target_link_libraries(finevox PUBLIC lz4_static glm::glm)
 
 # Tests
 if(FINEVOX_BUILD_TESTS)
@@ -83,6 +92,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_io_manager.cpp
         tests/test_config.cpp
         tests/test_resource_locator.cpp
+        tests/test_physics.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

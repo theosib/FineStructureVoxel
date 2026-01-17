@@ -214,8 +214,15 @@ items[0]                # Array indexing (brackets - future)
   - IOManager/SubChunkManager integration (bindIOManager, requestLoad, processSaveQueue)
   - Round-trip integration tests
   - 341 tests passing
+- Phase 3 (in progress):
+  - Vec3 floating-point vector for physics
+  - AABB with intersection, containment, swept collision
+  - CollisionShape with 24-rotation precomputation
+  - Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
+  - RaycastMode and RaycastResult types
+  - 390 tests passing
 
-**Next task:** Phase 3 (Physics) - AABB, collision detection, raycasting
+**Next task:** Phase 3.3 (Raycasting) and 3.4 (Entity Physics)
 **Blockers:** None
 
 ---

@@ -4,12 +4,23 @@
 
 ---
 
-## 8.1 Collision Shapes
+## 8.1 Linear Algebra Library
+
+**Use GLM** - FineStructureVK already depends on GLM for linear algebra. Using GLM ensures:
+- Consistent math types across the codebase
+- Well-tested, widely-used library
+- No row/column order bridging issues
+
+If more advanced features are needed later (eigenvalue decomposition, sparse matrices), Eigen3 could be considered, but requires careful attention to memory layout conventions.
+
+---
+
+## 8.2 Collision Shapes
 
 ```cpp
 namespace finevox {
 
-// Axis-aligned bounding box
+// Axis-aligned bounding box (implemented - uses glm::vec3)
 struct AABB {
     glm::vec3 min;
     glm::vec3 max;
@@ -18,16 +29,13 @@ struct AABB {
     bool contains(glm::vec3 point) const;
 
     // Swept collision (returns time of impact, 0-1, or >1 if no collision)
-    float sweepCollision(const AABB& other, glm::vec3 velocity) const;
-
-    // Get collision normal for swept collision
-    glm::vec3 getCollisionNormal(const AABB& other, glm::vec3 velocity) const;
+    float sweepCollision(const AABB& other, glm::vec3 velocity, glm::vec3* outNormal = nullptr) const;
 
     AABB expanded(glm::vec3 amount) const;
     AABB translated(glm::vec3 offset) const;
 };
 
-// Collection of AABBs for complex block shapes
+// Collection of AABBs for complex block shapes (implemented)
 class CollisionShape {
 public:
     void addBox(const AABB& box);
@@ -35,32 +43,29 @@ public:
     const std::vector<AABB>& boxes() const { return boxes_; }
 
     // Transform shape by block rotation
-    CollisionShape transformed(uint8_t rotation) const;
+    CollisionShape transformed(const Rotation& rotation) const;
 
     // Precompute all 24 rotations
     static std::array<CollisionShape, 24> computeRotations(const CollisionShape& base);
 
-    // Empty shape (no collision)
+    // Standard shapes
     static const CollisionShape NONE;
+    static const CollisionShape FULL_BLOCK;
+    static const CollisionShape HALF_SLAB_BOTTOM;
+    static const CollisionShape HALF_SLAB_TOP;
+    static const CollisionShape FENCE_POST;
+    static const CollisionShape THIN_FLOOR;
 
 private:
     std::vector<AABB> boxes_;
 };
-
-// Common shapes
-namespace Shapes {
-    extern const CollisionShape FULL_BLOCK;
-    extern const CollisionShape HALF_SLAB;
-    extern const CollisionShape STAIRS;
-    extern const CollisionShape FENCE;
-}
 
 }  // namespace finevox
 ```
 
 ---
 
-## 8.2 Collision Box vs Hit Box
+## 8.3 Collision Box vs Hit Box
 
 Blocks and entities have two distinct bounding volumes that serve different purposes:
 
@@ -81,47 +86,7 @@ These are often the same, but not always:
 | Ghost entity | None | Entity bounds | Walk through, can attack |
 | Pressure plate | Thin slab | Full cube | Step on triggers, easy to click |
 
-```cpp
-namespace finevox {
-
-// BlockType provides both shapes
-class BlockType {
-public:
-    // Physics collision (can be NONE for pass-through blocks)
-    virtual const CollisionShape* getCollisionShape() const = 0;
-
-    // Raycast/interaction hit box (can differ from collision)
-    // Defaults to collision shape if not overridden
-    virtual const CollisionShape* getHitBox() const {
-        return getCollisionShape();
-    }
-
-    // Some blocks (like tall grass) have no collision but are still "solid"
-    // for purposes like preventing block placement inside them
-    virtual bool preventsPlacement() const { return hasCollision(); }
-};
-
-// Entity provides both as well
-class Entity {
-public:
-    // Physics bounding box
-    virtual AABB getCollisionBox() const = 0;
-
-    // Interaction/combat hit box (may be larger or differently shaped)
-    virtual AABB getHitBox() const {
-        return getCollisionBox();  // Default: same as collision
-    }
-
-    // Some entities (like spectators) have no collision but can still be seen
-    virtual bool hasCollision() const { return true; }
-};
-
-}  // namespace finevox
-```
-
-### Raycast Modes
-
-The raycast system needs to know which boxes to check:
+### Raycast Modes (Implemented)
 
 ```cpp
 namespace finevox {
@@ -132,15 +97,12 @@ enum class RaycastMode {
     Both         // Check either (for general queries)
 };
 
-class PhysicsSystem {
-public:
-    // Raycast with mode selection
-    RaycastResult raycast(
-        glm::vec3 origin,
-        glm::vec3 direction,
-        float maxDistance,
-        RaycastMode mode = RaycastMode::Interaction  // Default for player interaction
-    ) const;
+struct RaycastResult {
+    bool hit = false;
+    BlockPos blockPos;        // Block that was hit
+    Face face = Face::PosY;   // Face of the block that was hit
+    glm::vec3 hitPoint;       // Exact hit point in world coordinates
+    float distance = 0.0f;    // Distance from origin to hit point
 };
 
 }  // namespace finevox
@@ -148,7 +110,92 @@ public:
 
 ---
 
-## 8.3 Entity Physics
+## 8.4 Entity Position Persistence (Avoiding Wall Glitching)
+
+### The Problem
+
+A famous Minecraft bug: entities would glitch through walls after save/load. The root cause:
+
+1. Entity AABBs have precise floating-point boundaries
+2. Only the bottom-center point was saved to disk
+3. On load, AABB was reconstructed from center point
+4. Floating-point rounding could extend AABB into neighboring blocks
+5. Entity would "pop" through the wall
+
+### The Solution: Collision Margin
+
+Enforce a **minimum margin** between entities and blocks at all times:
+
+```cpp
+constexpr float COLLISION_MARGIN = 0.001f;  // ~1mm in game units
+// Much larger than floating-point epsilon (~1e-7)
+// Much smaller than any visible gap
+
+// When resolving collisions, ensure margin is maintained
+float resolveAxisCollision(const AABB& entity, const AABB& block, int axis, float movement) {
+    // After resolution, entity edge must be at least COLLISION_MARGIN away from block edge
+    // ...
+}
+```
+
+### Entity Serialization
+
+Save the full AABB bounds (not just center), or save center with explicit half-extents:
+
+```yaml
+entity:
+  position: [10.5, 65.001, 20.5]  # Note the margin above y=65 block
+  half_extents: [0.3, 0.9, 0.3]   # Or save dimensions explicitly
+```
+
+---
+
+## 8.5 Soft vs Hard Collisions
+
+### Hard Collision (Default)
+
+Entities cannot overlap blocks or each other. Standard collision resolution pushes entities apart.
+
+### Soft Collision (Entity Crowding)
+
+Some entities allow overlap, generating a repulsion force:
+
+```cpp
+struct CollisionResponse {
+    enum Type {
+        Hard,           // Cannot overlap, resolve immediately
+        Soft,           // Overlap generates force
+        None            // No collision (pass-through)
+    };
+
+    Type type = Hard;
+    float repulsionStrength = 0.0f;  // For soft collisions
+};
+
+class Entity {
+public:
+    // How this entity responds to collisions with blocks
+    virtual CollisionResponse blockCollisionResponse() const {
+        return {CollisionResponse::Hard, 0.0f};
+    }
+
+    // How this entity responds to collisions with other entities
+    virtual CollisionResponse entityCollisionResponse(const Entity& other) const {
+        return {CollisionResponse::Hard, 0.0f};
+    }
+};
+```
+
+**Use cases:**
+- Packed mob farms (soft entity-entity collision)
+- Slime blocks (bouncy collision)
+- Water/lava (velocity modification instead of hard stop)
+
+**Even hard collisions must yield** when nothing can move out of the way (e.g., piston crushing). This prevents entities getting stuck in blocks.
+
+---
+
+## 8.6 Entity Physics
 
 ```cpp
 namespace finevox {
@@ -168,7 +215,8 @@ public:
     bool isOnGround(const Entity& entity) const;
 
     // Raycast through world
-    World::RaycastResult raycast(glm::vec3 origin, glm::vec3 direction, float maxDistance) const;
+    RaycastResult raycast(glm::vec3 origin, glm::vec3 direction, float maxDistance,
+                          RaycastMode mode = RaycastMode::Interaction) const;
 
     // Configuration
     void setGravity(float g) { gravity_ = g; }
@@ -181,7 +229,7 @@ private:
     // Collect all collision AABBs in a region
     std::vector<AABB> collectColliders(const AABB& region) const;
 
-    // Resolve collision along one axis
+    // Resolve collision along one axis (maintains COLLISION_MARGIN)
     float resolveAxisCollision(
         const AABB& entityBox,
         const std::vector<AABB>& colliders,
@@ -198,7 +246,7 @@ private:
 
 ---
 
-## 8.4 Step-Climbing Algorithm
+## 8.7 Step-Climbing Algorithm
 
 Borrowed from EigenVoxel, improved:
 
@@ -259,6 +307,12 @@ glm::vec3 PhysicsSystem::moveEntity(Entity& entity, glm::vec3 desiredMovement, f
     return finalMovement;
 }
 ```
+
+---
+
+## See Also
+
+- [19 - Block Models](19-block-models.md) - Data-driven model format for loading collision/hit shapes from files
 
 ---
 

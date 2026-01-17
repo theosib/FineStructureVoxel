@@ -175,14 +175,16 @@
 *Collision and raycasting, still no graphics.*
 
 ### 3.1 Collision Primitives
-- [ ] `AABB` - Axis-aligned bounding box
-- [ ] Intersection, containment, swept collision
-- [ ] `CollisionShape` - Collection of AABBs
+- [x] `AABB` - Axis-aligned bounding box
+- [x] Intersection, containment, swept collision
+- [x] `CollisionShape` - Collection of AABBs
+- [x] `Vec3` - Floating-point 3D vector for physics
 
 ### 3.2 Block Collision
-- [ ] Collision box vs hit box distinction
+- [x] Collision box vs hit box distinction (RaycastMode enum)
 - [ ] BlockType provides both shapes
-- [ ] 24-rotation precomputation for shapes
+- [x] 24-rotation precomputation for shapes
+- [x] Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
 
 ### 3.3 Raycasting
 - [ ] `RaycastMode` - Collision, Interaction, Both
@@ -196,7 +198,9 @@
 - [ ] Ground detection
 
 ### Testing
-- [ ] AABB intersection tests
+- [x] AABB intersection tests
+- [x] AABB swept collision tests
+- [x] CollisionShape rotation tests
 - [ ] Raycast hits expected blocks
 - [ ] Entity walks on ground, bumps into walls
 - [ ] Step-climbing works up to MAX_STEP_HEIGHT

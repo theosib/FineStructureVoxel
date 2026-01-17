@@ -46,8 +46,9 @@
 
 | Document | Key Contents |
 |----------|--------------|
-| [08 - Physics and Collision](08-physics.md) | AABB, CollisionShape, collision vs hit box, step-climbing, RaycastMode |
+| [08 - Physics and Collision](08-physics.md) | AABB, CollisionShape, collision vs hit box, step-climbing, RaycastMode, entity persistence |
 | [10 - Input and Player Control](10-input.md) | InputManager, PlayerController |
+| [19 - Block Models](19-block-models.md) | Hierarchical model format, render/collision/hit shapes, model inheritance |
 
 ### Persistence & Scripting
 
@@ -93,7 +94,8 @@
 | Chunk Lifecycle | Active → SaveQueue → Saving → UnloadQueue → Evicted, LRU cache | [05](05-world-management.md) §5.4 |
 | Rendering | View-relative coordinates | [06](06-rendering.md) |
 | Mesh Generation | Greedy meshing, priority by distance/visibility | [06](06-rendering.md), [18](18-open-questions.md) |
-| Collision vs Hit Box | Separate shapes for physics vs interaction | [08](08-physics.md) §8.2 |
+| Collision vs Hit Box | Separate shapes for physics vs interaction | [08](08-physics.md) §8.3 |
+| Block Models | Hierarchical model files, data-driven collision/hit shapes | [19](19-block-models.md) |
 | Mod System | Shared object loading; all game content is modules | [18](18-open-questions.md) |
 | Command Syntax | `{}` for function calls, `()` for math, `[]` for arrays | [12](12-scripting.md) §12.3 |
 
@@ -111,7 +113,10 @@
 | CoalescingQueue utility | [13](13-batch-operations.md) §13.2 |
 | Collision box vs hit box | [08](08-physics.md) §8.2 |
 | RaycastMode enum | [08](08-physics.md) §8.2 |
-| Step-climbing algorithm | [08](08-physics.md) §8.4 |
+| Step-climbing algorithm | [08](08-physics.md) §8.7 |
+| Entity wall-glitch prevention | [08](08-physics.md) §8.4 |
+| Soft vs hard collisions | [08](08-physics.md) §8.5 |
+| Hierarchical model files | [19](19-block-models.md) §19.3 |
 | Command language syntax | [12](12-scripting.md) §12.3 |
 | ModuleLoader API | [18](18-open-questions.md) |
 | Multiplayer architecture | [18](18-open-questions.md) |
@@ -147,4 +152,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-01-12*
+*Last Updated: 2026-01-17*

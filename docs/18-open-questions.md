@@ -181,6 +181,17 @@ Server pushes these changes; client updates its simplified model.
 - Trade-off: Memory vs rebuild time
 - **Leaning toward:** Whole subchunk, but profile to verify
 
+### FineStructureVK Texture Atlas Support
+
+The block model system needs texture atlases for efficient batching. FineStructureVK has some atlas support but may need enhancements:
+
+- **Needed:** Atlas manifest loading (mapping texture names → UV regions)
+- **Needed:** Per-face UV coordinate generation from atlas regions
+- **Needed:** Runtime atlas packing (for mods adding textures)
+- **Status:** Audit FineStructureVK to determine current capabilities
+
+See [19 - Block Models](19-block-models.md) §19.4 for atlas format specification.
+
 ### Target Games
 
 - Minecraft-style survival? Roblox-style building? 7DTD-style destruction?

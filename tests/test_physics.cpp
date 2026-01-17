@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "finevox/physics.hpp"
 #include <cmath>
+#include <unordered_set>
 
 using namespace finevox;
 
@@ -551,4 +552,736 @@ TEST(PhysicsConstantsTest, CollisionMargin) {
     EXPECT_GT(COLLISION_MARGIN, 0.0f);
     EXPECT_LT(COLLISION_MARGIN, 0.01f);  // Less than 1cm
     EXPECT_GT(COLLISION_MARGIN, 1e-6f);  // Much larger than float epsilon
+}
+
+// ============================================================================
+// Ray-AABB intersection tests
+// ============================================================================
+
+TEST(RayAABBTest, HitFromFront) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(-1.0f, 0.5f, 0.5f);  // In front of box
+    Vec3 dir(1.0f, 0.0f, 0.0f);       // Toward box
+
+    float tMin, tMax;
+    Face hitFace;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, &tMax, &hitFace));
+    EXPECT_NEAR(tMin, 1.0f, 0.001f);   // Hit at x=0, which is 1 unit away
+    EXPECT_NEAR(tMax, 2.0f, 0.001f);   // Exit at x=1, which is 2 units away
+    EXPECT_EQ(hitFace, Face::NegX);    // Hit the -X face of the box
+}
+
+TEST(RayAABBTest, HitFromBehind) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(2.0f, 0.5f, 0.5f);  // Behind box
+    Vec3 dir(-1.0f, 0.0f, 0.0f);    // Toward box
+
+    float tMin, tMax;
+    Face hitFace;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, &tMax, &hitFace));
+    EXPECT_NEAR(tMin, 1.0f, 0.001f);   // Hit at x=1, which is 1 unit away
+    EXPECT_EQ(hitFace, Face::PosX);    // Hit the +X face of the box
+}
+
+TEST(RayAABBTest, Miss) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(-1.0f, 2.0f, 0.5f);  // Above and in front of box
+    Vec3 dir(1.0f, 0.0f, 0.0f);      // Parallel, misses
+
+    EXPECT_FALSE(box.rayIntersect(origin, dir));
+}
+
+TEST(RayAABBTest, InsideBox) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(0.5f, 0.5f, 0.5f);  // Inside box
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    float tMin, tMax;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, &tMax));
+    EXPECT_LT(tMin, 0.0f);            // Entry is behind us
+    EXPECT_GT(tMax, 0.0f);            // Exit is in front
+}
+
+TEST(RayAABBTest, BoxBehindRay) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(2.0f, 0.5f, 0.5f);  // Past box
+    Vec3 dir(1.0f, 0.0f, 0.0f);     // Moving away
+
+    EXPECT_FALSE(box.rayIntersect(origin, dir));
+}
+
+TEST(RayAABBTest, DiagonalHit) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(-1.0f, -1.0f, -1.0f);
+    Vec3 dir = glm::normalize(Vec3(1.0f, 1.0f, 1.0f));
+
+    float tMin, tMax;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, &tMax));
+    EXPECT_GT(tMin, 0.0f);
+    EXPECT_GT(tMax, tMin);
+}
+
+TEST(RayAABBTest, GrazingEdge) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(-1.0f, 0.0f, 0.0f);  // At edge level
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    float tMin, tMax;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, &tMax));
+}
+
+TEST(RayAABBTest, HitTopFace) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(0.5f, 2.0f, 0.5f);  // Above box
+    Vec3 dir(0.0f, -1.0f, 0.0f);    // Straight down
+
+    float tMin;
+    Face hitFace;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, nullptr, &hitFace));
+    EXPECT_NEAR(tMin, 1.0f, 0.001f);  // Hit at y=1, which is 1 unit away
+    EXPECT_EQ(hitFace, Face::PosY);   // Hit top face
+}
+
+TEST(RayAABBTest, HitBottomFace) {
+    AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+    Vec3 origin(0.5f, -1.0f, 0.5f);  // Below box
+    Vec3 dir(0.0f, 1.0f, 0.0f);      // Straight up
+
+    float tMin;
+    Face hitFace;
+    EXPECT_TRUE(box.rayIntersect(origin, dir, &tMin, nullptr, &hitFace));
+    EXPECT_NEAR(tMin, 1.0f, 0.001f);
+    EXPECT_EQ(hitFace, Face::NegY);
+}
+
+// ============================================================================
+// Raycast through blocks tests
+// ============================================================================
+
+// Helper: simple shape provider that returns FULL_BLOCK for specific positions
+class SimpleBlockWorld {
+public:
+    void setBlock(const BlockPos& pos, bool solid) {
+        if (solid) {
+            solidBlocks_.insert(pos.pack());
+        } else {
+            solidBlocks_.erase(pos.pack());
+        }
+    }
+
+    const CollisionShape* getShape(const BlockPos& pos, RaycastMode /*mode*/) const {
+        if (solidBlocks_.count(pos.pack())) {
+            return &CollisionShape::FULL_BLOCK;
+        }
+        return nullptr;
+    }
+
+private:
+    std::unordered_set<uint64_t> solidBlocks_;
+};
+
+TEST(RaycastBlocksTest, HitSingleBlock) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(5, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, 5);
+    EXPECT_EQ(result.blockPos.y, 0);
+    EXPECT_EQ(result.blockPos.z, 0);
+    EXPECT_EQ(result.face, Face::NegX);  // Hit the -X face of the block
+    EXPECT_NEAR(result.distance, 4.5f, 0.01f);  // From 0.5 to 5.0
+}
+
+TEST(RaycastBlocksTest, MissEmptyWorld) {
+    SimpleBlockWorld world;  // No blocks
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_FALSE(result.hit);
+}
+
+TEST(RaycastBlocksTest, MaxDistanceRespected) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(50, 0, 0), true);  // Far block
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 10.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_FALSE(result.hit);  // Block is beyond max distance
+}
+
+TEST(RaycastBlocksTest, HitClosestBlock) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(5, 0, 0), true);
+    world.setBlock(BlockPos(10, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, 5);  // Should hit closer block
+}
+
+TEST(RaycastBlocksTest, DiagonalRay) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(5, 5, 5), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir = glm::normalize(Vec3(1.0f, 1.0f, 1.0f));
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, 5);
+    EXPECT_EQ(result.blockPos.y, 5);
+    EXPECT_EQ(result.blockPos.z, 5);
+}
+
+TEST(RaycastBlocksTest, DownwardRay) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(0, 0, 0), true);  // Ground block
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 5.0f, 0.5f);  // Above the block
+    Vec3 dir(0.0f, -1.0f, 0.0f);    // Looking down
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, 0);
+    EXPECT_EQ(result.blockPos.y, 0);
+    EXPECT_EQ(result.blockPos.z, 0);
+    EXPECT_EQ(result.face, Face::PosY);  // Hit top face
+    EXPECT_NEAR(result.distance, 4.0f, 0.01f);  // From y=5 to y=1 (top of block)
+}
+
+TEST(RaycastBlocksTest, NegativeCoordinates) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(-5, -3, -2), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir = glm::normalize(Vec3(-5.0f, -3.0f, -2.0f));
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, -5);
+    EXPECT_EQ(result.blockPos.y, -3);
+    EXPECT_EQ(result.blockPos.z, -2);
+}
+
+TEST(RaycastBlocksTest, StartInsideBlock) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(0, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);  // Inside the block
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    EXPECT_EQ(result.blockPos.x, 0);
+    EXPECT_EQ(result.blockPos.y, 0);
+    EXPECT_EQ(result.blockPos.z, 0);
+    EXPECT_NEAR(result.distance, 0.0f, 0.01f);  // Immediate hit
+}
+
+TEST(RaycastBlocksTest, HalfSlabTop) {
+    // Test with non-full block shape
+    SimpleBlockWorld world;
+    // Use a custom provider for half slabs
+    auto shapeProvider = [](const BlockPos& pos, RaycastMode /*mode*/) -> const CollisionShape* {
+        if (pos.x == 5 && pos.y == 0 && pos.z == 0) {
+            return &CollisionShape::HALF_SLAB_TOP;  // y: 0.5 to 1.0
+        }
+        return nullptr;
+    };
+
+    // Ray that would hit a full block but misses the top half
+    Vec3 origin(0.5f, 0.25f, 0.5f);  // In the lower half
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    // Should miss because the slab is only in the top half
+    EXPECT_FALSE(result.hit);
+
+    // Ray that hits the top half
+    Vec3 origin2(0.5f, 0.75f, 0.5f);  // In the upper half
+    auto result2 = raycastBlocks(origin2, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result2.hit);
+    EXPECT_EQ(result2.blockPos.x, 5);
+}
+
+TEST(RaycastBlocksTest, HitPointAccuracy) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(5, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    Vec3 origin(0.5f, 0.5f, 0.5f);
+    Vec3 dir(1.0f, 0.0f, 0.0f);
+
+    auto result = raycastBlocks(origin, dir, 100.0f, RaycastMode::Collision, shapeProvider);
+
+    EXPECT_TRUE(result.hit);
+    // Hit point should be on the face of the block
+    EXPECT_NEAR(result.hitPoint.x, 5.0f, 0.01f);  // On the -X face at x=5
+    EXPECT_NEAR(result.hitPoint.y, 0.5f, 0.01f);
+    EXPECT_NEAR(result.hitPoint.z, 0.5f, 0.01f);
+}
+
+// ============================================================================
+// PhysicsBody tests
+// ============================================================================
+
+TEST(PhysicsBodyTest, SimplePhysicsBodyConstruction) {
+    SimplePhysicsBody body(Vec3(0.5f, 0.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+
+    EXPECT_NEAR(body.position().x, 0.5f, 0.001f);
+    EXPECT_NEAR(body.position().y, 0.0f, 0.001f);
+    EXPECT_NEAR(body.position().z, 0.5f, 0.001f);
+
+    EXPECT_NEAR(body.halfExtents().x, 0.3f, 0.001f);
+    EXPECT_NEAR(body.halfExtents().y, 0.9f, 0.001f);
+    EXPECT_NEAR(body.halfExtents().z, 0.3f, 0.001f);
+}
+
+TEST(PhysicsBodyTest, BoundingBoxCalculation) {
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.3f, 0.9f, 0.3f));
+
+    AABB box = body.boundingBox();
+    // Position is bottom-center, so:
+    // min.x = 5.0 - 0.3 = 4.7
+    // min.y = 10.0 (bottom)
+    // min.z = 5.0 - 0.3 = 4.7
+    // max.x = 5.0 + 0.3 = 5.3
+    // max.y = 10.0 + 1.8 = 11.8 (height = halfExtents.y * 2)
+    // max.z = 5.0 + 0.3 = 5.3
+
+    EXPECT_NEAR(box.min.x, 4.7f, 0.001f);
+    EXPECT_NEAR(box.min.y, 10.0f, 0.001f);
+    EXPECT_NEAR(box.min.z, 4.7f, 0.001f);
+    EXPECT_NEAR(box.max.x, 5.3f, 0.001f);
+    EXPECT_NEAR(box.max.y, 11.8f, 0.001f);
+    EXPECT_NEAR(box.max.z, 5.3f, 0.001f);
+}
+
+TEST(PhysicsBodyTest, VelocityAndPosition) {
+    SimplePhysicsBody body(Vec3(0.0f, 0.0f, 0.0f), Vec3(0.3f, 0.9f, 0.3f));
+
+    body.setVelocity(Vec3(1.0f, 2.0f, 3.0f));
+    EXPECT_NEAR(body.velocity().x, 1.0f, 0.001f);
+    EXPECT_NEAR(body.velocity().y, 2.0f, 0.001f);
+    EXPECT_NEAR(body.velocity().z, 3.0f, 0.001f);
+
+    body.setPosition(Vec3(10.0f, 20.0f, 30.0f));
+    EXPECT_NEAR(body.position().x, 10.0f, 0.001f);
+    EXPECT_NEAR(body.position().y, 20.0f, 0.001f);
+    EXPECT_NEAR(body.position().z, 30.0f, 0.001f);
+}
+
+TEST(PhysicsBodyTest, GroundState) {
+    SimplePhysicsBody body(Vec3(0.0f, 0.0f, 0.0f), Vec3(0.3f, 0.9f, 0.3f));
+
+    EXPECT_FALSE(body.isOnGround());
+    body.setOnGround(true);
+    EXPECT_TRUE(body.isOnGround());
+    body.setOnGround(false);
+    EXPECT_FALSE(body.isOnGround());
+}
+
+// ============================================================================
+// PhysicsSystem tests
+// ============================================================================
+
+TEST(PhysicsSystemTest, MoveInEmptyWorld) {
+    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+        return nullptr;  // No blocks
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(0.5f, 5.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+
+    Vec3 movement = physics.moveBody(body, Vec3(1.0f, 0.0f, 0.0f));
+
+    EXPECT_NEAR(movement.x, 1.0f, 0.01f);  // Full movement
+    EXPECT_NEAR(body.position().x, 1.5f, 0.01f);
+}
+
+TEST(PhysicsSystemTest, BlocksMovement) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(2, 5, 0), true);  // Block in the way
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(0.5f, 5.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+
+    // Try to move into the block
+    Vec3 movement = physics.moveBody(body, Vec3(5.0f, 0.0f, 0.0f));
+
+    // Should stop before the block (at x=2 - 0.3 - margin)
+    EXPECT_LT(body.position().x, 2.0f);
+    EXPECT_LT(movement.x, 5.0f);
+}
+
+TEST(PhysicsSystemTest, FallsWithGravity) {
+    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+        return nullptr;  // No blocks
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(0.5f, 10.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+
+    float dt = 0.1f;
+    physics.applyGravity(body, dt);
+
+    // Velocity should be negative (falling)
+    EXPECT_LT(body.velocity().y, 0.0f);
+    EXPECT_NEAR(body.velocity().y, -DEFAULT_GRAVITY * dt, 0.01f);
+}
+
+TEST(PhysicsSystemTest, LandsOnGround) {
+    SimpleBlockWorld world;
+    // Create a floor
+    for (int x = -2; x <= 2; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    // Body starts above ground
+    SimplePhysicsBody body(Vec3(0.5f, 2.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+
+    // Apply downward movement
+    Vec3 movement = physics.moveBody(body, Vec3(0.0f, -5.0f, 0.0f));
+
+    // Should land on the block at y=1
+    EXPECT_NEAR(body.position().y, 1.0f, 0.01f);
+    EXPECT_TRUE(body.isOnGround());
+}
+
+TEST(PhysicsSystemTest, WalksOnGround) {
+    SimpleBlockWorld world;
+    // Create a floor
+    for (int x = -5; x <= 10; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(0.5f, 1.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+    body.setOnGround(true);
+
+    // Walk forward
+    Vec3 movement = physics.moveBody(body, Vec3(5.0f, 0.0f, 0.0f));
+
+    EXPECT_NEAR(movement.x, 5.0f, 0.01f);
+    EXPECT_NEAR(body.position().x, 5.5f, 0.01f);
+    EXPECT_NEAR(body.position().y, 1.0f, 0.01f);  // Stays on ground
+}
+
+TEST(PhysicsSystemTest, StepClimbing) {
+    SimpleBlockWorld world;
+    // Create a floor at y=0
+    for (int x = -2; x <= 5; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+    // Create a half-block step at x=3 (using bottom slab shape)
+    // Since we only have FULL_BLOCK in SimpleBlockWorld, use a custom provider
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+        // Step block at x=3, y=1 - make it a half slab (0.5 blocks high)
+        if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
+            return &CollisionShape::HALF_SLAB_BOTTOM;  // 0 to 0.5 height
+        }
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    // Body at y=1 (standing on floor at y=0, floor top is y=1)
+    // Half-extents (0.3, 0.5, 0.3) = 1 block tall
+    SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+    body.setOnGround(true);
+
+    // Walk toward the step (half slab at y=1 to y=1.5)
+    Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+    // Should step up onto the half slab
+    EXPECT_GT(body.position().x, 2.5f);  // Made horizontal progress
+    EXPECT_GT(body.position().y, 1.0f);  // Stepped up (at least a bit)
+}
+
+TEST(PhysicsSystemTest, CantClimbTooHigh) {
+    SimpleBlockWorld world;
+    // Create a floor
+    for (int x = -2; x <= 5; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+    // Create a wall (too high to step over)
+    world.setBlock(BlockPos(3, 1, 0), true);
+    world.setBlock(BlockPos(3, 2, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+    body.setOnGround(true);
+
+    // Walk toward the wall
+    Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+    // Should be blocked by the wall
+    EXPECT_LT(body.position().x, 3.0f);
+    EXPECT_NEAR(body.position().y, 1.0f, 0.01f);  // Still on ground level
+}
+
+TEST(PhysicsSystemTest, CheckOnGround) {
+    SimpleBlockWorld world;
+    world.setBlock(BlockPos(0, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+
+    // Body standing on block
+    SimplePhysicsBody onBlock(Vec3(0.5f, 1.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+    EXPECT_TRUE(physics.checkOnGround(onBlock));
+
+    // Body floating in air
+    SimplePhysicsBody inAir(Vec3(0.5f, 5.0f, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+    EXPECT_FALSE(physics.checkOnGround(inAir));
+}
+
+TEST(PhysicsSystemTest, GravityConfiguration) {
+    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+        return nullptr;
+    };
+
+    PhysicsSystem physics(shapeProvider);
+
+    EXPECT_NEAR(physics.gravity(), DEFAULT_GRAVITY, 0.01f);
+
+    physics.setGravity(10.0f);
+    EXPECT_NEAR(physics.gravity(), 10.0f, 0.01f);
+}
+
+TEST(PhysicsSystemTest, UpdateIntegration) {
+    SimpleBlockWorld world;
+    // Create a floor
+    world.setBlock(BlockPos(0, 0, 0), true);
+    world.setBlock(BlockPos(1, 0, 0), true);
+    world.setBlock(BlockPos(-1, 0, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(0.5f, 5.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+
+    // Simulate falling
+    for (int i = 0; i < 100; ++i) {
+        physics.update(body, 0.016f);  // ~60 FPS
+        if (body.isOnGround()) break;
+    }
+
+    // Should have landed
+    EXPECT_TRUE(body.isOnGround());
+    EXPECT_NEAR(body.position().y, 1.0f, 0.1f);
+}
+
+// ============================================================================
+// Per-body configurable step height tests
+// ============================================================================
+
+TEST(PhysicsBodyTest, MaxStepHeightDefault) {
+    SimplePhysicsBody body(Vec3(0.0f, 0.0f, 0.0f), Vec3(0.3f, 0.9f, 0.3f));
+    EXPECT_NEAR(body.maxStepHeight(), MAX_STEP_HEIGHT, 0.001f);
+}
+
+TEST(PhysicsBodyTest, MaxStepHeightConfigurable) {
+    SimplePhysicsBody body(Vec3(0.0f, 0.0f, 0.0f), Vec3(0.3f, 0.9f, 0.3f));
+
+    body.setMaxStepHeight(1.0f);  // Full block stepping (like Hytale)
+    EXPECT_NEAR(body.maxStepHeight(), 1.0f, 0.001f);
+
+    body.setMaxStepHeight(0.5f);  // Half block stepping
+    EXPECT_NEAR(body.maxStepHeight(), 0.5f, 0.001f);
+}
+
+TEST(PhysicsSystemTest, PerBodyStepHeightHigherAllowsHigherStep) {
+    // Test that a body with higher maxStepHeight can climb a step that
+    // a body with lower maxStepHeight cannot
+    SimpleBlockWorld world;
+    // Create a floor at y=0
+    for (int x = -2; x <= 10; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+
+    // Use a half slab (0.5 tall) at x=3, y=1 - this is climbable with default step height
+    // This is the same setup as the passing StepClimbing test
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+        if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
+            return &CollisionShape::HALF_SLAB_BOTTOM;  // 0 to 0.5 height
+        }
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+
+    // Test 1: Body with LOW step height (0.3) - should NOT be able to step up 0.5 blocks
+    {
+        SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+        body.setOnGround(true);
+        body.setMaxStepHeight(0.3f);  // Can only step 0.3 blocks (less than 0.5 slab)
+
+        Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+        // Should NOT step up - blocked by the half slab
+        EXPECT_LT(body.position().x, 3.0f);  // Blocked
+        EXPECT_NEAR(body.position().y, 1.0f, 0.1f);  // Still at ground level
+    }
+
+    // Test 2: Body with HIGH step height (0.6) - should be able to step up 0.5 blocks
+    {
+        SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+        body.setOnGround(true);
+        body.setMaxStepHeight(0.6f);  // Can step 0.6 blocks (more than 0.5 slab)
+
+        Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+        // Should step up onto the half slab
+        EXPECT_GT(body.position().x, 2.5f);  // Made horizontal progress
+        EXPECT_GT(body.position().y, 1.0f);  // Stepped up
+    }
+}
+
+TEST(PhysicsSystemTest, PerBodyStepHeightLimited) {
+    SimpleBlockWorld world;
+    // Create a floor at y=0
+    for (int x = -2; x <= 5; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+    // Create a full block step at x=3, y=1
+    world.setBlock(BlockPos(3, 1, 0), true);
+
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    // Small body that can fit
+    SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+    body.setOnGround(true);
+    body.setMaxStepHeight(0.5f);  // Can only step half a block
+
+    // Walk toward the full block step
+    Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+    // Should NOT be able to step up (full block is too high)
+    EXPECT_LT(body.position().x, 3.0f);  // Blocked by the wall
+    EXPECT_NEAR(body.position().y, 1.0f, 0.1f);  // Still on ground level
+}
+
+TEST(PhysicsSystemTest, PerBodyStepHeightZeroDisablesStep) {
+    SimpleBlockWorld world;
+    // Create a floor at y=0
+    for (int x = -2; x <= 5; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockPos(x, 0, z), true);
+        }
+    }
+
+    // Use a custom shape provider for half-slab
+    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+        // Half slab step at x=3, y=1
+        if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
+            return &CollisionShape::HALF_SLAB_BOTTOM;
+        }
+        return world.getShape(pos, mode);
+    };
+
+    PhysicsSystem physics(shapeProvider);
+    SimplePhysicsBody body(Vec3(1.5f, 1.0f, 0.5f), Vec3(0.3f, 0.5f, 0.3f));
+    body.setOnGround(true);
+    body.setMaxStepHeight(0.0f);  // No stepping at all
+
+    // Walk toward the half slab step
+    Vec3 movement = physics.moveBody(body, Vec3(3.0f, 0.0f, 0.0f));
+
+    // Should NOT step up even over a half slab
+    EXPECT_LT(body.position().x, 3.0f);  // Blocked
+    EXPECT_NEAR(body.position().y, 1.0f, 0.1f);  // Still on ground level
 }

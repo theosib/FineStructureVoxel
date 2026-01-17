@@ -310,6 +310,172 @@ glm::vec3 PhysicsSystem::moveEntity(Entity& entity, glm::vec3 desiredMovement, f
 
 ---
 
+## 8.8 Configurable Step Height
+
+The maximum step height is **configurable per-body** rather than a global constant. This allows:
+
+1. **Game-specific defaults** - Different games have different conventions:
+   - Minecraft: ~0.625 blocks (allows walking up slabs)
+   - Hytale: Full block stepping (auto-steps whole blocks)
+
+2. **Entity-specific overrides** - Some entities may have enhanced movement:
+   - Players with special armor could step higher
+   - Certain mobs might have different mobility
+   - Vehicles might have no step-up ability
+
+### Implementation (Implemented)
+
+```cpp
+class PhysicsBody {
+public:
+    // Default step height - slightly over half a block (Minecraft-style)
+    [[nodiscard]] virtual float maxStepHeight() const { return MAX_STEP_HEIGHT; }
+};
+
+class SimplePhysicsBody : public PhysicsBody {
+public:
+    [[nodiscard]] float maxStepHeight() const override { return maxStepHeight_; }
+    void setMaxStepHeight(float h) { maxStepHeight_ = h; }
+
+private:
+    float maxStepHeight_ = MAX_STEP_HEIGHT;  // Default, can be overridden
+};
+```
+
+The `PhysicsSystem::tryStepClimbing()` now takes the body's step height as a parameter.
+
+---
+
+## 8.9 Pathfinding Considerations
+
+Entity pathfinding must account for step heights when computing walkable paths:
+
+### Requirements
+
+1. **Partial block awareness** - The pathfinder must understand that:
+   - A half-slab (0.5 blocks) is walkable from below if step height >= 0.5
+   - Stairs create valid paths when step height allows
+   - Full blocks are only walkable with step height >= 1.0
+
+2. **Approximation strategy** - For performance, the pathfinder may:
+   - Use whole-block approximation for distant paths
+   - Use precise partial-block calculations for nearby/critical segments
+   - Cache walkability based on common step heights (0.5, 0.625, 1.0)
+
+3. **Entity-specific paths** - Different entities need different path calculations:
+   - A spider (can climb walls) has different reachable nodes
+   - A horse (large hitbox) needs wider corridors
+   - A player with jump boost has different vertical reach
+
+### Future Implementation Notes
+
+```cpp
+// Pathfinding should query step height from entity
+class Pathfinder {
+public:
+    Path findPath(const Entity& entity, BlockPos start, BlockPos goal) {
+        float stepHeight = entity.maxStepHeight();
+        // Use stepHeight when determining node connectivity
+        // ...
+    }
+};
+```
+
+---
+
+## 8.10 Entity Storage and Processing
+
+Entities are stored **per-subchunk** for efficient spatial queries and chunk lifecycle management.
+
+### Storage Strategy
+
+```
+SubChunk
+├── Block data (palette + indices)
+├── Light data (separate array)
+└── Entity list (vector of Entity*)
+```
+
+**Benefits:**
+- Fast spatial queries (only check relevant subchunks)
+- Natural chunk-based save/load boundaries
+- Efficient frustum culling for rendering
+
+### Atomic Handoff Problem
+
+When an entity crosses a subchunk boundary, it must be transferred atomically to prevent:
+
+1. **Duplicates** - Entity appears in both old and new subchunk
+2. **Lost entities** - Entity disappears during transfer
+3. **Concurrent modification** - Two threads process same entity
+
+### Proposed Solutions
+
+**Option A: Global Processing, Subchunk Storage**
+- All entity physics/AI processed in a single pass
+- Entity positions updated, then redistributed to subchunks
+- Simpler logic, but doesn't parallelize well
+
+**Option B: Per-Subchunk Processing with Handoff Queue**
+- Each subchunk processes its entities in parallel
+- Entities crossing boundaries go into a handoff queue
+- Main thread processes handoff queue after parallel phase
+- Better parallelism, more complex coordination
+
+**Option C: Two-Phase Processing**
+- Phase 1: All entities compute desired movement (parallel)
+- Phase 2: Sequential pass applies movements and handles transfers
+- Predictable, debuggable, moderate parallelism
+
+### Chunk Unload Safety
+
+When a chunk is being unloaded:
+1. Mark chunk as "unloading" - no new entities can enter
+2. Process remaining entities in that chunk
+3. Entities crossing into unloading chunk are either:
+   - Blocked at boundary (teleported back)
+   - Transferred to pending list for later
+4. Save chunk data including entity positions
+
+### Implementation Notes (Future)
+
+```cpp
+class SubChunk {
+public:
+    // Entity storage
+    void addEntity(Entity* entity);
+    void removeEntity(Entity* entity);
+    const std::vector<Entity*>& entities() const { return entities_; }
+
+    // Called during chunk lifecycle
+    void prepareForUnload();  // Mark unloading, prevent new entities
+    bool isUnloading() const;
+
+private:
+    std::vector<Entity*> entities_;
+    std::atomic<bool> unloading_{false};
+};
+
+// Handoff queue for cross-boundary transfers
+struct EntityTransfer {
+    Entity* entity;
+    ChunkPos fromChunk;
+    ChunkPos toChunk;
+};
+
+class EntityManager {
+public:
+    void processFrame(float deltaTime);
+
+private:
+    // Thread-safe queue for boundary crossings
+    std::vector<EntityTransfer> pendingTransfers_;
+    std::mutex transferMutex_;
+};
+```
+
+---
+
 ## See Also
 
 - [19 - Block Models](19-block-models.md) - Data-driven model format for loading collision/hit shapes from files

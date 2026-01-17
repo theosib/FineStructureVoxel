@@ -6,6 +6,7 @@
 #include <glm/gtc/constants.hpp>
 #include <array>
 #include <vector>
+#include <functional>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -117,6 +118,13 @@ struct AABB {
     // by velocity toward a stationary AABB. Returns >1 if no collision.
     // entryNormal is set to the normal of the face hit (pointing away from other)
     [[nodiscard]] float sweepCollision(const AABB& other, const Vec3& velocity, Vec3* entryNormal = nullptr) const;
+
+    // Ray intersection: returns true if ray hits this AABB.
+    // tMin/tMax are set to entry/exit distances along ray.
+    // hitFace is set to the face that was hit (entry face).
+    [[nodiscard]] bool rayIntersect(const Vec3& origin, const Vec3& direction,
+                                     float* tMin = nullptr, float* tMax = nullptr,
+                                     Face* hitFace = nullptr) const;
 
     // Expand AABB by amount in all directions
     [[nodiscard]] AABB expanded(const Vec3& amount) const {
@@ -242,5 +250,179 @@ struct RaycastResult {
 // Minimum margin between entities and blocks to prevent floating-point glitching
 // See docs/08-physics.md section 8.4 for explanation
 constexpr float COLLISION_MARGIN = 0.001f;
+
+// Maximum step height for step-climbing (slightly over half a block)
+constexpr float MAX_STEP_HEIGHT = 0.625f;
+
+// Default gravity in blocks per second squared
+constexpr float DEFAULT_GRAVITY = 20.0f;
+
+// ============================================================================
+// Block shape provider callback
+// ============================================================================
+
+// Callback type for getting collision shape at a block position
+// Returns the collision shape for the block, or nullptr/empty if no collision
+using BlockShapeProvider = std::function<const CollisionShape*(const BlockPos& pos, RaycastMode mode)>;
+
+// ============================================================================
+// PhysicsBody - Interface for entities that participate in physics
+// ============================================================================
+
+// A minimal interface that entities must implement for physics interaction.
+// This allows PhysicsSystem to work without depending on a specific Entity class.
+class PhysicsBody {
+public:
+    virtual ~PhysicsBody() = default;
+
+    // Position (bottom-center of bounding box)
+    [[nodiscard]] virtual Vec3 position() const = 0;
+    virtual void setPosition(const Vec3& pos) = 0;
+
+    // Velocity
+    [[nodiscard]] virtual Vec3 velocity() const = 0;
+    virtual void setVelocity(const Vec3& vel) = 0;
+
+    // Bounding box (in world coordinates, derived from position + half-extents)
+    [[nodiscard]] virtual AABB boundingBox() const = 0;
+
+    // Half-extents of the bounding box (fixed size, not affected by position)
+    [[nodiscard]] virtual Vec3 halfExtents() const = 0;
+
+    // Ground state
+    [[nodiscard]] virtual bool isOnGround() const = 0;
+    virtual void setOnGround(bool onGround) = 0;
+
+    // Whether this body is affected by gravity
+    [[nodiscard]] virtual bool hasGravity() const { return true; }
+
+    // Whether this body can step up (climb stairs)
+    [[nodiscard]] virtual bool canStepUp() const { return true; }
+
+    // Maximum step height for this body (can be overridden per-entity)
+    // Different games use different step heights (e.g., Hytale steps full blocks,
+    // Minecraft steps ~0.625 blocks). This can also depend on entity enhancements
+    // like special armor or abilities.
+    [[nodiscard]] virtual float maxStepHeight() const { return MAX_STEP_HEIGHT; }
+};
+
+// ============================================================================
+// SimplePhysicsBody - Basic implementation of PhysicsBody for testing
+// ============================================================================
+
+class SimplePhysicsBody : public PhysicsBody {
+public:
+    SimplePhysicsBody(const Vec3& pos, const Vec3& halfExt)
+        : position_(pos), halfExtents_(halfExt) {}
+
+    [[nodiscard]] Vec3 position() const override { return position_; }
+    void setPosition(const Vec3& pos) override { position_ = pos; }
+
+    [[nodiscard]] Vec3 velocity() const override { return velocity_; }
+    void setVelocity(const Vec3& vel) override { velocity_ = vel; }
+
+    [[nodiscard]] AABB boundingBox() const override {
+        // Position is bottom-center, so min.y = position.y
+        return AABB(
+            position_.x - halfExtents_.x,
+            position_.y,
+            position_.z - halfExtents_.z,
+            position_.x + halfExtents_.x,
+            position_.y + halfExtents_.y * 2.0f,
+            position_.z + halfExtents_.z
+        );
+    }
+
+    [[nodiscard]] Vec3 halfExtents() const override { return halfExtents_; }
+
+    [[nodiscard]] bool isOnGround() const override { return onGround_; }
+    void setOnGround(bool onGround) override { onGround_ = onGround; }
+
+    [[nodiscard]] float maxStepHeight() const override { return maxStepHeight_; }
+    void setMaxStepHeight(float h) { maxStepHeight_ = h; }
+
+private:
+    Vec3 position_{0.0f};
+    Vec3 velocity_{0.0f};
+    Vec3 halfExtents_{0.3f, 0.9f, 0.3f};  // Default player-like size
+    bool onGround_ = false;
+    float maxStepHeight_ = MAX_STEP_HEIGHT;
+};
+
+// ============================================================================
+// PhysicsSystem - Handles entity movement and collision
+// ============================================================================
+
+class PhysicsSystem {
+public:
+    // Constructor takes a block shape provider for collision detection
+    explicit PhysicsSystem(BlockShapeProvider shapeProvider);
+
+    // Move a physics body, handling collisions
+    // Returns actual movement vector after collision resolution
+    Vec3 moveBody(PhysicsBody& body, const Vec3& desiredMovement);
+
+    // Apply gravity to body velocity (call before moveBody)
+    void applyGravity(PhysicsBody& body, float deltaTime);
+
+    // Combined update: apply gravity and move
+    Vec3 update(PhysicsBody& body, float deltaTime);
+
+    // Check if body is on ground (touching surface below)
+    [[nodiscard]] bool checkOnGround(const PhysicsBody& body) const;
+
+    // Raycast through world
+    [[nodiscard]] RaycastResult raycast(const Vec3& origin, const Vec3& direction,
+                                         float maxDistance,
+                                         RaycastMode mode = RaycastMode::Interaction) const;
+
+    // Configuration
+    void setGravity(float g) { gravity_ = g; }
+    [[nodiscard]] float gravity() const { return gravity_; }
+
+    void setMaxStepHeight(float h) { maxStepHeight_ = h; }
+    [[nodiscard]] float maxStepHeight() const { return maxStepHeight_; }
+
+private:
+    BlockShapeProvider shapeProvider_;
+    float gravity_ = DEFAULT_GRAVITY;
+    float maxStepHeight_ = MAX_STEP_HEIGHT;
+
+    // Collect all collision AABBs in a region
+    [[nodiscard]] std::vector<AABB> collectColliders(const AABB& region) const;
+
+    // Resolve collision along one axis
+    // Returns the actual movement possible while maintaining COLLISION_MARGIN
+    [[nodiscard]] float resolveAxisCollision(
+        const AABB& entityBox,
+        const std::vector<AABB>& colliders,
+        int axis,
+        float movement
+    ) const;
+
+    // Try step-climbing (returns true if step-up improved movement)
+    // maxStepHeight is provided by the body being moved
+    [[nodiscard]] Vec3 tryStepClimbing(
+        const AABB& entityBox,
+        const std::vector<AABB>& colliders,
+        const Vec3& desiredMovement,
+        float maxStepHeight
+    ) const;
+};
+
+// ============================================================================
+// Raycasting utilities
+// ============================================================================
+
+// Raycast through world using DDA algorithm
+// Calls shapeProvider for each block along the ray to get its collision shape
+// Returns first hit within maxDistance, or empty result if no hit
+[[nodiscard]] RaycastResult raycastBlocks(
+    const Vec3& origin,
+    const Vec3& direction,
+    float maxDistance,
+    RaycastMode mode,
+    const BlockShapeProvider& shapeProvider
+);
 
 }  // namespace finevox

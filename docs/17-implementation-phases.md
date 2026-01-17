@@ -187,23 +187,28 @@
 - [x] Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
 
 ### 3.3 Raycasting
-- [ ] `RaycastMode` - Collision, Interaction, Both
-- [ ] Block raycasting through world
-- [ ] Face hit detection
+- [x] `RaycastMode` - Collision, Interaction, Both
+- [x] Block raycasting through world (DDA algorithm)
+- [x] Face hit detection
+- [x] Ray-AABB intersection
 
 ### 3.4 Entity Physics
-- [ ] `PhysicsSystem` - Entity movement and collision
-- [ ] Gravity application
-- [ ] Step-climbing algorithm (from EigenVoxel)
-- [ ] Ground detection
+- [x] `PhysicsSystem` - Entity movement and collision
+- [x] `PhysicsBody` interface for entities
+- [x] Gravity application
+- [x] Step-climbing algorithm (from EigenVoxel)
+- [x] Ground detection
+- [x] `SimplePhysicsBody` for testing
 
 ### Testing
 - [x] AABB intersection tests
 - [x] AABB swept collision tests
 - [x] CollisionShape rotation tests
-- [ ] Raycast hits expected blocks
-- [ ] Entity walks on ground, bumps into walls
-- [ ] Step-climbing works up to MAX_STEP_HEIGHT
+- [x] Ray-AABB intersection tests
+- [x] Raycast hits expected blocks
+- [x] Entity walks on ground, bumps into walls
+- [x] Step-climbing works up to MAX_STEP_HEIGHT
+- [x] Gravity integration tests
 
 ---
 

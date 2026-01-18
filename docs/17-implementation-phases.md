@@ -137,7 +137,7 @@
 - [x] Save thread (processes save queue with callbacks)
 - [x] Load thread (async load with callbacks)
 - [x] Region file caching with LRU eviction
-- [ ] Integration with SubChunkManager (coordinate lifecycle)
+- [x] Integration with SubChunkManager (coordinate lifecycle)
 
 ### 2.4 Configuration & Resource Location
 - [x] ConfigManager - Global engine settings (singleton, CBOR persistence)
@@ -165,7 +165,7 @@
 - [x] ConfigManager (init, save, reload, typed accessors, generic get/set)
 - [x] WorldConfig (metadata, compression override, persistence)
 - [x] ResourceLocator (scope resolution, world/dimension management)
-- [ ] Round-trip: create world -> save -> load -> verify identical
+- [x] Round-trip: create world -> save -> load -> verify identical
 - [ ] Region file corruption recovery
 
 ---
@@ -182,7 +182,7 @@
 
 ### 3.2 Block Collision
 - [x] Collision box vs hit box distinction (RaycastMode enum)
-- [ ] BlockType provides both shapes
+- [x] BlockType provides both shapes
 - [x] 24-rotation precomputation for shapes
 - [x] Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
 
@@ -217,9 +217,12 @@
 *First graphics code. Depends on FineStructureVK.*
 
 ### 4.1 Mesh Generation
-- [ ] `SubChunkView` - GPU mesh handle for a subchunk
-- [ ] Simple face culling (no greedy meshing yet)
-- [ ] Vertex format: position, normal, texcoord, AO
+- [x] `ChunkVertex` - Vertex format: position, normal, texcoord, AO
+- [x] `MeshData` - CPU-side vertex/index arrays
+- [x] `MeshBuilder` - Simple face culling (no greedy meshing yet)
+- [x] Ambient occlusion calculation (per-vertex, "0fps" algorithm)
+- [x] Face diagonal flipping for AO artifact prevention
+- [x] `SubChunkView` - GPU mesh handle for a subchunk (VK-dependent)
 
 ### 4.2 World Rendering
 - [ ] `WorldRenderer` - Renders visible subchunks
@@ -232,6 +235,10 @@
 - [ ] Basic fragment shader (texture + simple lighting)
 
 ### Testing
+- [x] Unit tests for ChunkVertex construction and equality
+- [x] Unit tests for MeshData (reserve, clear, memory usage)
+- [x] Unit tests for MeshBuilder (face culling, AO, vertex positions, normals, UVs)
+- [x] Stress tests (full subchunk, checkerboard pattern)
 - [ ] Render a static manually-placed world
 - [ ] View-relative precision at large coordinates
 - [ ] Frustum culling excludes off-screen chunks

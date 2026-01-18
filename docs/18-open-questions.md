@@ -200,4 +200,38 @@ See [19 - Block Models](19-block-models.md) §19.4 for atlas format specificatio
 
 ---
 
+## Future Design Notes
+
+### Block/Entity Interaction Events
+
+Every block and entity with a hitbox should have action events:
+
+1. **Hit action (left click)** - Primary action, typically breaking/attacking
+2. **Use action (right click)** - Secondary action, typically interaction
+
+```cpp
+// Block class receives method calls for these actions
+class Block {
+public:
+    // Called when player left-clicks on block
+    // Returns true to cancel default action (breaking)
+    virtual bool onHit(World& world, BlockPos pos, Player& player) { return false; }
+
+    // Called when player right-clicks on block
+    // Returns true to indicate interaction was handled
+    virtual bool onUse(World& world, BlockPos pos, Player& player) { return false; }
+};
+```
+
+**Design considerations:**
+- Blocks can **intercept and cancel** the normal action (e.g., a note block plays a note instead of breaking)
+- The receiver might be:
+  - A **subclass** of the main Block class (for built-in behavior)
+  - An **instance** that delegates to **scripting** (for mod-defined behavior)
+- Same pattern applies to entities with hitboxes
+
+This fits with the module architecture - core game defines default behaviors, mods can override.
+
+---
+
 [Back to Index](INDEX.md)

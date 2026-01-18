@@ -300,3 +300,210 @@ TEST_F(IOManagerTest, RegionEviction) {
 
     io.stop();
 }
+
+// ============================================================================
+// Round-trip test: create world -> save -> load -> verify identical
+// ============================================================================
+
+TEST_F(IOManagerTest, RoundTripSaveLoad) {
+    IOManager io(tempDir);
+    io.start();
+
+    // Create various block types
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("test:dirt");
+    BlockTypeId grass = BlockTypeId::fromName("test:grass");
+    BlockTypeId water = BlockTypeId::fromName("test:water");
+    BlockTypeId ore = BlockTypeId::fromName("test:diamond_ore");
+
+    // Store original block data for verification
+    // Map: ColumnPos -> Map: local BlockPos -> BlockTypeId
+    struct ColumnData {
+        ColumnPos pos;
+        std::unordered_map<uint64_t, BlockTypeId> blocks;  // packed local pos -> type
+    };
+    std::vector<ColumnData> originalData;
+
+    // Create multiple columns with various patterns
+    std::vector<ColumnPos> positions = {
+        {0, 0},     // Origin
+        {1, 0},     // Adjacent to origin
+        {0, 1},     // Adjacent to origin
+        {-1, -1},   // Negative coordinates
+        {32, 32},   // Different region
+        {-32, 0},   // Negative region
+    };
+
+    for (const auto& colPos : positions) {
+        ChunkColumn col(colPos);
+        ColumnData data;
+        data.pos = colPos;
+
+        // Fill base layer with stone
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                for (int y = 0; y < 5; ++y) {
+                    col.setBlock(x, y, z, stone);
+                    uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                     (static_cast<uint64_t>(y) << 16) |
+                                     static_cast<uint64_t>(z);
+                    data.blocks[packed] = stone;
+                }
+            }
+        }
+
+        // Add dirt layer
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                col.setBlock(x, 5, z, dirt);
+                uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                 (static_cast<uint64_t>(5) << 16) |
+                                 static_cast<uint64_t>(z);
+                data.blocks[packed] = dirt;
+            }
+        }
+
+        // Add grass on top
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) {
+                col.setBlock(x, 6, z, grass);
+                uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                 (static_cast<uint64_t>(6) << 16) |
+                                 static_cast<uint64_t>(z);
+                data.blocks[packed] = grass;
+            }
+        }
+
+        // Scatter some ore randomly
+        for (int y = 0; y < 5; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                for (int z = 0; z < 16; ++z) {
+                    // Deterministic pattern based on position
+                    if ((x + y + z + colPos.x + colPos.z) % 17 == 0) {
+                        col.setBlock(x, y, z, ore);
+                        uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                         (static_cast<uint64_t>(y) << 16) |
+                                         static_cast<uint64_t>(z);
+                        data.blocks[packed] = ore;
+                    }
+                }
+            }
+        }
+
+        // Add water pool at surface
+        for (int x = 5; x < 10; ++x) {
+            for (int z = 5; z < 10; ++z) {
+                col.setBlock(x, 6, z, water);  // Replace grass with water
+                uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                 (static_cast<uint64_t>(6) << 16) |
+                                 static_cast<uint64_t>(z);
+                data.blocks[packed] = water;
+            }
+        }
+
+        // Add tall structure in one column
+        if (colPos == ColumnPos{0, 0}) {
+            for (int y = 0; y < 100; ++y) {
+                col.setBlock(8, y, 8, stone);
+                uint64_t packed = (static_cast<uint64_t>(8) << 32) |
+                                 (static_cast<uint64_t>(y) << 16) |
+                                 static_cast<uint64_t>(8);
+                data.blocks[packed] = stone;
+            }
+        }
+
+        originalData.push_back(std::move(data));
+
+        // Queue save
+        io.queueSave(colPos, col);
+    }
+
+    // Wait for all saves to complete
+    io.flush();
+
+    // Stop and restart IO manager to ensure data is persisted
+    io.stop();
+
+    // Recreate IOManager (simulates fresh load after program restart)
+    IOManager io2(tempDir);
+    io2.start();
+
+    // Load all columns and verify
+    std::atomic<int> verifiedCount{0};
+    std::atomic<int> failureCount{0};
+
+    for (const auto& data : originalData) {
+        io2.requestLoad(data.pos, [&data, &verifiedCount, &failureCount](
+            ColumnPos pos, std::unique_ptr<ChunkColumn> col) {
+
+            if (!col) {
+                ++failureCount;
+                ADD_FAILURE() << "Failed to load column at (" << pos.x << ", " << pos.z << ")";
+                ++verifiedCount;
+                return;
+            }
+
+            // Verify position
+            EXPECT_EQ(col->position(), data.pos);
+
+            // Verify all blocks we set
+            for (const auto& [packed, expectedType] : data.blocks) {
+                int x = static_cast<int>((packed >> 32) & 0xFFFF);
+                int y = static_cast<int>((packed >> 16) & 0xFFFF);
+                int z = static_cast<int>(packed & 0xFFFF);
+
+                BlockTypeId actual = col->getBlock(x, y, z);
+                if (actual != expectedType) {
+                    ++failureCount;
+                    ADD_FAILURE() << "Block mismatch at (" << x << ", " << y << ", " << z
+                                  << ") in column (" << pos.x << ", " << pos.z << ")"
+                                  << " - expected " << expectedType.name()
+                                  << " but got " << actual.name();
+                }
+            }
+
+            // Verify blocks we didn't set are air
+            // Check a sampling of positions
+            for (int x = 0; x < 16; x += 4) {
+                for (int z = 0; z < 16; z += 4) {
+                    for (int y = 50; y < 60; ++y) {  // Above our structures (except tower)
+                        if (pos == ColumnPos{0, 0} && x == 8 && z == 8 && y < 100) {
+                            // This is part of the tower
+                            continue;
+                        }
+
+                        uint64_t packed = (static_cast<uint64_t>(x) << 32) |
+                                         (static_cast<uint64_t>(y) << 16) |
+                                         static_cast<uint64_t>(z);
+
+                        if (data.blocks.find(packed) == data.blocks.end()) {
+                            BlockTypeId actual = col->getBlock(x, y, z);
+                            if (!actual.isAir()) {
+                                ++failureCount;
+                                ADD_FAILURE() << "Expected air at (" << x << ", " << y << ", " << z
+                                              << ") in column (" << pos.x << ", " << pos.z << ")"
+                                              << " but got " << actual.name();
+                            }
+                        }
+                    }
+                }
+            }
+
+            ++verifiedCount;
+        });
+    }
+
+    // Wait for all verifications to complete
+    while (verifiedCount < static_cast<int>(originalData.size())) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    EXPECT_EQ(failureCount, 0) << "There were " << failureCount << " block mismatches";
+    EXPECT_EQ(verifiedCount, static_cast<int>(originalData.size()));
+
+    io2.stop();
+}
+
+// Note: RoundTripWithDataContainer test is pending - requires DataContainer
+// integration with ChunkColumn (data() accessor). DataContainer serialization
+// is tested separately in test_data_container.cpp.

@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
 option(FINEVOX_BUILD_TESTS "Build unit tests" ON)
+option(FINEVOX_BUILD_RENDER "Build Vulkan render module (requires FineStructureVK)" OFF)
 
 # Dependencies
 include(FetchContent)
@@ -47,6 +48,8 @@ add_library(finevox STATIC
     src/config.cpp
     src/resource_locator.cpp
     src/physics.cpp
+    src/mesh.cpp
+    src/block_type.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -60,6 +63,55 @@ target_compile_options(finevox PRIVATE
 )
 
 target_link_libraries(finevox PUBLIC lz4_static glm::glm)
+
+# ============================================================================
+# Vulkan Render Module (optional)
+# ============================================================================
+
+if(FINEVOX_BUILD_RENDER)
+    # Find Vulkan
+    find_package(Vulkan REQUIRED)
+
+    # Find FineStructureVK
+    # User must set FINEVK_DIR to point to FineStructureVK root
+    if(NOT DEFINED FINEVK_DIR)
+        set(FINEVK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../FineStructureVK" CACHE PATH "Path to FineStructureVK")
+    endif()
+
+    if(NOT EXISTS "${FINEVK_DIR}/include/finevk/finevk.hpp")
+        message(FATAL_ERROR "FineStructureVK not found at ${FINEVK_DIR}. Set FINEVK_DIR to the correct path.")
+    endif()
+
+    # Add the render module library
+    add_library(finevox_render STATIC
+        src/subchunk_view.cpp
+    )
+
+    target_include_directories(finevox_render PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+        ${FINEVK_DIR}/include
+    )
+
+    target_link_libraries(finevox_render PUBLIC
+        finevox
+        Vulkan::Vulkan
+    )
+
+    # Link against FineStructureVK library if it exists as a built library
+    # For now, we assume header-only usage or the user links finevk separately
+    if(EXISTS "${FINEVK_DIR}/build/libfinevk.a" OR EXISTS "${FINEVK_DIR}/build/finevk.lib")
+        if(EXISTS "${FINEVK_DIR}/build/libfinevk.a")
+            target_link_libraries(finevox_render PUBLIC "${FINEVK_DIR}/build/libfinevk.a")
+        else()
+            target_link_libraries(finevox_render PUBLIC "${FINEVK_DIR}/build/finevk.lib")
+        endif()
+    endif()
+
+    target_compile_definitions(finevox_render PUBLIC FINEVOX_HAS_RENDER=1)
+
+    message(STATUS "FineStructureVoxel: Building render module with FineStructureVK at ${FINEVK_DIR}")
+endif()
 
 # Tests
 if(FINEVOX_BUILD_TESTS)
@@ -93,6 +145,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_config.cpp
         tests/test_resource_locator.cpp
         tests/test_physics.cpp
+        tests/test_mesh.cpp
+        tests/test_block_type.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

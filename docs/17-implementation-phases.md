@@ -234,6 +234,10 @@
 - [x] Basic vertex shader (view-relative MVP)
 - [x] Basic fragment shader (texture + simple lighting)
 
+### 4.4 Debug Features
+- [x] Debug camera offset mode (renders from offset position to visualize culling)
+- [x] Render statistics (loadedChunkCount, renderedChunkCount, culledChunkCount, etc.)
+
 ### Testing
 - [x] Unit tests for ChunkVertex construction and equality
 - [x] Unit tests for MeshData (reserve, clear, memory usage)
@@ -241,7 +245,7 @@
 - [x] Stress tests (full subchunk, checkerboard pattern)
 - [ ] Render a static manually-placed world
 - [ ] View-relative precision at large coordinates
-- [ ] Frustum culling excludes off-screen chunks
+- [ ] Frustum culling excludes off-screen chunks (use debug camera offset to verify)
 
 ---
 

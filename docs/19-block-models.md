@@ -248,7 +248,7 @@ regions:
   stone_brick: [0, 1]
 ```
 
-**Note:** FineStructureVK's atlas support may need enhancement - see [18 - Open Questions](18-open-questions.md) for current limitations.
+**Note:** The `TextureManager` class (see §19.10) implements this atlas system with CBOR-based atlas definitions.
 
 ### Properties
 
@@ -485,6 +485,117 @@ collision:
 ```
 
 But this adds complexity. Start with explicit AABB lists; add DSL if needed.
+
+---
+
+## 19.10 TextureManager Implementation
+
+The `TextureManager` class provides the abstraction layer between texture references and atlas details:
+
+### Core Concepts
+
+1. **TextureRegion** - A rectangular UV region within a texture/atlas
+2. **TextureHandle** - Opaque reference containing atlas index + region
+3. **AtlasDefinition** - Config file describing atlas organization
+4. **TextureManager** - Registry with named lookups
+
+### Naming Convention
+
+Texture names follow a consistent pattern:
+
+```
+"atlasName:regionName"  - For atlas textures (e.g., "blocks:stone_top")
+"textureName"           - For standalone textures (e.g., "logo")
+```
+
+### Atlas Definition Format
+
+Atlas definitions use the same human-readable format as block models:
+
+```
+# blocks.atlas
+name: blocks
+image: game://textures/blocks/terrain.png
+grid: 16 16
+
+# Grid-based regions (x y)
+region:stone: 0 0
+region:dirt: 1 0
+region:grass_top: 2 0
+region:grass_side: 3 0
+
+# Pixel-based regions (x y w h) - use 4 values
+region:custom_sprite: 128 64 32 32
+```
+
+### Usage Pattern
+
+```cpp
+TextureManager textures(device, commandPool);
+
+// Load atlas from definition file
+textures.loadAtlas("game://textures/blocks.atlas");
+
+// Or register programmatically
+textures.registerGridAtlas("items", "game://textures/items.png", 16, 16);
+textures.registerGridRegion("items", "sword", 0, 0);
+textures.registerGridRegion("items", "pickaxe", 1, 0);
+
+// Standalone textures work too (degenerate single-region atlas)
+textures.registerTexture("logo", "game://textures/ui/logo.png");
+
+// Lookup by name
+auto handle = textures.getTexture("blocks:stone");
+if (handle) {
+    finevk::Texture* atlas = textures.getAtlasTexture(handle->atlasIndex);
+    glm::vec4 uvBounds = handle->region.bounds();
+}
+
+// Create provider for MeshBuilder
+auto provider = textures.createBlockProvider(
+    [](BlockTypeId id, Face face) -> std::string {
+        // Return texture name for this block/face
+        return getBlockTextureName(id, face);
+    }
+);
+```
+
+### Block Texture Config
+
+The manager can load block-to-texture mappings from a config file:
+
+```yaml
+# block_textures.cbor
+stone:
+  all: "blocks:stone"
+
+grass:
+  top: "blocks:grass_top"
+  bottom: "blocks:dirt"
+  sides: "blocks:grass_side"
+
+furnace:
+  top: "blocks:furnace_top"
+  bottom: "blocks:furnace_top"
+  north: "blocks:furnace_front"
+  sides: "blocks:furnace_side"
+```
+
+```cpp
+textures.loadBlockTextureConfig("game://config/block_textures.cbor");
+
+// Now can use built-in block name lookup
+std::string texName = textures.getBlockTextureName(grassId, Face::PosY);
+// Returns "blocks:grass_top"
+```
+
+### Design Benefits
+
+1. **Decoupled references** - Code uses names, not atlas coordinates
+2. **Single textures as degenerate case** - Unified API regardless of source
+3. **Config-driven** - Atlas organization in data files, not code
+4. **ResourceLocator integration** - Paths resolved through resource system
+5. **Prepared for dynamic packing** - When finevk adds runtime atlas packing, the TextureManager can use it transparently
 
 ---
 

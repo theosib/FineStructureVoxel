@@ -5,16 +5,25 @@
 #include <shared_mutex>
 #include <optional>
 #include <string>
+#include <memory>
 
 namespace finevox {
+
+// Forward declaration
+class ConfigFile;
 
 // ============================================================================
 // ConfigManager - Global engine configuration
 // ============================================================================
 //
-// Manages engine-wide settings stored in CBOR format.
+// Manages engine-wide settings stored in human-readable text format.
 // Settings can be queried and modified at runtime.
 // Changes are persisted to disk on save() or destruction.
+//
+// Config file format (key: value pairs):
+//   compression.enabled: true
+//   debug.logging: false
+//   io.thread_count: 2
 //
 // Thread safety: All public methods are thread-safe.
 //
@@ -28,7 +37,7 @@ public:
     void init(const std::filesystem::path& configPath);
 
     // Initialize using ResourceLocator to find user config
-    // Resolves "user/config.cbor" via ResourceLocator
+    // Resolves "user/config.conf" via ResourceLocator
     // Requires ResourceLocator::instance().setUserRoot() to be called first
     void initFromLocator();
 
@@ -91,11 +100,12 @@ private:
     ConfigManager& operator=(const ConfigManager&) = delete;
 
     void setDefaults();
-    bool loadFromFile();
-    bool saveToFile();
+    void syncFromFile();
+    void syncToFile();
 
     mutable std::shared_mutex mutex_;
     std::filesystem::path configPath_;
+    std::unique_ptr<ConfigFile> configFile_;
     DataContainer data_;
     bool initialized_ = false;
     bool dirty_ = false;
@@ -105,7 +115,8 @@ private:
 // WorldConfig - Per-world configuration
 // ============================================================================
 //
-// Settings specific to a single world, stored in the world directory.
+// Settings specific to a single world, stored in human-readable format
+// in the world directory (world.conf).
 // Includes world metadata (name, seed) and per-world overrides.
 //
 class WorldConfig {
@@ -113,8 +124,15 @@ public:
     // Create/load world config from world directory
     explicit WorldConfig(const std::filesystem::path& worldDir);
 
+    // Move-only (has unique_ptr member)
+    ~WorldConfig();
+    WorldConfig(WorldConfig&&) noexcept;
+    WorldConfig& operator=(WorldConfig&&) noexcept;
+    WorldConfig(const WorldConfig&) = delete;
+    WorldConfig& operator=(const WorldConfig&) = delete;
+
     // Create/load world config using ResourceLocator
-    // Resolves "world/<name>/world.cbor" via ResourceLocator
+    // Resolves "world/<name>/world.conf" via ResourceLocator
     // Requires the world to be registered with ResourceLocator first
     static std::optional<WorldConfig> fromWorld(const std::string& worldName);
 
@@ -164,12 +182,13 @@ public:
     [[nodiscard]] const DataContainer& data() const { return data_; }
 
 private:
-    bool loadFromFile();
-    bool saveToFile();
     void setDefaults();
+    void syncFromFile();
+    void syncToFile();
 
     std::filesystem::path worldDir_;
     std::filesystem::path configPath_;
+    std::unique_ptr<ConfigFile> configFile_;
     DataContainer data_;
     bool dirty_ = false;
 };

@@ -225,14 +225,14 @@
 - [x] `SubChunkView` - GPU mesh handle for a subchunk (VK-dependent)
 
 ### 4.2 World Rendering
-- [ ] `WorldRenderer` - Renders visible subchunks
-- [ ] View-relative coordinates (subtract camera position)
-- [ ] Frustum culling (use FineStructureVK's Camera)
-- [ ] Texture atlas for block faces
+- [x] `WorldRenderer` - Renders visible subchunks
+- [x] View-relative coordinates (subtract camera position)
+- [x] Frustum culling (use FineStructureVK's Camera)
+- [x] Texture atlas for block faces (`BlockAtlas` class)
 
 ### 4.3 Shaders
-- [ ] Basic vertex shader (view-relative MVP)
-- [ ] Basic fragment shader (texture + simple lighting)
+- [x] Basic vertex shader (view-relative MVP)
+- [x] Basic fragment shader (texture + simple lighting)
 
 ### Testing
 - [x] Unit tests for ChunkVertex construction and equality

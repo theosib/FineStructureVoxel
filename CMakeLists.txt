@@ -50,6 +50,8 @@ add_library(finevox STATIC
     src/physics.cpp
     src/mesh.cpp
     src/block_type.cpp
+    src/config_parser.cpp
+    src/config_file.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -85,6 +87,9 @@ if(FINEVOX_BUILD_RENDER)
     # Add the render module library
     add_library(finevox_render STATIC
         src/subchunk_view.cpp
+        src/world_renderer.cpp
+        src/block_atlas.cpp
+        src/texture_manager.cpp
     )
 
     target_include_directories(finevox_render PUBLIC
@@ -111,6 +116,38 @@ if(FINEVOX_BUILD_RENDER)
     target_compile_definitions(finevox_render PUBLIC FINEVOX_HAS_RENDER=1)
 
     message(STATUS "FineStructureVoxel: Building render module with FineStructureVK at ${FINEVK_DIR}")
+
+    # Compile shaders
+    find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
+    if(GLSLC)
+        set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+        set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+        file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+        set(SHADER_SOURCES
+            ${SHADER_DIR}/chunk.vert
+            ${SHADER_DIR}/chunk.frag
+        )
+
+        foreach(SHADER ${SHADER_SOURCES})
+            get_filename_component(SHADER_NAME ${SHADER} NAME)
+            set(SHADER_OUTPUT ${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv)
+            add_custom_command(
+                OUTPUT ${SHADER_OUTPUT}
+                COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT}
+                DEPENDS ${SHADER}
+                COMMENT "Compiling shader ${SHADER_NAME}"
+            )
+            list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+        endforeach()
+
+        add_custom_target(finevox_shaders ALL DEPENDS ${SHADER_OUTPUTS})
+        add_dependencies(finevox_render finevox_shaders)
+
+        message(STATUS "FineStructureVoxel: Shader compilation enabled (output: ${SHADER_OUTPUT_DIR})")
+    else()
+        message(WARNING "glslc not found - shaders will not be compiled. Install Vulkan SDK.")
+    endif()
 endif()
 
 # Tests
@@ -147,6 +184,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_physics.cpp
         tests/test_mesh.cpp
         tests/test_block_type.cpp
+        tests/test_config_parser.cpp
+        tests/test_config_file.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

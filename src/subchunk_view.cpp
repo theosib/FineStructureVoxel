@@ -3,8 +3,8 @@
 // FineStructureVK headers
 #include <finevk/high/raw_mesh.hpp>
 #include <finevk/device/logical_device.hpp>
-#include <finevk/command/command_pool.hpp>
-#include <finevk/command/command_buffer.hpp>
+#include <finevk/device/buffer.hpp>
+#include <finevk/device/command.hpp>
 
 namespace finevox {
 
@@ -12,6 +12,8 @@ SubChunkView::SubChunkView(ChunkPos pos)
     : pos_(pos)
 {
 }
+
+SubChunkView::~SubChunkView() = default;
 
 void SubChunkView::upload(
     finevk::LogicalDevice& device,

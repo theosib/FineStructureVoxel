@@ -110,7 +110,7 @@ void BlockAtlas::setBlockTexture(BlockTypeId id, uint32_t gridX, uint32_t gridY)
     BlockTextureInfo info;
     BlockFaceTexture tex = gridToUV(gridX, gridY);
     info.setAll(tex);
-    blockTextures_[id.value()] = info;
+    blockTextures_[id.id] = info;
 }
 
 void BlockAtlas::setBlockTexture(BlockTypeId id,
@@ -121,7 +121,7 @@ void BlockAtlas::setBlockTexture(BlockTypeId id,
     info.setTopBottom(gridToUV(topX, topY),
                       gridToUV(bottomX, bottomY),
                       gridToUV(sideX, sideY));
-    blockTextures_[id.value()] = info;
+    blockTextures_[id.id] = info;
 }
 
 void BlockAtlas::setBlockTexturePerFace(BlockTypeId id,
@@ -138,15 +138,15 @@ void BlockAtlas::setBlockTexturePerFace(BlockTypeId id,
     info.faces[static_cast<size_t>(Face::NegY)] = gridToUV(negYx, negYy);
     info.faces[static_cast<size_t>(Face::PosZ)] = gridToUV(posZx, posZy);
     info.faces[static_cast<size_t>(Face::NegZ)] = gridToUV(negZx, negZy);
-    blockTextures_[id.value()] = info;
+    blockTextures_[id.id] = info;
 }
 
 void BlockAtlas::setBlockTextureUV(BlockTypeId id, const BlockTextureInfo& info) {
-    blockTextures_[id.value()] = info;
+    blockTextures_[id.id] = info;
 }
 
 glm::vec4 BlockAtlas::getUV(BlockTypeId id, Face face) const {
-    auto it = blockTextures_.find(id.value());
+    auto it = blockTextures_.find(id.id);
     if (it != blockTextures_.end()) {
         return it->second.get(face).bounds();
     }
@@ -154,7 +154,7 @@ glm::vec4 BlockAtlas::getUV(BlockTypeId id, Face face) const {
 }
 
 const BlockTextureInfo* BlockAtlas::getTextureInfo(BlockTypeId id) const {
-    auto it = blockTextures_.find(id.value());
+    auto it = blockTextures_.find(id.id);
     if (it != blockTextures_.end()) {
         return &it->second;
     }

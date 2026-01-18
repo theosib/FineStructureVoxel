@@ -298,8 +298,7 @@ bool TextureManager::loadBlockTextureConfig(const std::string& configPath) {
         std::string blockName = entry.key;
 
         // Get or create block type ID
-        auto& interner = StringInterner::global();
-        BlockTypeId blockId = interner.intern(blockName);
+        BlockTypeId blockId = BlockTypeId::fromName(blockName);
 
         std::array<std::string, 6> faceTextures;
 
@@ -316,7 +315,7 @@ bool TextureManager::loadBlockTextureConfig(const std::string& configPath) {
             else if (entry.suffix == "sides") {
                 // Apply to all side faces
                 std::string texName(entry.value.asString());
-                auto& existing = blockTextureNames_[blockId.value()];
+                auto& existing = blockTextureNames_[blockId.id];
                 existing[static_cast<size_t>(Face::PosX)] = texName;
                 existing[static_cast<size_t>(Face::NegX)] = texName;
                 existing[static_cast<size_t>(Face::PosZ)] = texName;
@@ -325,14 +324,14 @@ bool TextureManager::loadBlockTextureConfig(const std::string& configPath) {
             } else if (entry.suffix == "all") {
                 // Apply to all faces
                 std::string texName(entry.value.asString());
-                auto& existing = blockTextureNames_[blockId.value()];
+                auto& existing = blockTextureNames_[blockId.id];
                 for (auto& tex : existing) {
                     tex = texName;
                 }
                 continue;
             }
 
-            auto& existing = blockTextureNames_[blockId.value()];
+            auto& existing = blockTextureNames_[blockId.id];
             existing[static_cast<size_t>(face)] = std::string(entry.value.asString());
         } else {
             // Simple entry like "stone: blocks:stone" - applies to all faces
@@ -340,7 +339,7 @@ bool TextureManager::loadBlockTextureConfig(const std::string& configPath) {
             for (auto& tex : faceTextures) {
                 tex = texName;
             }
-            blockTextureNames_[blockId.value()] = faceTextures;
+            blockTextureNames_[blockId.id] = faceTextures;
         }
     }
 
@@ -348,7 +347,7 @@ bool TextureManager::loadBlockTextureConfig(const std::string& configPath) {
 }
 
 std::string TextureManager::getBlockTextureName(BlockTypeId id, Face face) const {
-    auto it = blockTextureNames_.find(id.value());
+    auto it = blockTextureNames_.find(id.id);
     if (it == blockTextureNames_.end()) {
         return "";
     }

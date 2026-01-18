@@ -106,6 +106,9 @@ public:
     /// Default constructor (invalid position)
     SubChunkView() = default;
 
+    /// Destructor (defined in cpp due to incomplete RawMesh type)
+    ~SubChunkView();
+
     /// Get the chunk position
     [[nodiscard]] ChunkPos position() const { return pos_; }
 

@@ -6,7 +6,7 @@
 #include "finevox/resource_locator.hpp"
 
 #include <finevk/high/texture.hpp>
-#include <finevk/command/command_pool.hpp>
+#include <finevk/device/command.hpp>
 
 #include <glm/glm.hpp>
 #include <unordered_map>

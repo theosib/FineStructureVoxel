@@ -98,19 +98,28 @@ if(FINEVOX_BUILD_RENDER)
         ${FINEVK_DIR}/include
     )
 
+    # Need GLFW for FineStructureVK headers
+    find_package(glfw3 REQUIRED)
+
     target_link_libraries(finevox_render PUBLIC
         finevox
         Vulkan::Vulkan
+        glfw
     )
 
-    # Link against FineStructureVK library if it exists as a built library
-    # For now, we assume header-only usage or the user links finevk separately
-    if(EXISTS "${FINEVK_DIR}/build/libfinevk.a" OR EXISTS "${FINEVK_DIR}/build/finevk.lib")
-        if(EXISTS "${FINEVK_DIR}/build/libfinevk.a")
-            target_link_libraries(finevox_render PUBLIC "${FINEVK_DIR}/build/libfinevk.a")
-        else()
-            target_link_libraries(finevox_render PUBLIC "${FINEVK_DIR}/build/finevk.lib")
-        endif()
+    # Link against FineStructureVK libraries
+    if(EXISTS "${FINEVK_DIR}/build/libfinevk-core.a")
+        target_link_libraries(finevox_render PUBLIC
+            "${FINEVK_DIR}/build/libfinevk-engine.a"
+            "${FINEVK_DIR}/build/libfinevk-core.a"
+        )
+    elseif(EXISTS "${FINEVK_DIR}/build/finevk-core.lib")
+        target_link_libraries(finevox_render PUBLIC
+            "${FINEVK_DIR}/build/finevk-engine.lib"
+            "${FINEVK_DIR}/build/finevk-core.lib"
+        )
+    else()
+        message(WARNING "FineStructureVK library not found at ${FINEVK_DIR}/build - you may need to build it first")
     endif()
 
     target_compile_definitions(finevox_render PUBLIC FINEVOX_HAS_RENDER=1)
@@ -147,6 +156,31 @@ if(FINEVOX_BUILD_RENDER)
         message(STATUS "FineStructureVoxel: Shader compilation enabled (output: ${SHADER_OUTPUT_DIR})")
     else()
         message(WARNING "glslc not found - shaders will not be compiled. Install Vulkan SDK.")
+    endif()
+
+    # Render demo executable
+    option(FINEVOX_BUILD_EXAMPLES "Build example applications" ON)
+    if(FINEVOX_BUILD_EXAMPLES)
+        add_executable(finevox_render_demo
+            examples/render_demo.cpp
+        )
+
+        # finevox_render already links FineStructureVK libraries transitively (PUBLIC)
+        target_link_libraries(finevox_render_demo PRIVATE
+            finevox_render
+        )
+
+        # Copy shaders to build directory
+        add_dependencies(finevox_render_demo finevox_shaders)
+
+        # Set working directory for IDE
+        set_target_properties(finevox_render_demo PROPERTIES
+            VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+            XCODE_GENERATE_SCHEME TRUE
+            XCODE_SCHEME_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        )
+
+        message(STATUS "FineStructureVoxel: Building render demo")
     endif()
 endif()
 

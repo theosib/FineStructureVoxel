@@ -301,7 +301,7 @@ private:
     BlockTextureProvider textureProvider_;
 
     // SubChunk views (GPU meshes)
-    std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>, ChunkPosHash> views_;
+    std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;
 
     // Dirty tracking
     std::vector<ChunkPos> dirtyChunks_;

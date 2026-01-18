@@ -1,8 +1,7 @@
 #include "finevox/world_renderer.hpp"
 
 #include <finevk/device/logical_device.hpp>
-#include <finevk/command/command_pool.hpp>
-#include <finevk/command/command_buffer.hpp>
+#include <finevk/device/command.hpp>
 #include <finevk/device/sampler.hpp>
 
 #include <algorithm>

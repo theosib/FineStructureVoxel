@@ -6,6 +6,14 @@
 
 ## 6.1 Architecture
 
+> **Implementation Note (Current State):**
+> The current implementation has a simpler flat architecture:
+> ```
+> WorldRenderer (renders all subchunks)
+>     +-- SubChunkView (one per loaded subchunk, wraps finevk::RawMesh)
+> ```
+> The full architecture below is the target design for future phases.
+
 ```
 WorldRenderer
     |
@@ -146,6 +154,14 @@ private:
 
 ## 6.4 Chunk View and Double Buffering
 
+> **Implementation Note (Current State - Phase 4):**
+> The current `SubChunkView` class is simpler:
+> - Single buffer (no double-buffering)
+> - Wraps `finevk::RawMesh` for GPU storage
+> - Synchronous mesh updates on main thread
+>
+> Double-buffering and async mesh updates are **Phase 5** features.
+
 ```cpp
 namespace finevox {
 
@@ -197,6 +213,14 @@ private:
 ---
 
 ## 6.5 Mesh Update Pipeline
+
+> **Implementation Note (Current State - Phase 4):**
+> The current implementation uses a simpler synchronous approach:
+> - `WorldRenderer::markDirty(pos)` adds to a dirty list
+> - `WorldRenderer::updateMeshes()` rebuilds meshes on main thread
+> - No priority queue or worker threads
+>
+> The full 4-stage pipeline below is the **Phase 5** target design.
 
 Block changes trigger a multi-stage pipeline to update GPU-renderable data:
 
@@ -356,38 +380,53 @@ private:
 
 ## 6.6 Shader Design
 
-**Vertex Shader (block_vertex.glsl):**
+> **Implementation Note:**
+> The actual shaders in `shaders/chunk.vert` and `shaders/chunk.frag` may differ slightly
+> from these examples. The key concept is view-relative rendering where `chunkOffset`
+> is computed on CPU with double precision, keeping GPU math in the small-number range.
+
+**Vertex Shader (chunk.vert) - View-Relative Rendering:**
 ```glsl
 #version 450
 
-layout(location = 0) in vec3 inPosition;
+layout(location = 0) in vec3 inPosition;   // Local position within subchunk (0-16)
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in float inAO;
 
-layout(set = 0, binding = 0) uniform GlobalUBO {
-    mat4 viewProj;
-    vec3 viewCenter;  // For view-relative to world conversion
-    vec3 lightDir;
-    vec3 lightColor;
-    vec3 ambientColor;
-    float time;
-};
+// Camera uniform - view matrix is centered at origin (rotation only)
+layout(set = 0, binding = 0) uniform CameraUBO {
+    mat4 view;
+    mat4 projection;
+    mat4 viewProjection;
+    vec3 cameraPos;
+    float nearPlane;
+    float farPlane;
+} camera;
 
+// Per-chunk push constants
 layout(push_constant) uniform PushConstants {
-    vec3 chunkOffset;  // View-relative chunk position
-};
+    vec3 chunkOffset;  // View-relative position: (chunkWorldOrigin - cameraPos)
+    float padding;
+} chunk;
 
-layout(location = 0) out vec3 fragPosition;
+layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out float fragAO;
 
 void main() {
-    vec3 worldPos = inPosition + chunkOffset;
-    gl_Position = viewProj * vec4(worldPos, 1.0);
+    // View-relative rendering for precision at large coordinates:
+    // chunkOffset = (chunkWorldOrigin - cameraPos) computed on CPU with doubles
+    // viewRelativePos = chunkOffset + localPos = position relative to camera
+    vec3 viewRelativePos = chunk.chunkOffset + inPosition;
 
-    fragPosition = worldPos;
+    // Transform using view-relative position
+    // View matrix treats camera as at origin (rotation only, no translation)
+    gl_Position = camera.projection * camera.view * vec4(viewRelativePos, 1.0);
+
+    // Reconstruct approximate world pos for lighting if needed
+    fragWorldPos = viewRelativePos + camera.cameraPos;
     fragNormal = inNormal;
     fragTexCoord = inTexCoord;
     fragAO = inAO;

@@ -238,14 +238,19 @@
 - [x] Debug camera offset mode (renders from offset position to visualize culling)
 - [x] Render statistics (loadedChunkCount, renderedChunkCount, culledChunkCount, etc.)
 
+### 4.5 Large World Support
+- [x] Double-precision camera position (`glm::dvec3`) for jitter-free rendering at large coordinates
+- [x] View-relative frustum culling using double-precision AABB calculations
+- [x] `WorldRenderer::updateCamera()` overload accepting high-precision position
+
 ### Testing
 - [x] Unit tests for ChunkVertex construction and equality
 - [x] Unit tests for MeshData (reserve, clear, memory usage)
 - [x] Unit tests for MeshBuilder (face culling, AO, vertex positions, normals, UVs)
 - [x] Stress tests (full subchunk, checkerboard pattern)
-- [ ] Render a static manually-placed world
-- [ ] View-relative precision at large coordinates
-- [ ] Frustum culling excludes off-screen chunks (use debug camera offset to verify)
+- [x] Render a static manually-placed world (`render_demo.cpp`)
+- [x] View-relative precision at large coordinates (tested at 1,000,000 blocks)
+- [x] Frustum culling excludes off-screen chunks (verified with debug camera offset)
 
 ---
 
@@ -254,7 +259,10 @@
 *Performance improvements.*
 
 ### 5.1 Greedy Meshing
-- [ ] Greedy mesh algorithm (merge coplanar faces)
+
+**Note:** Greedy meshing is confined to subchunk boundaries. This keeps frustum culling simple - each subchunk is an independent unit with its own mesh, no cross-boundary considerations needed.
+
+- [ ] Greedy mesh algorithm (merge coplanar faces within subchunk)
 - [ ] Per-face-direction processing
 - [ ] Handle transparent blocks separately
 - [ ] Handle off-grid displaced blocks (only elide faces with matching displacement)

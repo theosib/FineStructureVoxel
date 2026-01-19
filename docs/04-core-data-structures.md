@@ -218,6 +218,21 @@ Word-straddling: ~12.8 indices per word (complex boundary logic)
 
 ## 4.5 Block System
 
+> **Implementation Note (Current State):**
+> The current implementation uses a simplified approach:
+> - `SubChunk::getBlock(x,y,z)` returns `BlockTypeId` directly
+> - `World::getBlock()` returns `BlockTypeId` directly
+> - No `Block` wrapper class is implemented yet
+>
+> The full `Block` wrapper design below will be needed when we implement:
+> - BlockDisplacement (off-grid blocks)
+> - Per-block custom data (DataContainer)
+> - Block rotation state
+>
+> When implemented, the `Block` wrapper will exist on the caller's stack with
+> low overhead, providing a convenient container that points to data rather
+> than copying it.
+
 ```cpp
 namespace finevox {
 
@@ -257,6 +272,18 @@ struct Block {
 };
 
 // Block type definition (singleton per type, owned by global registry)
+//
+// **Implementation Note (Current State):**
+// The current BlockType in block_type.hpp uses a data-driven approach:
+// - Builder pattern: setCollisionShape(), setOpaque(), setHardness(), etc.
+// - No virtual methods - all properties are data members
+// - Precomputed 24-rotation collision/hit shapes for O(1) lookup
+//
+// The virtual method design below will be needed when we implement:
+// - Custom block behaviors (events: onPlace, onBreak, onTick)
+// - Per-block custom meshes
+// - Scripted block types
+//
 class BlockType {
 public:
     virtual ~BlockType() = default;
@@ -326,6 +353,13 @@ struct TextRenderConfig {
 // - Blocks with different displacements (including zero vs non-zero) always render all faces
 // - This produces correct hollow-shell meshing for aligned displaced blocks
 //   while preventing visual artifacts from misaligned blocks
+//
+// **Implementation Status:** NOT YET IMPLEMENTED
+// This struct is designed but not yet integrated into SubChunk storage or MeshBuilder.
+// When implemented:
+// - SubChunk will have sparse storage: std::unordered_map<uint16_t, BlockDisplacement>
+// - MeshBuilder::canElideFaceWithNeighbor() will check displacement matching
+// - Block wrapper class will provide getDisplacement()/setDisplacement()
 struct BlockDisplacement {
     float dx = 0.0f;  // X-axis displacement [-1.0, 1.0]
     float dy = 0.0f;  // Y-axis displacement [-1.0, 1.0]

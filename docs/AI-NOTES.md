@@ -198,7 +198,7 @@ items[0]                # Array indexing (brackets - future)
 **Last completed:**
 - Phase 0: All data structures implemented and tested
 - Phase 1: World, SubChunkManager, LRUCache, BatchBuilder implemented and tested
-- Added BlockDisplacement for off-grid block placement
+- Added BlockDisplacement for off-grid block placement (documented, not yet implemented)
 - Documented mesh update pipeline (4 stages)
 - Phase 2 (complete):
   - DataContainer with interned keys and CBOR serialization
@@ -213,16 +213,28 @@ items[0]                # Array indexing (brackets - future)
   - LZ4 compression for region files (configurable via ConfigManager)
   - IOManager/SubChunkManager integration (bindIOManager, requestLoad, processSaveQueue)
   - Round-trip integration tests
-  - 341 tests passing
-- Phase 3 (in progress):
+- Phase 3 (complete):
   - Vec3 floating-point vector for physics
   - AABB with intersection, containment, swept collision
   - CollisionShape with 24-rotation precomputation
   - Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
   - RaycastMode and RaycastResult types
-  - 390 tests passing
+  - Raycasting through world (DDA algorithm)
+  - PhysicsSystem with gravity, step-climbing, ground detection
+- Phase 4 (complete):
+  - ChunkVertex, MeshData, MeshBuilder with simple face culling
+  - Ambient occlusion (per-vertex, "0fps" algorithm)
+  - SubChunkView for GPU mesh storage (uses finevk::RawMesh)
+  - WorldRenderer with view-relative coordinates
+  - Frustum culling using finevk::AABB
+  - BlockAtlas for texture management
+  - Basic vertex/fragment shaders
+  - Debug camera offset mode for visualizing culling
+  - Large world support with double-precision camera position
+  - View-relative frustum culling with double-precision AABB
+  - Tested at 1,000,000 block coordinates - smooth rendering confirmed
 
-**Next task:** Phase 3.3 (Raycasting) and 3.4 (Entity Physics)
+**Next task:** Phase 5 (Mesh Optimization) or documentation updates
 **Blockers:** None
 
 ---

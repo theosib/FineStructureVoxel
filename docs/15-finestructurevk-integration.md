@@ -25,6 +25,11 @@
 
 ## 15.2 Pipeline Setup
 
+> **Note:** This is conceptual pseudocode showing the intended usage pattern.
+> Actual FineVK API calls may differ slightly - see FineStructureVK headers.
+> The current WorldRenderer uses `SimpleRenderer`, `UniformBuffer<CameraUniform>`,
+> and direct descriptor set management rather than the `Material` abstraction.
+
 ```cpp
 void WorldRenderer::createPipelines(finevk::LogicalDevice& device, finevk::RenderTarget& target) {
     // Global uniform buffer (view-proj, lighting, time)

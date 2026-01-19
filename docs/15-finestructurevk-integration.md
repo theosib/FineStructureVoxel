@@ -25,93 +25,114 @@
 
 ## 15.2 Pipeline Setup
 
-> **Note:** This is conceptual pseudocode showing the intended usage pattern.
-> Actual FineVK API calls may differ slightly - see FineStructureVK headers.
-> The current WorldRenderer uses `SimpleRenderer`, `UniformBuffer<CameraUniform>`,
+> **Note:** The current WorldRenderer uses `SimpleRenderer`, `UniformBuffer<CameraUniform>`,
 > and direct descriptor set management rather than the `Material` abstraction.
+> See `src/world_renderer.cpp` for the actual implementation.
 
+### FineVK API Patterns
+
+**Material (manages uniform buffers and textures):**
 ```cpp
-void WorldRenderer::createPipelines(finevk::LogicalDevice& device, finevk::RenderTarget& target) {
-    // Global uniform buffer (view-proj, lighting, time)
-    globalUBO_ = finevk::Buffer::createUniform<GlobalUBO>(device, framesInFlight_);
+// Material creates and manages its own uniform buffers
+auto material = finevk::Material::create(device, framesInFlight)
+    .uniform<MVPUniform>(0, VK_SHADER_STAGE_VERTEX_BIT)  // Creates internal UBO
+    .texture(1, VK_SHADER_STAGE_FRAGMENT_BIT)            // Declares texture binding
+    .build();
 
-    // Texture atlas
-    textureAtlas_ = TextureAtlas::create(device);
-    loadBlockTextures();
-    textureAtlas_->finalize();
+// Update per frame
+material->setTexture(1, texture, sampler);
+material->update<MVPUniform>(0, uniformData);
+```
 
-    // Material for blocks
-    blockMaterial_ = finevk::Material::create(device, framesInFlight_)
-        .uniformBuffer(0, globalUBO_)
-        .sampledImage(1, textureAtlas_->getTexture())
-        .build();
+**GraphicsPipeline Builder:**
+```cpp
+// Path-based shader loading (builder owns shader modules)
+auto pipeline = finevk::GraphicsPipeline::create(device, renderPass, pipelineLayout)
+    .vertexShader("shaders/chunk.vert.spv")
+    .fragmentShader("shaders/chunk.frag.spv")
+    .vertexInput<ChunkVertex>()  // Requires static getBindingDescription/getAttributeDescriptions
+    .enableDepth()
+    .cullBack()                   // Convenience for cullMode(VK_CULL_MODE_BACK_BIT)
+    .dynamicViewportAndScissor()
+    .build();
 
-    // Pipeline for opaque blocks
-    opaquePipeline_ = finevk::GraphicsPipeline::create(device, target, blockMaterial_->layout())
-        .vertexShader("shaders/block_vertex.spv")
-        .fragmentShader("shaders/block_fragment.spv")
-        .vertexInput<ChunkVertex>()
-        .enableDepth()
-        .cullBack()
-        .pushConstants<ChunkPushConstants>()
-        .build();
+// Or explicit vertex binding (as used in current WorldRenderer):
+auto& builder = finevk::GraphicsPipeline::create(device, renderPass, pipelineLayout)
+    .vertexShader(vertexShaderModule)
+    .fragmentShader(fragmentShaderModule)
+    .vertexBinding(0, sizeof(ChunkVertex), VK_VERTEX_INPUT_RATE_VERTEX);
 
-    // Pipeline for translucent blocks
-    translucentPipeline_ = finevk::GraphicsPipeline::create(device, target, blockMaterial_->layout())
-        .vertexShader("shaders/block_vertex.spv")
-        .fragmentShader("shaders/block_fragment_translucent.spv")
-        .vertexInput<ChunkVertex>()
-        .enableDepth(true, false)  // Depth test yes, depth write no
-        .alphaBlending()
-        .cullNone()
-        .pushConstants<ChunkPushConstants>()
-        .build();
+for (const auto& attr : attributes) {
+    builder.vertexAttribute(attr.location, attr.binding, attr.format, attr.offset);
 }
+
+auto pipeline = builder.enableDepth().cullBack().build();
+```
+
+**Camera with Double-Precision (for large world coordinates):**
+```cpp
+finevk::Camera camera;
+camera.setPerspective(70.0f, aspect, 0.1f, 500.0f);
+
+// Double-precision position for large worlds (avoids jitter at >10000 blocks)
+camera.moveTo(glm::dvec3(1000000.0, 64.0, 1000000.0));
+camera.setOrientation(forward, up);
+camera.updateState();
+
+// Use view-relative matrix for rendering (camera at origin)
+const auto& state = camera.state();
+glm::mat4 viewRelative = state.viewRelative;  // Rotation only, camera at origin
+glm::dvec3 cameraPos = camera.positionD();    // Double-precision position
+
+// Per-chunk: compute view-relative offset with doubles, convert to float for GPU
+glm::vec3 chunkOffset = glm::vec3(chunkWorldPosD - cameraPos);
 ```
 
 ---
 
 ## 15.3 Frame Rendering
 
+The actual WorldRenderer implementation uses view-relative rendering to avoid float precision issues at large world coordinates:
+
 ```cpp
-void WorldRenderer::render(finevk::CommandBuffer& cmd, const Camera& camera, World& world) {
-    // Update view center
-    viewCenter_ = BlockPos::fromVector(camera.position());
+// Per-frame update
+void WorldRenderer::updateCamera(const finevk::CameraState& state, const glm::dvec3& highPrecisionPos) {
+    // Store high-precision position for view-relative calculations
+    highPrecisionCameraPos_ = highPrecisionPos;
 
-    // Update global UBO
-    GlobalUBO ubo{};
-    ubo.viewProj = camera.viewProjection();
-    ubo.viewCenter = glm::vec3(viewCenter_.x, viewCenter_.y, viewCenter_.z);
-    ubo.lightDir = glm::normalize(glm::vec3(0.5f, 1.0f, 0.3f));
-    ubo.lightColor = glm::vec3(1.0f);
-    ubo.ambientColor = glm::vec3(0.3f);
-    ubo.time = getTime();
-    globalUBO_->upload(&ubo, sizeof(ubo));
+    // Use FineVK's view-relative matrix (camera at origin, rotation only)
+    finevk::CameraUniform uniform{};
+    uniform.view = state.viewRelative;
+    uniform.projection = state.projection;
+    uniform.viewProjection = state.projection * state.viewRelative;
+    uniform.position = glm::vec3(highPrecisionPos);  // For lighting
 
-    // Bind material
-    blockMaterial_->bind(cmd);
+    cameraUniform_->update(currentFrame, uniform);
+}
 
-    // Render opaque chunks
-    opaquePipeline_->bind(cmd);
-    for (auto& [pos, chunk] : world.loadedChunks()) {
-        if (auto* view = chunk->getView()) {
-            if (view->isInFrustum(camera.frustum(), viewCenter_)) {
-                ChunkPushConstants pc{};
-                pc.chunkOffset = toViewRelative(chunk->cornerBlockPos());
-                cmd.pushConstants(opaquePipeline_->layout(), pc);
-                view->renderOpaque(cmd);
-            }
-        }
-    }
+// Per-chunk rendering
+void WorldRenderer::render(finevk::CommandBuffer& cmd) {
+    pipeline_->bind(cmd.handle());
 
-    // Render translucent (back to front)
-    translucentPipeline_->bind(cmd);
-    auto sortedTranslucent = collectAndSortTranslucent(camera.position());
-    for (auto& [distance, view, meshIndex] : sortedTranslucent) {
-        view->renderTranslucent(cmd, meshIndex);
+    for (auto& [pos, view] : views_) {
+        // Frustum culling using double-precision AABB
+        if (!isInFrustum(pos)) continue;
+
+        // Calculate view-relative offset with double precision
+        glm::dvec3 chunkWorldPosD(pos.x * 16.0, pos.y * 16.0, pos.z * 16.0);
+        glm::vec3 offset = glm::vec3(chunkWorldPosD - highPrecisionCameraPos_);
+
+        // Push per-chunk offset
+        ChunkPushConstants pc{ .chunkOffset = offset };
+        pipelineLayout_->pushConstants(cmd.handle(), VK_SHADER_STAGE_VERTEX_BIT, pc);
+
+        view->bind(cmd);
+        view->draw(cmd);
     }
 }
 ```
+
+See `src/world_renderer.cpp` for the complete implementation.
 
 ---
 

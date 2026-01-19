@@ -296,7 +296,7 @@ private:
     World& world_;
 
     // Camera state
-    finevk::CameraState cameraState_;       // Used for culling (actual camera)
+    finevk::CameraState cameraState_;       // Includes viewRelativeFrustumPlanes for culling
     glm::dvec3 highPrecisionCameraPos_{0.0};  // Double-precision camera position
     glm::vec3 renderCameraPos_{0.0f};       // Used for rendering (may be offset, float for GPU)
     glm::vec3 cameraChunkPos_{0.0f};        // Cull camera in chunk coordinates

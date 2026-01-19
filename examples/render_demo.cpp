@@ -32,12 +32,9 @@
 
 using namespace finevox;
 
-// Simple first-person camera controller with double-precision position
-// for large world coordinate support
-class CameraController {
-public:
-    // Use double precision for position to avoid jitter at large coordinates
-    glm::dvec3 position{0.0, 32.0, 0.0};
+// Simple first-person camera input handler
+// Uses FineVK's Camera with double-precision position support
+struct CameraInput {
     float yaw = 0.0f;
     float pitch = 0.0f;
     float moveSpeed = 10.0f;
@@ -50,7 +47,23 @@ public:
     bool moveUp = false;
     bool moveDown = false;
 
-    void update(float dt) {
+    void look(float dx, float dy) {
+        yaw -= dx * lookSensitivity;
+        pitch -= dy * lookSensitivity;
+        pitch = glm::clamp(pitch, -1.5f, 1.5f);
+    }
+
+    // Get forward vector from yaw/pitch
+    glm::vec3 forwardVec() const {
+        return glm::vec3{
+            std::cos(pitch) * std::sin(yaw),
+            std::sin(pitch),
+            std::cos(pitch) * std::cos(yaw)
+        };
+    }
+
+    // Apply movement to camera using double-precision
+    void applyMovement(finevk::Camera& camera, float dt) {
         glm::dvec3 forward{
             std::cos(pitch) * std::sin(yaw),
             std::sin(pitch),
@@ -69,33 +82,9 @@ public:
         if (glm::length(velocity) > 0.0) {
             velocity = glm::normalize(velocity) * static_cast<double>(moveSpeed);
         }
-        position += velocity * static_cast<double>(dt);
-    }
 
-    void look(float dx, float dy) {
-        yaw -= dx * lookSensitivity;
-        pitch -= dy * lookSensitivity;
-        pitch = glm::clamp(pitch, -1.5f, 1.5f);
-    }
-
-    // Get forward vector (float precision is fine for direction)
-    glm::vec3 forwardVec() const {
-        return glm::vec3{
-            std::cos(pitch) * std::sin(yaw),
-            std::sin(pitch),
-            std::cos(pitch) * std::cos(yaw)
-        };
-    }
-
-    // Get position as float (for APIs that need it)
-    glm::vec3 positionFloat() const {
-        return glm::vec3(position);
-    }
-
-    glm::mat4 viewMatrix() const {
-        glm::vec3 fwd = forwardVec();
-        glm::vec3 pos = positionFloat();
-        return glm::lookAt(pos, pos + fwd, glm::vec3(0, 1, 0));
+        // Use FineVK's double-precision move
+        camera.move(velocity * static_cast<double>(dt));
     }
 };
 
@@ -276,27 +265,27 @@ int main(int argc, char* argv[]) {
         // Mark all chunks as dirty to generate initial meshes
         worldRenderer.markAllDirty();
 
-        // Camera setup
-        CameraController camera;  // Just used for tracking key states now
-        finevk::Camera vkCamera;
-        vkCamera.setPerspective(70.0f, float(window->width()) / float(window->height()), 0.1f, 500.0f);
+        // Camera setup - use FineVK's Camera with double-precision support
+        CameraInput input;
+        finevk::Camera camera;
+        camera.setPerspective(70.0f, float(window->width()) / float(window->height()), 0.1f, 500.0f);
 
         if (singleBlockMode) {
             // Position camera to look at the single block at origin
             // Block is at (0,0,0) to (1,1,1), center is (0.5, 0.5, 0.5)
-            camera.position = glm::dvec3(3.0, 2.0, 3.0);
+            camera.moveTo(glm::dvec3(3.0, 2.0, 3.0));
             // Look at block center
-            glm::dvec3 toBlock = glm::dvec3(0.5, 0.5, 0.5) - camera.position;
-            camera.yaw = std::atan2(toBlock.x, toBlock.z);
-            camera.pitch = std::atan2(toBlock.y, glm::length(glm::dvec2(toBlock.x, toBlock.z)));
+            glm::dvec3 toBlock = glm::dvec3(0.5, 0.5, 0.5) - camera.positionD();
+            input.yaw = std::atan2(toBlock.x, toBlock.z);
+            input.pitch = std::atan2(toBlock.y, glm::length(glm::dvec2(toBlock.x, toBlock.z)));
             std::cout << "Single block mode: camera at (3,2,3) looking at block\n";
         } else if (startAtLargeCoords) {
             // Start at large coordinates to test precision
-            camera.position = glm::dvec3(1000000.0, 32.0, 1000000.0);
+            camera.moveTo(glm::dvec3(1000000.0, 32.0, 1000000.0));
             std::cout << "Starting at large coordinates for precision testing\n";
         } else {
             // Start above the test world
-            camera.position = glm::dvec3(0.0, 32.0, 0.0);
+            camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
         }
 
         // Input state
@@ -318,20 +307,20 @@ int main(int argc, char* argv[]) {
 
             // Movement - only when mouse is captured
             if (cursorCaptured) {
-                if (key == GLFW_KEY_W) camera.moveForward = pressed;
-                if (key == GLFW_KEY_S) camera.moveBack = pressed;
-                if (key == GLFW_KEY_A) camera.moveLeft = pressed;
-                if (key == GLFW_KEY_D) camera.moveRight = pressed;
-                if (key == GLFW_KEY_SPACE) camera.moveUp = pressed;
-                if (key == GLFW_KEY_LEFT_SHIFT) camera.moveDown = pressed;
+                if (key == GLFW_KEY_W) input.moveForward = pressed;
+                if (key == GLFW_KEY_S) input.moveBack = pressed;
+                if (key == GLFW_KEY_A) input.moveLeft = pressed;
+                if (key == GLFW_KEY_D) input.moveRight = pressed;
+                if (key == GLFW_KEY_SPACE) input.moveUp = pressed;
+                if (key == GLFW_KEY_LEFT_SHIFT) input.moveDown = pressed;
             } else {
                 // Clear movement when not captured
-                camera.moveForward = false;
-                camera.moveBack = false;
-                camera.moveLeft = false;
-                camera.moveRight = false;
-                camera.moveUp = false;
-                camera.moveDown = false;
+                input.moveForward = false;
+                input.moveBack = false;
+                input.moveLeft = false;
+                input.moveRight = false;
+                input.moveUp = false;
+                input.moveDown = false;
             }
 
             // Debug controls
@@ -343,13 +332,13 @@ int main(int argc, char* argv[]) {
 
             if (key == GLFW_KEY_F2 && action == finevk::Action::Press) {
                 // Teleport to large coordinates
-                camera.position = glm::dvec3(1000000.0, 32.0, 1000000.0);
+                camera.moveTo(glm::dvec3(1000000.0, 32.0, 1000000.0));
                 std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
             }
 
             if (key == GLFW_KEY_F3 && action == finevk::Action::Press) {
                 // Teleport back to origin
-                camera.position = glm::dvec3(0.0, 32.0, 0.0);
+                camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
                 std::cout << "Teleported to origin\n";
             }
 
@@ -380,12 +369,12 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        // Mouse move callback - use our double-precision CameraController
+        // Mouse move callback
         window->onMouseMove([&](double x, double y) {
             if (cursorCaptured) {
                 float dx = static_cast<float>(x - lastMouseX);
                 float dy = static_cast<float>(y - lastMouseY);
-                camera.look(dx, dy);
+                input.look(dx, dy);
             }
             lastMouseX = x;
             lastMouseY = y;
@@ -394,7 +383,7 @@ int main(int argc, char* argv[]) {
         // Resize callback
         window->onResize([&](uint32_t width, uint32_t height) {
             if (width > 0 && height > 0) {
-                vkCamera.setPerspective(70.0f, float(width) / float(height), 0.1f, 500.0f);
+                camera.setPerspective(70.0f, float(width) / float(height), 0.1f, 500.0f);
             }
         });
 
@@ -437,17 +426,13 @@ int main(int argc, char* argv[]) {
                 fpsTimer = 0.0f;
             }
 
-            // Update camera position using double-precision controller
-            camera.update(dt);
+            // Update camera position using input handler with double-precision
+            input.applyMovement(camera, dt);
+            camera.setOrientation(input.forwardVec(), glm::vec3(0, 1, 0));
+            camera.updateState();
 
-            // Sync vkCamera orientation with our controller (for view matrix extraction)
-            // Position doesn't matter since we use view-relative rendering
-            vkCamera.moveTo(glm::vec3(0.0f));  // Keep at origin for matrix purposes
-            vkCamera.setOrientation(camera.forwardVec(), glm::vec3(0, 1, 0));
-            vkCamera.updateState();
-
-            // Update world renderer with high-precision position
-            worldRenderer.updateCamera(vkCamera.state(), camera.position);
+            // Update world renderer - camera.positionD() provides high-precision position
+            worldRenderer.updateCamera(camera.state(), camera.positionD());
             worldRenderer.updateMeshes(16);  // Max 16 mesh updates per frame
 
             // Render

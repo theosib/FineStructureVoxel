@@ -98,12 +98,14 @@ void WorldRenderer::createPipeline() {
     auto binding = getChunkVertexBindingDescription();
     auto attributes = getChunkVertexAttributeDescriptions();
 
-    // Create graphics pipeline
+    // Create graphics pipeline using FineVK's builder pattern
+    // Builder is move-only, so we move it into a local variable
     auto builder = finevk::GraphicsPipeline::create(
-        device_, renderer_->renderPass(), pipelineLayout_.get())
-        .vertexShader(vertexShader_.get())
-        .fragmentShader(fragmentShader_.get())
-        .vertexBinding(binding.binding, binding.stride, binding.inputRate);
+        device_, renderer_->renderPass(), pipelineLayout_.get());
+
+    builder.vertexShader(vertexShader_.get())
+           .fragmentShader(fragmentShader_.get())
+           .vertexBinding(binding.binding, binding.stride, binding.inputRate);
 
     for (const auto& attr : attributes) {
         builder.vertexAttribute(attr.location, attr.binding, attr.format, attr.offset);
@@ -111,7 +113,7 @@ void WorldRenderer::createPipeline() {
 
     pipeline_ = builder
         .enableDepth()
-        .cullMode(VK_CULL_MODE_BACK_BIT)
+        .cullBack()  // Use FineVK's convenience method
         .frontFace(VK_FRONT_FACE_CLOCKWISE)  // Mesh uses CCW, but Vulkan Y-flip reverses apparent winding
         .samples(renderer_->msaaSamples())
         .dynamicViewportAndScissor()
@@ -133,19 +135,15 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
     // Cache cull camera position in chunk coordinates (double precision for accuracy)
     cameraChunkPos_ = glm::vec3(highPrecisionPos / 16.0);
 
-    // Extract camera basis vectors from view matrix
-    // View matrix columns are: right, up, -forward (in camera space)
-    // The transpose of the upper-left 3x3 gives us world-space basis
+    // Extract camera basis vectors from view matrix for debug offset
     glm::vec3 right = glm::vec3(cameraState_.view[0][0], cameraState_.view[1][0], cameraState_.view[2][0]);
     glm::vec3 up = glm::vec3(cameraState_.view[0][1], cameraState_.view[1][1], cameraState_.view[2][1]);
     glm::vec3 forward = -glm::vec3(cameraState_.view[0][2], cameraState_.view[1][2], cameraState_.view[2][2]);
 
     // Calculate render camera position (may be offset for debug visualization)
-    // Use double precision for the offset calculation
     glm::dvec3 renderCameraPosD = highPrecisionPos;
     if (config_.debugCameraOffset) {
         // Apply offset in camera's local space
-        // debugOffset.z > 0 means "backward" (opposite to forward)
         renderCameraPosD += glm::dvec3(right) * static_cast<double>(config_.debugOffset.x)
                          + glm::dvec3(up) * static_cast<double>(config_.debugOffset.y)
                          + glm::dvec3(forward) * static_cast<double>(config_.debugOffset.z);
@@ -154,16 +152,15 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
     // Store float version for GPU (view-relative rendering means this is only used for lighting)
     renderCameraPos_ = glm::vec3(renderCameraPosD);
 
-    // Create view-relative view matrix (camera at origin, rotation only)
+    // Use FineVK's view-relative view matrix (camera at origin, rotation only)
     // This is the key to avoiding precision loss at large coordinates!
-    // Instead of lookAt(cameraPos, target, up), we use lookAt(origin, forward, up)
-    glm::mat4 viewRelativeView = glm::lookAt(glm::vec3(0.0f), forward, up);
+    // FineVK also pre-computes viewRelativeFrustumPlanes for us in CameraState
 
     // Update uniform buffer with view-relative matrices
     finevk::CameraUniform uniform{};
-    uniform.view = viewRelativeView;
+    uniform.view = cameraState_.viewRelative;
     uniform.projection = cameraState_.projection;
-    uniform.viewProjection = cameraState_.projection * viewRelativeView;
+    uniform.viewProjection = cameraState_.projection * cameraState_.viewRelative;
     uniform.position = renderCameraPos_;  // Pass position for lighting/effects
 
     cameraUniform_->update(renderer_->currentFrame(), uniform);
@@ -339,9 +336,8 @@ bool WorldRenderer::isInFrustum(ChunkPos pos) const {
 
     finevk::AABB aabb = finevk::AABB::fromMinMax(minViewRel, maxViewRel);
 
-    // The frustum planes need to be in view-relative space too
-    // Since our view matrix is centered at origin, frustumPlanes should already be correct
-    return aabb.intersectsFrustum(cameraState_.frustumPlanes);
+    // Use FineVK's pre-computed view-relative frustum planes
+    return aabb.intersectsFrustum(cameraState_.viewRelativeFrustumPlanes);
 }
 
 glm::vec3 WorldRenderer::calculateViewRelativeOffset(ChunkPos pos) const {

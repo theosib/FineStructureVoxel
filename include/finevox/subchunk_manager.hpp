@@ -3,7 +3,7 @@
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/lru_cache.hpp"
-#include "finevox/coalescing_queue.hpp"
+#include "finevox/blocking_queue.hpp"
 #include <memory>
 #include <shared_mutex>
 #include <chrono>
@@ -145,7 +145,7 @@ private:
     std::unordered_map<uint64_t, std::unique_ptr<ManagedColumn>> active_;
 
     // Save queue - dirty columns with refs == 0
-    CoalescingQueue<uint64_t> saveQueue_;
+    BlockingQueue<uint64_t> saveQueue_;
 
     // Currently being saved - CRITICAL: don't load from disk while here!
     std::unordered_set<uint64_t> currentlySaving_;

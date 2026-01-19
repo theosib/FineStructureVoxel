@@ -19,7 +19,24 @@ BlockTypeId SubChunk::getBlock(int32_t index) const {
 }
 
 void SubChunk::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-    setBlock(toIndex(x, y, z), type);
+    LocalIndex oldIndex = blocks_[toIndex(x, y, z)];
+    BlockTypeId oldType = palette_.getGlobalId(oldIndex);
+
+    // No change needed
+    if (oldType == type) {
+        return;
+    }
+
+    // Perform the actual block change
+    setBlockInternal(toIndex(x, y, z), type, oldType);
+
+    // Increment block version (signals mesh needs rebuild)
+    blockVersion_.fetch_add(1, std::memory_order_release);
+
+    // Notify callback if set
+    if (blockChangeCallback_) {
+        blockChangeCallback_(position_, x, y, z, oldType, type);
+    }
 }
 
 void SubChunk::setBlock(int32_t index, BlockTypeId type) {
@@ -30,6 +47,24 @@ void SubChunk::setBlock(int32_t index, BlockTypeId type) {
     if (oldType == type) {
         return;
     }
+
+    // Perform the actual block change
+    setBlockInternal(index, type, oldType);
+
+    // Increment block version (signals mesh needs rebuild)
+    blockVersion_.fetch_add(1, std::memory_order_release);
+
+    // Notify callback if set (convert index to coordinates)
+    if (blockChangeCallback_) {
+        int32_t x = index % SIZE;
+        int32_t z = (index / SIZE) % SIZE;
+        int32_t y = index / (SIZE * SIZE);
+        blockChangeCallback_(position_, x, y, z, oldType, type);
+    }
+}
+
+void SubChunk::setBlockInternal(int32_t index, BlockTypeId type, BlockTypeId oldType) {
+    LocalIndex oldIndex = blocks_[index];
 
     // Get or create local index for new type
     LocalIndex newIndex = palette_.addType(type);
@@ -75,11 +110,18 @@ void SubChunk::incrementUsage(LocalIndex index) {
 }
 
 void SubChunk::clear() {
+    bool wasNotEmpty = nonAirCount_ > 0;
+
     blocks_.fill(0);
     palette_.clear();
     usageCounts_.clear();
     usageCounts_.push_back(VOLUME);  // Air has all blocks
     nonAirCount_ = 0;
+
+    // Increment block version if there was any content
+    if (wasNotEmpty) {
+        blockVersion_.fetch_add(1, std::memory_order_release);
+    }
 }
 
 void SubChunk::fill(BlockTypeId type) {
@@ -111,6 +153,9 @@ void SubChunk::fill(BlockTypeId type) {
     usageCounts_[1] = VOLUME;
 
     nonAirCount_ = VOLUME;
+
+    // Increment block version
+    blockVersion_.fetch_add(1, std::memory_order_release);
 }
 
 std::vector<SubChunk::LocalIndex> SubChunk::compactPalette() {

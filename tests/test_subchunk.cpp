@@ -306,3 +306,110 @@ TEST(SubChunkTest, ReplaceOneTypeWithAnother) {
     EXPECT_FALSE(chunk.palette().contains(stone));  // Stone removed
     EXPECT_TRUE(chunk.palette().contains(dirt));    // Dirt added
 }
+
+// ============================================================================
+// Block Version Tracking tests
+// ============================================================================
+
+TEST(SubChunkTest, BlockVersionOnBlockChange) {
+    SubChunk chunk;
+    auto stone = BlockTypeId::fromName("meshtest:stone");
+
+    // Initial version is 1
+    uint64_t initialVersion = chunk.blockVersion();
+    EXPECT_EQ(initialVersion, 1u);
+
+    // Setting a block increments version
+    chunk.setBlock(0, 0, 0, stone);
+    EXPECT_GT(chunk.blockVersion(), initialVersion);
+
+    uint64_t afterFirstSet = chunk.blockVersion();
+
+    // Setting same block type again doesn't increment version (no actual change)
+    chunk.setBlock(0, 0, 0, stone);
+    EXPECT_EQ(chunk.blockVersion(), afterFirstSet);
+
+    // But changing to different type does increment
+    auto dirt = BlockTypeId::fromName("meshtest:dirt");
+    chunk.setBlock(0, 0, 0, dirt);
+    EXPECT_GT(chunk.blockVersion(), afterFirstSet);
+}
+
+TEST(SubChunkTest, BlockVersionOnClear) {
+    SubChunk chunk;
+    auto stone = BlockTypeId::fromName("meshtest2:stone");
+
+    // Fill with stone
+    chunk.fill(stone);
+    uint64_t afterFill = chunk.blockVersion();
+
+    // Clear increments version
+    chunk.clear();
+    EXPECT_GT(chunk.blockVersion(), afterFill);
+
+    uint64_t afterClear = chunk.blockVersion();
+
+    // Clearing an already empty chunk doesn't increment version
+    chunk.clear();
+    EXPECT_EQ(chunk.blockVersion(), afterClear);
+}
+
+TEST(SubChunkTest, BlockVersionOnFill) {
+    SubChunk chunk;
+    auto stone = BlockTypeId::fromName("meshtest3:stone");
+
+    // Initial version
+    uint64_t initialVersion = chunk.blockVersion();
+
+    // Fill increments version
+    chunk.fill(stone);
+    EXPECT_GT(chunk.blockVersion(), initialVersion);
+}
+
+TEST(SubChunkTest, BlockChangeCallback) {
+    SubChunk chunk;
+    chunk.setPosition(ChunkPos{1, 2, 3});
+
+    auto stone = BlockTypeId::fromName("callbacktest:stone");
+
+    // Track callback invocations
+    int callbackCount = 0;
+    ChunkPos lastPos;
+    int lastX = 0, lastY = 0, lastZ = 0;
+    BlockTypeId lastOldType, lastNewType;
+
+    chunk.setBlockChangeCallback([&](ChunkPos pos, int32_t x, int32_t y, int32_t z,
+                                     BlockTypeId oldType, BlockTypeId newType) {
+        ++callbackCount;
+        lastPos = pos;
+        lastX = x;
+        lastY = y;
+        lastZ = z;
+        lastOldType = oldType;
+        lastNewType = newType;
+    });
+
+    // Set a block
+    chunk.setBlock(5, 7, 9, stone);
+
+    // Callback should have been called
+    EXPECT_EQ(callbackCount, 1);
+    EXPECT_EQ(lastPos.x, 1);
+    EXPECT_EQ(lastPos.y, 2);
+    EXPECT_EQ(lastPos.z, 3);
+    EXPECT_EQ(lastX, 5);
+    EXPECT_EQ(lastY, 7);
+    EXPECT_EQ(lastZ, 9);
+    EXPECT_TRUE(lastOldType.isAir());
+    EXPECT_EQ(lastNewType, stone);
+
+    // Setting same block doesn't trigger callback
+    chunk.setBlock(5, 7, 9, stone);
+    EXPECT_EQ(callbackCount, 1);
+
+    // Clear callback
+    chunk.clearBlockChangeCallback();
+    auto dirt = BlockTypeId::fromName("callbacktest:dirt");
+    chunk.setBlock(5, 7, 9, dirt);
+    EXPECT_EQ(callbackCount, 1);  // Not incremented
+}

@@ -6,10 +6,8 @@ World::World() = default;
 World::~World() = default;
 
 ColumnPos World::blockToColumn(BlockPos pos) {
-    // Floor division for negative coordinates
-    int32_t cx = pos.x >= 0 ? pos.x / 16 : (pos.x - 15) / 16;
-    int32_t cz = pos.z >= 0 ? pos.z / 16 : (pos.z - 15) / 16;
-    return ColumnPos(cx, cz);
+    // Arithmetic right shift gives floor division for signed integers
+    return ColumnPos(pos.x >> 4, pos.z >> 4);
 }
 
 BlockTypeId World::getBlock(BlockPos pos) const {
@@ -163,6 +161,50 @@ std::vector<ChunkPos> World::getAllSubChunkPositions() const {
 void World::clear() {
     std::unique_lock lock(columnMutex_);
     columns_.clear();
+}
+
+// ============================================================================
+// Mesh Utilities
+// ============================================================================
+
+std::vector<ChunkPos> World::getAffectedSubChunks(BlockPos blockPos) const {
+    std::vector<ChunkPos> affected;
+    affected.reserve(4);  // At most 1 + 3 adjacent (corner case)
+
+    // Calculate the containing subchunk position
+    ChunkPos containingChunk = ChunkPos::fromBlock(blockPos);
+    affected.push_back(containingChunk);
+
+    // Calculate local coordinates within the subchunk (0-15)
+    // Bitwise AND with 15 extracts lowest 4 bits, giving correct result for
+    // both positive and negative coordinates (two's complement)
+    int32_t localX = blockPos.x & 15;
+    int32_t localY = blockPos.y & 15;
+    int32_t localZ = blockPos.z & 15;
+
+    // Check if block is at any boundary and add adjacent subchunks
+    // A block at x=0 affects the chunk at x-1 (its +X face)
+    // A block at x=15 affects the chunk at x+1 (its -X face)
+
+    if (localX == 0) {
+        affected.push_back(ChunkPos(containingChunk.x - 1, containingChunk.y, containingChunk.z));
+    } else if (localX == 15) {
+        affected.push_back(ChunkPos(containingChunk.x + 1, containingChunk.y, containingChunk.z));
+    }
+
+    if (localY == 0) {
+        affected.push_back(ChunkPos(containingChunk.x, containingChunk.y - 1, containingChunk.z));
+    } else if (localY == 15) {
+        affected.push_back(ChunkPos(containingChunk.x, containingChunk.y + 1, containingChunk.z));
+    }
+
+    if (localZ == 0) {
+        affected.push_back(ChunkPos(containingChunk.x, containingChunk.y, containingChunk.z - 1));
+    } else if (localZ == 15) {
+        affected.push_back(ChunkPos(containingChunk.x, containingChunk.y, containingChunk.z + 1));
+    }
+
+    return affected;
 }
 
 }  // namespace finevox

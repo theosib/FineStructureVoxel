@@ -3,7 +3,7 @@
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/region_file.hpp"
-#include "finevox/coalescing_queue.hpp"
+#include "finevox/blocking_queue.hpp"
 #include <memory>
 #include <thread>
 #include <atomic>

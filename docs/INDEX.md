@@ -49,6 +49,7 @@
 | [08 - Physics and Collision](08-physics.md) | AABB, CollisionShape, collision vs hit box, step-climbing, RaycastMode, entity persistence |
 | [10 - Input and Player Control](10-input.md) | InputManager, PlayerController |
 | [19 - Block Models](19-block-models.md) | Hierarchical model format, render/collision/hit shapes, model inheritance |
+| [20 - Large World Coordinates](20-large-world-coordinates.md) | View-relative rendering, double-precision camera, precision at large distances |
 
 ### Persistence & Scripting
 
@@ -92,7 +93,7 @@
 | Loading Unit | Full-height columns, subchunk granularity for lifecycle | [05](05-world-management.md) |
 | Serialization | CBOR (RFC 8949) | [11](11-persistence.md) |
 | Chunk Lifecycle | Active → SaveQueue → Saving → UnloadQueue → Evicted, LRU cache | [05](05-world-management.md) §5.4 |
-| Rendering | View-relative coordinates | [06](06-rendering.md) |
+| Rendering | View-relative coordinates | [06](06-rendering.md), [20](20-large-world-coordinates.md) |
 | Mesh Generation | Greedy meshing, priority by distance/visibility | [06](06-rendering.md), [18](18-open-questions.md) |
 | Collision vs Hit Box | Separate shapes for physics vs interaction | [08](08-physics.md) §8.3 |
 | Block Models | Hierarchical model files, data-driven collision/hit shapes | [19](19-block-models.md) |
@@ -105,6 +106,7 @@
 
 | Topic | Location |
 |-------|----------|
+| Large world coordinates | [20](20-large-world-coordinates.md) |
 | Block storage bit-width | [04](04-core-data-structures.md) §4.4 SubChunkPalette |
 | Pointer usage strategy | [04](04-core-data-structures.md) §4.1 |
 | Lifecycle state machine | [05](05-world-management.md) §5.4 |
@@ -152,4 +154,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-01-18*
+*Last Updated: 2026-01-19*

@@ -14,6 +14,11 @@ class MeshTest : public ::testing::Test {
 protected:
     MeshBuilder builder;
 
+    void SetUp() override {
+        // Disable greedy meshing by default for tests that expect specific vertex counts
+        builder.setGreedyMeshing(false);
+    }
+
     // Simple texture provider that returns unit UVs
     BlockTextureProvider simpleTextureProvider = [](BlockTypeId, Face) {
         return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
@@ -581,4 +586,258 @@ TEST_F(MeshTest, CheckerboardPattern) {
     // With checkerboard, every block has all 6 faces visible
     // 2048 blocks * 6 faces * 4 vertices = 49152 vertices
     EXPECT_EQ(mesh.vertexCount(), 2048 * 6 * 4);
+}
+
+// ============================================================================
+// Greedy Meshing tests
+// ============================================================================
+
+class GreedyMeshTest : public ::testing::Test {
+protected:
+    MeshBuilder builder;
+
+    void SetUp() override {
+        // Enable greedy meshing for these tests
+        builder.setGreedyMeshing(true);
+    }
+
+    // Simple texture provider that returns unit UVs
+    BlockTextureProvider simpleTextureProvider = [](BlockTypeId, Face) {
+        return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    };
+
+    // Opaque provider that always returns false (nothing is opaque = all faces visible)
+    BlockOpaqueProvider nothingOpaque = [](const BlockPos&) {
+        return false;
+    };
+};
+
+TEST_F(GreedyMeshTest, SingleBlockSameAsSimple) {
+    // A single block should produce the same result with or without greedy meshing
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    subChunk.setBlock(5, 5, 5, stone);
+
+    ChunkPos pos{0, 0, 0};
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+
+    // Single block = 6 faces, 4 vertices each = 24 vertices
+    EXPECT_EQ(mesh.vertexCount(), 24);
+    EXPECT_EQ(mesh.indexCount(), 36);  // 6 faces * 6 indices
+}
+
+TEST_F(GreedyMeshTest, FullSubchunkReducesToSixFaces) {
+    // A completely solid 16x16x16 subchunk should reduce to just 6 large quads
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+
+    for (int y = 0; y < 16; ++y) {
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                subChunk.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    // Opaque provider that considers blocks inside the subchunk as opaque
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;  // Outside subchunk = not opaque (outer faces visible)
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // With greedy meshing, only 6 faces should be generated (one per side)
+    // 6 faces * 4 vertices = 24 vertices
+    EXPECT_EQ(mesh.vertexCount(), 24);
+    EXPECT_EQ(mesh.indexCount(), 36);
+}
+
+TEST_F(GreedyMeshTest, TwoBlockTypesDontMerge) {
+    // Adjacent blocks of different types should not be merged
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("minecraft:dirt");
+
+    // Fill bottom half with stone, top half with dirt
+    for (int y = 0; y < 8; ++y) {
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                subChunk.setBlock(x, y, z, stone);
+            }
+        }
+    }
+    for (int y = 8; y < 16; ++y) {
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                subChunk.setBlock(x, y, z, dirt);
+            }
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // Expected faces:
+    // - Bottom: 1 large quad (stone)
+    // - Top: 1 large quad (dirt)
+    // - 4 sides: each split into 2 quads (stone bottom, dirt top)
+    // Total: 2 + 4*2 = 10 quads = 40 vertices
+    EXPECT_EQ(mesh.vertexCount(), 40);
+    EXPECT_EQ(mesh.indexCount(), 60);
+}
+
+TEST_F(GreedyMeshTest, ReducesVertexCount) {
+    // Verify that greedy meshing produces fewer vertices than simple meshing
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+
+    // Create a 4x4x4 solid cube
+    for (int y = 0; y < 4; ++y) {
+        for (int z = 0; z < 4; ++z) {
+            for (int x = 0; x < 4; ++x) {
+                subChunk.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    // Greedy mesh
+    MeshData greedyMesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // Simple mesh
+    builder.setGreedyMeshing(false);
+    MeshData simpleMesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // Simple mesh: 6 sides * 4*4 faces = 96 faces * 4 verts = 384 vertices
+    EXPECT_EQ(simpleMesh.vertexCount(), 384);
+
+    // Greedy mesh: 6 faces (one large quad per side) = 24 vertices
+    EXPECT_EQ(greedyMesh.vertexCount(), 24);
+
+    // Greedy should use significantly fewer vertices
+    EXPECT_LT(greedyMesh.vertexCount(), simpleMesh.vertexCount());
+}
+
+TEST_F(GreedyMeshTest, ValidTriangles) {
+    // Verify that greedy meshing produces valid triangles
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+
+    // Create a 4x4x4 solid cube
+    for (int y = 0; y < 4; ++y) {
+        for (int z = 0; z < 4; ++z) {
+            for (int x = 0; x < 4; ++x) {
+                subChunk.setBlock(x, y, z, stone);
+            }
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // All indices should be valid
+    for (size_t i = 0; i < mesh.indices.size(); ++i) {
+        EXPECT_LT(mesh.indices[i], mesh.vertices.size())
+            << "Invalid index at position " << i;
+    }
+
+    // Number of indices should be divisible by 3 (triangles)
+    EXPECT_EQ(mesh.indices.size() % 3, 0);
+
+    // Each triangle should have non-zero area (vertices not all the same)
+    for (size_t i = 0; i < mesh.indices.size(); i += 3) {
+        const auto& v0 = mesh.vertices[mesh.indices[i]].position;
+        const auto& v1 = mesh.vertices[mesh.indices[i + 1]].position;
+        const auto& v2 = mesh.vertices[mesh.indices[i + 2]].position;
+
+        // At least one pair of vertices should differ
+        bool hasArea = (v0 != v1) || (v1 != v2) || (v0 != v2);
+        EXPECT_TRUE(hasArea) << "Degenerate triangle at index " << i;
+    }
+}
+
+TEST_F(GreedyMeshTest, TextureTiling) {
+    // Verify that texture coordinates tile correctly for merged faces
+    SubChunk subChunk;
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+
+    // Create a 4x1x1 horizontal row of blocks (exposed from all sides)
+    for (int x = 0; x < 4; ++x) {
+        subChunk.setBlock(x, 8, 8, stone);
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+
+    // Find the top face (+Y) - it should have tiled UVs across 4 blocks
+    bool foundTiledFace = false;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        // Check if this is a top face (all vertices have same Y, normal pointing up)
+        const auto& v0 = mesh.vertices[i];
+        if (v0.normal == glm::vec3(0.0f, 1.0f, 0.0f)) {
+            // This is a top face - check UV span
+            float maxU = 0.0f;
+            for (size_t j = 0; j < 4; ++j) {
+                maxU = std::max(maxU, mesh.vertices[i + j].texCoord.x);
+            }
+            // If this face spans 4 blocks, max U should be 4.0 (tiled)
+            if (maxU >= 3.9f) {
+                foundTiledFace = true;
+                break;
+            }
+        }
+    }
+
+    EXPECT_TRUE(foundTiledFace) << "Expected to find a face with tiled UVs spanning 4 blocks";
 }

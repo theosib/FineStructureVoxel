@@ -127,12 +127,17 @@ public:
     void setCalculateAO(bool enabled) { calculateAO_ = enabled; }
     [[nodiscard]] bool calculateAO() const { return calculateAO_; }
 
+    // Enable/disable greedy meshing (merges coplanar faces)
+    void setGreedyMeshing(bool enabled) { greedyMeshing_ = enabled; }
+    [[nodiscard]] bool greedyMeshing() const { return greedyMeshing_; }
+
     // DEBUG: Disable hidden face removal (renders all faces)
     void setDisableFaceCulling(bool disabled) { disableFaceCulling_ = disabled; }
     [[nodiscard]] bool disableFaceCulling() const { return disableFaceCulling_; }
 
 private:
     bool calculateAO_ = true;
+    bool greedyMeshing_ = true;  // Enabled by default
     bool disableFaceCulling_ = false;
 
     // Add a single face to the mesh data
@@ -163,6 +168,65 @@ private:
         std::array<glm::vec2, 4> uvOffsets;  // Relative UV offsets (0 or 1)
     };
     static const std::array<FaceData, 6> FACE_DATA;
+
+    // ========================================================================
+    // Greedy Meshing
+    // ========================================================================
+
+    // Data for a visible face in the greedy mesh mask
+    struct FaceMaskEntry {
+        BlockTypeId blockType = AIR_BLOCK_TYPE;  // Block type (AIR means no visible face)
+        glm::vec4 uvBounds{0.0f};                // Texture UVs
+        std::array<float, 4> aoValues{1.0f, 1.0f, 1.0f, 1.0f};  // AO per corner
+
+        bool operator==(const FaceMaskEntry& other) const {
+            // For greedy meshing, faces can merge if they have same block type and AO
+            // UVs will be tiled, so we don't check them
+            return blockType == other.blockType &&
+                   aoValues == other.aoValues;
+        }
+
+        bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }
+    };
+
+    // Build mesh using greedy meshing algorithm
+    void buildGreedyMesh(
+        MeshData& mesh,
+        const SubChunk& subChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& opaqueProvider,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // Build mesh using simple per-face algorithm (non-greedy)
+    void buildSimpleMesh(
+        MeshData& mesh,
+        const SubChunk& subChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& opaqueProvider,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // Process one face direction for greedy meshing
+    void greedyMeshFace(
+        MeshData& mesh,
+        Face face,
+        const SubChunk& subChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& opaqueProvider,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // Add a greedy-merged quad (larger than 1x1)
+    void addGreedyQuad(
+        MeshData& mesh,
+        Face face,
+        int sliceCoord,           // Position along face normal axis
+        int startU, int startV,   // Start position in face tangent space
+        int width, int height,    // Size of merged region
+        const FaceMaskEntry& entry,
+        const BlockTextureProvider& textureProvider
+    );
 };
 
 // ============================================================================

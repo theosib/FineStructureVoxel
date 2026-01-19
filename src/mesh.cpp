@@ -132,9 +132,27 @@ MeshData MeshBuilder::buildSubChunkMesh(
 
     // Reserve approximate space (assume ~1/6 of faces are visible on average)
     // Each visible face = 4 vertices + 6 indices
+    // With greedy meshing, we'll use fewer vertices, but this is a safe upper bound
     size_t estimatedFaces = subChunk.nonAirCount();
     mesh.reserve(estimatedFaces * 4, estimatedFaces * 6);
 
+    // Use greedy meshing if enabled, otherwise simple per-face meshing
+    if (greedyMeshing_) {
+        buildGreedyMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
+    } else {
+        buildSimpleMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
+    }
+
+    return mesh;
+}
+
+void MeshBuilder::buildSimpleMesh(
+    MeshData& mesh,
+    const SubChunk& subChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& opaqueProvider,
+    const BlockTextureProvider& textureProvider
+) {
     // Convert chunk position to world block coordinates (corner of subchunk)
     BlockPos subChunkWorldOrigin(
         chunkPos.x * SubChunk::SIZE,
@@ -197,8 +215,297 @@ MeshData MeshBuilder::buildSubChunkMesh(
             }
         }
     }
+}
 
-    return mesh;
+void MeshBuilder::buildGreedyMesh(
+    MeshData& mesh,
+    const SubChunk& subChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& opaqueProvider,
+    const BlockTextureProvider& textureProvider
+) {
+    // Process each face direction separately
+    for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
+        Face face = static_cast<Face>(faceIdx);
+        greedyMeshFace(mesh, face, subChunk, chunkPos, opaqueProvider, textureProvider);
+    }
+}
+
+void MeshBuilder::greedyMeshFace(
+    MeshData& mesh,
+    Face face,
+    const SubChunk& subChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& opaqueProvider,
+    const BlockTextureProvider& textureProvider
+) {
+    constexpr int SIZE = SubChunk::SIZE;
+
+    // Determine which axis is normal to this face, and which are tangent
+    // For each face direction:
+    //   normalAxis: the axis perpendicular to the face (0=X, 1=Y, 2=Z)
+    //   uAxis, vAxis: the two axes parallel to the face
+    int normalAxis, uAxis, vAxis;
+
+    switch (face) {
+        case Face::NegX: normalAxis = 0; uAxis = 2; vAxis = 1; break;
+        case Face::PosX: normalAxis = 0; uAxis = 2; vAxis = 1; break;
+        case Face::NegY: normalAxis = 1; uAxis = 0; vAxis = 2; break;
+        case Face::PosY: normalAxis = 1; uAxis = 0; vAxis = 2; break;
+        case Face::NegZ: normalAxis = 2; uAxis = 0; vAxis = 1; break;
+        case Face::PosZ: normalAxis = 2; uAxis = 0; vAxis = 1; break;
+        default: return;
+    }
+
+    // World origin of this subchunk
+    BlockPos subChunkWorldOrigin(
+        chunkPos.x * SIZE,
+        chunkPos.y * SIZE,
+        chunkPos.z * SIZE
+    );
+
+    // 2D mask array for this face direction
+    // Each entry contains the block type and AO for a potentially visible face
+    std::array<FaceMaskEntry, SIZE * SIZE> mask;
+
+    // Process each slice perpendicular to the normal axis
+    for (int slice = 0; slice < SIZE; ++slice) {
+        // Clear the mask
+        mask.fill(FaceMaskEntry{});
+
+        // Build the mask for this slice
+        for (int v = 0; v < SIZE; ++v) {
+            for (int u = 0; u < SIZE; ++u) {
+                // Convert (slice, u, v) to (x, y, z) based on face direction
+                int coords[3];
+                coords[normalAxis] = slice;
+                coords[uAxis] = u;
+                coords[vAxis] = v;
+
+                int x = coords[0];
+                int y = coords[1];
+                int z = coords[2];
+
+                BlockTypeId blockType = subChunk.getBlock(x, y, z);
+
+                // Skip air blocks
+                if (blockType == AIR_BLOCK_TYPE) {
+                    continue;
+                }
+
+                // World position of this block
+                BlockPos blockWorldPos(
+                    subChunkWorldOrigin.x + x,
+                    subChunkWorldOrigin.y + y,
+                    subChunkWorldOrigin.z + z
+                );
+
+                // Check if neighbor (in face direction) is opaque
+                BlockPos neighborPos = blockWorldPos.neighbor(face);
+                if (!disableFaceCulling_ && opaqueProvider(neighborPos)) {
+                    continue;  // Face is hidden
+                }
+
+                // This face is visible - add to mask
+                int maskIdx = v * SIZE + u;
+                mask[maskIdx].blockType = blockType;
+                mask[maskIdx].uvBounds = textureProvider(blockType, face);
+
+                if (calculateAO_) {
+                    mask[maskIdx].aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
+                }
+            }
+        }
+
+        // Greedy merge the mask into quads
+        // We use a simple row-by-row greedy algorithm
+        std::array<bool, SIZE * SIZE> used;
+        used.fill(false);
+
+        for (int v = 0; v < SIZE; ++v) {
+            for (int u = 0; u < SIZE; ++u) {
+                int startIdx = v * SIZE + u;
+
+                // Skip if already used or empty
+                if (used[startIdx] || mask[startIdx].isEmpty()) {
+                    continue;
+                }
+
+                const FaceMaskEntry& entry = mask[startIdx];
+
+                // Find width: extend in U direction while faces match
+                int width = 1;
+                while (u + width < SIZE) {
+                    int checkIdx = v * SIZE + (u + width);
+                    if (used[checkIdx] || mask[checkIdx] != entry) {
+                        break;
+                    }
+                    ++width;
+                }
+
+                // Find height: extend in V direction while entire row matches
+                int height = 1;
+                bool canExtend = true;
+                while (canExtend && v + height < SIZE) {
+                    for (int du = 0; du < width; ++du) {
+                        int checkIdx = (v + height) * SIZE + (u + du);
+                        if (used[checkIdx] || mask[checkIdx] != entry) {
+                            canExtend = false;
+                            break;
+                        }
+                    }
+                    if (canExtend) {
+                        ++height;
+                    }
+                }
+
+                // Mark all cells in this quad as used
+                for (int dv = 0; dv < height; ++dv) {
+                    for (int du = 0; du < width; ++du) {
+                        used[(v + dv) * SIZE + (u + du)] = true;
+                    }
+                }
+
+                // Add the merged quad
+                addGreedyQuad(mesh, face, slice, u, v, width, height, entry, textureProvider);
+            }
+        }
+    }
+}
+
+void MeshBuilder::addGreedyQuad(
+    MeshData& mesh,
+    Face face,
+    int sliceCoord,
+    int startU, int startV,
+    int width, int height,
+    const FaceMaskEntry& entry,
+    [[maybe_unused]] const BlockTextureProvider& textureProvider
+) {
+    // Determine axis mapping (same as in greedyMeshFace)
+    int normalAxis, uAxis, vAxis;
+    bool positiveNormal;
+
+    switch (face) {
+        case Face::NegX: normalAxis = 0; uAxis = 2; vAxis = 1; positiveNormal = false; break;
+        case Face::PosX: normalAxis = 0; uAxis = 2; vAxis = 1; positiveNormal = true;  break;
+        case Face::NegY: normalAxis = 1; uAxis = 0; vAxis = 2; positiveNormal = false; break;
+        case Face::PosY: normalAxis = 1; uAxis = 0; vAxis = 2; positiveNormal = true;  break;
+        case Face::NegZ: normalAxis = 2; uAxis = 0; vAxis = 1; positiveNormal = false; break;
+        case Face::PosZ: normalAxis = 2; uAxis = 0; vAxis = 1; positiveNormal = true;  break;
+        default: return;
+    }
+
+    // Calculate the 4 corners of the quad in local (subchunk) coordinates
+    // The face is at sliceCoord along the normal axis
+    // For positive-facing faces, the face is at sliceCoord + 1 (far side of block)
+    float normalCoord = positiveNormal ? static_cast<float>(sliceCoord + 1) : static_cast<float>(sliceCoord);
+
+    // Build corner positions
+    glm::vec3 corners[4];
+    float coords[3];
+
+    // Corner order for CCW winding (matching FACE_DATA):
+    // 0: (startU, startV)
+    // 1: (startU + width, startV)
+    // 2: (startU + width, startV + height)
+    // 3: (startU, startV + height)
+
+    // Adjust corner order based on face direction to maintain correct winding
+    int uCoords[4], vCoords[4];
+
+    // The winding needs to match what addFace produces
+    // We need to be careful here - the FACE_DATA has specific corner ordering
+    // For simplicity, we'll generate corners in a consistent order and rely on
+    // the index ordering to produce correct winding
+
+    switch (face) {
+        case Face::NegX:
+            // Looking at -X face from outside (from -X direction)
+            // U=Z, V=Y, normal at X=sliceCoord
+            uCoords[0] = startU + width; uCoords[1] = startU;            uCoords[2] = startU;            uCoords[3] = startU + width;
+            vCoords[0] = startV;         vCoords[1] = startV;            vCoords[2] = startV + height;   vCoords[3] = startV + height;
+            break;
+        case Face::PosX:
+            // Looking at +X face from outside (from +X direction)
+            uCoords[0] = startU;         uCoords[1] = startU + width;    uCoords[2] = startU + width;    uCoords[3] = startU;
+            vCoords[0] = startV;         vCoords[1] = startV;            vCoords[2] = startV + height;   vCoords[3] = startV + height;
+            break;
+        case Face::NegY:
+            // Looking at -Y face from outside (from below)
+            uCoords[0] = startU;         uCoords[1] = startU + width;    uCoords[2] = startU + width;    uCoords[3] = startU;
+            vCoords[0] = startV + height; vCoords[1] = startV + height;  vCoords[2] = startV;            vCoords[3] = startV;
+            break;
+        case Face::PosY:
+            // Looking at +Y face from outside (from above)
+            uCoords[0] = startU;         uCoords[1] = startU + width;    uCoords[2] = startU + width;    uCoords[3] = startU;
+            vCoords[0] = startV;         vCoords[1] = startV;            vCoords[2] = startV + height;   vCoords[3] = startV + height;
+            break;
+        case Face::NegZ:
+            // Looking at -Z face from outside (from -Z direction)
+            uCoords[0] = startU;         uCoords[1] = startU + width;    uCoords[2] = startU + width;    uCoords[3] = startU;
+            vCoords[0] = startV;         vCoords[1] = startV;            vCoords[2] = startV + height;   vCoords[3] = startV + height;
+            break;
+        case Face::PosZ:
+            // Looking at +Z face from outside (from +Z direction)
+            uCoords[0] = startU + width; uCoords[1] = startU;            uCoords[2] = startU;            uCoords[3] = startU + width;
+            vCoords[0] = startV;         vCoords[1] = startV;            vCoords[2] = startV + height;   vCoords[3] = startV + height;
+            break;
+        default:
+            return;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        coords[normalAxis] = normalCoord;
+        coords[uAxis] = static_cast<float>(uCoords[i]);
+        coords[vAxis] = static_cast<float>(vCoords[i]);
+        corners[i] = glm::vec3(coords[0], coords[1], coords[2]);
+    }
+
+    // Get face normal
+    const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
+    glm::vec3 normal = faceData.normal;
+
+    // Calculate UV coordinates - tile the texture across the merged quad
+    glm::vec4 uvBounds = entry.uvBounds;
+    float minU = uvBounds.x;
+    float minV = uvBounds.y;
+    float maxU = uvBounds.z;
+    float maxV = uvBounds.w;
+    float texWidth = maxU - minU;
+    float texHeight = maxV - minV;
+
+    // UVs tile across the merged region
+    glm::vec2 uvs[4] = {
+        {minU, minV},
+        {minU + texWidth * width, minV},
+        {minU + texWidth * width, minV + texHeight * height},
+        {minU, minV + texHeight * height}
+    };
+
+    // For greedy quads, we use uniform AO across the quad
+    // (averaging would be complex and greedy meshing typically assumes uniform lighting)
+    // Use the entry's AO values directly
+    const auto& aoValues = entry.aoValues;
+
+    // Add vertices
+    uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+    for (int i = 0; i < 4; ++i) {
+        ChunkVertex vertex;
+        vertex.position = corners[i];
+        vertex.normal = normal;
+        vertex.texCoord = uvs[i];
+        vertex.ao = aoValues[i];
+        mesh.vertices.push_back(vertex);
+    }
+
+    // Add indices (two triangles)
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 1);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 3);
 }
 
 MeshData MeshBuilder::buildSubChunkMesh(

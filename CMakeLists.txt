@@ -36,7 +36,6 @@ add_library(finevox STATIC
     src/palette.cpp
     src/subchunk.cpp
     src/chunk_column.cpp
-    src/coalescing_queue.cpp
     src/rotation.cpp
     src/world.cpp
     src/subchunk_manager.cpp
@@ -52,6 +51,7 @@ add_library(finevox STATIC
     src/block_type.cpp
     src/config_parser.cpp
     src/config_file.cpp
+    src/mesh_worker_pool.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -203,7 +203,6 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_palette.cpp
         tests/test_subchunk.cpp
         tests/test_chunk_column.cpp
-        tests/test_coalescing_queue.cpp
         tests/test_rotation.cpp
         tests/test_world.cpp
         tests/test_lru_cache.cpp
@@ -220,6 +219,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_block_type.cpp
         tests/test_config_parser.cpp
         tests/test_config_file.cpp
+        tests/test_blocking_queue.cpp
+        tests/test_mesh_worker_pool.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

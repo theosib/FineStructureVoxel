@@ -402,10 +402,10 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
         for (int idx = 0; idx < SubChunk::VOLUME; ++idx) {
             BlockTypeId type = sc->getBlock(idx);
             if (!type.isAir()) {
-                // Convert linear index to coordinates
-                int lx = idx % 16;
-                int lz = (idx / 16) % 16;
-                int ly = idx / 256;
+                // Convert linear index to coordinates (layout: y*256 + z*16 + x)
+                int lx = idx & 15;
+                int lz = (idx >> 4) & 15;
+                int ly = idx >> 8;
                 // Convert to column-local Y
                 int worldY = y * 16 + ly;
                 column->setBlock(lx, worldY, lz, type);

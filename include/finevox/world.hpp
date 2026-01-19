@@ -2,11 +2,13 @@
 
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
+#include "finevox/subchunk.hpp"
 #include <unordered_map>
 #include <memory>
 #include <shared_mutex>
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace finevox {
 
@@ -70,6 +72,15 @@ public:
 
     // Clear entire world
     void clear();
+
+    // ========================================================================
+    // Mesh Utilities
+    // ========================================================================
+
+    // Get subchunks that would be affected by a block change at the given position.
+    // Includes the containing subchunk and any adjacent subchunks
+    // affected if the block is at a boundary (useful for mesh rebuild scheduling).
+    [[nodiscard]] std::vector<ChunkPos> getAffectedSubChunks(BlockPos blockPos) const;
 
 private:
     mutable std::shared_mutex columnMutex_;

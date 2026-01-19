@@ -234,3 +234,103 @@ TEST(WorldTest, Clear) {
     EXPECT_EQ(world.columnCount(), 0);
     EXPECT_EQ(world.getBlock(0, 0, 0), AIR_BLOCK_TYPE);
 }
+
+// ============================================================================
+// Mesh Dirty Notification tests
+// ============================================================================
+
+TEST(WorldTest, GetAffectedSubChunks_InteriorBlock) {
+    World world;
+
+    // Block at (5, 5, 5) is interior to subchunk (0, 0, 0)
+    auto affected = world.getAffectedSubChunks(BlockPos(5, 5, 5));
+
+    EXPECT_EQ(affected.size(), 1);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+}
+
+TEST(WorldTest, GetAffectedSubChunks_XBoundary) {
+    World world;
+
+    // Block at x=0 affects neighboring subchunk at x-1
+    auto affected = world.getAffectedSubChunks(BlockPos(0, 5, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(-1, 0, 0));
+
+    // Block at x=15 affects neighboring subchunk at x+1
+    affected = world.getAffectedSubChunks(BlockPos(15, 5, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(1, 0, 0));
+}
+
+TEST(WorldTest, GetAffectedSubChunks_YBoundary) {
+    World world;
+
+    // Block at y=0 in subchunk (0, 0, 0) affects subchunk (0, -1, 0)
+    auto affected = world.getAffectedSubChunks(BlockPos(5, 0, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(0, -1, 0));
+
+    // Block at y=15 affects subchunk (0, 1, 0)
+    affected = world.getAffectedSubChunks(BlockPos(5, 15, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(0, 1, 0));
+}
+
+TEST(WorldTest, GetAffectedSubChunks_ZBoundary) {
+    World world;
+
+    // Block at z=0 affects neighboring subchunk at z-1
+    auto affected = world.getAffectedSubChunks(BlockPos(5, 5, 0));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(0, 0, -1));
+
+    // Block at z=15 affects neighboring subchunk at z+1
+    affected = world.getAffectedSubChunks(BlockPos(5, 5, 15));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(0, 0, 1));
+}
+
+TEST(WorldTest, GetAffectedSubChunks_Corner) {
+    World world;
+
+    // Block at corner (0, 0, 0) affects 3 neighboring subchunks
+    auto affected = world.getAffectedSubChunks(BlockPos(0, 0, 0));
+
+    EXPECT_EQ(affected.size(), 4);
+    EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(-1, 0, 0));  // -X neighbor
+    EXPECT_EQ(affected[2], ChunkPos(0, -1, 0));  // -Y neighbor
+    EXPECT_EQ(affected[3], ChunkPos(0, 0, -1));  // -Z neighbor
+}
+
+TEST(WorldTest, GetAffectedSubChunks_NegativeCoordinates) {
+    World world;
+
+    // Block at (-1, 5, 5) is at x=15 in subchunk (-1, 0, 0)
+    auto affected = world.getAffectedSubChunks(BlockPos(-1, 5, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(-1, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(0, 0, 0));  // Affects +X neighbor
+
+    // Block at (-16, 5, 5) is at x=0 in subchunk (-1, 0, 0)
+    affected = world.getAffectedSubChunks(BlockPos(-16, 5, 5));
+
+    EXPECT_EQ(affected.size(), 2);
+    EXPECT_EQ(affected[0], ChunkPos(-1, 0, 0));
+    EXPECT_EQ(affected[1], ChunkPos(-2, 0, 0));  // Affects -X neighbor
+}
+

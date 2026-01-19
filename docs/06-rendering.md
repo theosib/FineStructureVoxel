@@ -214,39 +214,35 @@ private:
 
 ## 6.5 Mesh Update Pipeline
 
-> **Implementation Note (Current State - Phase 4):**
-> The current implementation uses a simpler synchronous approach:
-> - `WorldRenderer::markDirty(pos)` adds to a dirty list
-> - `WorldRenderer::updateMeshes()` rebuilds meshes on main thread
-> - No priority queue or worker threads
->
-> The full 4-stage pipeline below is the **Phase 5** target design.
+> **Implementation Note (Phase 5 - Current):**
+> The pipeline has been simplified to a pull-based version model:
+> - SubChunks have atomic `blockVersion_` counter (incremented on changes)
+> - Render loop iterates visible chunks near-to-far, providing natural priority
+> - FIFO queue with deduplication replaces priority queue
+> - Workers write results directly; no separate GPU upload queue needed
 
-Block changes trigger a multi-stage pipeline to update GPU-renderable data:
+Block changes trigger a streamlined pipeline:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Stage 1: Block Change Detection                                         │
 │                                                                         │
-│   SubChunk.setBlock() ──► meshDirty_ = true                             │
-│                      └──► notify adjacent subchunks (boundary faces)    │
+│   SubChunk.setBlock() ──► blockVersion_.fetch_add(1)                    │
 │                                                                         │
-│   Cheap: O(1) flag set + O(1) neighbor notification                     │
+│   Cheap: O(1) atomic increment                                          │
+│   No push notifications - version comparison happens at read time       │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ Stage 2: Priority Queue                                                  │
+│ Stage 2: Render Loop Scheduling                                          │
 │                                                                         │
-│   MeshRebuildQueue (CoalescingQueue with priority)                      │
-│   - Key: ChunkPos                                                        │
-│   - Priority: f(distance to camera, in-frustum, time since dirty)       │
-│   - Coalescing: multiple changes to same subchunk = one rebuild         │
+│   for each visible subchunk (near-to-far order):                        │
+│       if (cachedVersion != subchunk.blockVersion()):                    │
+│           meshRebuildQueue.push(pos);  // Deduplicates automatically    │
 │                                                                         │
-│   Priority calculation (lower = higher priority):                       │
-│     in_frustum ? 0 : 1000                                               │
-│     + distance_to_camera * 10                                           │
-│     + time_since_dirty * -1  // older = higher priority                 │
+│   FIFO order from near-to-far iteration provides natural priority       │
+│   No explicit priority calculation needed                               │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
                                 ▼
@@ -254,83 +250,69 @@ Block changes trigger a multi-stage pipeline to update GPU-renderable data:
 │ Stage 3: Mesh Worker Thread(s)                                          │
 │                                                                         │
 │   while (running) {                                                     │
-│       ChunkPos pos = queue.popHighestPriority();                        │
+│       ChunkPos pos = queue.popWait();  // Blocking with condition_var   │
 │       SubChunk* chunk = world.getSubChunk(pos);                         │
-│       if (!chunk || !chunk->meshDirty_) continue;                       │
+│       if (!chunk) continue;                                             │
 │                                                                         │
-│       // Generate mesh data (CPU-side vertex/index arrays)              │
+│       // Generate mesh (reads block data without lock - see note below) │
 │       MeshData data = buildMesh(*chunk, world);                         │
 │                                                                         │
-│       // Queue for GPU upload                                           │
-│       gpuUploadQueue.push({pos, std::move(data)});                      │
+│       // Push result with version for staleness check                   │
+│       resultQueue.push({pos, data, chunk->blockVersion()});             │
 │   }                                                                     │
-│                                                                         │
-│   Note: Multiple worker threads can process in parallel                 │
-│   Output: CPU-side vertex/index buffers ready for GPU upload            │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ Stage 4: GPU Upload Queue (Main Thread)                                  │
+│ Stage 4: Result Processing (Main Thread)                                 │
 │                                                                         │
-│   GPUUploadQueue (FIFO, coalescing by ChunkPos)                         │
-│   - FIFO is fine: priority already handled in Stage 2                   │
-│   - Coalescing: if same chunk queued multiple times, keep latest        │
+│   while (auto result = workerPool.popResult()) {                        │
+│       if (result.version < currentVersion(result.pos)):                 │
+│           continue;  // Stale mesh, skip upload                         │
+│       uploadToGPU(result);                                              │
+│   }                                                                     │
 │                                                                         │
-│   Main thread processes N uploads per frame:                            │
-│     while (uploads_this_frame < MAX_UPLOADS && !queue.empty()) {        │
-│         auto [pos, data] = queue.pop();                                 │
-│         SubChunkView* view = getView(pos);                              │
-│         view->uploadToGPU(data);  // Buffer copy to GPU                 │
-│         ++uploads_this_frame;                                           │
-│     }                                                                   │
-│                                                                         │
-│   Throttling prevents frame stalls from too many uploads                │
+│   Staleness check prevents uploading outdated meshes                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Points
+### Concurrency and Consistency Notes
 
-**Stage 1 - Minimal overhead on block changes:**
-- Setting `meshDirty_` is O(1)
-- Adjacent subchunk notification only touches immediate neighbors (up to 6)
-- Does NOT compute mesh or touch GPU
+**Reading chunk data during mesh generation:**
 
-**Stage 2 - Priority queue with coalescing:**
-- Same subchunk changed 100 times = 1 rebuild
-- Camera-near and in-frustum chunks rebuild first
-- Stale dirty chunks eventually get processed even if distant
+Mesh workers read SubChunk data without holding locks. This is safe because:
 
-**Stage 3 - Parallel mesh generation:**
-- Pure CPU work, can use thread pool
-- Generates vertex/index arrays (not GPU buffers)
-- Could batch-generate for chunks in same column
+1. **Palette indices are stable** - New block types are appended to the palette;
+   existing indices never change meaning (as long as compaction is offline-only)
 
-**Stage 4 - GPU uploads on main thread:**
-- Vulkan buffer uploads typically require main thread (or careful synchronization)
-- Throttled per frame to avoid stalls
-- FIFO is fine since priority already sorted in Stage 2
-- Coalescing prevents redundant uploads if mesh worker is faster than GPU upload
+2. **Block type lookup is atomic** - Reading `blocks_[index]` and `palette_[paletteIdx]`
+   are both simple array lookups
 
-### Alternative: Combined Stage 3+4
+3. **Inconsistent reads are tolerable** - If a block changes mid-mesh-build:
+   - The mesh may show old or new state for that block
+   - The version check ensures a rebuild gets scheduled
+   - Visual glitches are transient (typically one frame)
 
-If mesh building and GPU data preparation can share work:
+4. **No crashes possible** - Array bounds are fixed, palette entries are valid
 
-```cpp
-// In worker thread:
-MeshData data = buildMesh(*chunk, world);
+**For blocks with extra data affecting appearance (stairs, sloped dirt, etc.):**
 
-// Prepare staging buffer (CPU-visible GPU memory) in worker thread
-StagingBuffer staging = prepareStagingBuffer(data);
+- Custom meshes stored as `std::shared_ptr` can be swapped atomically
+- Use `std::atomic<std::shared_ptr<Mesh>>` (C++20) or `atomic_store`/`atomic_load`
+- Version bump ensures rebuild when mesh-affecting data changes
 
-// Queue only the copy command for main thread
-copyQueue.push({pos, staging, targetBuffer});
+**Batch block operations:**
 
-// Main thread just issues copy commands:
-vkCmdCopyBuffer(cmd, staging.buffer, target.buffer, ...);
-```
+For bulk `setBlock` calls (e.g., structure generation), increment version once at
+the end of the batch rather than per-block. This avoids redundant mesh rebuilds.
 
-This reduces main-thread work to just issuing copy commands.
+### Key Design Benefits
+
+- **No push notifications** - Simpler code, no callback management
+- **Natural priority** - Render loop order provides near-to-far scheduling
+- **Deduplication** - Queue coalesces multiple changes to same chunk
+- **Version-based staleness** - Stale meshes detected and skipped
+- **Lock-free reads** - Workers don't block game logic
 
 ---
 

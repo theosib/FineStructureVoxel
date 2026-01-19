@@ -43,7 +43,13 @@ void BlockAtlas::createPlaceholderAtlas(
     uint32_t gridWidth,
     uint32_t gridHeight
 ) {
-    const uint32_t cellSize = 16;  // 16x16 pixels per cell
+    // Each cell has 2-pixel border on all sides for texture filtering safety
+    // Content is 12x12, border adds 4 pixels (2 on each side) = 16x16 total
+    // 2-pixel border ensures bilinear filtering (which samples 2x2) stays within cell
+    const uint32_t borderSize = 2;
+    const uint32_t contentSize = 12;  // Inner content area
+    const uint32_t cellSize = contentSize + borderSize * 2;  // 16 total
+
     atlasWidth_ = gridWidth * cellSize;
     atlasHeight_ = gridHeight * cellSize;
     gridWidth_ = gridWidth;
@@ -62,22 +68,36 @@ void BlockAtlas::createPlaceholderAtlas(
             uint8_t g = static_cast<uint8_t>(colorDist(rng));
             uint8_t b = static_cast<uint8_t>(colorDist(rng));
 
-            // Fill the cell with this color
+            // Fill the entire cell (including border) with this color
+            // The border pixels duplicate the edge pixels to prevent bleed
             for (uint32_t py = 0; py < cellSize; ++py) {
                 for (uint32_t px = 0; px < cellSize; ++px) {
                     uint32_t x = gx * cellSize + px;
                     uint32_t y = gy * cellSize + py;
                     uint32_t idx = (y * atlasWidth_ + x) * 4;
 
-                    // Add a simple border effect
-                    bool border = (px == 0 || px == cellSize - 1 ||
-                                   py == 0 || py == cellSize - 1);
+                    // Check if this pixel is on the inner edge of the content area
+                    // Content area is from borderSize to (cellSize - borderSize - 1)
+                    // Inner edge is the 1-pixel border just inside the content area
+                    bool isInnerEdge = false;
+                    if (px >= borderSize && px < cellSize - borderSize &&
+                        py >= borderSize && py < cellSize - borderSize) {
+                        // We're in the content area - check if on inner edge
+                        uint32_t contentX = px - borderSize;
+                        uint32_t contentY = py - borderSize;
+                        if (contentX == 0 || contentX == contentSize - 1 ||
+                            contentY == 0 || contentY == contentSize - 1) {
+                            isInnerEdge = true;
+                        }
+                    }
 
-                    if (border) {
-                        pixels[idx + 0] = r / 2;
-                        pixels[idx + 1] = g / 2;
-                        pixels[idx + 2] = b / 2;
+                    if (isInnerEdge) {
+                        // Dark border on inner edge
+                        pixels[idx + 0] = r / 3;
+                        pixels[idx + 1] = g / 3;
+                        pixels[idx + 2] = b / 3;
                     } else {
+                        // Normal color
                         pixels[idx + 0] = r;
                         pixels[idx + 1] = g;
                         pixels[idx + 2] = b;
@@ -99,10 +119,27 @@ void BlockAtlas::createPlaceholderAtlas(
 
 BlockFaceTexture BlockAtlas::gridToUV(uint32_t gridX, uint32_t gridY) const {
     BlockFaceTexture tex;
-    tex.uvMin.x = gridX * cellWidth_;
-    tex.uvMin.y = gridY * cellHeight_;
-    tex.uvMax.x = (gridX + 1) * cellWidth_;
-    tex.uvMax.y = (gridY + 1) * cellHeight_;
+
+    // Calculate UV coordinates that point to the inner content area,
+    // excluding the 2-pixel border used for filtering safety.
+    // Cell layout: [2px border][12px content][2px border] = 16px total
+    // UV should span the content area only.
+    const float borderPixels = 2.0f;
+
+    // Border size in UV coordinates
+    float borderU = borderPixels / static_cast<float>(atlasWidth_);
+    float borderV = borderPixels / static_cast<float>(atlasHeight_);
+
+    // Cell bounds in UV (including border)
+    float cellMinU = gridX * cellWidth_;
+    float cellMinV = gridY * cellHeight_;
+
+    // Content bounds (inset by border)
+    tex.uvMin.x = cellMinU + borderU;
+    tex.uvMin.y = cellMinV + borderV;
+    tex.uvMax.x = cellMinU + cellWidth_ - borderU;
+    tex.uvMax.y = cellMinV + cellHeight_ - borderV;
+
     return tex;
 }
 

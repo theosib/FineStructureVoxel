@@ -137,13 +137,66 @@ MeshData MeshBuilder::buildSubChunkMesh(
     mesh.reserve(estimatedFaces * 4, estimatedFaces * 6);
 
     // Use greedy meshing if enabled, otherwise simple per-face meshing
+    // No transparent provider = all blocks treated as opaque
     if (greedyMeshing_) {
-        buildGreedyMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
+        buildGreedyMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider, nullptr, false);
     } else {
-        buildSimpleMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
+        buildSimpleMesh(mesh, subChunk, chunkPos, opaqueProvider, textureProvider, nullptr, false);
     }
 
     return mesh;
+}
+
+SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
+    const SubChunk& subChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& opaqueProvider,
+    const BlockTransparentProvider& transparentProvider,
+    const BlockTextureProvider& textureProvider
+) {
+    SubChunkMeshData result;
+
+    // Early out if subchunk is empty
+    if (subChunk.isEmpty()) {
+        return result;
+    }
+
+    // Reserve approximate space
+    size_t estimatedFaces = subChunk.nonAirCount();
+    result.opaque.reserve(estimatedFaces * 4, estimatedFaces * 6);
+    result.transparent.reserve(estimatedFaces / 4, estimatedFaces / 4 * 6);  // Assume fewer transparent
+
+    // Build opaque mesh first
+    if (greedyMeshing_) {
+        buildGreedyMesh(result.opaque, subChunk, chunkPos, opaqueProvider, textureProvider,
+                        &transparentProvider, false);
+        // Build transparent mesh (no greedy merging for transparent - need sorting)
+        buildSimpleMesh(result.transparent, subChunk, chunkPos, opaqueProvider, textureProvider,
+                        &transparentProvider, true);
+    } else {
+        buildSimpleMesh(result.opaque, subChunk, chunkPos, opaqueProvider, textureProvider,
+                        &transparentProvider, false);
+        buildSimpleMesh(result.transparent, subChunk, chunkPos, opaqueProvider, textureProvider,
+                        &transparentProvider, true);
+    }
+
+    return result;
+}
+
+SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
+    const SubChunk& subChunk,
+    ChunkPos chunkPos,
+    const World& world,
+    const BlockTransparentProvider& transparentProvider,
+    const BlockTextureProvider& textureProvider
+) {
+    // Create opaque provider that checks the world
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+        BlockTypeId type = world.getBlock(pos);
+        return type != AIR_BLOCK_TYPE;
+    };
+
+    return buildSubChunkMeshSplit(subChunk, chunkPos, opaqueProvider, transparentProvider, textureProvider);
 }
 
 void MeshBuilder::buildSimpleMesh(
@@ -151,7 +204,9 @@ void MeshBuilder::buildSimpleMesh(
     const SubChunk& subChunk,
     ChunkPos chunkPos,
     const BlockOpaqueProvider& opaqueProvider,
-    const BlockTextureProvider& textureProvider
+    const BlockTextureProvider& textureProvider,
+    const BlockTransparentProvider* transparentProvider,
+    bool buildTransparent
 ) {
     // Convert chunk position to world block coordinates (corner of subchunk)
     BlockPos subChunkWorldOrigin(
@@ -169,6 +224,14 @@ void MeshBuilder::buildSimpleMesh(
                 // Skip air blocks
                 if (blockType == AIR_BLOCK_TYPE) {
                     continue;
+                }
+
+                // Filter by transparency if provider is given
+                if (transparentProvider) {
+                    bool isTransparent = (*transparentProvider)(blockType);
+                    if (isTransparent != buildTransparent) {
+                        continue;  // Skip blocks that don't match the pass type
+                    }
                 }
 
                 // World position of this block
@@ -194,6 +257,7 @@ void MeshBuilder::buildSimpleMesh(
 
                     // Check if neighbor is opaque (if so, this face is hidden)
                     // Skip this check if face culling is disabled (debug mode)
+                    // For transparent blocks, only cull against opaque neighbors
                     if (!disableFaceCulling_ && opaqueProvider(neighborPos)) {
                         continue;  // Face is hidden, don't render
                     }
@@ -222,12 +286,15 @@ void MeshBuilder::buildGreedyMesh(
     const SubChunk& subChunk,
     ChunkPos chunkPos,
     const BlockOpaqueProvider& opaqueProvider,
-    const BlockTextureProvider& textureProvider
+    const BlockTextureProvider& textureProvider,
+    const BlockTransparentProvider* transparentProvider,
+    bool buildTransparent
 ) {
     // Process each face direction separately
     for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
         Face face = static_cast<Face>(faceIdx);
-        greedyMeshFace(mesh, face, subChunk, chunkPos, opaqueProvider, textureProvider);
+        greedyMeshFace(mesh, face, subChunk, chunkPos, opaqueProvider, textureProvider,
+                       transparentProvider, buildTransparent);
     }
 }
 
@@ -237,7 +304,9 @@ void MeshBuilder::greedyMeshFace(
     const SubChunk& subChunk,
     ChunkPos chunkPos,
     const BlockOpaqueProvider& opaqueProvider,
-    const BlockTextureProvider& textureProvider
+    const BlockTextureProvider& textureProvider,
+    const BlockTransparentProvider* transparentProvider,
+    bool buildTransparent
 ) {
     constexpr int SIZE = SubChunk::SIZE;
 
@@ -291,6 +360,14 @@ void MeshBuilder::greedyMeshFace(
                 // Skip air blocks
                 if (blockType == AIR_BLOCK_TYPE) {
                     continue;
+                }
+
+                // Filter by transparency if provider is given
+                if (transparentProvider) {
+                    bool isTransparent = (*transparentProvider)(blockType);
+                    if (isTransparent != buildTransparent) {
+                        continue;  // Skip blocks that don't match the pass type
+                    }
                 }
 
                 // World position of this block
@@ -466,21 +543,27 @@ void MeshBuilder::addGreedyQuad(
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     glm::vec3 normal = faceData.normal;
 
-    // Calculate UV coordinates - tile the texture across the merged quad
-    glm::vec4 uvBounds = entry.uvBounds;
-    float minU = uvBounds.x;
-    float minV = uvBounds.y;
-    float maxU = uvBounds.z;
-    float maxV = uvBounds.w;
-    float texWidth = maxU - minU;
-    float texHeight = maxV - minV;
+    // Calculate UV coordinates for the merged quad with proper tiling support
+    // The texture coordinates extend beyond the tile bounds (0 to width/height in tile space)
+    // The shader uses fract() with tile bounds to wrap them properly within the atlas cell
+    glm::vec4 tileBounds = entry.uvBounds;
+    float minU = tileBounds.x;
+    float minV = tileBounds.y;
+    float maxU = tileBounds.z;
+    float maxV = tileBounds.w;
+    float tileWidth = maxU - minU;
+    float tileHeight = maxV - minV;
 
-    // UVs tile across the merged region
+    // UV coordinates that tile across the merged region
+    // Corner 0: (0, 0) in tile space -> minU, minV
+    // Corner 1: (width, 0) -> minU + width * tileWidth, minV
+    // Corner 2: (width, height) -> minU + width * tileWidth, minV + height * tileHeight
+    // Corner 3: (0, height) -> minU, minV + height * tileHeight
     glm::vec2 uvs[4] = {
         {minU, minV},
-        {minU + texWidth * width, minV},
-        {minU + texWidth * width, minV + texHeight * height},
-        {minU, minV + texHeight * height}
+        {minU + static_cast<float>(width) * tileWidth, minV},
+        {minU + static_cast<float>(width) * tileWidth, minV + static_cast<float>(height) * tileHeight},
+        {minU, minV + static_cast<float>(height) * tileHeight}
     };
 
     // For greedy quads, we use uniform AO across the quad
@@ -495,6 +578,7 @@ void MeshBuilder::addGreedyQuad(
         vertex.position = corners[i];
         vertex.normal = normal;
         vertex.texCoord = uvs[i];
+        vertex.tileBounds = tileBounds;  // Pass tile bounds for shader wrapping
         vertex.ao = aoValues[i];
         mesh.vertices.push_back(vertex);
     }
@@ -552,6 +636,9 @@ void MeshBuilder::addFace(
             minU + faceData.uvOffsets[i].x * (maxU - minU),
             minV + faceData.uvOffsets[i].y * (maxV - minV)
         );
+
+        // Pass tile bounds for shader-based wrapping (for single blocks, UV equals tile bounds)
+        vertex.tileBounds = uvBounds;
 
         vertex.ao = aoValues[i];
         mesh.vertices.push_back(vertex);

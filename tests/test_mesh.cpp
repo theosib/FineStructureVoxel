@@ -52,19 +52,22 @@ TEST(ChunkVertexTest, ParameterizedConstruction) {
         glm::vec3(1.0f, 2.0f, 3.0f),
         glm::vec3(0.0f, 1.0f, 0.0f),
         glm::vec2(0.5f, 0.5f),
+        glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),  // tileBounds
         0.75f
     );
 
     EXPECT_EQ(v.position, glm::vec3(1.0f, 2.0f, 3.0f));
     EXPECT_EQ(v.normal, glm::vec3(0.0f, 1.0f, 0.0f));
     EXPECT_EQ(v.texCoord, glm::vec2(0.5f, 0.5f));
+    EXPECT_EQ(v.tileBounds, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
     EXPECT_FLOAT_EQ(v.ao, 0.75f);
 }
 
 TEST(ChunkVertexTest, Equality) {
-    ChunkVertex v1(glm::vec3(1, 2, 3), glm::vec3(0, 1, 0), glm::vec2(0, 0), 1.0f);
-    ChunkVertex v2(glm::vec3(1, 2, 3), glm::vec3(0, 1, 0), glm::vec2(0, 0), 1.0f);
-    ChunkVertex v3(glm::vec3(1, 2, 3), glm::vec3(0, 1, 0), glm::vec2(0, 0), 0.5f);
+    glm::vec4 tileBounds(0.0f, 0.0f, 1.0f, 1.0f);
+    ChunkVertex v1(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec2(0.0f, 0.0f), tileBounds, 1.0f);
+    ChunkVertex v2(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec2(0.0f, 0.0f), tileBounds, 1.0f);
+    ChunkVertex v3(glm::vec3(1.0f, 2.0f, 3.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec2(0.0f, 0.0f), tileBounds, 0.5f);
 
     EXPECT_EQ(v1, v2);
     EXPECT_NE(v1, v3);
@@ -806,8 +809,9 @@ TEST_F(GreedyMeshTest, ValidTriangles) {
     }
 }
 
-TEST_F(GreedyMeshTest, TextureTiling) {
-    // Verify that texture coordinates tile correctly for merged faces
+TEST_F(GreedyMeshTest, TextureTilingWithBounds) {
+    // Verify that greedy meshing tiles textures across merged faces
+    // UVs extend beyond tile bounds, and tileBounds is set for shader-based wrapping
     SubChunk subChunk;
     BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
 
@@ -820,24 +824,209 @@ TEST_F(GreedyMeshTest, TextureTiling) {
 
     MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
 
-    // Find the top face (+Y) - it should have tiled UVs across 4 blocks
+    // Find the top face (+Y) - it should have tiled UVs (0 to 4 range for 4 blocks)
     bool foundTiledFace = false;
+    bool hasTileBounds = false;
     for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
-        // Check if this is a top face (all vertices have same Y, normal pointing up)
+        // Check if this is a top face (normal pointing up)
         const auto& v0 = mesh.vertices[i];
         if (v0.normal == glm::vec3(0.0f, 1.0f, 0.0f)) {
-            // This is a top face - check UV span
-            float maxU = 0.0f;
+            // This is a top face - check UV range
+            float minU = 1.0f, maxU = 0.0f;
             for (size_t j = 0; j < 4; ++j) {
+                minU = std::min(minU, mesh.vertices[i + j].texCoord.x);
                 maxU = std::max(maxU, mesh.vertices[i + j].texCoord.x);
             }
-            // If this face spans 4 blocks, max U should be 4.0 (tiled)
-            if (maxU >= 3.9f) {
+            // UVs should span 0 to 4 (tiled across 4-block merged region)
+            // simpleTextureProvider returns (0, 0, 1, 1)
+            // So for 4 blocks: maxU should be approximately 4.0
+            if (minU < 0.1f && maxU > 3.5f) {
                 foundTiledFace = true;
+            }
+            // Check that tileBounds is set correctly
+            if (v0.tileBounds == glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)) {
+                hasTileBounds = true;
+            }
+            if (foundTiledFace && hasTileBounds) {
                 break;
             }
         }
     }
 
-    EXPECT_TRUE(foundTiledFace) << "Expected to find a face with tiled UVs spanning 4 blocks";
+    EXPECT_TRUE(foundTiledFace) << "Expected to find a face with tiled UVs (0-4 range for 4 blocks)";
+    EXPECT_TRUE(hasTileBounds) << "Expected tileBounds to be set for shader-based wrapping";
+}
+
+// ============================================================================
+// Transparent Block tests (SubChunkMeshData split)
+// ============================================================================
+
+class TransparentMeshTest : public ::testing::Test {
+protected:
+    MeshBuilder builder;
+
+    void SetUp() override {
+        // Enable greedy meshing - transparent blocks won't be greedy-merged
+        builder.setGreedyMeshing(true);
+    }
+
+    // Simple texture provider that returns unit UVs
+    BlockTextureProvider simpleTextureProvider = [](BlockTypeId, Face) {
+        return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    };
+
+    // Opaque provider that always returns false (nothing is opaque = all faces visible)
+    BlockOpaqueProvider nothingOpaque = [](const BlockPos&) {
+        return false;
+    };
+
+    // Define some block types for testing
+    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId glass = BlockTypeId::fromName("minecraft:glass");
+    BlockTypeId water = BlockTypeId::fromName("minecraft:water");
+
+    // Transparent provider: glass and water are transparent
+    BlockTransparentProvider transparentProvider = [this](BlockTypeId type) {
+        return type == glass || type == water;
+    };
+};
+
+TEST_F(TransparentMeshTest, EmptySubchunkGeneratesEmptyMeshes) {
+    SubChunk subChunk;
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    EXPECT_TRUE(mesh.isEmpty());
+    EXPECT_TRUE(mesh.opaque.isEmpty());
+    EXPECT_TRUE(mesh.transparent.isEmpty());
+}
+
+TEST_F(TransparentMeshTest, OpaqueOnlyBlock) {
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, stone);
+
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    // Stone is opaque - should only have opaque mesh
+    EXPECT_FALSE(mesh.opaque.isEmpty());
+    EXPECT_TRUE(mesh.transparent.isEmpty());
+
+    // 6 faces * 4 vertices = 24
+    EXPECT_EQ(mesh.opaque.vertexCount(), 24);
+}
+
+TEST_F(TransparentMeshTest, TransparentOnlyBlock) {
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, glass);
+
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    // Glass is transparent - should only have transparent mesh
+    EXPECT_TRUE(mesh.opaque.isEmpty());
+    EXPECT_FALSE(mesh.transparent.isEmpty());
+
+    // 6 faces * 4 vertices = 24
+    EXPECT_EQ(mesh.transparent.vertexCount(), 24);
+}
+
+TEST_F(TransparentMeshTest, MixedBlocks) {
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, stone);
+    subChunk.setBlock(9, 8, 8, glass);
+
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    // Both meshes should have geometry
+    EXPECT_FALSE(mesh.opaque.isEmpty());
+    EXPECT_FALSE(mesh.transparent.isEmpty());
+}
+
+TEST_F(TransparentMeshTest, TransparentNotGreedyMerged) {
+    // Multiple transparent blocks should NOT be merged (for depth sorting)
+    SubChunk subChunk;
+
+    // Create a 4x4x1 flat layer of glass
+    for (int x = 0; x < 4; ++x) {
+        for (int z = 0; z < 4; ++z) {
+            subChunk.setBlock(x, 8, z, glass);
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    EXPECT_TRUE(mesh.opaque.isEmpty());
+    EXPECT_FALSE(mesh.transparent.isEmpty());
+
+    // 16 glass blocks, each with 6 faces * 4 vertices = 384 vertices
+    // (No greedy merging for transparent)
+    EXPECT_EQ(mesh.transparent.vertexCount(), 16 * 6 * 4);
+}
+
+TEST_F(TransparentMeshTest, OpaqueGreedyMerged) {
+    // Opaque blocks SHOULD be merged
+    SubChunk subChunk;
+
+    // Create a 4x4x1 flat layer of stone
+    for (int x = 0; x < 4; ++x) {
+        for (int z = 0; z < 4; ++z) {
+            subChunk.setBlock(x, 8, z, stone);
+        }
+    }
+
+    ChunkPos pos{0, 0, 0};
+
+    // Opaque provider that considers blocks in the subchunk
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, checkBlocks, transparentProvider, simpleTextureProvider);
+
+    EXPECT_FALSE(mesh.opaque.isEmpty());
+    EXPECT_TRUE(mesh.transparent.isEmpty());
+
+    // With greedy meshing, a 4x4 flat slab should have 6 quads:
+    // Top: 1 large quad
+    // Bottom: 1 large quad
+    // 4 sides: 1 quad each
+    // 6 quads * 4 vertices = 24 vertices
+    EXPECT_EQ(mesh.opaque.vertexCount(), 24);
+}
+
+TEST_F(TransparentMeshTest, TotalCounts) {
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, stone);
+    subChunk.setBlock(10, 8, 8, glass);
+
+    ChunkPos pos{0, 0, 0};
+
+    SubChunkMeshData mesh = builder.buildSubChunkMeshSplit(
+        subChunk, pos, nothingOpaque, transparentProvider, simpleTextureProvider);
+
+    // Both blocks have 6 faces * 4 vertices = 24 each
+    EXPECT_EQ(mesh.totalVertexCount(), 48);
+    EXPECT_EQ(mesh.totalIndexCount(), 72);  // 2 blocks * 36 indices
 }

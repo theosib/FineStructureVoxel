@@ -22,17 +22,20 @@ class World;
 struct ChunkVertex {
     glm::vec3 position;   // Local position within subchunk (0-16 on each axis)
     glm::vec3 normal;     // Face normal
-    glm::vec2 texCoord;   // Texture coordinates
+    glm::vec2 texCoord;   // Texture coordinates (may extend beyond 0-1 for tiling)
+    glm::vec4 tileBounds; // Texture tile bounds (minU, minV, maxU, maxV) for atlas tiling
     float ao;             // Ambient occlusion (0-1, 1 = fully lit)
 
     ChunkVertex() = default;
-    ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex, float ambientOcclusion)
-        : position(pos), normal(norm), texCoord(tex), ao(ambientOcclusion) {}
+    ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex,
+                const glm::vec4& tile, float ambientOcclusion)
+        : position(pos), normal(norm), texCoord(tex), tileBounds(tile), ao(ambientOcclusion) {}
 
     bool operator==(const ChunkVertex& other) const {
         return position == other.position &&
                normal == other.normal &&
                texCoord == other.texCoord &&
+               tileBounds == other.tileBounds &&
                ao == other.ao;
     }
 };
@@ -73,6 +76,36 @@ struct MeshData {
 };
 
 // ============================================================================
+// SubChunkMeshData - Combined opaque and transparent mesh data
+// ============================================================================
+
+struct SubChunkMeshData {
+    MeshData opaque;       // Opaque blocks (rendered first, no sorting)
+    MeshData transparent;  // Transparent blocks (rendered second, may need sorting)
+
+    [[nodiscard]] bool isEmpty() const {
+        return opaque.isEmpty() && transparent.isEmpty();
+    }
+
+    void clear() {
+        opaque.clear();
+        transparent.clear();
+    }
+
+    [[nodiscard]] size_t totalVertexCount() const {
+        return opaque.vertexCount() + transparent.vertexCount();
+    }
+
+    [[nodiscard]] size_t totalIndexCount() const {
+        return opaque.indexCount() + transparent.indexCount();
+    }
+
+    [[nodiscard]] size_t totalMemoryUsage() const {
+        return opaque.memoryUsage() + transparent.memoryUsage();
+    }
+};
+
+// ============================================================================
 // BlockFaceInfo - Information needed to generate a face
 // ============================================================================
 
@@ -91,6 +124,10 @@ struct BlockFaceInfo {
 // Returns true if the block at the given position is opaque (hides faces behind it)
 using BlockOpaqueProvider = std::function<bool(const BlockPos& pos)>;
 
+// Callback to check if a block is transparent
+// Returns true if the block at the given position is transparent (needs separate render pass)
+using BlockTransparentProvider = std::function<bool(BlockTypeId type)>;
+
 // Callback to get texture UVs for a block face
 // Returns UV coordinates (minU, minV, maxU, maxV) for the given block type and face
 using BlockTextureProvider = std::function<glm::vec4(BlockTypeId type, Face face)>;
@@ -106,7 +143,7 @@ public:
     // Build mesh for a subchunk using simple face culling
     // opaqueProvider: checks if neighboring blocks are opaque (for culling hidden faces)
     // textureProvider: gets UV coordinates for each block face
-    // Returns mesh data for the opaque pass
+    // Returns mesh data for the opaque pass only (legacy interface)
     [[nodiscard]] MeshData buildSubChunkMesh(
         const SubChunk& subChunk,
         ChunkPos chunkPos,
@@ -116,10 +153,31 @@ public:
 
     // Build mesh using World for neighbor lookups
     // This is a convenience method that creates providers from World access
+    // Returns mesh data for the opaque pass only (legacy interface)
     [[nodiscard]] MeshData buildSubChunkMesh(
         const SubChunk& subChunk,
         ChunkPos chunkPos,
         const World& world,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // Build mesh with separate opaque and transparent passes
+    // transparentProvider: checks if a block type is transparent
+    // Returns both opaque mesh (for early pass) and transparent mesh (for sorted pass)
+    [[nodiscard]] SubChunkMeshData buildSubChunkMeshSplit(
+        const SubChunk& subChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& opaqueProvider,
+        const BlockTransparentProvider& transparentProvider,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // Build mesh with separate opaque and transparent passes using World
+    [[nodiscard]] SubChunkMeshData buildSubChunkMeshSplit(
+        const SubChunk& subChunk,
+        ChunkPos chunkPos,
+        const World& world,
+        const BlockTransparentProvider& transparentProvider,
         const BlockTextureProvider& textureProvider
     );
 
@@ -195,7 +253,9 @@ private:
         const SubChunk& subChunk,
         ChunkPos chunkPos,
         const BlockOpaqueProvider& opaqueProvider,
-        const BlockTextureProvider& textureProvider
+        const BlockTextureProvider& textureProvider,
+        const BlockTransparentProvider* transparentProvider = nullptr,
+        bool buildTransparent = false  // false = opaque only, true = transparent only
     );
 
     // Build mesh using simple per-face algorithm (non-greedy)
@@ -204,7 +264,9 @@ private:
         const SubChunk& subChunk,
         ChunkPos chunkPos,
         const BlockOpaqueProvider& opaqueProvider,
-        const BlockTextureProvider& textureProvider
+        const BlockTextureProvider& textureProvider,
+        const BlockTransparentProvider* transparentProvider = nullptr,
+        bool buildTransparent = false  // false = opaque only, true = transparent only
     );
 
     // Process one face direction for greedy meshing
@@ -214,7 +276,9 @@ private:
         const SubChunk& subChunk,
         ChunkPos chunkPos,
         const BlockOpaqueProvider& opaqueProvider,
-        const BlockTextureProvider& textureProvider
+        const BlockTextureProvider& textureProvider,
+        const BlockTransparentProvider* transparentProvider,
+        bool buildTransparent
     );
 
     // Add a greedy-merged quad (larger than 1x1)

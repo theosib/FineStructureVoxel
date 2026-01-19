@@ -35,7 +35,7 @@ namespace finevox {
 
 /// Get Vulkan vertex input attribute descriptions for ChunkVertex
 [[nodiscard]] inline std::vector<VkVertexInputAttributeDescription> getChunkVertexAttributeDescriptions() {
-    std::vector<VkVertexInputAttributeDescription> attributes(4);
+    std::vector<VkVertexInputAttributeDescription> attributes(5);
 
     // Position (location 0)
     attributes[0].binding = 0;
@@ -55,11 +55,17 @@ namespace finevox {
     attributes[2].format = VK_FORMAT_R32G32_SFLOAT;
     attributes[2].offset = offsetof(ChunkVertex, texCoord);
 
-    // Ambient Occlusion (location 3)
+    // TileBounds (location 3) - for atlas texture tiling in shader
     attributes[3].binding = 0;
     attributes[3].location = 3;
-    attributes[3].format = VK_FORMAT_R32_SFLOAT;
-    attributes[3].offset = offsetof(ChunkVertex, ao);
+    attributes[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributes[3].offset = offsetof(ChunkVertex, tileBounds);
+
+    // Ambient Occlusion (location 4)
+    attributes[4].binding = 0;
+    attributes[4].location = 4;
+    attributes[4].format = VK_FORMAT_R32_SFLOAT;
+    attributes[4].offset = offsetof(ChunkVertex, ao);
 
     return attributes;
 }

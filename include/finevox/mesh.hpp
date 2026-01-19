@@ -127,8 +127,13 @@ public:
     void setCalculateAO(bool enabled) { calculateAO_ = enabled; }
     [[nodiscard]] bool calculateAO() const { return calculateAO_; }
 
+    // DEBUG: Disable hidden face removal (renders all faces)
+    void setDisableFaceCulling(bool disabled) { disableFaceCulling_ = disabled; }
+    [[nodiscard]] bool disableFaceCulling() const { return disableFaceCulling_; }
+
 private:
     bool calculateAO_ = true;
+    bool disableFaceCulling_ = false;
 
     // Add a single face to the mesh data
     void addFace(

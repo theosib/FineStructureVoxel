@@ -142,6 +142,24 @@ const SubChunk* World::getSubChunk(ChunkPos pos) const {
     return it->second->getSubChunk(pos.y);
 }
 
+std::vector<ChunkPos> World::getAllSubChunkPositions() const {
+    std::vector<ChunkPos> positions;
+
+    std::shared_lock lock(columnMutex_);
+    for (const auto& [packed, column] : columns_) {
+        ColumnPos colPos = ColumnPos::unpack(packed);
+
+        // Iterate over all existing subchunks (sparse storage)
+        column->forEachSubChunk([&](int32_t chunkY, const SubChunk& subchunk) {
+            if (!subchunk.isEmpty()) {
+                positions.push_back(ChunkPos(colPos.x, chunkY, colPos.z));
+            }
+        });
+    }
+
+    return positions;
+}
+
 void World::clear() {
     std::unique_lock lock(columnMutex_);
     columns_.clear();

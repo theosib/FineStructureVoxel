@@ -12,6 +12,7 @@ layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in float fragAO;
+layout(location = 4) in vec4 fragClipPos;  // DEBUG
 
 // Output color
 layout(location = 0) out vec4 outColor;
@@ -44,6 +45,12 @@ float getFaceShade(vec3 normal) {
     return 0.6;                             // East/West: medium-dark
 }
 
+// DEBUG: Uncomment one of these to enable debug visualization
+// #define DEBUG_WORLD_POS
+// #define DEBUG_LOCAL_POS
+// #define DEBUG_CLIP_DEPTH
+// #define DEBUG_NORMALS
+
 void main() {
     // Sample the block atlas texture
     vec4 texColor = texture(blockAtlas, fragTexCoord);
@@ -52,6 +59,45 @@ void main() {
     if (texColor.a < 0.01) {
         discard;
     }
+
+#ifdef DEBUG_WORLD_POS
+    // DEBUG: Visualize world position (modulo 32 to show patterns)
+    vec3 debugColor = fract(fragWorldPos / 32.0);
+    outColor = vec4(debugColor, 1.0);
+    return;
+#endif
+
+#ifdef DEBUG_LOCAL_POS
+    // DEBUG: Visualize local position within chunk (should be 0-16)
+    // Red if outside expected range
+    vec3 localPos = fragWorldPos - camera.cameraPos;  // Approximate local
+    bool outOfRange = any(lessThan(localPos, vec3(-256.0))) || any(greaterThan(localPos, vec3(256.0)));
+    if (outOfRange) {
+        outColor = vec4(1.0, 0.0, 0.0, 1.0);  // Red = bad!
+        return;
+    }
+    outColor = vec4(fract(localPos / 16.0), 1.0);
+    return;
+#endif
+
+#ifdef DEBUG_CLIP_DEPTH
+    // DEBUG: Visualize clip space depth
+    float depth = fragClipPos.z / fragClipPos.w;
+    outColor = vec4(vec3(depth), 1.0);
+    return;
+#endif
+
+#ifdef DEBUG_NORMALS
+    // DEBUG: Visualize normals - just show them as colors
+    // Normal (0,-1,0) maps to color (0.5, 0, 0.5) = dark purple
+    // Normal (0,1,0) maps to color (0.5, 1, 0.5) = light green
+    // Normal (1,0,0) maps to color (1, 0.5, 0.5) = salmon
+    // Normal (-1,0,0) maps to color (0, 0.5, 0.5) = teal
+    // Normal (0,0,1) maps to color (0.5, 0.5, 1) = light blue
+    // Normal (0,0,-1) maps to color (0.5, 0.5, 0) = olive
+    outColor = vec4(fragNormal * 0.5 + 0.5, 1.0);
+    return;
+#endif
 
     // Calculate lighting
     vec3 normal = normalize(fragNormal);

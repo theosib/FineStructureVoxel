@@ -44,7 +44,7 @@ struct WorldRendererConfig {
     // When enabled, culling uses the real camera position, but rendering
     // occurs from an offset position so you can see culled geometry edges.
     bool debugCameraOffset = false;
-    glm::vec3 debugOffset = glm::vec3(0.0f, 0.0f, -32.0f);  // Default: 32 blocks back
+    glm::vec3 debugOffset = glm::vec3(0.0f, 0.0f, 32.0f);  // Default: 32 blocks back (positive Z = backward in camera space)
 };
 
 // ============================================================================
@@ -157,6 +157,18 @@ public:
     void updateCamera(const finevk::CameraState& cameraState);
 
     /**
+     * @brief Update camera with high-precision position for large world support
+     *
+     * Use this overload when the camera is at large world coordinates (>10000 blocks)
+     * to avoid float32 precision jitter. The double-precision position is used for
+     * view-relative offset calculations, while the cameraState provides orientation.
+     *
+     * @param cameraState Camera state (orientation, projection, frustum)
+     * @param highPrecisionPos Camera position in double precision
+     */
+    void updateCamera(const finevk::CameraState& cameraState, const glm::dvec3& highPrecisionPos);
+
+    /**
      * @brief Update meshes for dirty subchunks
      *
      * Rebuilds meshes for subchunks that have been modified.
@@ -229,6 +241,12 @@ public:
     void setDebugOffset(const glm::vec3& offset) { config_.debugOffset = offset; }
     [[nodiscard]] glm::vec3 debugOffset() const { return config_.debugOffset; }
 
+    /**
+     * @brief Disable hidden face culling (renders all faces for debugging)
+     */
+    void setDisableFaceCulling(bool disabled) { meshBuilder_.setDisableFaceCulling(disabled); }
+    [[nodiscard]] bool disableFaceCulling() const { return meshBuilder_.disableFaceCulling(); }
+
     // ========================================================================
     // Cleanup
     // ========================================================================
@@ -279,7 +297,8 @@ private:
 
     // Camera state
     finevk::CameraState cameraState_;       // Used for culling (actual camera)
-    glm::vec3 renderCameraPos_{0.0f};       // Used for rendering (may be offset)
+    glm::dvec3 highPrecisionCameraPos_{0.0};  // Double-precision camera position
+    glm::vec3 renderCameraPos_{0.0f};       // Used for rendering (may be offset, float for GPU)
     glm::vec3 cameraChunkPos_{0.0f};        // Cull camera in chunk coordinates
 
     // Shaders

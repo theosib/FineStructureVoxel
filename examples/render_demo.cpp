@@ -32,10 +32,12 @@
 
 using namespace finevox;
 
-// Simple first-person camera controller
+// Simple first-person camera controller with double-precision position
+// for large world coordinate support
 class CameraController {
 public:
-    glm::vec3 position{0.0f, 32.0f, 0.0f};
+    // Use double precision for position to avoid jitter at large coordinates
+    glm::dvec3 position{0.0, 32.0, 0.0};
     float yaw = 0.0f;
     float pitch = 0.0f;
     float moveSpeed = 10.0f;
@@ -49,25 +51,25 @@ public:
     bool moveDown = false;
 
     void update(float dt) {
-        glm::vec3 forward{
+        glm::dvec3 forward{
             std::cos(pitch) * std::sin(yaw),
             std::sin(pitch),
             std::cos(pitch) * std::cos(yaw)
         };
-        glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+        glm::dvec3 right = glm::normalize(glm::cross(forward, glm::dvec3(0, 1, 0)));
 
-        glm::vec3 velocity{0.0f};
+        glm::dvec3 velocity{0.0};
         if (moveForward) velocity += forward;
         if (moveBack) velocity -= forward;
         if (moveRight) velocity += right;
         if (moveLeft) velocity -= right;
-        if (moveUp) velocity.y += 1.0f;
-        if (moveDown) velocity.y -= 1.0f;
+        if (moveUp) velocity.y += 1.0;
+        if (moveDown) velocity.y -= 1.0;
 
-        if (glm::length(velocity) > 0.0f) {
-            velocity = glm::normalize(velocity) * moveSpeed;
+        if (glm::length(velocity) > 0.0) {
+            velocity = glm::normalize(velocity) * static_cast<double>(moveSpeed);
         }
-        position += velocity * dt;
+        position += velocity * static_cast<double>(dt);
     }
 
     void look(float dx, float dy) {
@@ -76,17 +78,28 @@ public:
         pitch = glm::clamp(pitch, -1.5f, 1.5f);
     }
 
-    glm::mat4 viewMatrix() const {
-        glm::vec3 forward{
+    // Get forward vector (float precision is fine for direction)
+    glm::vec3 forwardVec() const {
+        return glm::vec3{
             std::cos(pitch) * std::sin(yaw),
             std::sin(pitch),
             std::cos(pitch) * std::cos(yaw)
         };
-        return glm::lookAt(position, position + forward, glm::vec3(0, 1, 0));
+    }
+
+    // Get position as float (for APIs that need it)
+    glm::vec3 positionFloat() const {
+        return glm::vec3(position);
+    }
+
+    glm::mat4 viewMatrix() const {
+        glm::vec3 fwd = forwardVec();
+        glm::vec3 pos = positionFloat();
+        return glm::lookAt(pos, pos + fwd, glm::vec3(0, 1, 0));
     }
 };
 
-void buildTestWorld(World& world) {
+void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = false) {
     // Get block type IDs (using string interner)
     auto stone = BlockTypeId::fromName("stone");
     auto dirt = BlockTypeId::fromName("dirt");
@@ -94,54 +107,77 @@ void buildTestWorld(World& world) {
     auto cobble = BlockTypeId::fromName("cobble");
 
     std::cout << "Building test world...\n";
+    std::cout << "  Block IDs: stone=" << stone.id << " dirt=" << dirt.id
+              << " grass=" << grass.id << " cobble=" << cobble.id << "\n";
 
-    // Create a flat ground plane
-    for (int x = -32; x < 32; x++) {
-        for (int z = -32; z < 32; z++) {
-            // Bedrock layer
-            world.setBlock({x, 0, z}, stone);
+    // Base offset for large coordinate testing
+    // At 1,000,000 blocks, float32 has ~0.06 block precision loss
+    // View-relative rendering should compensate for this
+    int32_t baseX = largeCoords ? 1000000 : 0;
+    int32_t baseZ = largeCoords ? 1000000 : 0;
 
-            // Dirt layers
-            for (int y = 1; y < 4; y++) {
-                world.setBlock({x, y, z}, dirt);
-            }
-
-            // Grass top
-            world.setBlock({x, 4, z}, grass);
-        }
+    if (largeCoords) {
+        std::cout << "  Large coordinates mode: base offset (" << baseX << ", " << baseZ << ")\n";
     }
 
-    // Build some structures
-    // A small house
-    for (int x = 0; x < 8; x++) {
-        for (int z = 0; z < 8; z++) {
-            for (int y = 5; y < 9; y++) {
-                // Walls only
-                if (x == 0 || x == 7 || z == 0 || z == 7) {
-                    world.setBlock({x, y, z}, cobble);
+    if (singleBlock) {
+        // Two adjacent blocks to test hidden face removal
+        world.setBlock({baseX, 0, baseZ}, stone);
+        world.setBlock({baseX + 1, 0, baseZ}, dirt);  // Adjacent block
+        std::cout << "  Single block mode: stone at (" << baseX << ",0," << baseZ << ")\n";
+    } else {
+        // Create a flat ground plane
+        for (int x = -32; x < 32; x++) {
+            for (int z = -32; z < 32; z++) {
+                // Bedrock layer
+                world.setBlock({baseX + x, 0, baseZ + z}, stone);
+
+                // Dirt layers
+                for (int y = 1; y < 4; y++) {
+                    world.setBlock({baseX + x, y, baseZ + z}, dirt);
+                }
+
+                // Grass top
+                world.setBlock({baseX + x, 4, baseZ + z}, grass);
+            }
+        }
+
+        // Build some structures
+        // A small house
+        for (int x = 0; x < 8; x++) {
+            for (int z = 0; z < 8; z++) {
+                for (int y = 5; y < 9; y++) {
+                    // Walls only
+                    if (x == 0 || x == 7 || z == 0 || z == 7) {
+                        world.setBlock({baseX + x, y, baseZ + z}, cobble);
+                    }
                 }
             }
         }
-    }
 
-    // A tall tower for frustum culling testing
-    for (int y = 5; y < 50; y++) {
-        world.setBlock({20, y, 20}, stone);
-        world.setBlock({21, y, 20}, stone);
-        world.setBlock({20, y, 21}, stone);
-        world.setBlock({21, y, 21}, stone);
-    }
+        // A tall tower for frustum culling testing
+        for (int y = 5; y < 50; y++) {
+            world.setBlock({baseX + 20, y, baseZ + 20}, stone);
+            world.setBlock({baseX + 21, y, baseZ + 20}, stone);
+            world.setBlock({baseX + 20, y, baseZ + 21}, stone);
+            world.setBlock({baseX + 21, y, baseZ + 21}, stone);
+        }
 
-    // Scattered blocks for culling verification
-    for (int i = 0; i < 20; i++) {
-        int x = (i * 7) % 60 - 30;
-        int z = (i * 11) % 60 - 30;
-        for (int y = 5; y < 10 + (i % 5); y++) {
-            world.setBlock({x, y, z}, stone);
+        // Scattered blocks for culling verification
+        for (int i = 0; i < 20; i++) {
+            int x = (i * 7) % 60 - 30;
+            int z = (i * 11) % 60 - 30;
+            for (int y = 5; y < 10 + (i % 5); y++) {
+                world.setBlock({baseX + x, y, baseZ + z}, stone);
+            }
         }
     }
 
     std::cout << "World built.\n";
+
+    // Verify a block was actually set
+    auto testBlock = world.getBlock({baseX, 0, baseZ});
+    std::cout << "  Test read: block at (" << baseX << ",0," << baseZ << ") = " << testBlock.id << "\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -150,9 +186,13 @@ int main(int argc, char* argv[]) {
 
     // Parse command line
     bool startAtLargeCoords = false;
+    bool singleBlockMode = false;
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
             startAtLargeCoords = true;
+        }
+        if (std::string(argv[i]) == "--single-block") {
+            singleBlockMode = true;
         }
     }
 
@@ -193,13 +233,26 @@ int main(int argc, char* argv[]) {
 
         // Create finevox world
         World world;
-        buildTestWorld(world);
+        buildTestWorld(world, singleBlockMode, startAtLargeCoords);
+
+        // Debug: Check world state
+        std::cout << "World columns: " << world.columnCount() << std::endl;
+        std::cout << "Total non-air blocks: " << world.totalNonAirBlocks() << std::endl;
+        auto subchunks = world.getAllSubChunkPositions();
+        std::cout << "Subchunks with data: " << subchunks.size() << std::endl;
+        for (size_t i = 0; i < std::min(subchunks.size(), size_t(5)); ++i) {
+            std::cout << "  - (" << subchunks[i].x << ", " << subchunks[i].y << ", " << subchunks[i].z << ")\n";
+        }
+        if (subchunks.size() > 5) {
+            std::cout << "  ... and " << (subchunks.size() - 5) << " more\n";
+        }
 
         // Create world renderer
         WorldRendererConfig worldConfig;
         worldConfig.viewDistance = 128.0f;
         worldConfig.debugCameraOffset = false;
         worldConfig.debugOffset = glm::vec3(0.0f, 0.0f, -32.0f);
+        worldConfig.meshCapacityMultiplier = 1.0f;  // DEBUG: No extra capacity to rule out uninitialized data
 
         WorldRenderer worldRenderer(device.get(), renderer.get(), world, worldConfig);
 
@@ -228,13 +281,22 @@ int main(int argc, char* argv[]) {
         finevk::Camera vkCamera;
         vkCamera.setPerspective(70.0f, float(window->width()) / float(window->height()), 0.1f, 500.0f);
 
-        if (startAtLargeCoords) {
+        if (singleBlockMode) {
+            // Position camera to look at the single block at origin
+            // Block is at (0,0,0) to (1,1,1), center is (0.5, 0.5, 0.5)
+            camera.position = glm::dvec3(3.0, 2.0, 3.0);
+            // Look at block center
+            glm::dvec3 toBlock = glm::dvec3(0.5, 0.5, 0.5) - camera.position;
+            camera.yaw = std::atan2(toBlock.x, toBlock.z);
+            camera.pitch = std::atan2(toBlock.y, glm::length(glm::dvec2(toBlock.x, toBlock.z)));
+            std::cout << "Single block mode: camera at (3,2,3) looking at block\n";
+        } else if (startAtLargeCoords) {
             // Start at large coordinates to test precision
-            vkCamera.moveTo(glm::vec3(1000000.0f, 32.0f, 1000000.0f));
+            camera.position = glm::dvec3(1000000.0, 32.0, 1000000.0);
             std::cout << "Starting at large coordinates for precision testing\n";
         } else {
             // Start above the test world
-            vkCamera.moveTo(glm::vec3(0.0f, 32.0f, 0.0f));
+            camera.position = glm::dvec3(0.0, 32.0, 0.0);
         }
 
         // Input state
@@ -254,13 +316,23 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Movement
-            if (key == GLFW_KEY_W) camera.moveForward = pressed;
-            if (key == GLFW_KEY_S) camera.moveBack = pressed;
-            if (key == GLFW_KEY_A) camera.moveLeft = pressed;
-            if (key == GLFW_KEY_D) camera.moveRight = pressed;
-            if (key == GLFW_KEY_SPACE) camera.moveUp = pressed;
-            if (key == GLFW_KEY_LEFT_SHIFT) camera.moveDown = pressed;
+            // Movement - only when mouse is captured
+            if (cursorCaptured) {
+                if (key == GLFW_KEY_W) camera.moveForward = pressed;
+                if (key == GLFW_KEY_S) camera.moveBack = pressed;
+                if (key == GLFW_KEY_A) camera.moveLeft = pressed;
+                if (key == GLFW_KEY_D) camera.moveRight = pressed;
+                if (key == GLFW_KEY_SPACE) camera.moveUp = pressed;
+                if (key == GLFW_KEY_LEFT_SHIFT) camera.moveDown = pressed;
+            } else {
+                // Clear movement when not captured
+                camera.moveForward = false;
+                camera.moveBack = false;
+                camera.moveLeft = false;
+                camera.moveRight = false;
+                camera.moveUp = false;
+                camera.moveDown = false;
+            }
 
             // Debug controls
             if (key == GLFW_KEY_F1 && action == finevk::Action::Press) {
@@ -271,14 +343,27 @@ int main(int argc, char* argv[]) {
 
             if (key == GLFW_KEY_F2 && action == finevk::Action::Press) {
                 // Teleport to large coordinates
-                vkCamera.moveTo(glm::vec3(1000000.0f, 32.0f, 1000000.0f));
+                camera.position = glm::dvec3(1000000.0, 32.0, 1000000.0);
                 std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
             }
 
             if (key == GLFW_KEY_F3 && action == finevk::Action::Press) {
                 // Teleport back to origin
-                vkCamera.moveTo(glm::vec3(0.0f, 32.0f, 0.0f));
+                camera.position = glm::dvec3(0.0, 32.0, 0.0);
                 std::cout << "Teleported to origin\n";
+            }
+
+            if ((key == GLFW_KEY_F4 || key == GLFW_KEY_4) && action == finevk::Action::Press) {
+                // Toggle hidden face culling (debug)
+                bool disabled = !worldRenderer.disableFaceCulling();
+                worldRenderer.setDisableFaceCulling(disabled);
+                worldRenderer.markAllDirty();  // Rebuild meshes
+                std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
+            }
+
+            if (key == GLFW_KEY_F5 && action == finevk::Action::Press) {
+                // Request screenshot on next frame
+                std::cout << "Screenshot requested (will save to screenshot.ppm)\n";
             }
         });
 
@@ -295,14 +380,12 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        // Mouse move callback
-        float lookSensitivity = 0.1f;  // Degrees per pixel
+        // Mouse move callback - use our double-precision CameraController
         window->onMouseMove([&](double x, double y) {
             if (cursorCaptured) {
                 float dx = static_cast<float>(x - lastMouseX);
                 float dy = static_cast<float>(y - lastMouseY);
-                vkCamera.rotateYaw(-dx * lookSensitivity);
-                vkCamera.rotatePitch(-dy * lookSensitivity);
+                camera.look(dx, dy);
             }
             lastMouseX = x;
             lastMouseY = y;
@@ -321,8 +404,10 @@ int main(int argc, char* argv[]) {
         std::cout << "  F1: Toggle debug camera offset\n";
         std::cout << "  F2: Teleport to large coords (1M)\n";
         std::cout << "  F3: Teleport to origin\n";
+        std::cout << "  F4: Toggle hidden face culling (debug)\n";
         std::cout << "  Click: Capture mouse\n";
-        std::cout << "  Escape: Release mouse / Exit\n\n";
+        std::cout << "  Escape: Release mouse / Exit\n";
+        std::cout << "\nUse --single-block flag for minimal test with one block\n\n";
 
         // Timing
         auto lastTime = std::chrono::high_resolution_clock::now();
@@ -352,18 +437,17 @@ int main(int argc, char* argv[]) {
                 fpsTimer = 0.0f;
             }
 
-            // Update camera - use finevk::Camera movement API
-            float moveSpeed = 10.0f * dt;
-            if (camera.moveForward) vkCamera.moveForward(moveSpeed);
-            if (camera.moveBack) vkCamera.moveForward(-moveSpeed);
-            if (camera.moveRight) vkCamera.moveRight(moveSpeed);
-            if (camera.moveLeft) vkCamera.moveRight(-moveSpeed);
-            if (camera.moveUp) vkCamera.moveUp(moveSpeed);
-            if (camera.moveDown) vkCamera.moveUp(-moveSpeed);
+            // Update camera position using double-precision controller
+            camera.update(dt);
+
+            // Sync vkCamera orientation with our controller (for view matrix extraction)
+            // Position doesn't matter since we use view-relative rendering
+            vkCamera.moveTo(glm::vec3(0.0f));  // Keep at origin for matrix purposes
+            vkCamera.setOrientation(camera.forwardVec(), glm::vec3(0, 1, 0));
             vkCamera.updateState();
 
-            // Update world renderer
-            worldRenderer.updateCamera(vkCamera.state());
+            // Update world renderer with high-precision position
+            worldRenderer.updateCamera(vkCamera.state(), camera.position);
             worldRenderer.updateMeshes(16);  // Max 16 mesh updates per frame
 
             // Render

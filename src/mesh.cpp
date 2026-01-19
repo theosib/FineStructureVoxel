@@ -11,30 +11,15 @@ namespace finevox {
 // Face data for each of the 6 faces
 // Positions are relative to block corner (0,0,0), CCW winding when looking at front
 // UV offsets map to texture coordinates
+// IMPORTANT: Array order must match Face enum: NegX=0, PosX=1, NegY=2, PosY=3, NegZ=4, PosZ=5
 const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
-    // PosX (+X face) - right side of block
+    // [0] NegX (-X face) - left side of block
     {
         .positions = {{
-            {1.0f, 0.0f, 1.0f},  // bottom-left  (looking at face from outside)
-            {1.0f, 0.0f, 0.0f},  // bottom-right
-            {1.0f, 1.0f, 0.0f},  // top-right
-            {1.0f, 1.0f, 1.0f}   // top-left
-        }},
-        .normal = {1.0f, 0.0f, 0.0f},
-        .uvOffsets = {{
-            {0.0f, 0.0f},  // bottom-left
-            {1.0f, 0.0f},  // bottom-right
-            {1.0f, 1.0f},  // top-right
-            {0.0f, 1.0f}   // top-left
-        }}
-    },
-    // NegX (-X face) - left side of block
-    {
-        .positions = {{
-            {0.0f, 0.0f, 0.0f},  // bottom-left
-            {0.0f, 0.0f, 1.0f},  // bottom-right
-            {0.0f, 1.0f, 1.0f},  // top-right
-            {0.0f, 1.0f, 0.0f}   // top-left
+            {0.0f, 0.0f, 1.0f},  // bottom-back  (v0)
+            {0.0f, 0.0f, 0.0f},  // bottom-front (v1)
+            {0.0f, 1.0f, 0.0f},  // top-front    (v2)
+            {0.0f, 1.0f, 1.0f}   // top-back     (v3)
         }},
         .normal = {-1.0f, 0.0f, 0.0f},
         .uvOffsets = {{
@@ -44,15 +29,15 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
             {0.0f, 1.0f}
         }}
     },
-    // PosY (+Y face) - top of block
+    // [1] PosX (+X face) - right side of block
     {
         .positions = {{
-            {0.0f, 1.0f, 1.0f},  // bottom-left (front-left when looking down)
-            {1.0f, 1.0f, 1.0f},  // bottom-right
-            {1.0f, 1.0f, 0.0f},  // top-right
-            {0.0f, 1.0f, 0.0f}   // top-left
+            {1.0f, 0.0f, 0.0f},  // bottom-front (v0)
+            {1.0f, 0.0f, 1.0f},  // bottom-back  (v1)
+            {1.0f, 1.0f, 1.0f},  // top-back     (v2)
+            {1.0f, 1.0f, 0.0f}   // top-front    (v3)
         }},
-        .normal = {0.0f, 1.0f, 0.0f},
+        .normal = {1.0f, 0.0f, 0.0f},
         .uvOffsets = {{
             {0.0f, 0.0f},
             {1.0f, 0.0f},
@@ -60,13 +45,13 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
             {0.0f, 1.0f}
         }}
     },
-    // NegY (-Y face) - bottom of block
+    // [2] NegY (-Y face) - bottom of block
     {
         .positions = {{
-            {0.0f, 0.0f, 0.0f},  // bottom-left
-            {1.0f, 0.0f, 0.0f},  // bottom-right
-            {1.0f, 0.0f, 1.0f},  // top-right
-            {0.0f, 0.0f, 1.0f}   // top-left
+            {0.0f, 0.0f, 1.0f},  // front-left  (v0)
+            {1.0f, 0.0f, 1.0f},  // front-right (v1)
+            {1.0f, 0.0f, 0.0f},  // back-right  (v2)
+            {0.0f, 0.0f, 0.0f}   // back-left   (v3)
         }},
         .normal = {0.0f, -1.0f, 0.0f},
         .uvOffsets = {{
@@ -76,15 +61,15 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
             {0.0f, 1.0f}
         }}
     },
-    // PosZ (+Z face) - front of block
+    // [3] PosY (+Y face) - top of block
     {
         .positions = {{
-            {0.0f, 0.0f, 1.0f},  // bottom-left
-            {1.0f, 0.0f, 1.0f},  // bottom-right
-            {1.0f, 1.0f, 1.0f},  // top-right
-            {0.0f, 1.0f, 1.0f}   // top-left
+            {0.0f, 1.0f, 0.0f},  // back-left   (v0)
+            {1.0f, 1.0f, 0.0f},  // back-right  (v1)
+            {1.0f, 1.0f, 1.0f},  // front-right (v2)
+            {0.0f, 1.0f, 1.0f}   // front-left  (v3)
         }},
-        .normal = {0.0f, 0.0f, 1.0f},
+        .normal = {0.0f, 1.0f, 0.0f},
         .uvOffsets = {{
             {0.0f, 0.0f},
             {1.0f, 0.0f},
@@ -92,15 +77,31 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
             {0.0f, 1.0f}
         }}
     },
-    // NegZ (-Z face) - back of block
+    // [4] NegZ (-Z face) - back of block
     {
         .positions = {{
-            {1.0f, 0.0f, 0.0f},  // bottom-left
-            {0.0f, 0.0f, 0.0f},  // bottom-right
-            {0.0f, 1.0f, 0.0f},  // top-right
-            {1.0f, 1.0f, 0.0f}   // top-left
+            {0.0f, 0.0f, 0.0f},  // bottom-left  (v0)
+            {1.0f, 0.0f, 0.0f},  // bottom-right (v1)
+            {1.0f, 1.0f, 0.0f},  // top-right    (v2)
+            {0.0f, 1.0f, 0.0f}   // top-left     (v3)
         }},
         .normal = {0.0f, 0.0f, -1.0f},
+        .uvOffsets = {{
+            {0.0f, 0.0f},
+            {1.0f, 0.0f},
+            {1.0f, 1.0f},
+            {0.0f, 1.0f}
+        }}
+    },
+    // [5] PosZ (+Z face) - front of block
+    {
+        .positions = {{
+            {1.0f, 0.0f, 1.0f},  // bottom-right (v0)
+            {0.0f, 0.0f, 1.0f},  // bottom-left  (v1)
+            {0.0f, 1.0f, 1.0f},  // top-left     (v2)
+            {1.0f, 1.0f, 1.0f}   // top-right    (v3)
+        }},
+        .normal = {0.0f, 0.0f, 1.0f},
         .uvOffsets = {{
             {0.0f, 0.0f},
             {1.0f, 0.0f},
@@ -174,7 +175,8 @@ MeshData MeshBuilder::buildSubChunkMesh(
                     BlockPos neighborPos = blockWorldPos.neighbor(face);
 
                     // Check if neighbor is opaque (if so, this face is hidden)
-                    if (opaqueProvider(neighborPos)) {
+                    // Skip this check if face culling is disabled (debug mode)
+                    if (!disableFaceCulling_ && opaqueProvider(neighborPos)) {
                         continue;  // Face is hidden, don't render
                     }
 
@@ -248,30 +250,15 @@ void MeshBuilder::addFace(
         mesh.vertices.push_back(vertex);
     }
 
-    // Add 6 indices for 2 triangles (CCW winding)
-    // Use the "flip diagonal" technique based on AO to avoid visual artifacts
-    // If AO at corners 0+2 < AO at corners 1+3, flip the diagonal
-    bool flipDiagonal = (aoValues[0] + aoValues[2]) < (aoValues[1] + aoValues[3]);
-
-    if (flipDiagonal) {
-        // Triangle 1: 0-1-2
-        mesh.indices.push_back(baseVertex + 0);
-        mesh.indices.push_back(baseVertex + 1);
-        mesh.indices.push_back(baseVertex + 2);
-        // Triangle 2: 0-2-3
-        mesh.indices.push_back(baseVertex + 0);
-        mesh.indices.push_back(baseVertex + 2);
-        mesh.indices.push_back(baseVertex + 3);
-    } else {
-        // Triangle 1: 0-1-3
-        mesh.indices.push_back(baseVertex + 0);
-        mesh.indices.push_back(baseVertex + 1);
-        mesh.indices.push_back(baseVertex + 3);
-        // Triangle 2: 1-2-3
-        mesh.indices.push_back(baseVertex + 1);
-        mesh.indices.push_back(baseVertex + 2);
-        mesh.indices.push_back(baseVertex + 3);
-    }
+    // Add 6 indices for 2 triangles
+    // Vertices are in order: v0, v1, v2, v3 forming a quad
+    // Standard quad triangulation: 0-1-2 and 0-2-3
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 1);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 3);
 }
 
 float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const {

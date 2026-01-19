@@ -65,6 +65,9 @@ public:
     [[nodiscard]] SubChunk* getSubChunk(ChunkPos pos);
     [[nodiscard]] const SubChunk* getSubChunk(ChunkPos pos) const;
 
+    // Get all subchunk positions that have data
+    [[nodiscard]] std::vector<ChunkPos> getAllSubChunkPositions() const;
+
     // Clear entire world
     void clear();
 

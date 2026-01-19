@@ -5,7 +5,6 @@
 #include <finevk/device/sampler.hpp>
 
 #include <algorithm>
-#include <cmath>
 
 namespace finevox {
 
@@ -113,36 +112,59 @@ void WorldRenderer::createPipeline() {
     pipeline_ = builder
         .enableDepth()
         .cullMode(VK_CULL_MODE_BACK_BIT)
-        .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .frontFace(VK_FRONT_FACE_CLOCKWISE)  // Mesh uses CCW, but Vulkan Y-flip reverses apparent winding
         .samples(renderer_->msaaSamples())
         .dynamicViewportAndScissor()
         .build();
 }
 
 void WorldRenderer::updateCamera(const finevk::CameraState& cameraState) {
+    // Delegate to high-precision version using float position
+    updateCamera(cameraState, glm::dvec3(cameraState.position));
+}
+
+void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const glm::dvec3& highPrecisionPos) {
     // Store the actual camera state for culling (uses real position and frustum)
     cameraState_ = cameraState;
 
-    // Cache cull camera position in chunk coordinates
-    cameraChunkPos_ = cameraState_.position / 16.0f;
+    // Store high-precision position for view-relative calculations
+    highPrecisionCameraPos_ = highPrecisionPos;
+
+    // Cache cull camera position in chunk coordinates (double precision for accuracy)
+    cameraChunkPos_ = glm::vec3(highPrecisionPos / 16.0);
+
+    // Extract camera basis vectors from view matrix
+    // View matrix columns are: right, up, -forward (in camera space)
+    // The transpose of the upper-left 3x3 gives us world-space basis
+    glm::vec3 right = glm::vec3(cameraState_.view[0][0], cameraState_.view[1][0], cameraState_.view[2][0]);
+    glm::vec3 up = glm::vec3(cameraState_.view[0][1], cameraState_.view[1][1], cameraState_.view[2][1]);
+    glm::vec3 forward = -glm::vec3(cameraState_.view[0][2], cameraState_.view[1][2], cameraState_.view[2][2]);
 
     // Calculate render camera position (may be offset for debug visualization)
+    // Use double precision for the offset calculation
+    glm::dvec3 renderCameraPosD = highPrecisionPos;
     if (config_.debugCameraOffset) {
-        // Apply offset in camera's local space (offset is relative to view direction)
-        // Transform the offset by the camera's rotation
-        glm::mat3 rotation = glm::mat3(glm::inverse(cameraState_.view));
-        renderCameraPos_ = cameraState_.position + rotation * config_.debugOffset;
-    } else {
-        renderCameraPos_ = cameraState_.position;
+        // Apply offset in camera's local space
+        // debugOffset.z > 0 means "backward" (opposite to forward)
+        renderCameraPosD += glm::dvec3(right) * static_cast<double>(config_.debugOffset.x)
+                         + glm::dvec3(up) * static_cast<double>(config_.debugOffset.y)
+                         + glm::dvec3(forward) * static_cast<double>(config_.debugOffset.z);
     }
 
-    // Update uniform buffer with render camera position
-    // This affects where the geometry appears to be rendered from
+    // Store float version for GPU (view-relative rendering means this is only used for lighting)
+    renderCameraPos_ = glm::vec3(renderCameraPosD);
+
+    // Create view-relative view matrix (camera at origin, rotation only)
+    // This is the key to avoiding precision loss at large coordinates!
+    // Instead of lookAt(cameraPos, target, up), we use lookAt(origin, forward, up)
+    glm::mat4 viewRelativeView = glm::lookAt(glm::vec3(0.0f), forward, up);
+
+    // Update uniform buffer with view-relative matrices
     finevk::CameraUniform uniform{};
-    uniform.view = cameraState_.view;
+    uniform.view = viewRelativeView;
     uniform.projection = cameraState_.projection;
-    uniform.viewProjection = cameraState_.viewProjection;
-    uniform.position = renderCameraPos_;  // Use render position for shader
+    uniform.viewProjection = cameraState_.projection * viewRelativeView;
+    uniform.position = renderCameraPos_;  // Pass position for lighting/effects
 
     cameraUniform_->update(renderer_->currentFrame(), uniform);
 }
@@ -205,8 +227,16 @@ void WorldRenderer::markDirty(ChunkPos pos) {
 }
 
 void WorldRenderer::markAllDirty() {
+    // Mark existing views dirty
     for (auto& [pos, view] : views_) {
         view->markDirty();
+        markDirty(pos);
+    }
+
+    // Also scan the world for all subchunks with data and mark them dirty
+    // This is needed for initial population when views_ is empty
+    auto subchunkPositions = world_.getAllSubChunkPositions();
+    for (const auto& pos : subchunkPositions) {
         markDirty(pos);
     }
 }
@@ -224,19 +254,7 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
 
     // Set viewport and scissor
     VkExtent2D extent = renderer_->extent();
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd.handle(), 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = extent;
-    vkCmdSetScissor(cmd.handle(), 0, 1, &scissor);
+    cmd.setViewportAndScissor(extent.width, extent.height);
 
     // Bind descriptor set
     VkDescriptorSet currentSet = descriptorSets_[renderer_->currentFrame()];
@@ -261,6 +279,7 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
         // Calculate view-relative offset
         ChunkPushConstants pushConstants;
         pushConstants.chunkOffset = calculateViewRelativeOffset(pos);
+        pushConstants.padding = 0.0f;
 
         // Push constants
         pipelineLayout_->pushConstants(cmd.handle(), VK_SHADER_STAGE_VERTEX_BIT, pushConstants);
@@ -305,22 +324,52 @@ bool WorldRenderer::isInViewDistance(ChunkPos pos) const {
 }
 
 bool WorldRenderer::isInFrustum(ChunkPos pos) const {
-    // Create AABB for the subchunk (in world space)
-    glm::vec3 minWorld(pos.x * 16.0f, pos.y * 16.0f, pos.z * 16.0f);
-    glm::vec3 maxWorld = minWorld + glm::vec3(16.0f);
+    // Create AABB in view-relative coordinates for precision at large world coords
+    // Use double precision for the subtraction, then convert to float for the AABB
+    glm::dvec3 worldMinD(
+        static_cast<double>(pos.x) * 16.0,
+        static_cast<double>(pos.y) * 16.0,
+        static_cast<double>(pos.z) * 16.0
+    );
+    glm::dvec3 worldMaxD = worldMinD + glm::dvec3(16.0);
 
-    finevk::AABB aabb = finevk::AABB::fromMinMax(minWorld, maxWorld);
+    // Convert to view-relative coordinates (small values, safe for float32)
+    glm::vec3 minViewRel = glm::vec3(worldMinD - highPrecisionCameraPos_);
+    glm::vec3 maxViewRel = glm::vec3(worldMaxD - highPrecisionCameraPos_);
+
+    finevk::AABB aabb = finevk::AABB::fromMinMax(minViewRel, maxViewRel);
+
+    // The frustum planes need to be in view-relative space too
+    // Since our view matrix is centered at origin, frustumPlanes should already be correct
     return aabb.intersectsFrustum(cameraState_.frustumPlanes);
 }
 
 glm::vec3 WorldRenderer::calculateViewRelativeOffset(ChunkPos pos) const {
-    // Calculate subchunk origin in world space
-    glm::vec3 worldPos(pos.x * 16.0f, pos.y * 16.0f, pos.z * 16.0f);
+    // Calculate subchunk origin in world space using double precision
+    // This is critical for large world coordinates!
+    glm::dvec3 worldPosD(
+        static_cast<double>(pos.x) * 16.0,
+        static_cast<double>(pos.y) * 16.0,
+        static_cast<double>(pos.z) * 16.0
+    );
 
-    // Subtract render camera position for view-relative coordinates
-    // This prevents floating-point precision issues at large distances
-    // Note: Uses renderCameraPos_ which may be offset from cull position for debug
-    return worldPos - renderCameraPos_;
+    // Subtract camera position using double precision
+    // The result is small (view-relative), so converting to float is safe
+    glm::dvec3 offsetD = worldPosD - highPrecisionCameraPos_;
+
+    // Apply debug offset if enabled (already factored into highPrecisionCameraPos_ handling)
+    // The offset should match what was used for renderCameraPos_
+    if (config_.debugCameraOffset) {
+        glm::vec3 right = glm::vec3(cameraState_.view[0][0], cameraState_.view[1][0], cameraState_.view[2][0]);
+        glm::vec3 up = glm::vec3(cameraState_.view[0][1], cameraState_.view[1][1], cameraState_.view[2][1]);
+        glm::vec3 forward = -glm::vec3(cameraState_.view[0][2], cameraState_.view[1][2], cameraState_.view[2][2]);
+
+        offsetD -= glm::dvec3(right) * static_cast<double>(config_.debugOffset.x)
+                 + glm::dvec3(up) * static_cast<double>(config_.debugOffset.y)
+                 + glm::dvec3(forward) * static_cast<double>(config_.debugOffset.z);
+    }
+
+    return glm::vec3(offsetD);
 }
 
 void WorldRenderer::unloadChunk(ChunkPos pos) {

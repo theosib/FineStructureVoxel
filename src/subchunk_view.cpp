@@ -38,9 +38,11 @@ void SubChunkView::upload(
         .vertices(meshData.vertices.data(), meshData.vertices.size())
         .reserveCapacity(capacityMultiplier);
 
+    // Keep indices16 alive until after build() - the builder stores a pointer
+    std::vector<uint16_t> indices16;
     if (use16BitIndices) {
         // Convert indices to 16-bit
-        std::vector<uint16_t> indices16(meshData.indices.size());
+        indices16.resize(meshData.indices.size());
         for (size_t i = 0; i < meshData.indices.size(); ++i) {
             indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
         }

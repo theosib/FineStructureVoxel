@@ -388,4 +388,24 @@ void WorldRenderer::unloadAll() {
     dirtyChunks_.clear();
 }
 
+size_t WorldRenderer::totalVertexCount() const {
+    size_t total = 0;
+    for (const auto& [pos, view] : views_) {
+        total += view->vertexCount();
+    }
+    return total;
+}
+
+size_t WorldRenderer::totalIndexCount() const {
+    size_t total = 0;
+    for (const auto& [pos, view] : views_) {
+        total += view->indexCount();
+    }
+    return total;
+}
+
+size_t WorldRenderer::loadedMeshCount() const {
+    return views_.size();
+}
+
 }  // namespace finevox

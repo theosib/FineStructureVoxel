@@ -7,12 +7,17 @@
  * - WorldRenderer setup with BlockAtlas
  * - Debug camera offset for frustum culling visualization
  * - View-relative rendering at large coordinates
+ * - Greedy meshing optimization
  *
  * Controls:
  * - WASD: Move camera
  * - Mouse: Look around
  * - F1: Toggle debug camera offset (shows frustum culling edges)
  * - F2: Teleport to large coordinates (tests precision)
+ * - F3: Teleport to origin
+ * - F4: Toggle hidden face culling (debug)
+ * - G: Toggle greedy meshing (compare vertex counts)
+ * - V: Print mesh statistics (vertices, indices)
  * - Escape: Exit
  */
 
@@ -353,6 +358,24 @@ int main(int argc, char* argv[]) {
             if (key == GLFW_KEY_F5 && action == finevk::Action::Press) {
                 // Request screenshot on next frame
                 std::cout << "Screenshot requested (will save to screenshot.ppm)\n";
+            }
+
+            if (key == GLFW_KEY_G && action == finevk::Action::Press) {
+                // Toggle greedy meshing
+                bool enabled = !worldRenderer.greedyMeshing();
+                worldRenderer.setGreedyMeshing(enabled);
+                worldRenderer.markAllDirty();  // Rebuild meshes
+                std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
+            }
+
+            if (key == GLFW_KEY_V && action == finevk::Action::Press) {
+                // Print mesh stats
+                std::cout << "\n=== Mesh Stats ===\n";
+                std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
+                std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
+                std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
+                std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
+                std::cout << "==================\n\n";
             }
         });
 

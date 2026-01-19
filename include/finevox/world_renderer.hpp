@@ -247,6 +247,27 @@ public:
     void setDisableFaceCulling(bool disabled) { meshBuilder_.setDisableFaceCulling(disabled); }
     [[nodiscard]] bool disableFaceCulling() const { return meshBuilder_.disableFaceCulling(); }
 
+    /**
+     * @brief Enable/disable greedy meshing (merges adjacent faces)
+     */
+    void setGreedyMeshing(bool enabled) { meshBuilder_.setGreedyMeshing(enabled); }
+    [[nodiscard]] bool greedyMeshing() const { return meshBuilder_.greedyMeshing(); }
+
+    /**
+     * @brief Get total vertex count across all loaded meshes
+     */
+    [[nodiscard]] size_t totalVertexCount() const;
+
+    /**
+     * @brief Get total index count across all loaded meshes
+     */
+    [[nodiscard]] size_t totalIndexCount() const;
+
+    /**
+     * @brief Get number of loaded subchunk meshes
+     */
+    [[nodiscard]] size_t loadedMeshCount() const;
+
     // ========================================================================
     // Cleanup
     // ========================================================================

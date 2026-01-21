@@ -461,6 +461,50 @@ ModelFile loadModelWithIncludes(const std::string& logicalPath, ResourceLocator&
 }
 ```
 
+### Greedy Meshing Integration
+
+Blocks with custom render models (non-cube geometry) require special handling in the mesh generation pipeline:
+
+**The Problem:**
+Greedy meshing merges adjacent coplanar faces of the same block type into larger quads. This works for standard cubes but breaks for:
+- Stairs (multiple faces at different heights)
+- Slabs (half-height blocks)
+- Fences (posts and rails)
+- Any block with orientation-dependent geometry
+
+**Solution: `hasCustomMesh` Flag**
+
+When the model loader detects a non-trivial render model, set a flag on `BlockType`:
+
+```cpp
+class BlockType {
+    // ... existing fields ...
+    bool hasCustomMesh_ = false;  // True if render model is not a standard cube
+
+public:
+    BlockType& setHasCustomMesh(bool custom) { hasCustomMesh_ = custom; return *this; }
+    [[nodiscard]] bool hasCustomMesh() const { return hasCustomMesh_; }
+};
+```
+
+**Mesh Builder Check:**
+
+In `greedyMeshFace()`, skip blocks with custom meshes:
+
+```cpp
+BlockTypeId blockType = subChunk.getBlock(x, y, z);
+if (blockType == AIR_BLOCK_TYPE) continue;
+
+// Check if this block uses a custom mesh
+if (blockRegistry.getType(blockType).hasCustomMesh()) {
+    continue;  // Don't include in greedy mask - will render separately
+}
+```
+
+Custom mesh blocks are then rendered via `buildSimpleMesh()` or a dedicated custom mesh pass.
+
+**Note:** The current `FaceMaskEntry` comparison already prevents merging blocks with different AO values, which provides partial protection for orientation-dependent blocks. The explicit flag provides complete coverage.
+
 ---
 
 ## 19.9 Comparison with Minecraft VoxelShapes

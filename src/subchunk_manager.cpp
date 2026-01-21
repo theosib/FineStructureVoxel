@@ -42,13 +42,19 @@ ManagedColumn* SubChunkManager::get(ColumnPos pos) {
 }
 
 void SubChunkManager::add(std::unique_ptr<ChunkColumn> column) {
-    uint64_t key = column->position().pack();
+    ColumnPos pos = column->position();
+    uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
 
     auto managed = std::make_unique<ManagedColumn>(std::move(column));
     managed->state = ColumnState::Active;
     active_[key] = std::move(managed);
+
+    // Notify about newly available chunk
+    if (chunkLoadCallback_) {
+        chunkLoadCallback_(pos);
+    }
 }
 
 void SubChunkManager::markDirty(ColumnPos pos) {
@@ -214,6 +220,11 @@ void SubChunkManager::setEvictionCallback(EvictionCallback callback) {
     evictionCallback_ = std::move(callback);
 }
 
+void SubChunkManager::setChunkLoadCallback(ChunkLoadCallback callback) {
+    std::unique_lock lock(mutex_);
+    chunkLoadCallback_ = std::move(callback);
+}
+
 void SubChunkManager::transitionToSaveQueue(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
@@ -285,6 +296,11 @@ bool SubChunkManager::requestLoad(ColumnPos pos, LoadCallback callback) {
                 auto managed = std::make_unique<ManagedColumn>(std::move(col));
                 managed->state = ColumnState::Active;
                 active_[key] = std::move(managed);
+
+                // Notify about newly available chunk (under lock - keep callback fast!)
+                if (chunkLoadCallback_) {
+                    chunkLoadCallback_(loadedPos);
+                }
 
                 // Column was added - callback gets nullptr since we took ownership
                 // Caller should use get() to access the managed column

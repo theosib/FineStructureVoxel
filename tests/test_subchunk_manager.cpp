@@ -176,6 +176,25 @@ TEST(SubChunkManagerTest, EvictionCallback) {
     EXPECT_EQ(evictionCount, 1);
 }
 
+TEST(SubChunkManagerTest, ChunkLoadCallback) {
+    SubChunkManager manager;
+
+    std::vector<ColumnPos> loadedPositions;
+    manager.setChunkLoadCallback([&loadedPositions](ColumnPos pos) {
+        loadedPositions.push_back(pos);
+    });
+
+    // Add columns - callback should fire for each
+    manager.add(std::make_unique<ChunkColumn>(ColumnPos(0, 0)));
+    manager.add(std::make_unique<ChunkColumn>(ColumnPos(1, 1)));
+    manager.add(std::make_unique<ChunkColumn>(ColumnPos(2, 3)));
+
+    ASSERT_EQ(loadedPositions.size(), 3);
+    EXPECT_EQ(loadedPositions[0], ColumnPos(0, 0));
+    EXPECT_EQ(loadedPositions[1], ColumnPos(1, 1));
+    EXPECT_EQ(loadedPositions[2], ColumnPos(2, 3));
+}
+
 // ============================================================================
 // Currently saving protection
 // ============================================================================

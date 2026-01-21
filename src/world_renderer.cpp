@@ -171,36 +171,82 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
 
     uint32_t updates = 0;
 
-    // Sort dirty chunks by distance to camera for priority
-    std::sort(dirtyChunks_.begin(), dirtyChunks_.end(),
-        [this](const ChunkPos& a, const ChunkPos& b) {
-            float distA = glm::length(glm::vec3(a.x, a.y, a.z) - cameraChunkPos_);
-            float distB = glm::length(glm::vec3(b.x, b.y, b.z) - cameraChunkPos_);
-            return distA < distB;
+    // Collect chunks that need rebuilding based on version mismatch or LOD change
+    // This replaces the explicit dirty tracking with self-throttling version checks
+    struct ChunkUpdateInfo {
+        ChunkPos pos;
+        float distance;
+        LODRequest lodRequest;  // Uses 2x encoding for hysteresis
+        bool needsRebuild;
+    };
+    std::vector<ChunkUpdateInfo> chunksToUpdate;
+
+    // First pass: check existing views for version mismatches or LOD changes
+    for (auto& [pos, view] : views_) {
+        const SubChunk* subchunk = world_.getSubChunk(pos);
+        if (!subchunk) continue;
+
+        // Calculate distance in blocks (not chunk coordinates)
+        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+
+        // Get LOD request based on distance
+        // - Returns exact request when clearly in one LOD zone
+        // - Returns flexible request (accepts 2 levels) in hysteresis zones
+        LODRequest lodRequest = lodEnabled_
+            ? lodConfig_.getRequestForDistance(distBlocks)
+            : LODRequest::exact(LODLevel::LOD0);
+
+        // Check if rebuild needed: version mismatch OR LOD doesn't satisfy request
+        // The LODRequest::accepts() method handles the hysteresis logic:
+        // - Exact requests only match one LOD level
+        // - Flexible requests match either neighboring level
+        uint64_t currentVersion = subchunk->blockVersion();
+        if (view->needsRebuild(currentVersion, lodRequest)) {
+            chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
+        }
+    }
+
+    // Second pass: check explicitly marked dirty chunks (for new chunks not yet in views_)
+    for (const auto& pos : dirtyChunks_) {
+        if (views_.find(pos) != views_.end()) continue;  // Already checked above
+        if (!isInViewDistance(pos)) continue;
+
+        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+        LODRequest lodRequest = lodEnabled_
+            ? lodConfig_.getRequestForDistance(distBlocks)
+            : LODRequest::exact(LODLevel::LOD0);
+
+        chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
+    }
+    dirtyChunks_.clear();  // Clear explicit dirty list after processing
+
+    // Sort by distance to camera (nearest first) - prioritize close chunks
+    std::sort(chunksToUpdate.begin(), chunksToUpdate.end(),
+        [](const ChunkUpdateInfo& a, const ChunkUpdateInfo& b) {
+            return a.distance < b.distance;
         });
 
-    // Process dirty chunks
-    auto it = dirtyChunks_.begin();
-    while (it != dirtyChunks_.end()) {
+    // Process chunks that need updating
+    for (const auto& info : chunksToUpdate) {
         if (maxUpdates > 0 && updates >= maxUpdates) break;
 
-        ChunkPos pos = *it;
-
         // Skip if too far
-        if (!isInViewDistance(pos)) {
-            it = dirtyChunks_.erase(it);
-            continue;
-        }
+        if (!isInViewDistance(info.pos)) continue;
 
         // Get or create view
-        SubChunkView* view = getOrCreateView(pos);
-        if (!view) {
-            it = dirtyChunks_.erase(it);
-            continue;
-        }
+        SubChunkView* view = getOrCreateView(info.pos);
+        if (!view) continue;
 
-        // Build mesh
-        MeshData meshData = buildMeshFor(pos);
+        // CRITICAL: Capture version BEFORE reading any block data (see mesh_worker_pool.cpp)
+        // This gives us a "floor" version - if the chunk is modified during mesh build,
+        // we'll have a stale version number which triggers a rebuild next frame.
+        const SubChunk* subchunk = world_.getSubChunk(info.pos);
+        uint64_t versionBeforeBuild = subchunk ? subchunk->blockVersion() : 0;
+
+        // Build mesh at the LOD level specified by the request
+        // For flexible requests, buildLevel() returns the finer (lower number) of the two acceptable levels
+        LODLevel buildLOD = info.lodRequest.buildLevel();
+        MeshData meshData = buildMeshFor(info.pos, buildLOD);
 
         // Upload to GPU
         if (view->canUpdateInPlace(meshData)) {
@@ -209,9 +255,11 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
         }
 
-        view->clearDirty();
+        // Record the version and LOD we built
+        view->setLastBuiltVersion(versionBeforeBuild);
+        view->setLastBuiltLOD(buildLOD);
+
         ++updates;
-        it = dirtyChunks_.erase(it);
     }
 }
 
@@ -223,14 +271,26 @@ void WorldRenderer::markDirty(ChunkPos pos) {
     dirtyChunks_.push_back(pos);
 }
 
+void WorldRenderer::markColumnDirty(ColumnPos pos) {
+    // Get the column and mark all its non-empty subchunks dirty
+    ChunkColumn* column = world_.getColumn(pos);
+    if (!column) return;
+
+    // ChunkColumn uses sparse storage - iterate over existing subchunks only
+    column->forEachSubChunk([this, &pos](int32_t chunkY, const SubChunk& subchunk) {
+        if (!subchunk.isEmpty()) {
+            markDirty(ChunkPos(pos.x, chunkY, pos.z));
+        }
+    });
+}
+
 void WorldRenderer::markAllDirty() {
-    // Mark existing views dirty
+    // Invalidate version on all existing views (forces rebuild on next updateMeshes)
     for (auto& [pos, view] : views_) {
-        view->markDirty();
-        markDirty(pos);
+        view->markDirty();  // Sets lastBuiltVersion to 0, guaranteeing version mismatch
     }
 
-    // Also scan the world for all subchunks with data and mark them dirty
+    // Also scan the world for all subchunks with data and add to dirty list
     // This is needed for initial population when views_ is empty
     auto subchunkPositions = world_.getAllSubChunkPositions();
     for (const auto& pos : subchunkPositions) {
@@ -303,14 +363,23 @@ SubChunkView* WorldRenderer::getOrCreateView(ChunkPos pos) {
     return ptr;
 }
 
-MeshData WorldRenderer::buildMeshFor(ChunkPos pos) {
+MeshData WorldRenderer::buildMeshFor(ChunkPos pos, LODLevel lodLevel) {
     // Get the subchunk from the world
     const SubChunk* subchunk = world_.getSubChunk(pos);
     if (!subchunk) {
         return MeshData{};
     }
 
-    return meshBuilder_.buildSubChunkMesh(*subchunk, pos, world_, textureProvider_);
+    // For LOD0, use normal mesh building
+    if (lodLevel == LODLevel::LOD0) {
+        return meshBuilder_.buildSubChunkMesh(*subchunk, pos, world_, textureProvider_);
+    }
+
+    // For higher LOD levels, generate downsampled mesh
+    // Create temporary LOD subchunk, downsample, and build mesh
+    LODSubChunk lodData(lodLevel);
+    lodData.downsampleFrom(*subchunk);
+    return meshBuilder_.buildLODMesh(lodData, pos, textureProvider_);
 }
 
 bool WorldRenderer::isInViewDistance(ChunkPos pos) const {
@@ -406,6 +475,41 @@ size_t WorldRenderer::totalIndexCount() const {
 
 size_t WorldRenderer::loadedMeshCount() const {
     return views_.size();
+}
+
+// ============================================================================
+// LOD (Level of Detail)
+// ============================================================================
+
+void WorldRenderer::cycleLODDebugMode() {
+    switch (lodDebugMode_) {
+        case LODDebugMode::None:
+            lodDebugMode_ = LODDebugMode::ColorByLOD;
+            break;
+        case LODDebugMode::ColorByLOD:
+            lodDebugMode_ = LODDebugMode::WireframeByLOD;
+            break;
+        case LODDebugMode::WireframeByLOD:
+            lodDebugMode_ = LODDebugMode::ShowBoundaries;
+            break;
+        case LODDebugMode::ShowBoundaries:
+            lodDebugMode_ = LODDebugMode::None;
+            break;
+    }
+}
+
+WorldRenderer::LODStats WorldRenderer::getLODStats() const {
+    LODStats stats;
+
+    for (const auto& [pos, view] : views_) {
+        int level = static_cast<int>(view->lastBuiltLOD());
+        if (level >= 0 && level < static_cast<int>(LOD_LEVEL_COUNT)) {
+            stats.chunksPerLevel[level]++;
+            stats.totalChunks++;
+        }
+    }
+
+    return stats;
 }
 
 }  // namespace finevox

@@ -68,6 +68,12 @@
 | [15 - FineStructureVK Integration](15-finestructurevk-integration.md) | How we use FineStructureVK features |
 | [16 - FineStructureVK Critique](16-finestructurevk-critique.md) | Missing features, what to add vs not duplicate |
 
+### Systems & Configuration
+
+| Document | Key Contents |
+|----------|--------------|
+| [23 - Distance and Loading](23-distance-and-loading.md) | Distance zones, chunk loading policies, block updates, fog, force-loading |
+
 ### Planning & Analysis
 
 | Document | Key Contents |
@@ -133,6 +139,15 @@
 | LOD boundary stitching | [22](22-phase6-lod-design.md) §4 |
 | BlockSnapshot format | [21](21-clipboard-schematic.md) §21.3 |
 | Schematic serialization | [21](21-clipboard-schematic.md) §21.6 |
+| Distance zones | [23](23-distance-and-loading.md) §1 |
+| Block update scheduling | [23](23-distance-and-loading.md) §3.1 |
+| Cross-chunk updates | [23](23-distance-and-loading.md) §3.2 |
+| Network quiescence | [23](23-distance-and-loading.md) §3.3 |
+| Force-load mechanism | [23](23-distance-and-loading.md) §2.4 |
+| Fog system | [23](23-distance-and-loading.md) §2.3 |
+| Block extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
+| SubChunk extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
+| Column extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
 
 ---
 

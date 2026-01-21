@@ -12,6 +12,17 @@
 
 namespace finevox {
 
+// DEPRECATED: Use AlarmQueue or AlarmQueueWithData from alarm_queue.hpp instead.
+// AlarmQueue provides the same functionality plus alarm-based wakeup support.
+//
+// BlockingQueue will be removed in a future version.
+//
+// Migration:
+//   - BlockingQueue<T> -> AlarmQueue<T>
+//   - BlockingQueueWithData<K,V> -> AlarmQueueWithData<K,V>
+//   - popWait() -> waitForWork() then tryPop()
+//   - pop() -> tryPop()
+//
 // A thread-safe FIFO queue with deduplication and optional blocking operations.
 //
 // Features:
@@ -23,7 +34,6 @@ namespace finevox {
 // - Batch pop for efficiency
 //
 // Use cases:
-// - Mesh rebuild queue (with blocking workers)
 // - Save queue (non-blocking, polling)
 // - Any producer-consumer pattern needing deduplication
 //

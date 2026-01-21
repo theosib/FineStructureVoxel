@@ -6,6 +6,7 @@
 #include "finevox/world.hpp"
 #include "finevox/block_atlas.hpp"
 #include "finevox/texture_manager.hpp"
+#include "finevox/lod.hpp"
 
 // FineStructureVK types
 #include <finevk/engine/camera.hpp>
@@ -18,6 +19,7 @@
 #include <unordered_map>
 #include <memory>
 #include <vector>
+#include <algorithm>
 
 namespace finevox {
 
@@ -185,6 +187,16 @@ public:
     void markDirty(ChunkPos pos);
 
     /**
+     * @brief Mark all subchunks in a column as needing mesh rebuild
+     *
+     * Call this when a new column is loaded to ensure all its subchunks get meshes.
+     * This is typically connected to SubChunkManager::setChunkLoadCallback().
+     *
+     * @param pos Column position
+     */
+    void markColumnDirty(ColumnPos pos);
+
+    /**
      * @brief Mark all loaded subchunks as dirty
      */
     void markAllDirty();
@@ -253,6 +265,54 @@ public:
     void setGreedyMeshing(bool enabled) { meshBuilder_.setGreedyMeshing(enabled); }
     [[nodiscard]] bool greedyMeshing() const { return meshBuilder_.greedyMeshing(); }
 
+    // ========================================================================
+    // LOD (Level of Detail)
+    // ========================================================================
+
+    /**
+     * @brief Get mutable reference to LOD configuration
+     * Allows adjusting LOD distance thresholds, hysteresis, bias, and force settings
+     */
+    [[nodiscard]] LODConfig& lodConfig() { return lodConfig_; }
+    [[nodiscard]] const LODConfig& lodConfig() const { return lodConfig_; }
+
+    /**
+     * @brief Enable/disable LOD system
+     * When disabled, all chunks render at full detail (LOD0)
+     */
+    void setLODEnabled(bool enabled) { lodEnabled_ = enabled; }
+    [[nodiscard]] bool lodEnabled() const { return lodEnabled_; }
+
+    /**
+     * @brief Set LOD debug visualization mode
+     */
+    void setLODDebugMode(LODDebugMode mode) { lodDebugMode_ = mode; }
+    [[nodiscard]] LODDebugMode lodDebugMode() const { return lodDebugMode_; }
+
+    /**
+     * @brief Increment LOD bias (shifts all chunks to lower detail)
+     */
+    void increaseLODBias() { lodConfig_.lodBias = std::min(lodConfig_.lodBias + 1, 4); }
+
+    /**
+     * @brief Decrement LOD bias (shifts all chunks to higher detail)
+     */
+    void decreaseLODBias() { lodConfig_.lodBias = std::max(lodConfig_.lodBias - 1, -4); }
+
+    /**
+     * @brief Cycle through LOD debug modes
+     */
+    void cycleLODDebugMode();
+
+    /**
+     * @brief Get statistics about current LOD distribution
+     */
+    struct LODStats {
+        std::array<uint32_t, LOD_LEVEL_COUNT> chunksPerLevel{};
+        uint32_t totalChunks = 0;
+    };
+    [[nodiscard]] LODStats getLODStats() const;
+
     /**
      * @brief Get total vertex count across all loaded meshes
      */
@@ -296,8 +356,8 @@ private:
     // Get or create SubChunkView for a position
     SubChunkView* getOrCreateView(ChunkPos pos);
 
-    // Build mesh for a subchunk
-    MeshData buildMeshFor(ChunkPos pos);
+    // Build mesh for a subchunk at the given LOD level
+    MeshData buildMeshFor(ChunkPos pos, LODLevel lodLevel = LODLevel::LOD0);
 
     // Check if a subchunk is within view distance
     bool isInViewDistance(ChunkPos pos) const;
@@ -348,6 +408,11 @@ private:
 
     // Mesh building
     MeshBuilder meshBuilder_;
+
+    // LOD system
+    LODConfig lodConfig_;
+    bool lodEnabled_ = true;
+    LODDebugMode lodDebugMode_ = LODDebugMode::None;
 
     // Statistics
     uint32_t lastRenderedCount_ = 0;

@@ -2,6 +2,7 @@
 
 #include "finevox/position.hpp"
 #include "finevox/mesh.hpp"
+#include "finevox/lod.hpp"
 
 // Vulkan-dependent headers
 #include <vulkan/vulkan.h>
@@ -214,17 +215,61 @@ public:
     void draw(finevk::CommandBuffer& cmd, uint32_t instanceCount = 1) const;
 
     // ========================================================================
-    // Dirty Tracking (for mesh rebuild scheduling)
+    // Version and LOD-Based Change Detection
     // ========================================================================
 
-    /// Mark this view as needing mesh regeneration
-    void markDirty() { dirty_ = true; }
+    /// Get the block version this mesh was built from
+    /// Returns 0 if no mesh has been built yet
+    [[nodiscard]] uint64_t lastBuiltVersion() const { return lastBuiltVersion_; }
 
-    /// Clear the dirty flag
-    void clearDirty() { dirty_ = false; }
+    /// Set the block version after building a mesh
+    void setLastBuiltVersion(uint64_t version) { lastBuiltVersion_ = version; }
 
-    /// Check if mesh needs regeneration
-    [[nodiscard]] bool isDirty() const { return dirty_; }
+    /// Get the LOD level this mesh was built at
+    [[nodiscard]] LODLevel lastBuiltLOD() const { return lastBuiltLOD_; }
+
+    /// Set the LOD level after building a mesh
+    void setLastBuiltLOD(LODLevel lod) { lastBuiltLOD_ = lod; }
+
+    /// Check if mesh needs regeneration by comparing versions
+    /// @param currentBlockVersion The current SubChunk::blockVersion()
+    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion) const {
+        return lastBuiltVersion_ != currentBlockVersion;
+    }
+
+    /// Check if mesh needs regeneration due to LOD change (exact match)
+    /// @param targetLOD The desired LOD level
+    [[nodiscard]] bool needsLODChange(LODLevel targetLOD) const {
+        return lastBuiltLOD_ != targetLOD;
+    }
+
+    /// Check if the current mesh satisfies an LOD request
+    /// Uses flexible matching: request may accept multiple LOD levels
+    /// @param request The LOD request (may be exact or flexible)
+    [[nodiscard]] bool satisfiesLODRequest(LODRequest request) const {
+        return request.accepts(lastBuiltLOD_);
+    }
+
+    /// Check if mesh needs any kind of rebuild (version or LOD)
+    /// @param currentBlockVersion The current SubChunk::blockVersion()
+    /// @param targetLOD The desired LOD level (exact match)
+    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion, LODLevel targetLOD) const {
+        return needsRebuild(currentBlockVersion) || needsLODChange(targetLOD);
+    }
+
+    /// Check if mesh needs any kind of rebuild (version or LOD request)
+    /// Uses flexible LOD matching for hysteresis
+    /// @param currentBlockVersion The current SubChunk::blockVersion()
+    /// @param lodRequest The LOD request (may accept multiple levels)
+    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion, LODRequest lodRequest) const {
+        return needsRebuild(currentBlockVersion) || !satisfiesLODRequest(lodRequest);
+    }
+
+    // Legacy dirty flag interface (deprecated - use version comparison instead)
+    // Kept for compatibility during transition
+    void markDirty() { lastBuiltVersion_ = 0; }
+    void clearDirty() { /* no-op, use setLastBuiltVersion instead */ }
+    [[nodiscard]] bool isDirty() const { return lastBuiltVersion_ == 0; }
 
     // Non-copyable, movable
     SubChunkView(const SubChunkView&) = delete;
@@ -237,7 +282,8 @@ private:
     finevk::RawMeshPtr mesh_;
     uint32_t indexCount_ = 0;
     uint32_t vertexCount_ = 0;
-    bool dirty_ = true;  // Start dirty so initial mesh is generated
+    uint64_t lastBuiltVersion_ = 0;  // 0 means never built
+    LODLevel lastBuiltLOD_ = LODLevel::LOD0;  // LOD level of current mesh
 };
 
 }  // namespace finevox

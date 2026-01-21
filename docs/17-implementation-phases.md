@@ -262,39 +262,47 @@
 
 **Note:** Greedy meshing is confined to subchunk boundaries. This keeps frustum culling simple - each subchunk is an independent unit with its own mesh, no cross-boundary considerations needed.
 
-- [ ] Greedy mesh algorithm (merge coplanar faces within subchunk)
-- [ ] Per-face-direction processing
-- [ ] Handle transparent blocks separately
-- [ ] Handle off-grid displaced blocks (only elide faces with matching displacement)
+- [x] Greedy mesh algorithm (merge coplanar faces within subchunk)
+- [x] Per-face-direction processing
+- [x] Handle transparent blocks separately (`SubChunkMeshData` with opaque/transparent split)
+- [ ] Handle off-grid displaced blocks (only elide faces with matching displacement) - deferred until `BlockDisplacement` implemented
+- [ ] Exclude blocks with custom/dynamic meshes from greedy merging - deferred until custom mesh system implemented
 
-### 5.2 Mesh Update Pipeline (4 Stages)
+**Custom Mesh Exclusion (Future):** Blocks with dynamic appearance (stairs, sloped terrain, rotating machinery) cannot be greedy-merged because their visual representation varies per-instance. When the custom mesh system is implemented, add a `BlockType::hasCustomMesh()` flag. The greedy algorithm will skip these blocks, rendering them individually via `buildSimpleMesh()`. The `FaceMaskEntry` comparison already prevents merging blocks with different AO values, which partially handles orientation-dependent lighting.
 
-**Stage 1: Block Change Detection**
-- [ ] `meshDirty_` flag per SubChunk (separate from persistence dirty)
-- [ ] SubChunk.setBlock() automatically marks mesh dirty (O(1))
-- [ ] Adjacent subchunk notifications (boundary face visibility changes)
+### 5.2 Mesh Update Pipeline (Pull-Based Architecture)
 
-**Stage 2: Priority Queue**
-- [ ] `MeshRebuildQueue` - CoalescingQueue with priority
-- [ ] Priority = f(distance to camera, in-frustum, time since dirty)
-- [ ] Coalescing: multiple changes to same subchunk = one rebuild
+**Implementation Note:** The original 4-stage push-based design was simplified to a pull-based model during implementation. This reduces complexity while maintaining good performance characteristics.
 
-**Stage 3: Mesh Worker Thread(s)**
-- [ ] Thread pool for parallel mesh generation
-- [ ] Generates CPU-side vertex/index arrays
-- [ ] Priority ordering: near + visible first, stale eventually processed
-- [ ] Stale mesh displayed while new mesh computes
+**Version-Based Change Detection**
+- [x] `blockVersion_` atomic counter per SubChunk (incrementing version number)
+- [x] SubChunk.setBlock() increments version (O(1), lock-free)
+- [x] Render loop compares cached version vs current to detect staleness
+- [x] No push notifications needed - workers pull work based on version mismatch
 
-**Stage 4: GPU Upload Queue (Main Thread)**
-- [ ] FIFO queue (priority already handled in Stage 2)
-- [ ] Coalescing by ChunkPos (latest wins)
-- [ ] Throttled uploads per frame to prevent stalls
-- [ ] Alternative: prepare staging buffers in worker, main thread only issues copy commands
+**FIFO Rebuild Queue with Deduplication**
+- [x] `MeshRebuildQueue` (AlarmQueueWithData) - thread-safe FIFO with alarm support
+- [x] Render loop iterates near-to-far, providing natural priority ordering
+- [x] O(1) deduplication prevents unbounded queue growth
+- [x] Non-popping `waitForWork()` with alarm-based wakeup for frame sync
+
+**Mesh Worker Thread Pool**
+- [x] `MeshWorkerPool` for parallel mesh generation
+- [x] Generates CPU-side vertex/index arrays
+- [x] Lock-free reads from SubChunk (palette indices stable)
+- [x] Stale mesh displayed while new mesh computes
+
+**Mesh Cache Architecture** (refined in Phase 6)
+- [x] `MeshCacheEntry` per subchunk: pending mesh, version, LOD tracking
+- [x] Graphics thread calls `getMesh()` - triggers rebuild if stale
+- [x] Workers write directly to cache, no separate result queue
+- [x] `markUploaded()` transfers pending state after GPU upload
 
 ### Testing
-- [ ] Greedy meshing reduces vertex count significantly
-- [ ] Nearby changes mesh faster than distant
-- [ ] No visual pops on mesh updates
+- [x] Greedy meshing reduces vertex count significantly (verified: 4x4x4 cube 384→24 vertices)
+- [x] Nearby changes mesh faster than distant (FIFO + near-to-far render order)
+- [x] No visual pops on mesh updates (stale mesh shown during rebuild)
+- [x] Transparent blocks separated from opaque (7 tests in `TransparentMeshTest`)
 
 ---
 
@@ -303,22 +311,68 @@
 *Distance-based detail reduction.*
 
 ### 6.1 LOD Generation
-- [ ] LOD levels (1x, 2x, 4x, 8x block grouping)
-- [ ] Simplified mesh for each LOD
-- [ ] Representative block selection for grouped blocks
+- [x] LOD levels (LOD0-LOD4: 1x, 2x, 4x, 8x, 16x block grouping)
+- [x] `LODSubChunk` - Downsampled block storage for each LOD level
+- [x] Mode-based representative block selection (most common solid block in group)
+- [x] `MeshBuilder::buildLODMesh()` generates simplified mesh at each LOD
+- [x] LOD meshes use scaled block geometry (2x, 4x, 8x, 16x block sizes)
 
 ### 6.2 LOD Selection
-- [ ] Distance-based LOD switching
-- [ ] Buffer zones (hysteresis) at LOD boundaries
-- [ ] Smooth transitions
+- [x] `LODConfig` - Configurable distance thresholds for each LOD level
+- [x] `LODRequest` with 2x encoding for hysteresis (flexible zones at boundaries)
+- [x] Distance-based LOD switching via `getRequestForDistance()`
+- [x] Debug controls: `lodBias` (shift all distances), `forceLOD` (force specific level)
+- [x] `LODDebugMode` enum for visualization (ColorByLOD, WireframeByLOD, ShowBoundaries)
 
-### 6.3 GPU Memory Management
-- [ ] Lazy unloading of unused LOD meshes
-- [ ] Only update visible LOD level on distant changes
+### 6.3 Mesh Pipeline Integration
+- [x] `WorldRenderer` LOD configuration and enable/disable
+- [x] `MeshRebuildRequest` carries LOD request with hysteresis encoding
+- [x] `SubChunkView` tracks `lastBuiltLOD` for staleness detection
+- [x] `MeshWorkerPool` builds meshes at requested LOD level
+- [x] `MeshCacheEntry` tracks pending/uploaded LOD per chunk
+
+### 6.4 Worker Thread Architecture (Refined)
+- [x] `AlarmQueue` - Thread-safe queue with alarm-based wakeup for frame sync
+- [x] Pull-based mesh cache: workers write to cache, graphics thread queries
+- [x] `getMesh()` API triggers rebuilds when version or LOD is stale
+- [x] `markUploaded()` transfers pending mesh state to uploaded state
+- [x] Background scanning finds stale chunks without explicit requests
+- [x] `BlockingQueue` deprecated in favor of `AlarmQueue`
+
+### 6.5 Chunk Lifecycle Integration
+- [x] `SubChunkManager::setChunkLoadCallback()` for chunk load notifications
+- [x] `WorldRenderer::markColumnDirty()` for marking newly loaded columns
+- [x] `MeshCacheEntry` uses `weak_ptr<SubChunk>` for version checking without ownership
+- [x] Stale meshes continue rendering after chunk unload (graceful degradation)
+- [x] Decoupled chunk lifecycle from mesh lifecycle (semi-independent systems)
+
+**Design Note:** The chunk lifecycle (SubChunkManager) and rendering lifecycle (WorldRenderer/MeshWorkerPool) are intentionally semi-independent:
+- **Chunk unload**: Mesh views use weak pointers, so stale meshes can persist and render
+- **Chunk load**: Callback notifies renderer to request meshes for new chunks
+- **Version tracking**: Atomic `blockVersion_` counter enables lock-free staleness detection
+
+### 6.6 GPU Memory Management
+- [ ] Lazy unloading of meshes for chunks outside view distance
+- [ ] Memory budget enforcement (unload furthest chunks when over budget)
+
+### 6.7 Distance Configuration
+- [ ] `DistanceConfig` struct for all distance thresholds
+- [ ] Integrate render distance into WorldRenderer
+- [ ] Add fog configuration and shader support
+- [ ] Add entity render distance (when entity system exists)
+
+See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 
 ### Testing
-- [ ] Distant terrain renders at lower detail
-- [ ] LOD transitions don't pop
+- [x] LOD level utilities (grouping, resolution, conversions)
+- [x] LODRequest hysteresis encoding (exact vs flexible, accepts())
+- [x] LODConfig distance thresholds, bias, force modes
+- [x] LODSubChunk downsampling from SubChunk
+- [x] LOD mesh generation (scaling, face culling at each level)
+- [x] MeshWorkerPool cache API (getMesh, markUploaded, version/LOD tracking)
+- [x] AlarmQueue alarm-based wakeup and FIFO ordering
+- [x] SubChunkManager ChunkLoadCallback fires on add() and requestLoad()
+- [ ] Runtime LOD transitions at boundaries (visual testing)
 - [ ] Memory usage stays bounded at large view distances
 
 ---
@@ -374,6 +428,51 @@
 
 ---
 
+## Phase 9: Block Update System
+
+*Scheduled block updates for game logic (redstone, automation, etc.)*
+
+**Note:** This phase spans engine and game layers. Engine provides scheduling mechanisms; game modules define update behavior.
+
+### 9.1 Engine: Data Storage
+- [ ] Add block extra data to SubChunk (tile entity data - chests, signs, etc.)
+  - `DataContainer* getBlockData(LocalPos pos)` - returns nullptr if no data
+  - `DataContainer& getOrCreateBlockData(LocalPos pos)` - creates if needed
+  - Sparse map storage (most blocks have no extra data)
+- [ ] Add `extraData()` to SubChunk for per-subchunk game state
+  - Lighting cache, local heightmaps, biome blends
+  - Game-defined format via DataContainer
+- [ ] Add `extraData()` to ChunkColumn for per-column game state
+  - Stores pending block events when unloading mid-update
+  - Game-defined format via DataContainer
+- [ ] Serialize block/subchunk/column extra data with chunks
+
+### 9.2 Engine: Update Scheduler
+- [ ] `BlockUpdateScheduler` - schedule/cancel timed updates
+- [ ] Per-chunk update queues with distance filtering
+- [ ] Persistence of pending updates across save/load
+- [ ] Cross-chunk update boundary handling
+
+### 9.3 Engine: Force Loading
+- [ ] `ChunkForceLoader` - ticket-based force loading
+- [ ] Activity timer per chunk
+- [ ] Unload veto mechanism
+
+### 9.4 Game: Update Propagation (Module-Defined)
+- [ ] `UpdatePropagationPolicy` interface
+- [ ] Cross-chunk update queueing vs loading decision
+- [ ] Network quiescence protocol for connected blocks
+
+See [23 - Distance and Loading](23-distance-and-loading.md) for detailed design.
+
+### Testing
+- [ ] Schedule and execute block updates
+- [ ] Updates persist across save/load
+- [ ] Force-load prevents chunk unloading
+- [ ] Cross-chunk updates handled correctly
+
+---
+
 ## Future Phases (Not Scheduled)
 
 These are documented for completeness but not in initial implementation scope:
@@ -392,6 +491,14 @@ These are documented for completeness but not in initial implementation scope:
 - Noise generators
 - Biome system
 - Structure generation
+
+### World Editing / Clipboard System
+- `BlockSnapshot` and `Schematic` structures
+- Region extraction and placement
+- CBOR serialization for schematic files
+- `ClipboardManager` for runtime copy/paste
+- Transformation utilities (rotate, mirror, crop)
+- See [21 - Clipboard and Schematic System](21-clipboard-schematic.md) for full design
 
 ---
 
@@ -419,6 +526,8 @@ Phase 6 (LOD System)                          │
 Phase 7 (Module System) ──────────────────────┘
     ↓                     (modules can use persistence)
 Phase 8 (Lighting)
+    ↓
+Phase 9 (Block Updates) ← Engine + Game layer
 ```
 
 ---

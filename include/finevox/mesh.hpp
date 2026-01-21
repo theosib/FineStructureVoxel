@@ -3,6 +3,7 @@
 #include "finevox/position.hpp"
 #include "finevox/string_interner.hpp"  // For BlockTypeId
 #include "finevox/physics.hpp"
+#include "finevox/lod.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
@@ -193,6 +194,35 @@ public:
     void setDisableFaceCulling(bool disabled) { disableFaceCulling_ = disabled; }
     [[nodiscard]] bool disableFaceCulling() const { return disableFaceCulling_; }
 
+    // ========================================================================
+    // LOD Mesh Generation
+    // ========================================================================
+
+    /// Build mesh for an LOD subchunk (downsampled block data)
+    /// Blocks are scaled up by the LOD grouping factor
+    /// @param lodSubChunk The downsampled block data
+    /// @param chunkPos The chunk position in world coordinates
+    /// @param textureProvider Callback to get texture UVs for block faces
+    /// @return Mesh data with scaled block geometry
+    [[nodiscard]] MeshData buildLODMesh(
+        const LODSubChunk& lodSubChunk,
+        ChunkPos chunkPos,
+        const BlockTextureProvider& textureProvider
+    );
+
+    /// Build mesh for an LOD subchunk with neighbor culling
+    /// @param lodSubChunk The downsampled block data
+    /// @param chunkPos The chunk position in world coordinates
+    /// @param neighborProvider Callback to check if LOD neighbor positions are opaque
+    /// @param textureProvider Callback to get texture UVs for block faces
+    /// @return Mesh data with scaled block geometry and hidden face removal
+    [[nodiscard]] MeshData buildLODMesh(
+        const LODSubChunk& lodSubChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& neighborProvider,
+        const BlockTextureProvider& textureProvider
+    );
+
 private:
     bool calculateAO_ = true;
     bool greedyMeshing_ = true;  // Enabled by default
@@ -205,6 +235,17 @@ private:
         Face face,
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues  // AO for each corner (CCW from bottom-left)
+    );
+
+    // Add a scaled face to the mesh data (for LOD blocks)
+    // blockScale: size of the LOD block (2, 4, 8, or 16)
+    void addScaledFace(
+        MeshData& mesh,
+        const glm::vec3& blockPos,   // Local block position within subchunk (in world blocks)
+        Face face,
+        float blockScale,            // Scale factor for the block
+        const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
+        const std::array<float, 4>& aoValues  // AO for each corner
     );
 
     // Calculate ambient occlusion for a face corner

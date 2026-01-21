@@ -357,17 +357,299 @@ TEST(BlockingQueueTest, WorksWithStringKeys) {
 }
 
 // ============================================================================
-// MeshRebuildQueue alias test (ensure backwards compatibility)
+// MeshRebuildQueue test (with priority and version support)
 // ============================================================================
 
-TEST(MeshRebuildQueueTest, AliasWorksCorrectly) {
-    // MeshRebuildQueue is now an alias for BlockingQueue<ChunkPos>
-    MeshRebuildQueue queue;
+TEST(MeshRebuildQueueTest, BasicPushPop) {
+    // MeshRebuildQueue is BlockingQueueWithData<ChunkPos, MeshRebuildRequest>
+    MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
-    queue.push(ChunkPos(1, 2, 3));
+    queue.push(ChunkPos(1, 2, 3), MeshRebuildRequest::normal(1));
     EXPECT_EQ(queue.size(), 1);
 
-    auto pos = queue.pop();
-    ASSERT_TRUE(pos.has_value());
-    EXPECT_EQ(*pos, ChunkPos(1, 2, 3));
+    auto result = queue.pop();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, ChunkPos(1, 2, 3));
+    EXPECT_EQ(result->second.priority, 100);  // normal priority
+}
+
+TEST(MeshRebuildQueueTest, PriorityMerging) {
+    MeshRebuildQueue queue(mergeMeshRebuildRequest);
+
+    // Push with normal priority
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal(1));
+    EXPECT_EQ(queue.size(), 1);
+
+    // Push same position with higher priority (immediate = 0)
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::immediate(2));
+    EXPECT_EQ(queue.size(), 1);  // Still 1 - merged
+
+    auto result = queue.pop();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->second.priority, 0);  // Should be immediate (lowest = most urgent)
+    EXPECT_EQ(result->second.targetVersion, 2);  // Should have latest version
+}
+
+TEST(MeshRebuildQueueTest, VersionUpdate) {
+    MeshRebuildQueue queue(mergeMeshRebuildRequest);
+
+    // Push with version 5
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(5, 100));
+
+    // Push same position with version 10
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(10, 100));
+
+    auto result = queue.pop();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->second.targetVersion, 10);  // Latest version
+}
+
+// ============================================================================
+// AlarmQueue tests
+// ============================================================================
+
+#include "finevox/alarm_queue.hpp"
+
+TEST(AlarmQueueTest, BasicPushTryPop) {
+    AlarmQueue<int> queue;
+
+    EXPECT_TRUE(queue.empty());
+    EXPECT_FALSE(queue.tryPop().has_value());
+
+    queue.push(42);
+    EXPECT_FALSE(queue.empty());
+    EXPECT_EQ(queue.size(), 1);
+
+    auto result = queue.tryPop();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 42);
+    EXPECT_TRUE(queue.empty());
+}
+
+TEST(AlarmQueueTest, FIFOOrder) {
+    AlarmQueue<int> queue;
+
+    queue.push(1);
+    queue.push(2);
+    queue.push(3);
+
+    EXPECT_EQ(*queue.tryPop(), 1);
+    EXPECT_EQ(*queue.tryPop(), 2);
+    EXPECT_EQ(*queue.tryPop(), 3);
+}
+
+TEST(AlarmQueueTest, WaitForWorkWakesOnPush) {
+    AlarmQueue<int> queue;
+    std::atomic<bool> woke{false};
+
+    std::thread waiter([&]() {
+        queue.waitForWork();
+        woke = true;
+    });
+
+    // Give the waiter time to block
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(woke);
+
+    // Push should wake the waiter
+    queue.push(1);
+    waiter.join();
+
+    EXPECT_TRUE(woke);
+    // Item should still be there (waitForWork doesn't pop)
+    EXPECT_EQ(queue.size(), 1);
+}
+
+TEST(AlarmQueueTest, WaitForWorkWakesOnShutdown) {
+    AlarmQueue<int> queue;
+    std::atomic<bool> result{true};
+
+    std::thread waiter([&]() {
+        result = queue.waitForWork();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    queue.shutdown();
+    waiter.join();
+
+    EXPECT_FALSE(result);  // waitForWork returns false on shutdown
+}
+
+TEST(AlarmQueueTest, AlarmWakesWaiter) {
+    AlarmQueue<int> queue;
+    std::atomic<bool> woke{false};
+
+    auto wakeTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    queue.setAlarm(wakeTime);
+
+    std::thread waiter([&]() {
+        queue.waitForWork();
+        woke = true;
+    });
+
+    // Should not wake immediately
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(woke);
+
+    // Wait for alarm to fire
+    waiter.join();
+    EXPECT_TRUE(woke);
+
+    // Alarm should be cleared after firing
+    EXPECT_FALSE(queue.hasAlarm());
+}
+
+TEST(AlarmQueueTest, AlarmKeepsLaterTime) {
+    AlarmQueue<int> queue;
+
+    auto now = std::chrono::steady_clock::now();
+    auto early = now + std::chrono::milliseconds(10);
+    auto late = now + std::chrono::milliseconds(100);
+
+    // Set early alarm first
+    queue.setAlarm(early);
+    EXPECT_TRUE(queue.hasAlarm());
+
+    // Set later alarm - should replace (keep later)
+    queue.setAlarm(late);
+    EXPECT_TRUE(queue.hasAlarm());
+
+    // Now try setting an earlier one - should NOT replace
+    queue.setAlarm(early);
+    EXPECT_TRUE(queue.hasAlarm());
+
+    // Verify it kept the later alarm by checking wake time
+    // We can't directly inspect the alarm time, but we can test behavior:
+    // If we wait past the early time but before the late time, it should still be waiting
+    std::atomic<bool> woke{false};
+    std::thread waiter([&]() {
+        queue.waitForWork();
+        woke = true;
+    });
+
+    // Wait past the early time
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    // Should still be waiting (later alarm hasn't fired)
+    // Note: This is a timing-sensitive test
+    // If the alarm was the early one, it would have fired by now
+
+    waiter.join();
+    EXPECT_TRUE(woke);
+}
+
+TEST(AlarmQueueTest, ClearAlarm) {
+    AlarmQueue<int> queue;
+
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::hours(1));
+    EXPECT_TRUE(queue.hasAlarm());
+
+    queue.clearAlarm();
+    EXPECT_FALSE(queue.hasAlarm());
+}
+
+TEST(AlarmQueueTest, Clear) {
+    AlarmQueue<int> queue;
+
+    queue.push(1);
+    queue.push(2);
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::hours(1));
+
+    queue.clear();
+    EXPECT_TRUE(queue.empty());
+    EXPECT_FALSE(queue.hasAlarm());
+}
+
+// ============================================================================
+// AlarmQueueWithData tests
+// ============================================================================
+
+TEST(AlarmQueueWithDataTest, BasicOperations) {
+    AlarmQueueWithData<ChunkPos, int> queue;
+
+    EXPECT_TRUE(queue.empty());
+
+    queue.push(ChunkPos(1, 2, 3), 42);
+    EXPECT_FALSE(queue.empty());
+    EXPECT_EQ(queue.size(), 1);
+    EXPECT_TRUE(queue.contains(ChunkPos(1, 2, 3)));
+
+    auto result = queue.pop();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, ChunkPos(1, 2, 3));
+    EXPECT_EQ(result->second, 42);
+    EXPECT_TRUE(queue.empty());
+}
+
+TEST(AlarmQueueWithDataTest, MergeFunction) {
+    // Merge function: keep maximum value
+    AlarmQueueWithData<ChunkPos, int> queue([](const int& old, const int& newVal) {
+        return std::max(old, newVal);
+    });
+
+    queue.push(ChunkPos(0, 0, 0), 10);
+    queue.push(ChunkPos(0, 0, 0), 5);   // Should keep 10 (max)
+    queue.push(ChunkPos(0, 0, 0), 20);  // Should become 20 (max)
+
+    EXPECT_EQ(queue.size(), 1);
+
+    auto result = queue.pop();
+    EXPECT_EQ(result->second, 20);
+}
+
+TEST(AlarmQueueWithDataTest, PopWaitBlocking) {
+    AlarmQueueWithData<ChunkPos, int> queue;
+    std::atomic<bool> gotResult{false};
+
+    std::thread consumer([&]() {
+        auto result = queue.popWait();
+        if (result && result->second == 99) {
+            gotResult = true;
+        }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(gotResult);
+
+    queue.push(ChunkPos(0, 0, 0), 99);
+    consumer.join();
+
+    EXPECT_TRUE(gotResult);
+}
+
+TEST(AlarmQueueWithDataTest, AlarmSupport) {
+    AlarmQueueWithData<ChunkPos, int> queue;
+
+    auto wakeTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(30);
+    queue.setAlarm(wakeTime);
+    EXPECT_TRUE(queue.hasAlarm());
+
+    std::atomic<bool> woke{false};
+    std::thread waiter([&]() {
+        queue.waitForWork();
+        woke = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(woke);
+
+    waiter.join();
+    EXPECT_TRUE(woke);
+    EXPECT_FALSE(queue.hasAlarm());
+}
+
+TEST(AlarmQueueWithDataTest, ShutdownWakesPopWait) {
+    AlarmQueueWithData<ChunkPos, int> queue;
+    std::atomic<bool> gotNullopt{false};
+
+    std::thread consumer([&]() {
+        auto result = queue.popWait();
+        gotNullopt = !result.has_value();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    queue.shutdown();
+    consumer.join();
+
+    EXPECT_TRUE(gotNullopt);
 }

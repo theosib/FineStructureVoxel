@@ -758,4 +758,159 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     return aoValues;
 }
 
+// ============================================================================
+// LOD Mesh Generation
+// ============================================================================
+
+void MeshBuilder::addScaledFace(
+    MeshData& mesh,
+    const glm::vec3& blockPos,
+    Face face,
+    float blockScale,
+    const glm::vec4& uvBounds,
+    const std::array<float, 4>& aoValues
+) {
+    const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
+    uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+
+    // Extract UV bounds
+    float minU = uvBounds.x;
+    float minV = uvBounds.y;
+    float maxU = uvBounds.z;
+    float maxV = uvBounds.w;
+    float tileWidth = maxU - minU;
+    float tileHeight = maxV - minV;
+
+    // Add 4 vertices for the face, scaled by blockScale
+    for (int i = 0; i < 4; ++i) {
+        ChunkVertex vertex;
+        // Scale the face positions by blockScale
+        vertex.position = blockPos + faceData.positions[i] * blockScale;
+        vertex.normal = faceData.normal;
+
+        // UV coordinates tile across the scaled block
+        // A 2x2x2 LOD block should tile the texture 2x2 times
+        vertex.texCoord = glm::vec2(
+            minU + faceData.uvOffsets[i].x * blockScale * tileWidth,
+            minV + faceData.uvOffsets[i].y * blockScale * tileHeight
+        );
+
+        // Pass tile bounds for shader-based wrapping
+        vertex.tileBounds = uvBounds;
+
+        vertex.ao = aoValues[i];
+        mesh.vertices.push_back(vertex);
+    }
+
+    // Add 6 indices for 2 triangles
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 1);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 3);
+}
+
+MeshData MeshBuilder::buildLODMesh(
+    const LODSubChunk& lodSubChunk,
+    ChunkPos chunkPos,
+    const BlockTextureProvider& textureProvider
+) {
+    // Simple version without neighbor culling - all non-air faces are rendered
+    BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
+    return buildLODMesh(lodSubChunk, chunkPos, alwaysTransparent, textureProvider);
+}
+
+MeshData MeshBuilder::buildLODMesh(
+    const LODSubChunk& lodSubChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& neighborProvider,
+    const BlockTextureProvider& textureProvider
+) {
+    MeshData mesh;
+
+    if (lodSubChunk.isEmpty()) {
+        return mesh;
+    }
+
+    int resolution = lodSubChunk.resolution();
+    int grouping = lodSubChunk.grouping();
+    float blockScale = static_cast<float>(grouping);
+
+    // Reserve space based on expected geometry
+    // Worst case: each LOD cell has 6 faces * 4 vertices
+    mesh.reserve(resolution * resolution * resolution * 6 * 4,
+                 resolution * resolution * resolution * 6 * 6);
+
+    // Default AO values (no AO calculation for LOD - too expensive and not very visible)
+    std::array<float, 4> defaultAO = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    // Iterate over all LOD cells
+    for (int ly = 0; ly < resolution; ++ly) {
+        for (int lz = 0; lz < resolution; ++lz) {
+            for (int lx = 0; lx < resolution; ++lx) {
+                BlockTypeId blockType = lodSubChunk.getBlock(lx, ly, lz);
+                if (blockType == AIR_BLOCK_TYPE) {
+                    continue;
+                }
+
+                // Calculate world block position for the LOD cell corner
+                // LOD cell (lx, ly, lz) at grouping G corresponds to world blocks:
+                // [lx*G, ly*G, lz*G] to [(lx+1)*G-1, (ly+1)*G-1, (lz+1)*G-1]
+                float worldX = static_cast<float>(chunkPos.x * 16 + lx * grouping);
+                float worldY = static_cast<float>(chunkPos.y * 16 + ly * grouping);
+                float worldZ = static_cast<float>(chunkPos.z * 16 + lz * grouping);
+
+                // Convert to local position within subchunk (0-16 range)
+                float localX = static_cast<float>(lx * grouping);
+                float localY = static_cast<float>(ly * grouping);
+                float localZ = static_cast<float>(lz * grouping);
+                glm::vec3 localPos(localX, localY, localZ);
+
+                // Check each face
+                for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
+                    Face face = static_cast<Face>(faceIdx);
+
+                    // Check if neighbor is solid (in LOD space)
+                    int nx = lx + (faceIdx == 1 ? 1 : (faceIdx == 0 ? -1 : 0));
+                    int ny = ly + (faceIdx == 3 ? 1 : (faceIdx == 2 ? -1 : 0));
+                    int nz = lz + (faceIdx == 5 ? 1 : (faceIdx == 4 ? -1 : 0));
+
+                    bool neighborOpaque = false;
+
+                    // Check if neighbor is within this LOD subchunk
+                    if (nx >= 0 && nx < resolution &&
+                        ny >= 0 && ny < resolution &&
+                        nz >= 0 && nz < resolution) {
+                        // Internal neighbor - check LOD data
+                        neighborOpaque = (lodSubChunk.getBlock(nx, ny, nz) != AIR_BLOCK_TYPE);
+                    } else {
+                        // External neighbor - use the provided neighbor provider
+                        // Calculate the world position of the neighbor block
+                        // We check the world block adjacent to the LOD cell face
+                        BlockPos neighborWorldPos;
+                        auto normal = faceNormal(face);
+                        neighborWorldPos.x = static_cast<int32_t>(worldX) + normal[0] * grouping;
+                        neighborWorldPos.y = static_cast<int32_t>(worldY) + normal[1] * grouping;
+                        neighborWorldPos.z = static_cast<int32_t>(worldZ) + normal[2] * grouping;
+                        neighborOpaque = neighborProvider(neighborWorldPos);
+                    }
+
+                    if (neighborOpaque && !disableFaceCulling_) {
+                        continue;  // Face is hidden
+                    }
+
+                    // Get texture UVs for this face
+                    glm::vec4 uvBounds = textureProvider(blockType, face);
+
+                    // Add the scaled face
+                    addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO);
+                }
+            }
+        }
+    }
+
+    return mesh;
+}
+
 }  // namespace finevox

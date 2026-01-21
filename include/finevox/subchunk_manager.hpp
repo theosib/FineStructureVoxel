@@ -138,6 +138,13 @@ public:
     using EvictionCallback = std::function<void(std::unique_ptr<ChunkColumn>)>;
     void setEvictionCallback(EvictionCallback callback);
 
+    // Callback for when a new column becomes available (added or loaded)
+    // Called with the column position after it's added to the manager.
+    // The callback is invoked under the manager's lock - keep it fast!
+    // Use this to notify the graphics system about newly available chunks.
+    using ChunkLoadCallback = std::function<void(ColumnPos pos)>;
+    void setChunkLoadCallback(ChunkLoadCallback callback);
+
 private:
     mutable std::shared_mutex mutex_;
 
@@ -159,6 +166,9 @@ private:
 
     // Eviction callback
     EvictionCallback evictionCallback_;
+
+    // Chunk load callback (notifies when new chunks become available)
+    ChunkLoadCallback chunkLoadCallback_;
 
     // IOManager for persistence (optional, not owned)
     IOManager* ioManager_ = nullptr;

@@ -52,6 +52,7 @@ add_library(finevox STATIC
     src/config_parser.cpp
     src/config_file.cpp
     src/mesh_worker_pool.cpp
+    src/lod.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -221,6 +222,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_config_file.cpp
         tests/test_blocking_queue.cpp
         tests/test_mesh_worker_pool.cpp
+        tests/test_lod.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

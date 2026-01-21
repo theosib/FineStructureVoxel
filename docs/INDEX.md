@@ -40,6 +40,7 @@
 |----------|--------------|
 | [06 - Rendering System](06-rendering.md) | Mesh generation, view-relative rendering, shaders |
 | [07 - Level of Detail](07-lod.md) | LOD levels, lazy updates, buffer zones |
+| [22 - Phase 6 LOD Design](22-phase6-lod-design.md) | POP buffers, octree downsampling, boundary stitching |
 | [09 - Lighting System](09-lighting.md) | Block light, sky light, ambient occlusion |
 
 ### Physics & Interaction
@@ -50,6 +51,7 @@
 | [10 - Input and Player Control](10-input.md) | InputManager, PlayerController |
 | [19 - Block Models](19-block-models.md) | Hierarchical model format, render/collision/hit shapes, model inheritance |
 | [20 - Large World Coordinates](20-large-world-coordinates.md) | View-relative rendering, double-precision camera, precision at large distances |
+| [21 - Clipboard and Schematic](21-clipboard-schematic.md) | BlockSnapshot, Schematic, copy/paste, CBOR serialization, ClipboardManager |
 
 ### Persistence & Scripting
 
@@ -125,6 +127,12 @@
 | FineStructureVK overlap audit | [16](16-finestructurevk-critique.md), [AI-NOTES.md](AI-NOTES.md) |
 | VK-independent phases | [17](17-implementation-phases.md) Phases 0-3 |
 | VK-dependent phases | [17](17-implementation-phases.md) Phases 4-8 |
+| Clipboard/schematic system | [21](21-clipboard-schematic.md) |
+| LOD POP buffers | [22](22-phase6-lod-design.md) §2 |
+| LOD octree downsampling | [22](22-phase6-lod-design.md) §3 |
+| LOD boundary stitching | [22](22-phase6-lod-design.md) §4 |
+| BlockSnapshot format | [21](21-clipboard-schematic.md) §21.3 |
+| Schematic serialization | [21](21-clipboard-schematic.md) §21.6 |
 
 ---
 

@@ -352,8 +352,15 @@
 - **Version tracking**: Atomic `blockVersion_` counter enables lock-free staleness detection
 
 ### 6.6 GPU Memory Management
-- [ ] Lazy unloading of meshes for chunks outside view distance
-- [ ] Memory budget enforcement (unload furthest chunks when over budget)
+- [x] `SubChunkView::gpuMemoryBytes()` tracks allocated GPU memory per mesh
+- [x] `WorldRendererConfig` GPU memory settings:
+  - `gpuMemoryBudget` - Target GPU memory limit (default 512MB)
+  - `unloadDistanceMultiplier` - Hysteresis for unload distance (default 1.2x)
+  - `maxUnloadsPerFrame` - Limit unloads to avoid GPU stalls (default 16)
+- [x] `WorldRenderer::gpuMemoryUsed()` - Sum of all loaded mesh memory
+- [x] `WorldRenderer::unloadDistantChunks()` - Hysteresis-based unloading with per-frame limit
+- [x] `WorldRenderer::enforceMemoryBudget()` - Unload furthest out-of-view chunks when over budget
+- [x] `WorldRenderer::performCleanup()` - Combined cleanup (distance + budget enforcement)
 
 ### 6.7 Distance Configuration
 - [ ] `DistanceConfig` struct for all distance thresholds
@@ -373,7 +380,7 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 - [x] AlarmQueue alarm-based wakeup and FIFO ordering
 - [x] SubChunkManager ChunkLoadCallback fires on add() and requestLoad()
 - [ ] Runtime LOD transitions at boundaries (visual testing)
-- [ ] Memory usage stays bounded at large view distances
+- [x] Memory usage bounded via hysteresis unloading and budget enforcement
 
 ---
 

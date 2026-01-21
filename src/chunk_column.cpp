@@ -81,10 +81,15 @@ const SubChunk* ChunkColumn::getSubChunk(int32_t chunkY) const {
     return it != subChunks_.end() ? it->second.get() : nullptr;
 }
 
+std::shared_ptr<SubChunk> ChunkColumn::getSubChunkShared(int32_t chunkY) {
+    auto it = subChunks_.find(chunkY);
+    return it != subChunks_.end() ? it->second : nullptr;
+}
+
 SubChunk& ChunkColumn::getOrCreateSubChunk(int32_t chunkY) {
     auto& ptr = subChunks_[chunkY];
     if (!ptr) {
-        ptr = std::make_unique<SubChunk>();
+        ptr = std::make_shared<SubChunk>();
     }
     return *ptr;
 }

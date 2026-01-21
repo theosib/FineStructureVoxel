@@ -67,6 +67,10 @@ public:
     [[nodiscard]] SubChunk* getSubChunk(ChunkPos pos);
     [[nodiscard]] const SubChunk* getSubChunk(ChunkPos pos) const;
 
+    // Get shared pointer to subchunk (for mesh cache weak references)
+    // Returns empty shared_ptr if column or subchunk doesn't exist
+    [[nodiscard]] std::shared_ptr<SubChunk> getSubChunkShared(ChunkPos pos);
+
     // Get all subchunk positions that have data
     [[nodiscard]] std::vector<ChunkPos> getAllSubChunkPositions() const;
 

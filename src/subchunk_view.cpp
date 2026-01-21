@@ -54,7 +54,15 @@ void SubChunkView::upload(
     mesh_ = builder.build(commandPool);
     indexCount_ = static_cast<uint32_t>(meshData.indices.size());
     vertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
-    dirty_ = false;
+
+    // Calculate GPU memory usage
+    // Vertex buffer: vertices * sizeof(ChunkVertex) * capacityMultiplier
+    // Index buffer: indices * indexSize * capacityMultiplier
+    size_t indexSize = use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t);
+    gpuMemoryBytes_ = static_cast<size_t>(
+        (meshData.vertices.size() * sizeof(ChunkVertex) +
+         meshData.indices.size() * indexSize) * capacityMultiplier
+    );
 }
 
 bool SubChunkView::canUpdateInPlace(const MeshData& meshData) const {
@@ -97,13 +105,14 @@ void SubChunkView::update(finevk::CommandPool& commandPool, const MeshData& mesh
 
     indexCount_ = static_cast<uint32_t>(meshData.indices.size());
     vertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
-    dirty_ = false;
+    // Note: gpuMemoryBytes_ stays the same since capacity doesn't change on in-place update
 }
 
 void SubChunkView::release() {
     mesh_.reset();
     indexCount_ = 0;
     vertexCount_ = 0;
+    gpuMemoryBytes_ = 0;
 }
 
 void SubChunkView::bind(finevk::CommandBuffer& cmd) const {

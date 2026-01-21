@@ -140,6 +140,17 @@ const SubChunk* World::getSubChunk(ChunkPos pos) const {
     return it->second->getSubChunk(pos.y);
 }
 
+std::shared_ptr<SubChunk> World::getSubChunkShared(ChunkPos pos) {
+    ColumnPos colPos = ColumnPos::fromChunk(pos);
+
+    std::shared_lock lock(columnMutex_);
+    auto it = columns_.find(colPos.pack());
+    if (it == columns_.end()) {
+        return nullptr;
+    }
+    return it->second->getSubChunkShared(pos.y);
+}
+
 std::vector<ChunkPos> World::getAllSubChunkPositions() const {
     std::vector<ChunkPos> positions;
 

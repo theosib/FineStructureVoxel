@@ -40,6 +40,10 @@ public:
     [[nodiscard]] SubChunk* getSubChunk(int32_t chunkY);
     [[nodiscard]] const SubChunk* getSubChunk(int32_t chunkY) const;
 
+    // Get shared pointer to subchunk (for mesh cache weak references)
+    // Returns empty shared_ptr if subchunk doesn't exist
+    [[nodiscard]] std::shared_ptr<SubChunk> getSubChunkShared(int32_t chunkY);
+
     // Get or create subchunk at the given chunk Y coordinate
     [[nodiscard]] SubChunk& getOrCreateSubChunk(int32_t chunkY);
 
@@ -68,7 +72,7 @@ public:
 
 private:
     ColumnPos pos_;
-    std::unordered_map<int32_t, std::unique_ptr<SubChunk>> subChunks_;
+    std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
 
     // Convert block Y to subchunk Y (handles negative correctly)
     [[nodiscard]] static int32_t blockYToChunkY(int32_t blockY);

@@ -441,15 +441,97 @@ void WorldRenderer::unloadChunk(ChunkPos pos) {
     views_.erase(pos);
 }
 
-void WorldRenderer::unloadDistantChunks() {
+uint32_t WorldRenderer::unloadDistantChunks() {
+    // Use hysteresis: unload distance is viewDistance * unloadDistanceMultiplier
+    // This prevents thrashing when camera is near the view distance boundary
+    float unloadDistChunks = (config_.viewDistance * config_.unloadDistanceMultiplier) / 16.0f;
+
+    uint32_t unloaded = 0;
     auto it = views_.begin();
     while (it != views_.end()) {
-        if (!isInViewDistance(it->first)) {
+        if (unloaded >= config_.maxUnloadsPerFrame) break;
+
+        // Calculate distance to camera in chunk coordinates
+        glm::vec3 chunkCenter(it->first.x + 0.5f, it->first.y + 0.5f, it->first.z + 0.5f);
+        float dist = glm::length(chunkCenter - cameraChunkPos_);
+
+        if (dist > unloadDistChunks) {
             it = views_.erase(it);
+            ++unloaded;
         } else {
             ++it;
         }
     }
+
+    lastUnloadedCount_ = unloaded;
+    return unloaded;
+}
+
+size_t WorldRenderer::gpuMemoryUsed() const {
+    size_t total = 0;
+    for (const auto& [pos, view] : views_) {
+        total += view->gpuMemoryBytes();
+    }
+    return total;
+}
+
+uint32_t WorldRenderer::enforceMemoryBudget() {
+    size_t currentUsage = gpuMemoryUsed();
+    if (currentUsage <= config_.gpuMemoryBudget) {
+        return 0;  // Within budget, nothing to do
+    }
+
+    // Collect chunks with their distances, sorted by distance (furthest first)
+    struct ChunkDistance {
+        ChunkPos pos;
+        float distance;
+        size_t memoryBytes;
+    };
+    std::vector<ChunkDistance> chunks;
+    chunks.reserve(views_.size());
+
+    float viewDistChunks = config_.viewDistance / 16.0f;
+
+    for (const auto& [pos, view] : views_) {
+        glm::vec3 chunkCenter(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
+        float dist = glm::length(chunkCenter - cameraChunkPos_);
+
+        // Only consider chunks beyond view distance for unloading
+        // (won't unload visible chunks even if over budget)
+        if (dist > viewDistChunks) {
+            chunks.push_back({pos, dist, view->gpuMemoryBytes()});
+        }
+    }
+
+    // Sort by distance descending (furthest first)
+    std::sort(chunks.begin(), chunks.end(),
+        [](const ChunkDistance& a, const ChunkDistance& b) {
+            return a.distance > b.distance;
+        });
+
+    // Unload until under budget or no more chunks can be unloaded
+    uint32_t unloaded = 0;
+    for (const auto& chunk : chunks) {
+        if (currentUsage <= config_.gpuMemoryBudget) break;
+        if (unloaded >= config_.maxUnloadsPerFrame) break;
+
+        views_.erase(chunk.pos);
+        currentUsage -= chunk.memoryBytes;
+        ++unloaded;
+    }
+
+    return unloaded;
+}
+
+void WorldRenderer::performCleanup() {
+    // First unload distant chunks (with hysteresis)
+    uint32_t distantUnloaded = unloadDistantChunks();
+
+    // Then enforce memory budget if still over
+    uint32_t budgetUnloaded = enforceMemoryBudget();
+
+    // Update combined statistic
+    lastUnloadedCount_ = distantUnloaded + budgetUnloaded;
 }
 
 void WorldRenderer::unloadAll() {

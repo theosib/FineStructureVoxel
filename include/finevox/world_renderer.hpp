@@ -41,6 +41,11 @@ struct WorldRendererConfig {
     uint32_t maxVisibleChunks = 4096;   // Maximum subchunks to render per frame
     float meshCapacityMultiplier = 1.5f; // Extra GPU buffer capacity for mesh updates
 
+    // GPU Memory Management
+    size_t gpuMemoryBudget = 512 * 1024 * 1024;  // Target GPU memory budget (default 512MB)
+    float unloadDistanceMultiplier = 1.2f;       // Unload chunks beyond viewDistance * this (hysteresis)
+    uint32_t maxUnloadsPerFrame = 16;            // Limit unloads per frame to avoid stalls
+
     // Debug: offset the render camera backwards from the cull camera
     // This reveals frustum culling edges for testing purposes.
     // When enabled, culling uses the real camera position, but rendering
@@ -233,6 +238,18 @@ public:
     /// Get total triangle count of rendered meshes
     [[nodiscard]] uint32_t renderedTriangleCount() const { return lastRenderedTriangles_; }
 
+    /// Get total GPU memory used by all loaded meshes (bytes)
+    [[nodiscard]] size_t gpuMemoryUsed() const;
+
+    /// Get configured GPU memory budget (bytes)
+    [[nodiscard]] size_t gpuMemoryBudget() const { return config_.gpuMemoryBudget; }
+
+    /// Set GPU memory budget (bytes)
+    void setGpuMemoryBudget(size_t bytes) { config_.gpuMemoryBudget = bytes; }
+
+    /// Get number of chunks unloaded last frame
+    [[nodiscard]] uint32_t unloadedChunkCount() const { return lastUnloadedCount_; }
+
     // ========================================================================
     // Debug
     // ========================================================================
@@ -339,9 +356,34 @@ public:
     void unloadChunk(ChunkPos pos);
 
     /**
-     * @brief Unload meshes for subchunks outside view distance
+     * @brief Unload meshes for subchunks outside unload distance
+     *
+     * Uses hysteresis: unload distance = viewDistance * unloadDistanceMultiplier
+     * This prevents thrashing when camera is near the view distance boundary.
+     * Limited to maxUnloadsPerFrame to avoid GPU stalls.
+     *
+     * @return Number of chunks unloaded
      */
-    void unloadDistantChunks();
+    uint32_t unloadDistantChunks();
+
+    /**
+     * @brief Enforce GPU memory budget by unloading furthest chunks
+     *
+     * If GPU memory usage exceeds budget, unloads chunks starting from
+     * the furthest from camera until under budget or no more can be unloaded.
+     * Only unloads chunks beyond view distance (won't unload visible chunks).
+     *
+     * @return Number of chunks unloaded
+     */
+    uint32_t enforceMemoryBudget();
+
+    /**
+     * @brief Perform all cleanup tasks (call once per frame after render)
+     *
+     * Combines unloadDistantChunks() and enforceMemoryBudget().
+     * Safe to call every frame - uses limits to avoid stalls.
+     */
+    void performCleanup();
 
     /**
      * @brief Unload all meshes
@@ -419,6 +461,7 @@ private:
     uint32_t lastCulledCount_ = 0;
     uint32_t lastRenderedVertices_ = 0;
     uint32_t lastRenderedTriangles_ = 0;
+    uint32_t lastUnloadedCount_ = 0;
 
     // State
     bool initialized_ = false;

@@ -192,6 +192,10 @@ public:
     /// Get the number of triangles
     [[nodiscard]] uint32_t triangleCount() const { return indexCount_ / 3; }
 
+    /// Get allocated GPU memory in bytes (vertex buffer + index buffer)
+    /// Returns 0 if no GPU resources allocated
+    [[nodiscard]] size_t gpuMemoryBytes() const { return gpuMemoryBytes_; }
+
     // ========================================================================
     // Rendering
     // ========================================================================
@@ -282,7 +286,8 @@ private:
     finevk::RawMeshPtr mesh_;
     uint32_t indexCount_ = 0;
     uint32_t vertexCount_ = 0;
-    uint64_t lastBuiltVersion_ = 0;  // 0 means never built
+    size_t gpuMemoryBytes_ = 0;       // Allocated GPU memory (vertex + index buffers)
+    uint64_t lastBuiltVersion_ = 0;   // 0 means never built
     LODLevel lastBuiltLOD_ = LODLevel::LOD0;  // LOD level of current mesh
 };
 

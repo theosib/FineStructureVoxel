@@ -49,6 +49,10 @@ add_library(finevox STATIC
     src/physics.cpp
     src/mesh.cpp
     src/block_type.cpp
+    src/block_handler.cpp
+    src/module.cpp
+    src/entity_registry.cpp
+    src/item_registry.cpp
     src/config_parser.cpp
     src/config_file.cpp
     src/mesh_worker_pool.cpp
@@ -223,6 +227,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_blocking_queue.cpp
         tests/test_mesh_worker_pool.cpp
         tests/test_lod.cpp
+        tests/test_module.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

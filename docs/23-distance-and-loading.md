@@ -194,7 +194,7 @@ world/
 {
   "version": 1,
   "columns": [
-    {"pos": [x, z], "reasons": ["spawn", "chunk_loader:minecraft:chunk_loader"]},
+    {"pos": [x, z], "reasons": ["spawn", "chunk_loader:blockgame:chunk_loader"]},
     {"pos": [x2, z2], "reasons": ["chunk_loader:mymod:advanced_loader"]}
   ]
 }

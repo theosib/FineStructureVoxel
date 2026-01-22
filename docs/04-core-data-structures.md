@@ -89,7 +89,7 @@ Before diving into the data structures, here's the strategy for pointer types:
 
 ## 4.3 String Interning for Block Type Names
 
-Block types are identified by name (e.g., `"minecraft:stone"`), but comparing strings everywhere is expensive. We use **string interning** to get the best of both worlds:
+Block types are identified by name (e.g., `"blockgame:stone"`), but comparing strings everywhere is expensive. We use **string interning** to get the best of both worlds:
 
 ```cpp
 namespace finevox {

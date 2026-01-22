@@ -19,7 +19,7 @@ constexpr InternedId INVALID_INTERNED_ID = 0;
 //
 // Usage:
 //   auto& interner = StringInterner::global();
-//   InternedId id = interner.intern("minecraft:stone");
+//   InternedId id = interner.intern("blockgame:stone");
 //   std::string_view name = interner.lookup(id);
 //
 class StringInterner {

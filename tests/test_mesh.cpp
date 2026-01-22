@@ -143,7 +143,7 @@ TEST_F(MeshTest, EmptySubchunkGeneratesEmptyMesh) {
 
 TEST_F(MeshTest, SingleBlockGenerates6Faces) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);  // Block in center
 
     ChunkPos pos{0, 0, 0};
@@ -159,7 +159,7 @@ TEST_F(MeshTest, SingleBlockGenerates6Faces) {
 
 TEST_F(MeshTest, SingleBlockAllNeighborsOpaque) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -176,7 +176,7 @@ TEST_F(MeshTest, SingleBlockAllNeighborsOpaque) {
 
 TEST_F(MeshTest, TwoAdjacentBlocksCullSharedFace) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
     subChunk.setBlock(9, 8, 8, stone);  // +X neighbor
 
@@ -211,7 +211,7 @@ TEST_F(MeshTest, TwoAdjacentBlocksCullSharedFace) {
 
 TEST_F(MeshTest, VertexPositionsCorrectForBlockAtOrigin) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(0, 0, 0, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -231,7 +231,7 @@ TEST_F(MeshTest, VertexPositionsCorrectForBlockAtOrigin) {
 
 TEST_F(MeshTest, VertexPositionsCorrectForBlockAtOffset) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(5, 7, 9, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -255,7 +255,7 @@ TEST_F(MeshTest, VertexPositionsCorrectForBlockAtOffset) {
 
 TEST_F(MeshTest, NormalsAreUnitVectors) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -270,7 +270,7 @@ TEST_F(MeshTest, NormalsAreUnitVectors) {
 
 TEST_F(MeshTest, NormalsPointOutward) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -304,7 +304,7 @@ TEST_F(MeshTest, NormalsPointOutward) {
 
 TEST_F(MeshTest, TextureCoordsInBounds) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -321,7 +321,7 @@ TEST_F(MeshTest, TextureCoordsInBounds) {
 
 TEST_F(MeshTest, TextureProviderValuesUsed) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -348,7 +348,7 @@ TEST_F(MeshTest, TextureProviderValuesUsed) {
 
 TEST_F(MeshTest, AOValuesWithNoOccluders) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -363,7 +363,7 @@ TEST_F(MeshTest, AOValuesWithNoOccluders) {
 
 TEST_F(MeshTest, AODisabled) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -383,7 +383,7 @@ TEST_F(MeshTest, AODisabled) {
 
 TEST_F(MeshTest, AOValuesWithOccluders) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Place a block at (8,8,8) with occluders at corners
     // AO checks blocks around each face, not just adjacent blocks
@@ -434,7 +434,7 @@ TEST_F(MeshTest, AOValuesWithOccluders) {
 
 TEST_F(MeshTest, IndicesAreValid) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Add several blocks
     subChunk.setBlock(8, 8, 8, stone);
@@ -455,7 +455,7 @@ TEST_F(MeshTest, IndicesAreValid) {
 
 TEST_F(MeshTest, IndicesFormValidTriangles) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(8, 8, 8, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -474,7 +474,7 @@ TEST_F(MeshTest, WorldOverloadWorks) {
     // Create a simple world with one subchunk
     World world;
 
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     world.setBlock(BlockPos(8, 8, 8), stone);
 
     // Get the subchunk
@@ -517,7 +517,7 @@ TEST(MeshUtilityTest, FaceOffset) {
 
 TEST_F(MeshTest, FullSubchunkMeshing) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill entire subchunk with blocks
     for (int y = 0; y < 16; ++y) {
@@ -557,7 +557,7 @@ TEST_F(MeshTest, FullSubchunkMeshing) {
 
 TEST_F(MeshTest, CheckerboardPattern) {
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Checkerboard pattern - maximum internal face exposure
     for (int y = 0; y < 16; ++y) {
@@ -618,7 +618,7 @@ protected:
 TEST_F(GreedyMeshTest, SingleBlockSameAsSimple) {
     // A single block should produce the same result with or without greedy meshing
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
     subChunk.setBlock(5, 5, 5, stone);
 
     ChunkPos pos{0, 0, 0};
@@ -633,7 +633,7 @@ TEST_F(GreedyMeshTest, SingleBlockSameAsSimple) {
 TEST_F(GreedyMeshTest, FullSubchunkReducesToSixFaces) {
     // A completely solid 16x16x16 subchunk should reduce to just 6 large quads
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     for (int y = 0; y < 16; ++y) {
         for (int z = 0; z < 16; ++z) {
@@ -669,8 +669,8 @@ TEST_F(GreedyMeshTest, FullSubchunkReducesToSixFaces) {
 TEST_F(GreedyMeshTest, TwoBlockTypesDontMerge) {
     // Adjacent blocks of different types should not be merged
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
-    BlockTypeId dirt = BlockTypeId::fromName("minecraft:dirt");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("blockgame:dirt");
 
     // Fill bottom half with stone, top half with dirt
     for (int y = 0; y < 8; ++y) {
@@ -716,7 +716,7 @@ TEST_F(GreedyMeshTest, TwoBlockTypesDontMerge) {
 TEST_F(GreedyMeshTest, ReducesVertexCount) {
     // Verify that greedy meshing produces fewer vertices than simple meshing
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Create a 4x4x4 solid cube
     for (int y = 0; y < 4; ++y) {
@@ -761,7 +761,7 @@ TEST_F(GreedyMeshTest, ReducesVertexCount) {
 TEST_F(GreedyMeshTest, ValidTriangles) {
     // Verify that greedy meshing produces valid triangles
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Create a 4x4x4 solid cube
     for (int y = 0; y < 4; ++y) {
@@ -813,7 +813,7 @@ TEST_F(GreedyMeshTest, TextureTilingWithBounds) {
     // Verify that greedy meshing tiles textures across merged faces
     // UVs extend beyond tile bounds, and tileBounds is set for shader-based wrapping
     SubChunk subChunk;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Create a 4x1x1 horizontal row of blocks (exposed from all sides)
     for (int x = 0; x < 4; ++x) {
@@ -881,9 +881,9 @@ protected:
     };
 
     // Define some block types for testing
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
-    BlockTypeId glass = BlockTypeId::fromName("minecraft:glass");
-    BlockTypeId water = BlockTypeId::fromName("minecraft:water");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
+    BlockTypeId glass = BlockTypeId::fromName("blockgame:glass");
+    BlockTypeId water = BlockTypeId::fromName("blockgame:water");
 
     // Transparent provider: glass and water are transparent
     BlockTransparentProvider transparentProvider = [this](BlockTypeId type) {

@@ -363,9 +363,19 @@
 - [x] `WorldRenderer::performCleanup()` - Combined cleanup (distance + budget enforcement)
 
 ### 6.7 Distance Configuration
-- [ ] `DistanceConfig` struct for all distance thresholds
-- [ ] Integrate render distance into WorldRenderer
-- [ ] Add fog configuration and shader support
+- [x] `DistanceConfig` struct in `distances.hpp` for all distance thresholds:
+  - `RenderDistanceConfig` - chunk and entity render distances
+  - `FogConfig` - fog start/end distances, color, dynamic color flag
+  - `LoadingDistanceConfig` - chunk loading distances with hysteresis
+  - `ProcessingDistanceConfig` - block update, entity, simulation distances
+- [x] `FogConfig` integrated into `WorldRendererConfig`
+- [x] Fog configuration API in WorldRenderer:
+  - `fogConfig()`, `setFogEnabled()`, `setFogDistances()`, `setFogColor()`
+  - `setFogDynamicColor()`, `getFogFactor()`
+- [x] Fog shader support:
+  - Vertex shader passes `fragDistance` to fragment shader
+  - Push constants include fog parameters (start, end, color)
+  - Fragment shader applies linear fog blend based on distance
 - [ ] Add entity render distance (when entity system exists)
 
 See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
@@ -384,29 +394,63 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 
 ---
 
-## Phase 7: Module System
+## Phase 7: Module System ✓
 
 *Game-agnostic plugin architecture.*
 
 ### 7.1 Module Loader
-- [ ] `ModuleLoader` - Load .so/.dll shared objects
-- [ ] `GameModule` interface (name, version, lifecycle)
-- [ ] Entry point: `extern "C" GameModule* createModule()`
+- [x] `ModuleLoader` - Load .so/.dll shared objects via dlopen/LoadLibrary
+- [x] `GameModule` interface (name, version, dependencies, lifecycle)
+- [x] Entry point: `extern "C" GameModule* finevox_create_module()`
+- [x] `FINEVOX_MODULE(ModuleClass)` macro for entry point definition
+- [x] Dependency resolution with topological sort (Kahn's algorithm)
+- [x] Module initialization order based on dependencies
 
 ### 7.2 Registries
-- [ ] `BlockRegistry` - Block type registration
-- [ ] `EntityRegistry` - Entity type registration
-- [ ] `ItemRegistry` - Item registration
-- [ ] `CommandRegistry` - Custom command registration
+- [x] `BlockRegistry` - Block type registration with handler support
+  - Block types (collision shapes, properties)
+  - Block handlers (stateless behavior)
+  - Handler factories for lazy loading
+  - Namespace utilities (`namespace:localname` format validation)
+- [x] `EntityRegistry` - Entity type registration (stub)
+- [x] `ItemRegistry` - Item registration (stub)
+- [ ] `CommandRegistry` - Custom command registration (future)
 
-### 7.3 Core Module
-- [ ] Core game content as a module (not engine built-in)
-- [ ] Demonstrates module API usage
+### 7.3 Block Handler System
+- [x] `BlockHandler` - Stateless block behavior interface
+  - Lifecycle: onPlace, onBreak
+  - Ticks: onTick (scheduled, repeating, random)
+  - Events: onNeighborChanged, onUse, onHit
+  - Visual: onRepaint
+- [x] `BlockContext` - Ephemeral context passed to handlers
+  - Access to world, subchunk, block position
+  - Rotation get/set (storage deferred to Phase 9)
+  - Extra data access (storage deferred to Phase 9)
+  - Tick scheduling (deferred to Phase 9)
+  - Neighbor notification
+
+### 7.4 Module Context
+- [x] `ModuleRegistry` - Context provided during registration
+  - Namespace-aware content registration
+  - `qualifiedName()` auto-prefixes with module namespace
+  - Access to BlockRegistry, EntityRegistry, ItemRegistry
+  - Logging utilities (log, warn, error)
+
+### 7.5 Core Module
+- [ ] Core game content as a module (not engine built-in) - deferred
+- [ ] Demonstrates module API usage - see test_module.cpp for examples
 
 ### Testing
-- [ ] Load test module, register content
-- [ ] Module lifecycle (init, shutdown)
-- [ ] Core module provides basic blocks
+- [x] Module registration and lookup
+- [x] Duplicate module rejection
+- [x] Lifecycle methods called in order
+- [x] Dependency resolution (A→B→C chain)
+- [x] Missing dependency detection
+- [x] Namespace validation (valid/invalid formats)
+- [x] Block handler registration and retrieval
+- [x] Handler factory lazy loading
+- [x] Handler lookup by BlockTypeId
+- [x] Entity/Item registry stubs
 
 ---
 
@@ -506,6 +550,15 @@ These are documented for completeness but not in initial implementation scope:
 - `ClipboardManager` for runtime copy/paste
 - Transformation utilities (rotate, mirror, crop)
 - See [21 - Clipboard and Schematic System](21-clipboard-schematic.md) for full design
+
+### Fluid System
+Engine should provide helper infrastructure for fluid simulation:
+- **Fluid properties**: Spread rate, slope/viscosity, transparency, light absorption
+- **Source block mechanics**: Game-level mechanic where two adjacent source blocks flowing into a gap create a new source block (engine provides helper, game defines policy)
+- **Visual aspects**: Dynamic meshes for fluid surfaces, translucency sorting
+- **Light interaction**: Light levels through translucent fluids, caustics (optional)
+- **Physics**: Buoyancy, flow direction affecting entities
+- **Integration**: Game modules register fluid types with properties, engine handles propagation scheduling
 
 ---
 

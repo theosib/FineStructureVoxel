@@ -9,8 +9,13 @@
 #include <shared_mutex>
 #include <optional>
 #include <array>
+#include <memory>
+#include <functional>
 
 namespace finevox {
+
+// Forward declaration
+class BlockHandler;
 
 /**
  * @brief Properties for a block type
@@ -104,16 +109,31 @@ private:
 };
 
 /**
- * @brief Registry mapping BlockTypeId to BlockType data
+ * @brief Registry mapping BlockTypeId to BlockType data and handlers
  *
- * Thread-safe registry for block type definitions.
- * Block types should be registered during game initialization,
+ * Thread-safe registry for block type definitions and behavior handlers.
+ * Block types should be registered during game initialization (module loading),
  * then looked up during gameplay.
+ *
+ * The registry supports:
+ * - BlockType: Static properties (collision, opacity, hardness)
+ * - BlockHandler: Dynamic behavior (events, ticks, interactions)
+ * - Handler factories: For lazy loading of handler code
+ *
+ * Namespace convention: Block names use "namespace:localname" format.
+ * Example: "blockgame:stone", "mymod:custom_ore"
  */
 class BlockRegistry {
 public:
+    /// Factory function type for lazy handler creation
+    using HandlerFactory = std::function<std::unique_ptr<BlockHandler>()>;
+
     /// Get the global registry instance (singleton)
     static BlockRegistry& global();
+
+    // ========================================================================
+    // Block Type Registration
+    // ========================================================================
 
     /// Register a block type
     /// Returns false if ID is already registered (won't overwrite)
@@ -134,6 +154,9 @@ public:
     /// Check if a type is registered
     [[nodiscard]] bool hasType(BlockTypeId id) const;
 
+    /// Check if a type is registered by name
+    [[nodiscard]] bool hasType(std::string_view name) const;
+
     /// Get number of registered types
     [[nodiscard]] size_t size() const;
 
@@ -143,6 +166,52 @@ public:
     /// Get the air block type (no collision, no hit)
     [[nodiscard]] static const BlockType& airType();
 
+    // ========================================================================
+    // Block Handler Registration
+    // ========================================================================
+
+    /// Register a block handler directly
+    /// Takes ownership of the handler
+    /// Returns false if a handler is already registered for this name
+    bool registerHandler(std::string_view name, std::unique_ptr<BlockHandler> handler);
+
+    /// Register a handler factory for lazy loading
+    /// The factory is called the first time the handler is requested
+    /// Returns false if a handler or factory is already registered
+    bool registerHandlerFactory(std::string_view name, HandlerFactory factory);
+
+    /// Get handler for a block type (may trigger lazy loading)
+    /// Returns nullptr if no handler is registered
+    [[nodiscard]] BlockHandler* getHandler(BlockTypeId id);
+
+    /// Get handler by name (may trigger lazy loading)
+    /// Returns nullptr if no handler is registered
+    [[nodiscard]] BlockHandler* getHandler(std::string_view name);
+
+    /// Check if a handler is registered (or has a factory)
+    [[nodiscard]] bool hasHandler(BlockTypeId id) const;
+
+    /// Check if a handler is registered by name
+    [[nodiscard]] bool hasHandler(std::string_view name) const;
+
+    // ========================================================================
+    // Namespace Utilities
+    // ========================================================================
+
+    /// Check if a name has valid namespace format ("namespace:localname")
+    [[nodiscard]] static bool isValidNamespacedName(std::string_view name);
+
+    /// Get the namespace portion of a name
+    /// Returns empty string_view if name has no namespace
+    [[nodiscard]] static std::string_view getNamespace(std::string_view name);
+
+    /// Get the local name portion (after the colon)
+    /// Returns the full name if there's no namespace
+    [[nodiscard]] static std::string_view getLocalName(std::string_view name);
+
+    /// Build a fully-qualified name from namespace and local name
+    [[nodiscard]] static std::string makeQualifiedName(std::string_view ns, std::string_view localName);
+
     // Non-copyable singleton
     BlockRegistry(const BlockRegistry&) = delete;
     BlockRegistry& operator=(const BlockRegistry&) = delete;
@@ -150,8 +219,18 @@ public:
 private:
     BlockRegistry();
 
+    // Handler entry: either a loaded handler or a factory to create one
+    struct HandlerEntry {
+        std::unique_ptr<BlockHandler> handler;
+        HandlerFactory factory;  // Used if handler is null
+
+        bool hasHandler() const { return handler != nullptr; }
+        bool hasFactory() const { return factory != nullptr; }
+    };
+
     mutable std::shared_mutex mutex_;
     std::unordered_map<BlockTypeId, BlockType> types_;
+    std::unordered_map<std::string, HandlerEntry> handlers_;  // Keyed by name string
 };
 
 /**

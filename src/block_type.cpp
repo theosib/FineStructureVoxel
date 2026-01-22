@@ -1,4 +1,5 @@
 #include "finevox/block_type.hpp"
+#include "finevox/block_handler.hpp"
 #include "finevox/world.hpp"
 
 namespace finevox {
@@ -146,6 +147,14 @@ bool BlockRegistry::hasType(BlockTypeId id) const {
     return types_.find(id) != types_.end();
 }
 
+bool BlockRegistry::hasType(std::string_view name) const {
+    auto id = StringInterner::global().find(name);
+    if (!id.has_value()) {
+        return false;
+    }
+    return hasType(BlockTypeId(*id));
+}
+
 size_t BlockRegistry::size() const {
     std::shared_lock lock(mutex_);
     return types_.size();
@@ -171,6 +180,159 @@ const BlockType& BlockRegistry::airType() {
         return b;
     }();
     return airBlock;
+}
+
+// ============================================================================
+// Block Handler Registration
+// ============================================================================
+
+bool BlockRegistry::registerHandler(std::string_view name, std::unique_ptr<BlockHandler> handler) {
+    if (!handler) {
+        return false;
+    }
+
+    std::unique_lock lock(mutex_);
+
+    std::string nameStr(name);
+    auto it = handlers_.find(nameStr);
+    if (it != handlers_.end() && (it->second.hasHandler() || it->second.hasFactory())) {
+        return false;  // Already registered
+    }
+
+    handlers_[nameStr].handler = std::move(handler);
+    return true;
+}
+
+bool BlockRegistry::registerHandlerFactory(std::string_view name, HandlerFactory factory) {
+    if (!factory) {
+        return false;
+    }
+
+    std::unique_lock lock(mutex_);
+
+    std::string nameStr(name);
+    auto it = handlers_.find(nameStr);
+    if (it != handlers_.end() && (it->second.hasHandler() || it->second.hasFactory())) {
+        return false;  // Already registered
+    }
+
+    handlers_[nameStr].factory = std::move(factory);
+    return true;
+}
+
+BlockHandler* BlockRegistry::getHandler(BlockTypeId id) {
+    return getHandler(id.name());
+}
+
+BlockHandler* BlockRegistry::getHandler(std::string_view name) {
+    std::unique_lock lock(mutex_);
+
+    std::string nameStr(name);
+    auto it = handlers_.find(nameStr);
+    if (it == handlers_.end()) {
+        return nullptr;
+    }
+
+    // If we have a handler, return it
+    if (it->second.hasHandler()) {
+        return it->second.handler.get();
+    }
+
+    // If we have a factory, use it to create the handler (lazy loading)
+    if (it->second.hasFactory()) {
+        it->second.handler = it->second.factory();
+        it->second.factory = nullptr;  // Clear factory after use
+        return it->second.handler.get();
+    }
+
+    return nullptr;
+}
+
+bool BlockRegistry::hasHandler(BlockTypeId id) const {
+    return hasHandler(id.name());
+}
+
+bool BlockRegistry::hasHandler(std::string_view name) const {
+    std::shared_lock lock(mutex_);
+
+    auto it = handlers_.find(std::string(name));
+    if (it == handlers_.end()) {
+        return false;
+    }
+
+    return it->second.hasHandler() || it->second.hasFactory();
+}
+
+// ============================================================================
+// Namespace Utilities
+// ============================================================================
+
+bool BlockRegistry::isValidNamespacedName(std::string_view name) {
+    // Must contain exactly one colon
+    size_t colonPos = name.find(':');
+    if (colonPos == std::string_view::npos) {
+        return false;  // No colon
+    }
+    if (name.find(':', colonPos + 1) != std::string_view::npos) {
+        return false;  // Multiple colons
+    }
+
+    // Namespace must be non-empty
+    if (colonPos == 0) {
+        return false;
+    }
+
+    // Local name must be non-empty
+    if (colonPos == name.size() - 1) {
+        return false;
+    }
+
+    // Both parts should only contain alphanumeric and underscore
+    auto isValidChar = [](char c) {
+        return (c >= 'a' && c <= 'z') ||
+               (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') ||
+               c == '_';
+    };
+
+    for (size_t i = 0; i < colonPos; ++i) {
+        if (!isValidChar(name[i])) {
+            return false;
+        }
+    }
+
+    for (size_t i = colonPos + 1; i < name.size(); ++i) {
+        if (!isValidChar(name[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::string_view BlockRegistry::getNamespace(std::string_view name) {
+    size_t colonPos = name.find(':');
+    if (colonPos == std::string_view::npos) {
+        return {};
+    }
+    return name.substr(0, colonPos);
+}
+
+std::string_view BlockRegistry::getLocalName(std::string_view name) {
+    size_t colonPos = name.find(':');
+    if (colonPos == std::string_view::npos) {
+        return name;  // No namespace, entire thing is local name
+    }
+    return name.substr(colonPos + 1);
+}
+
+std::string BlockRegistry::makeQualifiedName(std::string_view ns, std::string_view localName) {
+    std::string result;
+    result.reserve(ns.size() + 1 + localName.size());
+    result.append(ns);
+    result.push_back(':');
+    result.append(localName);
+    return result;
 }
 
 // ============================================================================

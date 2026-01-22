@@ -576,7 +576,7 @@ TEST(DataContainer, CBORLargeArray) {
 TEST(DataContainer, CBORComplexStructure) {
     // Simulate a tile entity like a furnace
     DataContainer furnace;
-    furnace.set("id", std::string("minecraft:furnace"));
+    furnace.set("id", std::string("blockgame:furnace"));
     furnace.set("burn_time", 200);
     furnace.set("cook_time", 100);
     furnace.set("cook_time_total", 200);
@@ -597,7 +597,7 @@ TEST(DataContainer, CBORComplexStructure) {
     auto restored = DataContainer::fromCBOR(bytes);
 
     // Verify all data
-    EXPECT_EQ(restored->get<std::string>("id"), "minecraft:furnace");
+    EXPECT_EQ(restored->get<std::string>("id"), "blockgame:furnace");
     EXPECT_EQ(restored->get<int>("burn_time"), 200);
     EXPECT_EQ(restored->get<int>("cook_time"), 100);
     EXPECT_EQ(restored->get<int>("cook_time_total"), 200);

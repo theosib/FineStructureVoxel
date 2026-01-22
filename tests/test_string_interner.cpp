@@ -24,15 +24,15 @@ TEST(StringInternerTest, InternReturnsNonZeroForNonEmpty) {
 
 TEST(StringInternerTest, SameStringReturnsSameId) {
     auto& interner = StringInterner::global();
-    InternedId id1 = interner.intern("minecraft:stone");
-    InternedId id2 = interner.intern("minecraft:stone");
+    InternedId id1 = interner.intern("blockgame:stone");
+    InternedId id2 = interner.intern("blockgame:stone");
     EXPECT_EQ(id1, id2);
 }
 
 TEST(StringInternerTest, DifferentStringsReturnDifferentIds) {
     auto& interner = StringInterner::global();
-    InternedId id1 = interner.intern("minecraft:dirt");
-    InternedId id2 = interner.intern("minecraft:grass");
+    InternedId id1 = interner.intern("blockgame:dirt");
+    InternedId id2 = interner.intern("blockgame:grass");
     EXPECT_NE(id1, id2);
 }
 

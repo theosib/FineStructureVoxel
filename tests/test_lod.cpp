@@ -316,7 +316,7 @@ TEST(LODSubChunkTest, InitiallyEmpty) {
 
 TEST(LODSubChunkTest, GetSetBlock) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
     EXPECT_EQ(lod.getBlock(0, 0, 0), stone);
@@ -329,7 +329,7 @@ TEST(LODSubChunkTest, GetSetBlock) {
 
 TEST(LODSubChunkTest, OutOfBoundsReturnsAir) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Out of bounds should return air
     EXPECT_EQ(lod.getBlock(-1, 0, 0), AIR_BLOCK_TYPE);
@@ -339,7 +339,7 @@ TEST(LODSubChunkTest, OutOfBoundsReturnsAir) {
 
 TEST(LODSubChunkTest, Clear) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
     lod.setBlock(1, 1, 1, stone);
@@ -352,7 +352,7 @@ TEST(LODSubChunkTest, Clear) {
 
 TEST(LODSubChunkTest, VersionIncrement) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     uint64_t v0 = lod.version();
     lod.setBlock(0, 0, 0, stone);
@@ -374,7 +374,7 @@ TEST(LODSubChunkTest, VersionIncrement) {
 
 TEST(LODSubChunkTest, DownsampleSolidChunk) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill entire subchunk with stone
     source.fill(stone);
@@ -406,7 +406,7 @@ TEST(LODSubChunkTest, DownsampleEmptyChunk) {
 
 TEST(LODSubChunkTest, DownsampleHalfFilled) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill bottom half (y < 8) with stone
     for (int y = 0; y < 8; ++y) {
@@ -438,8 +438,8 @@ TEST(LODSubChunkTest, DownsampleHalfFilled) {
 
 TEST(LODSubChunkTest, DownsampleModeSelection) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
-    BlockTypeId dirt = BlockTypeId::fromName("minecraft:dirt");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("blockgame:dirt");
 
     // In the first 2x2x2 group (LOD coords 0,0,0):
     // Put 5 stone blocks and 3 dirt blocks - stone should win
@@ -461,7 +461,7 @@ TEST(LODSubChunkTest, DownsampleModeSelection) {
 
 TEST(LODSubChunkTest, DownsampleSparseGroup) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Put only 3 blocks in a 2x2x2 group (less than half = 4)
     // Now preserves any solid block (no 50% threshold) to avoid losing small features
@@ -479,7 +479,7 @@ TEST(LODSubChunkTest, DownsampleSparseGroup) {
 
 TEST(LODSubChunkTest, DownsampleToLOD2) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill a 4x4x4 region (one LOD2 cell)
     for (int y = 0; y < 4; ++y) {
@@ -501,7 +501,7 @@ TEST(LODSubChunkTest, DownsampleToLOD2) {
 
 TEST(LODSubChunkTest, DownsampleToLOD4) {
     SubChunk source;
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill entire subchunk
     source.fill(stone);
@@ -581,7 +581,7 @@ TEST_F(LODMeshTest, EmptyLODSubChunkProducesEmptyMesh) {
 
 TEST_F(LODMeshTest, SingleLOD1BlockProducesMesh) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
 
@@ -595,7 +595,7 @@ TEST_F(LODMeshTest, SingleLOD1BlockProducesMesh) {
 
 TEST_F(LODMeshTest, LOD1BlocksAreScaled2x) {
     LODSubChunk lod(LODLevel::LOD1);  // 2x scale
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
 
@@ -625,7 +625,7 @@ TEST_F(LODMeshTest, LOD1BlocksAreScaled2x) {
 
 TEST_F(LODMeshTest, LOD2BlocksAreScaled4x) {
     LODSubChunk lod(LODLevel::LOD2);  // 4x scale
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
 
@@ -645,7 +645,7 @@ TEST_F(LODMeshTest, LOD2BlocksAreScaled4x) {
 
 TEST_F(LODMeshTest, LOD4BlocksAreScaled16x) {
     LODSubChunk lod(LODLevel::LOD4);  // 16x scale (entire subchunk is one block)
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
 
@@ -665,7 +665,7 @@ TEST_F(LODMeshTest, LOD4BlocksAreScaled16x) {
 
 TEST_F(LODMeshTest, AdjacentLODBlocksCullHiddenFaces) {
     LODSubChunk lod(LODLevel::LOD1);
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Two adjacent blocks in X direction
     lod.setBlock(0, 0, 0, stone);
@@ -681,7 +681,7 @@ TEST_F(LODMeshTest, AdjacentLODBlocksCullHiddenFaces) {
 
 TEST_F(LODMeshTest, FullLOD1SubChunkCullsAllInternalFaces) {
     LODSubChunk lod(LODLevel::LOD1);  // 8x8x8 resolution
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     // Fill all cells
     for (int y = 0; y < 8; ++y) {
@@ -702,7 +702,7 @@ TEST_F(LODMeshTest, FullLOD1SubChunkCullsAllInternalFaces) {
 
 TEST_F(LODMeshTest, TextureTilesAcrossScaledBlock) {
     LODSubChunk lod(LODLevel::LOD1);  // 2x scale
-    BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
 
     lod.setBlock(0, 0, 0, stone);
 

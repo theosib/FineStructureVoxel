@@ -656,7 +656,7 @@ void main() {
 - [0 FPS - A level of detail method for blocky voxels](https://0fps.net/2018/03/03/a-level-of-detail-method-for-blocky-voxels/) - POP buffers
 - [Parker Lawrence - Voxel Level of Detail](https://legalian.github.io/voxel/2018/03/12/voxel-level-of-detail.html) - Skirt-based boundaries
 - [Transvoxel Algorithm](https://transvoxel.org/) - Smooth terrain stitching (reference only, not for blocky voxels)
-- [Distant Horizons Mod](https://www.curseforge.com/minecraft/mc-mods/distant-horizons) - Minecraft LOD implementation
+- [Distant Horizons Mod](https://www.curseforge.com/minecraft/mc-mods/distant-horizons) - LOD implementation for block games
 
 ---
 

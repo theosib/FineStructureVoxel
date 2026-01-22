@@ -464,7 +464,7 @@ TEST(LODSubChunkTest, DownsampleSparseGroup) {
     BlockTypeId stone = BlockTypeId::fromName("minecraft:stone");
 
     // Put only 3 blocks in a 2x2x2 group (less than half = 4)
-    // Should become air
+    // Now preserves any solid block (no 50% threshold) to avoid losing small features
     source.setBlock(0, 0, 0, stone);
     source.setBlock(1, 0, 0, stone);
     source.setBlock(0, 1, 0, stone);
@@ -472,8 +472,9 @@ TEST(LODSubChunkTest, DownsampleSparseGroup) {
     LODSubChunk lod1(LODLevel::LOD1);
     lod1.downsampleFrom(source);
 
-    // Group has < 50% solid, should be air
-    EXPECT_EQ(lod1.getBlock(0, 0, 0), AIR_BLOCK_TYPE);
+    // Group has solid blocks, should be stone (not air)
+    // The topmost block is at y=1, which is >= g/2 (1 >= 1), so surface preservation applies
+    EXPECT_EQ(lod1.getBlock(0, 0, 0), stone);
 }
 
 TEST(LODSubChunkTest, DownsampleToLOD2) {
@@ -672,9 +673,10 @@ TEST_F(LODMeshTest, AdjacentLODBlocksCullHiddenFaces) {
 
     MeshData mesh = builder.buildLODMesh(lod, ChunkPos{0, 0, 0}, simpleTextureProvider);
 
-    // Two blocks would have 48 vertices if no culling
-    // With culling, the shared face is hidden: 48 - 8 = 40 vertices
-    EXPECT_EQ(mesh.vertexCount(), 40);
+    // With greedy meshing, two adjacent same-type blocks are merged into one:
+    // 6 faces * 4 vertices = 24 vertices
+    // The internal face is culled, and the coplanar external faces are merged
+    EXPECT_EQ(mesh.vertexCount(), 24);
 }
 
 TEST_F(LODMeshTest, FullLOD1SubChunkCullsAllInternalFaces) {
@@ -692,9 +694,10 @@ TEST_F(LODMeshTest, FullLOD1SubChunkCullsAllInternalFaces) {
 
     MeshData mesh = builder.buildLODMesh(lod, ChunkPos{0, 0, 0}, simpleTextureProvider);
 
-    // Only outer faces are visible: 6 faces * 8*8 cells per face = 384 quads
-    // Each quad = 4 vertices, so 384 * 4 = 1536 vertices
-    EXPECT_EQ(mesh.vertexCount(), 1536);
+    // With greedy meshing, all internal faces are culled and all external faces
+    // on each side are merged into one large quad per face:
+    // 6 faces * 4 vertices = 24 vertices
+    EXPECT_EQ(mesh.vertexCount(), 24);
 }
 
 TEST_F(LODMeshTest, TextureTilesAcrossScaledBlock) {

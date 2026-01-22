@@ -10,6 +10,28 @@
 namespace finevox {
 
 // ============================================================================
+// LODMergeMode - How LOD blocks are merged/sized
+// ============================================================================
+
+/// Mode for how LOD blocks are sized when merging multiple source blocks
+enum class LODMergeMode : uint8_t {
+    /// Full height: LOD blocks are always full cubes (current behavior)
+    /// Pros: Maximum hidden face removal, simplest
+    /// Cons: Visual stepping at LOD boundaries
+    FullHeight,
+
+    /// Height-limited: LOD block height matches highest source block in group
+    /// Pros: Smoother transitions at LOD boundaries
+    /// Cons: More faces for top-layer blocks (no side culling)
+    HeightLimited,
+
+    /// No merge (debug): Each source block rendered individually at LOD resolution
+    /// Pros: Maximum detail preservation
+    /// Cons: No vertex reduction, defeats purpose of LOD
+    NoMerge
+};
+
+// ============================================================================
 // LODLevel - Level of detail enumeration
 // ============================================================================
 
@@ -219,6 +241,12 @@ public:
 // LODSubChunk - Downsampled block storage for LOD levels
 // ============================================================================
 
+/// Result of selecting a representative block for an LOD cell
+struct LODBlockInfo {
+    BlockTypeId type = AIR_BLOCK_TYPE;
+    uint8_t height = 0;  // Height in source blocks (0 = air, 1-grouping = solid height)
+};
+
 /// Downsampled block data for a subchunk at a specific LOD level
 /// Stores representative blocks for grouped regions
 class LODSubChunk {
@@ -240,8 +268,14 @@ public:
     /// Coordinates range from 0 to resolution()-1
     [[nodiscard]] BlockTypeId getBlock(int x, int y, int z) const;
 
+    /// Get block info (type + height) at LOD coordinates
+    [[nodiscard]] LODBlockInfo getBlockInfo(int x, int y, int z) const;
+
     /// Set block type at LOD coordinates
     void setBlock(int x, int y, int z, BlockTypeId type);
+
+    /// Set block info (type + height) at LOD coordinates
+    void setBlockInfo(int x, int y, int z, const LODBlockInfo& info);
 
     /// Get total number of cells at this LOD level
     [[nodiscard]] int volume() const {
@@ -260,7 +294,9 @@ public:
 
     /// Generate LOD data from a full-resolution SubChunk
     /// Uses mode-based block selection (most common solid block in group)
-    void downsampleFrom(const SubChunk& source);
+    /// @param source The full-resolution subchunk to downsample
+    /// @param mergeMode How to merge blocks (affects height calculation)
+    void downsampleFrom(const SubChunk& source, LODMergeMode mergeMode = LODMergeMode::FullHeight);
 
     /// Get version for cache invalidation
     [[nodiscard]] uint64_t version() const { return version_; }
@@ -271,6 +307,7 @@ public:
 private:
     LODLevel level_;
     std::vector<BlockTypeId> blocks_;  // Size = volume()
+    std::vector<uint8_t> heights_;     // Size = volume(), height in source blocks
     int nonAirCount_ = 0;
     uint64_t version_ = 0;
 
@@ -281,7 +318,8 @@ private:
     }
 
     /// Select representative block from a group using mode (most common)
-    [[nodiscard]] BlockTypeId selectRepresentativeBlock(
+    /// Returns block type and height (topmost occupied Y within the group)
+    [[nodiscard]] LODBlockInfo selectRepresentativeBlock(
         const SubChunk& source,
         int groupX, int groupY, int groupZ) const;
 };

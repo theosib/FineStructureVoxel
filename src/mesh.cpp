@@ -811,6 +811,86 @@ void MeshBuilder::addScaledFace(
     mesh.indices.push_back(baseVertex + 3);
 }
 
+void MeshBuilder::addHeightLimitedFace(
+    MeshData& mesh,
+    const glm::vec3& blockPos,
+    Face face,
+    float blockScale,
+    float height,
+    const glm::vec4& uvBounds,
+    const std::array<float, 4>& aoValues
+) {
+    // For height-limited blocks:
+    // - Top face (PosY): at height instead of blockScale
+    // - Bottom face (NegY): at 0 (same as full block)
+    // - Side faces (X, Z): truncated to height instead of blockScale
+
+    const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
+    uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+
+    // Extract UV bounds
+    float minU = uvBounds.x;
+    float minV = uvBounds.y;
+    float maxU = uvBounds.z;
+    float maxV = uvBounds.w;
+    float tileWidth = maxU - minU;
+    float tileHeight = maxV - minV;
+
+    // Determine scaling for each vertex based on face type
+    auto scalePosition = [&](const glm::vec3& facePos) -> glm::vec3 {
+        glm::vec3 scaled;
+        // X and Z scale by blockScale
+        scaled.x = facePos.x * blockScale;
+        scaled.z = facePos.z * blockScale;
+        // Y scales by height (facePos.y is 0 or 1)
+        scaled.y = facePos.y * height;
+        return scaled;
+    };
+
+    // For UV tiling, we need to adjust based on the actual dimensions
+    auto getUVScale = [&](const glm::vec2& uvOffset) -> glm::vec2 {
+        float uvScaleX = blockScale;
+        float uvScaleY;
+
+        // Determine which dimension uses height vs blockScale for UV
+        switch (face) {
+            case Face::PosY:
+            case Face::NegY:
+                // Top/bottom faces: both dimensions use blockScale
+                uvScaleY = blockScale;
+                break;
+            default:
+                // Side faces: V dimension (usually Y) uses height
+                uvScaleY = height;
+                break;
+        }
+
+        return glm::vec2(
+            minU + uvOffset.x * uvScaleX * tileWidth,
+            minV + uvOffset.y * uvScaleY * tileHeight
+        );
+    };
+
+    // Add 4 vertices for the face
+    for (int i = 0; i < 4; ++i) {
+        ChunkVertex vertex;
+        vertex.position = blockPos + scalePosition(faceData.positions[i]);
+        vertex.normal = faceData.normal;
+        vertex.texCoord = getUVScale(faceData.uvOffsets[i]);
+        vertex.tileBounds = uvBounds;
+        vertex.ao = aoValues[i];
+        mesh.vertices.push_back(vertex);
+    }
+
+    // Add 6 indices for 2 triangles
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 1);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 3);
+}
+
 MeshData MeshBuilder::buildLODMesh(
     const LODSubChunk& lodSubChunk,
     ChunkPos chunkPos,
@@ -818,7 +898,7 @@ MeshData MeshBuilder::buildLODMesh(
 ) {
     // Simple version without neighbor culling - all non-air faces are rendered
     BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
-    return buildLODMesh(lodSubChunk, chunkPos, alwaysTransparent, textureProvider);
+    return buildLODMesh(lodSubChunk, chunkPos, alwaysTransparent, textureProvider, LODMergeMode::FullHeight);
 }
 
 MeshData MeshBuilder::buildLODMesh(
@@ -827,67 +907,253 @@ MeshData MeshBuilder::buildLODMesh(
     const BlockOpaqueProvider& neighborProvider,
     const BlockTextureProvider& textureProvider
 ) {
+    // Delegate to the merge mode version with FullHeight
+    return buildLODMesh(lodSubChunk, chunkPos, neighborProvider, textureProvider, LODMergeMode::FullHeight);
+}
+
+MeshData MeshBuilder::buildLODMesh(
+    const LODSubChunk& lodSubChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& neighborProvider,
+    const BlockTextureProvider& textureProvider,
+    LODMergeMode mergeMode
+) {
     MeshData mesh;
 
     if (lodSubChunk.isEmpty()) {
         return mesh;
     }
 
+    // Use greedy meshing if enabled (same setting as regular meshing)
+    if (greedyMeshing_) {
+        buildGreedyLODMesh(mesh, lodSubChunk, chunkPos, neighborProvider, textureProvider, mergeMode);
+    } else {
+        // Fallback to simple per-cell meshing
+        int resolution = lodSubChunk.resolution();
+        int grouping = lodSubChunk.grouping();
+        float blockScale = static_cast<float>(grouping);
+
+        // Reserve space based on expected geometry
+        mesh.reserve(resolution * resolution * resolution * 6 * 4,
+                     resolution * resolution * resolution * 6 * 6);
+
+        // Default AO values (no AO calculation for LOD)
+        std::array<float, 4> defaultAO = {1.0f, 1.0f, 1.0f, 1.0f};
+
+        // Iterate over all LOD cells
+        for (int ly = 0; ly < resolution; ++ly) {
+            for (int lz = 0; lz < resolution; ++lz) {
+                for (int lx = 0; lx < resolution; ++lx) {
+                    LODBlockInfo blockInfo = lodSubChunk.getBlockInfo(lx, ly, lz);
+                    if (blockInfo.type == AIR_BLOCK_TYPE) {
+                        continue;
+                    }
+
+                    // Get actual height for this LOD block
+                    float height = static_cast<float>(blockInfo.height);
+                    if (height <= 0) {
+                        height = blockScale;  // Fallback to full height
+                    }
+
+                    // Calculate world block position for the LOD cell corner
+                    float worldX = static_cast<float>(chunkPos.x * 16 + lx * grouping);
+                    float worldY = static_cast<float>(chunkPos.y * 16 + ly * grouping);
+                    float worldZ = static_cast<float>(chunkPos.z * 16 + lz * grouping);
+
+                    // Local position within subchunk
+                    float localX = static_cast<float>(lx * grouping);
+                    float localY = static_cast<float>(ly * grouping);
+                    float localZ = static_cast<float>(lz * grouping);
+                    glm::vec3 localPos(localX, localY, localZ);
+
+                    // Check each face
+                    for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
+                        Face face = static_cast<Face>(faceIdx);
+
+                        // Check if neighbor is solid (in LOD space)
+                        int nx = lx + (faceIdx == 1 ? 1 : (faceIdx == 0 ? -1 : 0));
+                        int ny = ly + (faceIdx == 3 ? 1 : (faceIdx == 2 ? -1 : 0));
+                        int nz = lz + (faceIdx == 5 ? 1 : (faceIdx == 4 ? -1 : 0));
+
+                        bool neighborOpaque = false;
+
+                        // For height-limited mode, top faces are never culled by internal neighbors
+                        // (since we can't know if the neighbor's height matches ours)
+                        bool skipInternalCull = (mergeMode == LODMergeMode::HeightLimited &&
+                                                 face == Face::PosY);
+
+                        if (!skipInternalCull) {
+                            // Check if neighbor is within this LOD subchunk
+                            if (nx >= 0 && nx < resolution &&
+                                ny >= 0 && ny < resolution &&
+                                nz >= 0 && nz < resolution) {
+                                // Internal neighbor
+                                // For side faces in height-limited mode, only cull if neighbor is fully solid
+                                if (mergeMode == LODMergeMode::HeightLimited &&
+                                    (face == Face::NegX || face == Face::PosX ||
+                                     face == Face::NegZ || face == Face::PosZ)) {
+                                    // Check if neighbor height would cover this face
+                                    LODBlockInfo neighborInfo = lodSubChunk.getBlockInfo(nx, ny, nz);
+                                    float neighborHeight = static_cast<float>(neighborInfo.height);
+                                    // Only cull if neighbor is at least as tall as us
+                                    neighborOpaque = (neighborInfo.type != AIR_BLOCK_TYPE &&
+                                                      neighborHeight >= height);
+                                } else {
+                                    neighborOpaque = (lodSubChunk.getBlock(nx, ny, nz) != AIR_BLOCK_TYPE);
+                                }
+                            } else {
+                                // External neighbor - use the provided neighbor provider
+                                BlockPos neighborWorldPos;
+                                auto normal = faceNormal(face);
+                                neighborWorldPos.x = static_cast<int32_t>(worldX) + normal[0] * grouping;
+                                neighborWorldPos.y = static_cast<int32_t>(worldY) + normal[1] * grouping;
+                                neighborWorldPos.z = static_cast<int32_t>(worldZ) + normal[2] * grouping;
+                                neighborOpaque = neighborProvider(neighborWorldPos);
+                            }
+                        }
+
+                        if (neighborOpaque && !disableFaceCulling_) {
+                            continue;  // Face is hidden
+                        }
+
+                        // Get texture UVs for this face
+                        glm::vec4 uvBounds = textureProvider(blockInfo.type, face);
+
+                        // Add the face with height limitation
+                        if (mergeMode == LODMergeMode::HeightLimited && height < blockScale) {
+                            addHeightLimitedFace(mesh, localPos, face, blockScale, height, uvBounds, defaultAO);
+                        } else {
+                            addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return mesh;
+}
+
+// ============================================================================
+// LOD Greedy Meshing
+// ============================================================================
+
+void MeshBuilder::buildGreedyLODMesh(
+    MeshData& mesh,
+    const LODSubChunk& lodSubChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& neighborProvider,
+    const BlockTextureProvider& textureProvider,
+    LODMergeMode mergeMode
+) {
+    int resolution = lodSubChunk.resolution();
+
+    // Reserve space - with greedy meshing, we'll use much less
+    mesh.reserve(resolution * resolution * 6 * 4, resolution * resolution * 6 * 6);
+
+    // Process each face direction separately
+    for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
+        Face face = static_cast<Face>(faceIdx);
+        greedyMeshLODFace(mesh, face, lodSubChunk, chunkPos, neighborProvider, textureProvider, mergeMode);
+    }
+}
+
+void MeshBuilder::greedyMeshLODFace(
+    MeshData& mesh,
+    Face face,
+    const LODSubChunk& lodSubChunk,
+    ChunkPos chunkPos,
+    const BlockOpaqueProvider& neighborProvider,
+    const BlockTextureProvider& textureProvider,
+    LODMergeMode mergeMode
+) {
     int resolution = lodSubChunk.resolution();
     int grouping = lodSubChunk.grouping();
     float blockScale = static_cast<float>(grouping);
 
-    // Reserve space based on expected geometry
-    // Worst case: each LOD cell has 6 faces * 4 vertices
-    mesh.reserve(resolution * resolution * resolution * 6 * 4,
-                 resolution * resolution * resolution * 6 * 6);
+    // Determine which axis is normal to this face, and which are tangent
+    int normalAxis, uAxis, vAxis;
 
-    // Default AO values (no AO calculation for LOD - too expensive and not very visible)
-    std::array<float, 4> defaultAO = {1.0f, 1.0f, 1.0f, 1.0f};
+    switch (face) {
+        case Face::NegX: normalAxis = 0; uAxis = 2; vAxis = 1; break;
+        case Face::PosX: normalAxis = 0; uAxis = 2; vAxis = 1; break;
+        case Face::NegY: normalAxis = 1; uAxis = 0; vAxis = 2; break;
+        case Face::PosY: normalAxis = 1; uAxis = 0; vAxis = 2; break;
+        case Face::NegZ: normalAxis = 2; uAxis = 0; vAxis = 1; break;
+        case Face::PosZ: normalAxis = 2; uAxis = 0; vAxis = 1; break;
+        default: return;
+    }
 
-    // Iterate over all LOD cells
-    for (int ly = 0; ly < resolution; ++ly) {
-        for (int lz = 0; lz < resolution; ++lz) {
-            for (int lx = 0; lx < resolution; ++lx) {
-                BlockTypeId blockType = lodSubChunk.getBlock(lx, ly, lz);
-                if (blockType == AIR_BLOCK_TYPE) {
+    // 2D mask array for this face direction
+    std::vector<LODFaceMaskEntry> mask(resolution * resolution);
+
+    // Process each slice perpendicular to the normal axis
+    for (int slice = 0; slice < resolution; ++slice) {
+        // Clear the mask
+        for (auto& entry : mask) {
+            entry = LODFaceMaskEntry{};
+        }
+
+        // Build the mask for this slice
+        for (int v = 0; v < resolution; ++v) {
+            for (int u = 0; u < resolution; ++u) {
+                // Convert (slice, u, v) to (lx, ly, lz) based on face direction
+                int coords[3];
+                coords[normalAxis] = slice;
+                coords[uAxis] = u;
+                coords[vAxis] = v;
+
+                int lx = coords[0];
+                int ly = coords[1];
+                int lz = coords[2];
+
+                LODBlockInfo blockInfo = lodSubChunk.getBlockInfo(lx, ly, lz);
+                if (blockInfo.type == AIR_BLOCK_TYPE) {
                     continue;
                 }
 
-                // Calculate world block position for the LOD cell corner
-                // LOD cell (lx, ly, lz) at grouping G corresponds to world blocks:
-                // [lx*G, ly*G, lz*G] to [(lx+1)*G-1, (ly+1)*G-1, (lz+1)*G-1]
+                // Get actual height for this LOD block
+                float height = static_cast<float>(blockInfo.height);
+                if (height <= 0) {
+                    height = blockScale;
+                }
+
+                // Calculate world position for neighbor checking
                 float worldX = static_cast<float>(chunkPos.x * 16 + lx * grouping);
                 float worldY = static_cast<float>(chunkPos.y * 16 + ly * grouping);
                 float worldZ = static_cast<float>(chunkPos.z * 16 + lz * grouping);
 
-                // Convert to local position within subchunk (0-16 range)
-                float localX = static_cast<float>(lx * grouping);
-                float localY = static_cast<float>(ly * grouping);
-                float localZ = static_cast<float>(lz * grouping);
-                glm::vec3 localPos(localX, localY, localZ);
+                // Check neighbor occlusion
+                int nCoords[3];
+                nCoords[normalAxis] = slice + (face == Face::PosX || face == Face::PosY || face == Face::PosZ ? 1 : -1);
+                nCoords[uAxis] = u;
+                nCoords[vAxis] = v;
 
-                // Check each face
-                for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
-                    Face face = static_cast<Face>(faceIdx);
+                int nx = nCoords[0];
+                int ny = nCoords[1];
+                int nz = nCoords[2];
 
-                    // Check if neighbor is solid (in LOD space)
-                    int nx = lx + (faceIdx == 1 ? 1 : (faceIdx == 0 ? -1 : 0));
-                    int ny = ly + (faceIdx == 3 ? 1 : (faceIdx == 2 ? -1 : 0));
-                    int nz = lz + (faceIdx == 5 ? 1 : (faceIdx == 4 ? -1 : 0));
+                bool neighborOpaque = false;
 
-                    bool neighborOpaque = false;
+                // For height-limited mode, top faces are never culled by internal neighbors
+                bool skipInternalCull = (mergeMode == LODMergeMode::HeightLimited && face == Face::PosY);
 
-                    // Check if neighbor is within this LOD subchunk
+                if (!skipInternalCull) {
                     if (nx >= 0 && nx < resolution &&
                         ny >= 0 && ny < resolution &&
                         nz >= 0 && nz < resolution) {
-                        // Internal neighbor - check LOD data
-                        neighborOpaque = (lodSubChunk.getBlock(nx, ny, nz) != AIR_BLOCK_TYPE);
+                        // Internal neighbor
+                        if (mergeMode == LODMergeMode::HeightLimited &&
+                            (face == Face::NegX || face == Face::PosX ||
+                             face == Face::NegZ || face == Face::PosZ)) {
+                            LODBlockInfo neighborInfo = lodSubChunk.getBlockInfo(nx, ny, nz);
+                            float neighborHeight = static_cast<float>(neighborInfo.height);
+                            neighborOpaque = (neighborInfo.type != AIR_BLOCK_TYPE && neighborHeight >= height);
+                        } else {
+                            neighborOpaque = (lodSubChunk.getBlock(nx, ny, nz) != AIR_BLOCK_TYPE);
+                        }
                     } else {
-                        // External neighbor - use the provided neighbor provider
-                        // Calculate the world position of the neighbor block
-                        // We check the world block adjacent to the LOD cell face
+                        // External neighbor
                         BlockPos neighborWorldPos;
                         auto normal = faceNormal(face);
                         neighborWorldPos.x = static_cast<int32_t>(worldX) + normal[0] * grouping;
@@ -895,22 +1161,231 @@ MeshData MeshBuilder::buildLODMesh(
                         neighborWorldPos.z = static_cast<int32_t>(worldZ) + normal[2] * grouping;
                         neighborOpaque = neighborProvider(neighborWorldPos);
                     }
+                }
 
-                    if (neighborOpaque && !disableFaceCulling_) {
-                        continue;  // Face is hidden
-                    }
+                if (neighborOpaque && !disableFaceCulling_) {
+                    continue;  // Face is hidden
+                }
 
-                    // Get texture UVs for this face
-                    glm::vec4 uvBounds = textureProvider(blockType, face);
+                // This face is visible - add to mask
+                int maskIdx = v * resolution + u;
+                mask[maskIdx].blockType = blockInfo.type;
+                mask[maskIdx].uvBounds = textureProvider(blockInfo.type, face);
 
-                    // Add the scaled face
-                    addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO);
+                // For height-limited mode, store the height (but only matters for top/bottom/side faces)
+                if (mergeMode == LODMergeMode::HeightLimited) {
+                    mask[maskIdx].height = height;
+                } else {
+                    mask[maskIdx].height = blockScale;  // FullHeight mode
                 }
             }
         }
+
+        // Greedy merge the mask into quads
+        std::vector<bool> used(resolution * resolution, false);
+
+        for (int v = 0; v < resolution; ++v) {
+            for (int u = 0; u < resolution; ++u) {
+                int startIdx = v * resolution + u;
+
+                // Skip if already used or empty
+                if (used[startIdx] || mask[startIdx].isEmpty()) {
+                    continue;
+                }
+
+                const LODFaceMaskEntry& entry = mask[startIdx];
+
+                // Find width: extend in U direction while faces match
+                int width = 1;
+                while (u + width < resolution) {
+                    int checkIdx = v * resolution + (u + width);
+                    if (used[checkIdx] || mask[checkIdx] != entry) {
+                        break;
+                    }
+                    ++width;
+                }
+
+                // Find height: extend in V direction while entire row matches
+                int height = 1;
+                bool canExtend = true;
+                while (canExtend && v + height < resolution) {
+                    for (int du = 0; du < width; ++du) {
+                        int checkIdx = (v + height) * resolution + (u + du);
+                        if (used[checkIdx] || mask[checkIdx] != entry) {
+                            canExtend = false;
+                            break;
+                        }
+                    }
+                    if (canExtend) {
+                        ++height;
+                    }
+                }
+
+                // Mark all cells in this quad as used
+                for (int dv = 0; dv < height; ++dv) {
+                    for (int du = 0; du < width; ++du) {
+                        used[(v + dv) * resolution + (u + du)] = true;
+                    }
+                }
+
+                // Add the merged quad
+                addGreedyLODQuad(mesh, face, slice, u, v, width, height,
+                                 blockScale, entry.height, entry, textureProvider);
+            }
+        }
+    }
+}
+
+void MeshBuilder::addGreedyLODQuad(
+    MeshData& mesh,
+    Face face,
+    int sliceCoord,
+    int startU, int startV,
+    int width, int height,
+    float blockScale,
+    float blockHeight,
+    const LODFaceMaskEntry& entry,
+    [[maybe_unused]] const BlockTextureProvider& textureProvider
+) {
+    // Determine axis mapping (same as in greedyMeshLODFace)
+    int normalAxis, uAxis, vAxis;
+    bool positiveNormal;
+
+    switch (face) {
+        case Face::NegX: normalAxis = 0; uAxis = 2; vAxis = 1; positiveNormal = false; break;
+        case Face::PosX: normalAxis = 0; uAxis = 2; vAxis = 1; positiveNormal = true;  break;
+        case Face::NegY: normalAxis = 1; uAxis = 0; vAxis = 2; positiveNormal = false; break;
+        case Face::PosY: normalAxis = 1; uAxis = 0; vAxis = 2; positiveNormal = true;  break;
+        case Face::NegZ: normalAxis = 2; uAxis = 0; vAxis = 1; positiveNormal = false; break;
+        case Face::PosZ: normalAxis = 2; uAxis = 0; vAxis = 1; positiveNormal = true;  break;
+        default: return;
     }
 
-    return mesh;
+    // Calculate the 4 corners of the quad in local (subchunk) coordinates
+    // Each LOD cell is blockScale units in size
+    // The face is at sliceCoord along the normal axis
+    float normalCoord;
+    if (positiveNormal) {
+        normalCoord = static_cast<float>(sliceCoord + 1) * blockScale;
+    } else {
+        normalCoord = static_cast<float>(sliceCoord) * blockScale;
+    }
+
+    // For height-limited top faces, adjust the normal coordinate
+    bool isHeightLimited = (blockHeight < blockScale);
+    if (isHeightLimited && face == Face::PosY) {
+        // Top face at blockHeight instead of blockScale
+        normalCoord = static_cast<float>(sliceCoord) * blockScale + blockHeight;
+    }
+
+    // Build corner positions
+    glm::vec3 corners[4];
+    float coords[3];
+
+    // Quad dimensions in world units
+    float quadWidth = static_cast<float>(width) * blockScale;
+    float quadHeight = static_cast<float>(height) * blockScale;
+
+    // For side faces in height-limited mode, adjust the V dimension
+    if (isHeightLimited && (face == Face::NegX || face == Face::PosX ||
+                            face == Face::NegZ || face == Face::PosZ)) {
+        // Side faces are truncated by blockHeight
+        quadHeight = static_cast<float>(height) * blockHeight;
+    }
+
+    // Calculate start positions in world units
+    float uStart = static_cast<float>(startU) * blockScale;
+    float vStart = static_cast<float>(startV) * blockScale;
+
+    // Adjust corner order based on face direction to maintain correct winding
+    int uCoords[4], vCoords[4];
+
+    switch (face) {
+        case Face::NegX:
+            uCoords[0] = 1; uCoords[1] = 0; uCoords[2] = 0; uCoords[3] = 1;  // width
+            vCoords[0] = 0; vCoords[1] = 0; vCoords[2] = 1; vCoords[3] = 1;  // height
+            break;
+        case Face::PosX:
+            uCoords[0] = 0; uCoords[1] = 1; uCoords[2] = 1; uCoords[3] = 0;
+            vCoords[0] = 0; vCoords[1] = 0; vCoords[2] = 1; vCoords[3] = 1;
+            break;
+        case Face::NegY:
+            uCoords[0] = 0; uCoords[1] = 1; uCoords[2] = 1; uCoords[3] = 0;
+            vCoords[0] = 1; vCoords[1] = 1; vCoords[2] = 0; vCoords[3] = 0;
+            break;
+        case Face::PosY:
+            uCoords[0] = 0; uCoords[1] = 1; uCoords[2] = 1; uCoords[3] = 0;
+            vCoords[0] = 0; vCoords[1] = 0; vCoords[2] = 1; vCoords[3] = 1;
+            break;
+        case Face::NegZ:
+            uCoords[0] = 0; uCoords[1] = 1; uCoords[2] = 1; uCoords[3] = 0;
+            vCoords[0] = 0; vCoords[1] = 0; vCoords[2] = 1; vCoords[3] = 1;
+            break;
+        case Face::PosZ:
+            uCoords[0] = 1; uCoords[1] = 0; uCoords[2] = 0; uCoords[3] = 1;
+            vCoords[0] = 0; vCoords[1] = 0; vCoords[2] = 1; vCoords[3] = 1;
+            break;
+        default:
+            return;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        coords[normalAxis] = normalCoord;
+        coords[uAxis] = uStart + static_cast<float>(uCoords[i]) * quadWidth;
+        coords[vAxis] = vStart + static_cast<float>(vCoords[i]) * quadHeight;
+        corners[i] = glm::vec3(coords[0], coords[1], coords[2]);
+    }
+
+    // Get face normal
+    const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
+    glm::vec3 normal = faceData.normal;
+
+    // Calculate UV coordinates for the merged quad with proper tiling
+    glm::vec4 tileBounds = entry.uvBounds;
+    float minU = tileBounds.x;
+    float minV = tileBounds.y;
+    float maxU = tileBounds.z;
+    float maxV = tileBounds.w;
+    float tileWidth = maxU - minU;
+    float tileHeight = maxV - minV;
+
+    // UV tiling: each LOD cell tiles the texture once (scaled by blockScale)
+    // So a merged region of width*height LOD cells tiles width*height times
+    float uvWidth = static_cast<float>(width) * blockScale;
+    float uvHeight = static_cast<float>(height) * blockScale;
+
+    // For height-limited side faces, UV height is reduced
+    if (isHeightLimited && (face == Face::NegX || face == Face::PosX ||
+                            face == Face::NegZ || face == Face::PosZ)) {
+        uvHeight = static_cast<float>(height) * blockHeight;
+    }
+
+    glm::vec2 uvs[4] = {
+        {minU, minV},
+        {minU + uvWidth * tileWidth, minV},
+        {minU + uvWidth * tileWidth, minV + uvHeight * tileHeight},
+        {minU, minV + uvHeight * tileHeight}
+    };
+
+    // Add vertices
+    uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+    for (int i = 0; i < 4; ++i) {
+        ChunkVertex vertex;
+        vertex.position = corners[i];
+        vertex.normal = normal;
+        vertex.texCoord = uvs[i];
+        vertex.tileBounds = tileBounds;
+        vertex.ao = 1.0f;  // No AO for LOD meshes
+        mesh.vertices.push_back(vertex);
+    }
+
+    // Add indices (two triangles)
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 1);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 0);
+    mesh.indices.push_back(baseVertex + 2);
+    mesh.indices.push_back(baseVertex + 3);
 }
 
 }  // namespace finevox

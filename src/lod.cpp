@@ -19,6 +19,7 @@ LODSubChunk::LODSubChunk(LODLevel level)
     // Allocate storage based on resolution
     int v = volume();
     blocks_.resize(v, AIR_BLOCK_TYPE);
+    heights_.resize(v, 0);
 }
 
 BlockTypeId LODSubChunk::getBlock(int x, int y, int z) const {
@@ -27,6 +28,15 @@ BlockTypeId LODSubChunk::getBlock(int x, int y, int z) const {
         return AIR_BLOCK_TYPE;
     }
     return blocks_[toIndex(x, y, z)];
+}
+
+LODBlockInfo LODSubChunk::getBlockInfo(int x, int y, int z) const {
+    int r = resolution();
+    if (x < 0 || x >= r || y < 0 || y >= r || z < 0 || z >= r) {
+        return LODBlockInfo{};
+    }
+    int idx = toIndex(x, y, z);
+    return LODBlockInfo{blocks_[idx], heights_[idx]};
 }
 
 void LODSubChunk::setBlock(int x, int y, int z, BlockTypeId type) {
@@ -51,30 +61,61 @@ void LODSubChunk::setBlock(int x, int y, int z, BlockTypeId type) {
     }
 }
 
+void LODSubChunk::setBlockInfo(int x, int y, int z, const LODBlockInfo& info) {
+    int r = resolution();
+    if (x < 0 || x >= r || y < 0 || y >= r || z < 0 || z >= r) {
+        return;
+    }
+
+    int idx = toIndex(x, y, z);
+    BlockTypeId oldType = blocks_[idx];
+
+    if (oldType != info.type) {
+        // Update non-air count
+        if (oldType == AIR_BLOCK_TYPE && info.type != AIR_BLOCK_TYPE) {
+            ++nonAirCount_;
+        } else if (oldType != AIR_BLOCK_TYPE && info.type == AIR_BLOCK_TYPE) {
+            --nonAirCount_;
+        }
+
+        blocks_[idx] = info.type;
+        ++version_;
+    }
+    heights_[idx] = info.height;
+}
+
 void LODSubChunk::clear() {
     std::fill(blocks_.begin(), blocks_.end(), AIR_BLOCK_TYPE);
+    std::fill(heights_.begin(), heights_.end(), 0);
     nonAirCount_ = 0;
     ++version_;
 }
 
-void LODSubChunk::downsampleFrom(const SubChunk& source) {
+void LODSubChunk::downsampleFrom(const SubChunk& source, LODMergeMode mergeMode) {
     clear();
 
     int r = resolution();
+    int g = grouping();
 
     for (int ly = 0; ly < r; ++ly) {
         for (int lz = 0; lz < r; ++lz) {
             for (int lx = 0; lx < r; ++lx) {
-                BlockTypeId representative = selectRepresentativeBlock(source, lx, ly, lz);
-                if (representative != AIR_BLOCK_TYPE) {
-                    setBlock(lx, ly, lz, representative);
+                LODBlockInfo info = selectRepresentativeBlock(source, lx, ly, lz);
+                if (info.type != AIR_BLOCK_TYPE) {
+                    // Adjust height based on merge mode
+                    if (mergeMode == LODMergeMode::FullHeight) {
+                        info.height = static_cast<uint8_t>(g);  // Full height
+                    }
+                    // HeightLimited keeps the computed height
+                    // NoMerge would need different handling (not implemented here)
+                    setBlockInfo(lx, ly, lz, info);
                 }
             }
         }
     }
 }
 
-BlockTypeId LODSubChunk::selectRepresentativeBlock(
+LODBlockInfo LODSubChunk::selectRepresentativeBlock(
     const SubChunk& source,
     int groupX, int groupY, int groupZ) const
 {
@@ -107,14 +148,17 @@ BlockTypeId LODSubChunk::selectRepresentativeBlock(
 
     // If no solid blocks, return air
     if (counts.empty()) {
-        return AIR_BLOCK_TYPE;
+        return LODBlockInfo{AIR_BLOCK_TYPE, 0};
     }
+
+    // Height is topY + 1 (since topY is 0-indexed within the group)
+    uint8_t height = static_cast<uint8_t>(topY + 1);
 
     // For surface-like scenarios (top layer has blocks), prefer the top block
     // This preserves grass on top of dirt, etc.
     // Check if there's a block in the top half of the group
     if (topY >= g / 2) {
-        return topBlock;
+        return LODBlockInfo{topBlock, height};
     }
 
     // Otherwise, find the most common block type (mode)
@@ -128,7 +172,7 @@ BlockTypeId LODSubChunk::selectRepresentativeBlock(
         }
     }
 
-    return mostCommon;
+    return LODBlockInfo{mostCommon, height};
 }
 
 }  // namespace finevox

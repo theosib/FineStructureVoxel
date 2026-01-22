@@ -278,8 +278,11 @@ bool MeshWorkerPool::buildMeshToCache(ChunkPos pos, const MeshRebuildRequest& re
         } else {
             // Lower detail - downsample and build LOD mesh
             LODSubChunk lodData(buildLOD);
-            lodData.downsampleFrom(*subchunk);
-            meshData = builder.buildLODMesh(lodData, pos, textureProvider);
+            lodData.downsampleFrom(*subchunk, lodMergeMode_);
+
+            // Use merge-mode-aware mesh building
+            BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
+            meshData = builder.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider, lodMergeMode_);
         }
         success = true;
 

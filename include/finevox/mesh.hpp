@@ -223,6 +223,21 @@ public:
         const BlockTextureProvider& textureProvider
     );
 
+    /// Build mesh for an LOD subchunk with merge mode control
+    /// @param lodSubChunk The downsampled block data (with height info if HeightLimited)
+    /// @param chunkPos The chunk position in world coordinates
+    /// @param neighborProvider Callback to check if LOD neighbor positions are opaque
+    /// @param textureProvider Callback to get texture UVs for block faces
+    /// @param mergeMode How to handle block heights (FullHeight, HeightLimited, NoMerge)
+    /// @return Mesh data with scaled block geometry
+    [[nodiscard]] MeshData buildLODMesh(
+        const LODSubChunk& lodSubChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& neighborProvider,
+        const BlockTextureProvider& textureProvider,
+        LODMergeMode mergeMode
+    );
+
 private:
     bool calculateAO_ = true;
     bool greedyMeshing_ = true;  // Enabled by default
@@ -246,6 +261,18 @@ private:
         float blockScale,            // Scale factor for the block
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues  // AO for each corner
+    );
+
+    // Add a height-limited scaled face (for HeightLimited LOD mode)
+    // The block only extends from 0 to height (instead of 0 to blockScale)
+    void addHeightLimitedFace(
+        MeshData& mesh,
+        const glm::vec3& blockPos,   // Local block position within subchunk
+        Face face,
+        float blockScale,            // Full scale factor
+        float height,                // Actual height (1 to blockScale)
+        const glm::vec4& uvBounds,
+        const std::array<float, 4>& aoValues
     );
 
     // Calculate ambient occlusion for a face corner
@@ -330,6 +357,59 @@ private:
         int startU, int startV,   // Start position in face tangent space
         int width, int height,    // Size of merged region
         const FaceMaskEntry& entry,
+        const BlockTextureProvider& textureProvider
+    );
+
+    // ========================================================================
+    // LOD Greedy Meshing
+    // ========================================================================
+
+    // LOD face mask entry - includes scale information
+    struct LODFaceMaskEntry {
+        BlockTypeId blockType = AIR_BLOCK_TYPE;
+        glm::vec4 uvBounds{0.0f};
+        float height = 0.0f;  // For height-limited mode
+
+        bool operator==(const LODFaceMaskEntry& other) const {
+            // For greedy meshing, faces can merge if same block type
+            // Heights must also match for HeightLimited mode
+            return blockType == other.blockType && height == other.height;
+        }
+
+        bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }
+    };
+
+    // Build LOD mesh using greedy meshing algorithm
+    void buildGreedyLODMesh(
+        MeshData& mesh,
+        const LODSubChunk& lodSubChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& neighborProvider,
+        const BlockTextureProvider& textureProvider,
+        LODMergeMode mergeMode
+    );
+
+    // Process one face direction for LOD greedy meshing
+    void greedyMeshLODFace(
+        MeshData& mesh,
+        Face face,
+        const LODSubChunk& lodSubChunk,
+        ChunkPos chunkPos,
+        const BlockOpaqueProvider& neighborProvider,
+        const BlockTextureProvider& textureProvider,
+        LODMergeMode mergeMode
+    );
+
+    // Add a greedy-merged LOD quad (scaled up)
+    void addGreedyLODQuad(
+        MeshData& mesh,
+        Face face,
+        int sliceCoord,           // Position along face normal axis (in LOD cells)
+        int startU, int startV,   // Start position in face tangent space (in LOD cells)
+        int width, int height,    // Size of merged region (in LOD cells)
+        float blockScale,         // Scale of each LOD cell (2, 4, 8, etc.)
+        float blockHeight,        // Actual height for HeightLimited mode (0 = use blockScale)
+        const LODFaceMaskEntry& entry,
         const BlockTextureProvider& textureProvider
     );
 };

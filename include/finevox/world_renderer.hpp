@@ -60,6 +60,10 @@ struct WorldRendererConfig {
     // occurs from an offset position so you can see culled geometry edges.
     bool debugCameraOffset = false;
     glm::vec3 debugOffset = glm::vec3(0.0f, 0.0f, 32.0f);  // Default: 32 blocks back (positive Z = backward in camera space)
+
+    // Debug: disable frustum culling (render all chunks in view distance)
+    // Useful for profiling total vertex counts without culling effects
+    bool disableFrustumCulling = false;
 };
 
 // ============================================================================
@@ -313,6 +317,13 @@ public:
     [[nodiscard]] glm::vec3 debugOffset() const { return config_.debugOffset; }
 
     /**
+     * @brief Enable/disable frustum culling (for profiling)
+     * When disabled, all chunks in view distance are rendered regardless of frustum
+     */
+    void setFrustumCullingEnabled(bool enabled) { config_.disableFrustumCulling = !enabled; }
+    [[nodiscard]] bool frustumCullingEnabled() const { return !config_.disableFrustumCulling; }
+
+    /**
      * @brief Disable hidden face culling (renders all faces for debugging)
      */
     void setDisableFaceCulling(bool disabled) { meshBuilder_.setDisableFaceCulling(disabled); }
@@ -395,6 +406,14 @@ public:
      */
     void setLODDebugMode(LODDebugMode mode) { lodDebugMode_ = mode; }
     [[nodiscard]] LODDebugMode lodDebugMode() const { return lodDebugMode_; }
+
+    /**
+     * @brief Set LOD merge mode (how LOD blocks are sized)
+     * FullHeight: LOD blocks are always full cubes (default, best culling)
+     * HeightLimited: LOD blocks match highest source block (smoother transitions)
+     */
+    void setLODMergeMode(LODMergeMode mode);
+    [[nodiscard]] LODMergeMode lodMergeMode() const;
 
     /**
      * @brief Increment LOD bias (shifts all chunks to lower detail)
@@ -548,6 +567,7 @@ private:
     LODConfig lodConfig_;
     bool lodEnabled_ = true;
     LODDebugMode lodDebugMode_ = LODDebugMode::None;
+    LODMergeMode lodMergeMode_ = LODMergeMode::FullHeight;
 
     // Statistics
     uint32_t lastRenderedCount_ = 0;

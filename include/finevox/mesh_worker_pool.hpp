@@ -172,6 +172,10 @@ public:
     void setGreedyMeshing(bool enabled) { greedyMeshing_ = enabled; }
     [[nodiscard]] bool greedyMeshing() const { return greedyMeshing_; }
 
+    // Configure LOD merge mode (how LOD blocks are sized)
+    void setLODMergeMode(LODMergeMode mode) { lodMergeMode_ = mode; }
+    [[nodiscard]] LODMergeMode lodMergeMode() const { return lodMergeMode_; }
+
     // ========================================================================
     // Stale Chunk Tracking (for background updates)
     // ========================================================================
@@ -249,6 +253,7 @@ private:
     // Mesh settings
     bool greedyMeshing_ = true;
     bool backgroundScanning_ = true;
+    LODMergeMode lodMergeMode_ = LODMergeMode::FullHeight;
 
     // Tracked chunks for stale scanning
     // Vector allows O(1) iteration; map provides O(1) lookup for touch/remove

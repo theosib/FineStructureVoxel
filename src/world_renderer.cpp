@@ -419,8 +419,8 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
     for (auto& [pos, view] : views_) {
         if (!view->hasGeometry()) continue;
 
-        // Frustum culling
-        if (!isInFrustum(pos)) {
+        // Frustum culling (can be disabled for profiling)
+        if (!config_.disableFrustumCulling && !isInFrustum(pos)) {
             ++lastCulledCount_;
             continue;
         }
@@ -478,8 +478,11 @@ MeshData WorldRenderer::buildMeshFor(ChunkPos pos, LODLevel lodLevel) {
     // For higher LOD levels, generate downsampled mesh
     // Create temporary LOD subchunk, downsample, and build mesh
     LODSubChunk lodData(lodLevel);
-    lodData.downsampleFrom(*subchunk);
-    return meshBuilder_.buildLODMesh(lodData, pos, textureProvider_);
+    lodData.downsampleFrom(*subchunk, lodMergeMode_);
+
+    // Use merge-mode-aware mesh building
+    BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
+    return meshBuilder_.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider_, lodMergeMode_);
 }
 
 bool WorldRenderer::isInViewDistance(ChunkPos pos) const {
@@ -709,6 +712,7 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
     meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());
     meshWorkerPool_->setBlockTextureProvider(textureProvider_);
     meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
+    meshWorkerPool_->setLODMergeMode(lodMergeMode_);
 
     // Start worker threads
     meshWorkerPool_->start();
@@ -738,6 +742,28 @@ void WorldRenderer::disableAsyncMeshing() {
     // Destroy pool and queue
     meshWorkerPool_.reset();
     meshRebuildQueue_.reset();
+}
+
+// ============================================================================
+// LOD Merge Mode
+// ============================================================================
+
+void WorldRenderer::setLODMergeMode(LODMergeMode mode) {
+    if (lodMergeMode_ == mode) return;
+
+    lodMergeMode_ = mode;
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setLODMergeMode(mode);
+    }
+
+    // Mark all chunks dirty to rebuild with new mode
+    markAllDirty();
+}
+
+LODMergeMode WorldRenderer::lodMergeMode() const {
+    return lodMergeMode_;
 }
 
 }  // namespace finevox

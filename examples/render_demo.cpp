@@ -17,7 +17,10 @@
  * - F3: Teleport to origin
  * - F4: Toggle hidden face culling (debug)
  * - F6: Toggle async meshing (background mesh generation)
+ * - C: Toggle frustum culling (off = render all chunks for profiling)
  * - G: Toggle greedy meshing (compare vertex counts)
+ * - L: Toggle LOD system (off = all LOD0, no merging)
+ * - M: Cycle LOD merge mode (FullHeight vs HeightLimited)
  * - V: Print mesh statistics (vertices, indices)
  * - Escape: Exit
  */
@@ -398,8 +401,57 @@ int main(int argc, char* argv[]) {
                 std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
                 std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
                 std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
+                std::cout << "  Frustum culling: " << (worldRenderer.frustumCullingEnabled() ? "ON" : "OFF") << "\n";
                 std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
+                std::cout << "  LOD system: " << (worldRenderer.lodEnabled() ? "ON" : "OFF") << "\n";
+                if (worldRenderer.lodEnabled()) {
+                    const char* mergeModeName = "Unknown";
+                    switch (worldRenderer.lodMergeMode()) {
+                        case LODMergeMode::FullHeight: mergeModeName = "FullHeight"; break;
+                        case LODMergeMode::HeightLimited: mergeModeName = "HeightLimited"; break;
+                        case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
+                    }
+                    std::cout << "  LOD merge mode: " << mergeModeName << "\n";
+                }
                 std::cout << "==================\n\n";
+            }
+
+            if (key == GLFW_KEY_M && action == finevk::Action::Press) {
+                // Cycle LOD merge mode
+                auto currentMode = worldRenderer.lodMergeMode();
+                LODMergeMode nextMode;
+                const char* modeName;
+                switch (currentMode) {
+                    case LODMergeMode::FullHeight:
+                        nextMode = LODMergeMode::HeightLimited;
+                        modeName = "HeightLimited (smoother transitions)";
+                        break;
+                    case LODMergeMode::HeightLimited:
+                        nextMode = LODMergeMode::FullHeight;
+                        modeName = "FullHeight (best culling)";
+                        break;
+                    default:
+                        nextMode = LODMergeMode::FullHeight;
+                        modeName = "FullHeight (best culling)";
+                        break;
+                }
+                worldRenderer.setLODMergeMode(nextMode);
+                std::cout << "LOD merge mode: " << modeName << "\n";
+            }
+
+            if (key == GLFW_KEY_L && action == finevk::Action::Press) {
+                // Toggle LOD system (off = all chunks at LOD0, no merging)
+                bool enabled = !worldRenderer.lodEnabled();
+                worldRenderer.setLODEnabled(enabled);
+                worldRenderer.markAllDirty();
+                std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
+            }
+
+            if (key == GLFW_KEY_C && action == finevk::Action::Press) {
+                // Toggle frustum culling (for profiling)
+                bool enabled = !worldRenderer.frustumCullingEnabled();
+                worldRenderer.setFrustumCullingEnabled(enabled);
+                std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
             }
         });
 
@@ -442,7 +494,10 @@ int main(int argc, char* argv[]) {
         std::cout << "  F3: Teleport to origin\n";
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
         std::cout << "  F6: Toggle async meshing\n";
+        std::cout << "  C: Toggle frustum culling\n";
         std::cout << "  G: Toggle greedy meshing\n";
+        std::cout << "  L: Toggle LOD (off = no merging)\n";
+        std::cout << "  M: Cycle LOD merge mode\n";
         std::cout << "  V: Print mesh statistics\n";
         std::cout << "  Click: Capture mouse\n";
         std::cout << "  Escape: Release mouse / Exit\n";

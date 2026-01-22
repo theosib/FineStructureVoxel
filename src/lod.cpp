@@ -84,8 +84,10 @@ BlockTypeId LODSubChunk::selectRepresentativeBlock(
     int startZ = groupZ * g;
 
     // Count occurrences of each block type in the group
+    // Also track the topmost non-air block for surface preservation
     std::unordered_map<uint32_t, int> counts;
-    int solidCount = 0;
+    BlockTypeId topBlock = AIR_BLOCK_TYPE;
+    int topY = -1;
 
     for (int dy = 0; dy < g && startY + dy < 16; ++dy) {
         for (int dz = 0; dz < g && startZ + dz < 16; ++dz) {
@@ -93,20 +95,29 @@ BlockTypeId LODSubChunk::selectRepresentativeBlock(
                 BlockTypeId type = source.getBlock(startX + dx, startY + dy, startZ + dz);
                 if (type != AIR_BLOCK_TYPE) {
                     ++counts[type.id];
-                    ++solidCount;
+                    // Track topmost block (for surface preservation)
+                    if (dy > topY) {
+                        topY = dy;
+                        topBlock = type;
+                    }
                 }
             }
         }
     }
 
-    // If less than half the group is solid, return air
-    // This prevents tiny floating blocks at distance
-    int groupVolume = g * g * g;
-    if (solidCount < groupVolume / 2) {
+    // If no solid blocks, return air
+    if (counts.empty()) {
         return AIR_BLOCK_TYPE;
     }
 
-    // Find the most common block type (mode)
+    // For surface-like scenarios (top layer has blocks), prefer the top block
+    // This preserves grass on top of dirt, etc.
+    // Check if there's a block in the top half of the group
+    if (topY >= g / 2) {
+        return topBlock;
+    }
+
+    // Otherwise, find the most common block type (mode)
     BlockTypeId mostCommon = AIR_BLOCK_TYPE;
     int maxCount = 0;
 

@@ -16,6 +16,7 @@
  * - F2: Teleport to large coordinates (tests precision)
  * - F3: Teleport to origin
  * - F4: Toggle hidden face culling (debug)
+ * - F6: Toggle async meshing (background mesh generation)
  * - G: Toggle greedy meshing (compare vertex counts)
  * - V: Print mesh statistics (vertices, indices)
  * - Escape: Exit
@@ -181,12 +182,16 @@ int main(int argc, char* argv[]) {
     // Parse command line
     bool startAtLargeCoords = false;
     bool singleBlockMode = false;
+    bool useAsyncMeshing = false;
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
             startAtLargeCoords = true;
         }
         if (std::string(argv[i]) == "--single-block") {
             singleBlockMode = true;
+        }
+        if (std::string(argv[i]) == "--async") {
+            useAsyncMeshing = true;
         }
     }
 
@@ -266,6 +271,13 @@ int main(int argc, char* argv[]) {
         worldRenderer.setBlockAtlas(atlas.texture());
         worldRenderer.setTextureProvider(atlas.createProvider());
         worldRenderer.initialize();
+
+        // Enable async meshing if requested
+        if (useAsyncMeshing) {
+            worldRenderer.enableAsyncMeshing();
+            std::cout << "Async meshing enabled with "
+                      << worldRenderer.meshWorkerPool()->threadCount() << " worker threads\n";
+        }
 
         // Mark all chunks as dirty to generate initial meshes
         worldRenderer.markAllDirty();
@@ -360,6 +372,18 @@ int main(int argc, char* argv[]) {
                 std::cout << "Screenshot requested (will save to screenshot.ppm)\n";
             }
 
+            if (key == GLFW_KEY_F6 && action == finevk::Action::Press) {
+                // Toggle async meshing
+                if (worldRenderer.asyncMeshingEnabled()) {
+                    worldRenderer.disableAsyncMeshing();
+                    std::cout << "Async meshing: OFF (synchronous mode)\n";
+                } else {
+                    worldRenderer.enableAsyncMeshing();
+                    std::cout << "Async meshing: ON ("
+                              << worldRenderer.meshWorkerPool()->threadCount() << " worker threads)\n";
+                }
+            }
+
             if (key == GLFW_KEY_G && action == finevk::Action::Press) {
                 // Toggle greedy meshing
                 bool enabled = !worldRenderer.greedyMeshing();
@@ -417,9 +441,12 @@ int main(int argc, char* argv[]) {
         std::cout << "  F2: Teleport to large coords (1M)\n";
         std::cout << "  F3: Teleport to origin\n";
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
+        std::cout << "  F6: Toggle async meshing\n";
+        std::cout << "  G: Toggle greedy meshing\n";
+        std::cout << "  V: Print mesh statistics\n";
         std::cout << "  Click: Capture mouse\n";
         std::cout << "  Escape: Release mouse / Exit\n";
-        std::cout << "\nUse --single-block flag for minimal test with one block\n\n";
+        std::cout << "\nFlags: --single-block, --large-coords, --async\n\n";
 
         // Timing
         auto lastTime = std::chrono::high_resolution_clock::now();

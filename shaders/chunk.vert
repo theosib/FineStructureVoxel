@@ -21,6 +21,7 @@ layout(location = 2) out vec2 fragTexCoord;    // Texture coordinates (may exten
 layout(location = 3) out vec4 fragTileBounds;  // Texture tile bounds for atlas tiling
 layout(location = 4) out float fragAO;         // Ambient occlusion
 layout(location = 5) out vec4 fragClipPos;     // DEBUG: clip space position
+layout(location = 6) out float fragDistance;   // Distance from camera (for fog)
 
 // Camera uniform (binding 0)
 layout(set = 0, binding = 0) uniform CameraUBO {
@@ -36,7 +37,9 @@ layout(set = 0, binding = 0) uniform CameraUBO {
 // Per-chunk push constants
 layout(push_constant) uniform PushConstants {
     vec3 chunkOffset;  // View-relative position of subchunk origin
-    float padding;
+    float fogStart;    // Fog start distance
+    vec3 fogColor;     // Fog color
+    float fogEnd;      // Fog end distance
 } chunk;
 
 void main() {
@@ -58,4 +61,5 @@ void main() {
     fragTileBounds = inTileBounds;
     fragAO = inAO;
     fragClipPos = gl_Position;
+    fragDistance = length(viewRelativePos);  // Distance from camera for fog
 }

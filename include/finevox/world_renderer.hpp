@@ -7,6 +7,9 @@
 #include "finevox/block_atlas.hpp"
 #include "finevox/texture_manager.hpp"
 #include "finevox/lod.hpp"
+#include "finevox/distances.hpp"
+#include "finevox/mesh_worker_pool.hpp"
+#include "finevox/mesh_rebuild_queue.hpp"
 
 // FineStructureVK types
 #include <finevk/engine/camera.hpp>
@@ -29,7 +32,9 @@ namespace finevox {
 
 struct ChunkPushConstants {
     alignas(16) glm::vec3 chunkOffset;  // World offset of subchunk origin relative to camera
-    alignas(4) float padding;
+    alignas(4) float fogStart;          // Fog start distance
+    alignas(16) glm::vec3 fogColor;     // Fog color
+    alignas(4) float fogEnd;            // Fog end distance
 };
 
 // ============================================================================
@@ -45,6 +50,9 @@ struct WorldRendererConfig {
     size_t gpuMemoryBudget = 512 * 1024 * 1024;  // Target GPU memory budget (default 512MB)
     float unloadDistanceMultiplier = 1.2f;       // Unload chunks beyond viewDistance * this (hysteresis)
     uint32_t maxUnloadsPerFrame = 16;            // Limit unloads per frame to avoid stalls
+
+    // Fog configuration
+    FogConfig fog;
 
     // Debug: offset the render camera backwards from the cull camera
     // This reveals frustum culling edges for testing purposes.
@@ -152,6 +160,40 @@ public:
      * @brief Initialize rendering resources (call after shaders and atlas are set)
      */
     void initialize();
+
+    // ========================================================================
+    // Async Meshing (Optional)
+    // ========================================================================
+
+    /**
+     * @brief Enable async meshing with a worker thread pool
+     *
+     * When enabled, mesh generation runs on background threads. The graphics
+     * thread uploads pending meshes each frame. Stale meshes continue to render
+     * while new meshes are being built.
+     *
+     * @param numThreads Number of worker threads (0 = auto, based on hardware)
+     */
+    void enableAsyncMeshing(size_t numThreads = 0);
+
+    /**
+     * @brief Disable async meshing and return to synchronous mode
+     *
+     * Stops worker threads and clears the mesh cache. Existing GPU meshes
+     * are preserved.
+     */
+    void disableAsyncMeshing();
+
+    /**
+     * @brief Check if async meshing is enabled
+     */
+    [[nodiscard]] bool asyncMeshingEnabled() const { return meshWorkerPool_ != nullptr; }
+
+    /**
+     * @brief Get the mesh worker pool (for advanced configuration)
+     * @return Pointer to worker pool, or nullptr if async meshing is disabled
+     */
+    [[nodiscard]] MeshWorkerPool* meshWorkerPool() { return meshWorkerPool_.get(); }
 
     // ========================================================================
     // Per-Frame Updates
@@ -283,6 +325,54 @@ public:
     [[nodiscard]] bool greedyMeshing() const { return meshBuilder_.greedyMeshing(); }
 
     // ========================================================================
+    // Fog Configuration
+    // ========================================================================
+
+    /**
+     * @brief Get mutable reference to fog configuration
+     */
+    [[nodiscard]] FogConfig& fogConfig() { return config_.fog; }
+    [[nodiscard]] const FogConfig& fogConfig() const { return config_.fog; }
+
+    /**
+     * @brief Enable/disable fog rendering
+     */
+    void setFogEnabled(bool enabled) { config_.fog.enabled = enabled; }
+    [[nodiscard]] bool fogEnabled() const { return config_.fog.enabled; }
+
+    /**
+     * @brief Set fog distance range
+     * @param start Distance where fog begins (0% density)
+     * @param end Distance where fog is complete (100% density)
+     */
+    void setFogDistances(float start, float end) {
+        config_.fog.startDistance = start;
+        config_.fog.endDistance = end;
+    }
+    [[nodiscard]] float fogStartDistance() const { return config_.fog.startDistance; }
+    [[nodiscard]] float fogEndDistance() const { return config_.fog.endDistance; }
+
+    /**
+     * @brief Set fog color
+     */
+    void setFogColor(const glm::vec3& color) { config_.fog.color = color; }
+    [[nodiscard]] glm::vec3 fogColor() const { return config_.fog.color; }
+
+    /**
+     * @brief Enable/disable dynamic fog color (ties to sky color)
+     */
+    void setFogDynamicColor(bool enabled) { config_.fog.dynamicColor = enabled; }
+    [[nodiscard]] bool fogDynamicColor() const { return config_.fog.dynamicColor; }
+
+    /**
+     * @brief Calculate fog factor for a given distance
+     * @return 0.0 = no fog, 1.0 = full fog
+     */
+    [[nodiscard]] float getFogFactor(float distance) const {
+        return config_.fog.getFogFactor(distance);
+    }
+
+    // ========================================================================
     // LOD (Level of Detail)
     // ========================================================================
 
@@ -410,6 +500,9 @@ private:
     // Calculate view-relative offset for a subchunk
     glm::vec3 calculateViewRelativeOffset(ChunkPos pos) const;
 
+    // Async mesh update path (used when meshWorkerPool_ is active)
+    void updateMeshesAsync(uint32_t maxUpdates);
+
     // Configuration
     WorldRendererConfig config_;
 
@@ -462,6 +555,10 @@ private:
     uint32_t lastRenderedVertices_ = 0;
     uint32_t lastRenderedTriangles_ = 0;
     uint32_t lastUnloadedCount_ = 0;
+
+    // Async meshing (optional)
+    std::unique_ptr<MeshRebuildQueue> meshRebuildQueue_;
+    std::unique_ptr<MeshWorkerPool> meshWorkerPool_;
 
     // State
     bool initialized_ = false;

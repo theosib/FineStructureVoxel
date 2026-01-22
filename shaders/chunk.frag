@@ -14,6 +14,7 @@ layout(location = 2) in vec2 fragTexCoord;     // Raw texture coordinates (may e
 layout(location = 3) in vec4 fragTileBounds;   // Texture tile bounds (minU, minV, maxU, maxV)
 layout(location = 4) in float fragAO;
 layout(location = 5) in vec4 fragClipPos;      // DEBUG
+layout(location = 6) in float fragDistance;    // Distance from camera (for fog)
 
 // Output color
 layout(location = 0) out vec4 outColor;
@@ -32,10 +33,28 @@ layout(set = 0, binding = 0) uniform CameraUBO {
 // Block atlas texture (binding 1)
 layout(set = 0, binding = 1) uniform sampler2D blockAtlas;
 
+// Per-chunk push constants (must match vertex shader)
+layout(push_constant) uniform PushConstants {
+    vec3 chunkOffset;  // View-relative position of subchunk origin
+    float fogStart;    // Fog start distance (0 = fog disabled)
+    vec3 fogColor;     // Fog color
+    float fogEnd;      // Fog end distance
+} chunk;
+
 // Lighting constants
 const vec3 LIGHT_DIR = normalize(vec3(0.5, 1.0, 0.3));  // Sun direction
 const float AMBIENT = 0.4;                               // Ambient light level
 const float DIFFUSE = 0.6;                               // Diffuse light strength
+
+// Calculate fog factor based on distance
+// Returns 0.0 (no fog) to 1.0 (full fog)
+float calculateFog(float distance) {
+    // Fog disabled if start >= end
+    if (chunk.fogStart >= chunk.fogEnd) {
+        return 0.0;
+    }
+    return clamp((distance - chunk.fogStart) / (chunk.fogEnd - chunk.fogStart), 0.0, 1.0);
+}
 
 // Per-face brightness (Minecraft-style)
 // Top faces are brightest, bottom darkest, sides in between
@@ -145,8 +164,12 @@ void main() {
     // Apply ambient occlusion
     lighting *= fragAO;
 
-    // Final color
+    // Final color before fog
     vec3 finalColor = texColor.rgb * lighting;
+
+    // Apply distance fog
+    float fogFactor = calculateFog(fragDistance);
+    finalColor = mix(finalColor, chunk.fogColor, fogFactor);
 
     // Output with gamma correction (if not using sRGB framebuffer)
     // outColor = vec4(pow(finalColor, vec3(1.0/2.2)), texColor.a);

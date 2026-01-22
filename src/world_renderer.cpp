@@ -88,10 +88,10 @@ void WorldRenderer::initialize() {
 }
 
 void WorldRenderer::createPipeline() {
-    // Create pipeline layout with push constants
+    // Create pipeline layout with push constants (shared between vertex and fragment)
     pipelineLayout_ = finevk::PipelineLayout::create(device_)
         .addDescriptorSetLayout(descriptorLayout_->handle())
-        .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ChunkPushConstants))
+        .addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ChunkPushConstants))
         .build();
 
     // Get vertex layout from ChunkVertex
@@ -169,6 +169,12 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
 void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
     if (!initialized_) return;
 
+    // Use async path if worker pool is enabled
+    if (meshWorkerPool_) {
+        updateMeshesAsync(maxUpdates);
+        return;
+    }
+
     uint32_t updates = 0;
 
     // Collect chunks that need rebuilding based on version mismatch or LOD change
@@ -207,9 +213,15 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
     }
 
     // Second pass: check explicitly marked dirty chunks (for new chunks not yet in views_)
+    // Keep track of which dirty chunks we're going to process
+    std::vector<ChunkPos> remainingDirty;
     for (const auto& pos : dirtyChunks_) {
         if (views_.find(pos) != views_.end()) continue;  // Already checked above
-        if (!isInViewDistance(pos)) continue;
+        if (!isInViewDistance(pos)) {
+            // Keep chunks outside view distance - they may come into view later
+            remainingDirty.push_back(pos);
+            continue;
+        }
 
         float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
         LODRequest lodRequest = lodEnabled_
@@ -218,7 +230,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
 
         chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
     }
-    dirtyChunks_.clear();  // Clear explicit dirty list after processing
+    dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
 
     // Sort by distance to camera (nearest first) - prioritize close chunks
     std::sort(chunksToUpdate.begin(), chunksToUpdate.end(),
@@ -227,8 +239,19 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         });
 
     // Process chunks that need updating
-    for (const auto& info : chunksToUpdate) {
-        if (maxUpdates > 0 && updates >= maxUpdates) break;
+    for (size_t i = 0; i < chunksToUpdate.size(); ++i) {
+        const auto& info = chunksToUpdate[i];
+
+        if (maxUpdates > 0 && updates >= maxUpdates) {
+            // Hit the limit - re-add remaining chunks to dirty list for next frame
+            for (size_t j = i; j < chunksToUpdate.size(); ++j) {
+                // Only re-add if not already in views_ (views will be checked via version)
+                if (views_.find(chunksToUpdate[j].pos) == views_.end()) {
+                    dirtyChunks_.push_back(chunksToUpdate[j].pos);
+                }
+            }
+            break;
+        }
 
         // Skip if too far
         if (!isInViewDistance(info.pos)) continue;
@@ -260,6 +283,81 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         view->setLastBuiltLOD(buildLOD);
 
         ++updates;
+    }
+}
+
+void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
+    uint32_t uploads = 0;
+
+    // Process explicitly dirty chunks first (for new chunks not yet tracked)
+    std::vector<ChunkPos> remainingDirty;
+    for (const auto& pos : dirtyChunks_) {
+        if (!isInViewDistance(pos)) {
+            // Keep chunks outside view distance - they may come into view later
+            remainingDirty.push_back(pos);
+            continue;
+        }
+
+        auto subchunk = world_.getSubChunkShared(pos);
+        if (!subchunk) continue;
+
+        // Calculate LOD request
+        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+        LODRequest lodRequest = lodEnabled_
+            ? lodConfig_.getRequestForDistance(distBlocks)
+            : LODRequest::exact(LODLevel::LOD0);
+
+        // Queue rebuild request - workers will build it
+        uint64_t version = subchunk->blockVersion();
+        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal(version, lodRequest));
+
+        // Track this chunk for future stale scanning
+        if (views_.find(pos) == views_.end()) {
+            getOrCreateView(pos);  // Ensure view exists
+        }
+        auto* viewPtr = views_[pos].get();
+        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentVersion) {
+            return viewPtr->lastBuiltVersion() != currentVersion;
+        });
+    }
+    dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
+
+    // Poll the mesh cache for pending meshes and upload them
+    // This is the "pull" model - we check what the workers have built
+    for (auto& [pos, view] : views_) {
+        if (maxUpdates > 0 && uploads >= maxUpdates) break;
+
+        auto subchunk = world_.getSubChunkShared(pos);
+        if (!subchunk) continue;
+
+        // Calculate LOD request
+        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+        LODRequest lodRequest = lodEnabled_
+            ? lodConfig_.getRequestForDistance(distBlocks)
+            : LODRequest::exact(LODLevel::LOD0);
+
+        // Query mesh cache - this triggers rebuild if stale
+        auto result = meshWorkerPool_->getMesh(pos, subchunk, lodRequest);
+
+        if (result.entry && result.entry->hasPendingMesh()) {
+            // Upload the pending mesh to GPU
+            MeshData& meshData = *result.entry->pendingMesh;
+
+            if (view->canUpdateInPlace(meshData)) {
+                view->update(*renderer_->commandPool(), meshData);
+            } else {
+                view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
+            }
+
+            // Record the version and LOD from the pending mesh
+            view->setLastBuiltVersion(result.entry->pendingVersion);
+            view->setLastBuiltLOD(result.entry->pendingLOD);
+
+            // Mark as uploaded in the cache
+            meshWorkerPool_->markUploaded(pos);
+
+            ++uploads;
+        }
     }
 }
 
@@ -333,13 +431,15 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             continue;
         }
 
-        // Calculate view-relative offset
+        // Calculate view-relative offset and set fog parameters
         ChunkPushConstants pushConstants;
         pushConstants.chunkOffset = calculateViewRelativeOffset(pos);
-        pushConstants.padding = 0.0f;
+        pushConstants.fogStart = config_.fog.enabled ? config_.fog.startDistance : 0.0f;
+        pushConstants.fogColor = config_.fog.color;
+        pushConstants.fogEnd = config_.fog.enabled ? config_.fog.endDistance : 0.0f;
 
-        // Push constants
-        pipelineLayout_->pushConstants(cmd.handle(), VK_SHADER_STAGE_VERTEX_BIT, pushConstants);
+        // Push constants (shared between vertex and fragment stages)
+        pipelineLayout_->pushConstants(cmd.handle(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pushConstants);
 
         // Bind and draw
         view->bind(cmd);
@@ -592,6 +692,52 @@ WorldRenderer::LODStats WorldRenderer::getLODStats() const {
     }
 
     return stats;
+}
+
+// ============================================================================
+// Async Meshing
+// ============================================================================
+
+void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
+    if (meshWorkerPool_) return;  // Already enabled
+
+    // Create the rebuild queue
+    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(mergeMeshRebuildRequest);
+
+    // Create the worker pool
+    meshWorkerPool_ = std::make_unique<MeshWorkerPool>(world_, numThreads);
+    meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());
+    meshWorkerPool_->setBlockTextureProvider(textureProvider_);
+    meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
+
+    // Start worker threads
+    meshWorkerPool_->start();
+
+    // Track all existing views so workers can scan for stale meshes
+    for (auto& [pos, view] : views_) {
+        auto subchunk = world_.getSubChunkShared(pos);
+        if (!subchunk) continue;
+
+        // Create staleness checker that captures the view
+        auto* viewPtr = view.get();
+        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentVersion) {
+            return viewPtr->lastBuiltVersion() != currentVersion;
+        });
+    }
+}
+
+void WorldRenderer::disableAsyncMeshing() {
+    if (!meshWorkerPool_) return;  // Already disabled
+
+    // Stop worker threads
+    meshWorkerPool_->stop();
+
+    // Clear mesh cache (GPU meshes in views_ are preserved)
+    meshWorkerPool_->clearTrackedChunks();
+
+    // Destroy pool and queue
+    meshWorkerPool_.reset();
+    meshRebuildQueue_.reset();
 }
 
 }  // namespace finevox

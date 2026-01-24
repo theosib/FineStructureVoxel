@@ -122,4 +122,16 @@ void BlockContext::notifyNeighbors() {
     }
 }
 
+void BlockContext::setBlock(BlockTypeId type) {
+    subChunk_.setBlock(localPos_.x, localPos_.y, localPos_.z, type);
+}
+
+std::unique_ptr<DataContainer> BlockContext::takePreviousData() {
+    return std::move(previousData_);
+}
+
+void BlockContext::setPreviousData(std::unique_ptr<DataContainer> data) {
+    previousData_ = std::move(data);
+}
+
 }  // namespace finevox

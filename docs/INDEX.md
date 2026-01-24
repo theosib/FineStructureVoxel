@@ -73,6 +73,7 @@
 | Document | Key Contents |
 |----------|--------------|
 | [23 - Distance and Loading](23-distance-and-loading.md) | Distance zones, chunk loading policies, block updates, fog, force-loading |
+| [24 - Event System](24-event-system.md) | Inbox/outbox event processing, lighting thread, version tracking |
 
 ### Planning & Analysis
 
@@ -148,6 +149,10 @@
 | Block extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
 | SubChunk extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
 | Column extra data | [23](23-distance-and-loading.md) §2.5, [17](17-implementation-phases.md) §9.1 |
+| Event system inbox/outbox | [24](24-event-system.md) §24.2, §24.6 |
+| Handler semantics (place/break) | [24](24-event-system.md) §24.7 |
+| Lighting thread integration | [24](24-event-system.md) §24.8-24.11 |
+| Version tracking (block/light) | [24](24-event-system.md) §24.9 |
 
 ---
 
@@ -177,4 +182,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-01-19*
+*Last Updated: 2026-01-24*

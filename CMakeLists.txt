@@ -50,6 +50,7 @@ add_library(finevox STATIC
     src/mesh.cpp
     src/block_type.cpp
     src/block_handler.cpp
+    src/block_event.cpp
     src/module.cpp
     src/entity_registry.cpp
     src/item_registry.cpp

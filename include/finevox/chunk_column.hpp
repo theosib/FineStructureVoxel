@@ -106,6 +106,20 @@ public:
     /// Mark heightmap as dirty (needs recalculation)
     void markHeightmapDirty() { heightmapDirty_ = true; }
 
+    // ========================================================================
+    // Light Initialization (for lazy sky light calculation)
+    // ========================================================================
+
+    /// Check if sky light has been initialized for this column
+    /// Returns false if the column needs sky light calculation before meshing
+    [[nodiscard]] bool isLightInitialized() const { return lightInitialized_; }
+
+    /// Mark sky light as initialized (called after sky light propagation)
+    void markLightInitialized() { lightInitialized_ = true; }
+
+    /// Reset light initialization flag (e.g., after major terrain changes)
+    void resetLightInitialized() { lightInitialized_ = false; }
+
 private:
     ColumnPos pos_;
     std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
@@ -116,6 +130,10 @@ private:
     static constexpr int32_t NO_HEIGHT = std::numeric_limits<int32_t>::min();
     std::array<int32_t, 256> heightmap_;
     bool heightmapDirty_ = true;
+
+    // Light initialization: false until sky light is first calculated
+    // Used for lazy initialization - mesher can wait for this before building
+    bool lightInitialized_ = false;
 
     // Convert block Y to subchunk Y (handles negative correctly)
     [[nodiscard]] static int32_t blockYToChunkY(int32_t blockY);

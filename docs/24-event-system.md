@@ -9,29 +9,66 @@
 The event system provides a unified mechanism for delivering block-related events to various handlers and subsystems. Events originate from block changes, player interactions, tick updates, and other game actions. They are delivered to:
 
 1. **Block handlers** - For block-specific behavior (existing BlockHandler interface)
-2. **Lighting system** - For light propagation updates
+2. **Lighting system** - For light propagation updates (separate thread)
 3. **Physics system** - For collision updates
 4. **Network system** - For multiplayer synchronization (future)
 
 ### Design Goals
 
-- **Unified event container** - Single struct carries all event data
-- **Dual-dispatch pattern** - Single entry point + type-specific methods
-- **Zero-copy where possible** - "No value" defaults for unused fields
-- **Thread-safe queuing** - Lock-free FIFO for async systems
+- **No per-block-change locking** - Game logic thread owns all event queues
+- **Inbox/outbox pattern** - Clean separation of processing phases
+- **Decoupled lighting** - Light updates can lag without blocking game logic
+- **Version tracking** - Mesher knows when to rebuild
 - **Extensible** - Easy to add new event types and handlers
 
 ---
 
-## 24.2 Event Types
+## 24.2 Thread Model
+
+```
+External Input (thread-safe, may block)
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Game Logic Thread                                       │
+│                                                          │
+│  ┌─────────┐     ┌─────────┐                           │
+│  │  Inbox  │◄───►│ Outbox  │   (swap when inbox empty) │
+│  └────┬────┘     └────▲────┘                           │
+│       │               │                                  │
+│       │ process       │ new events                       │
+│       ▼               │ (neighbor updates, etc.)         │
+│  ┌─────────────────────────┐                            │
+│  │  Event Processor        │                            │
+│  │  - calls setBlock()     │───► SubChunk.blockVersion++│
+│  │  - invokes handlers     │                            │
+│  │  - generates neighbors  │───► outbox                  │
+│  │  - lighting events      │───► lighting thread queue   │
+│  └─────────────────────────┘                            │
+│                                                          │
+│  Loop: process inbox → swap → repeat until both empty   │
+│  Then: block on external input                           │
+└─────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │ Lighting Thread   │
+                    │ (consolidating    │
+                    │  queue, can lag)  │
+                    └──────────────────┘
+```
+
+---
+
+## 24.3 Event Types
 
 ```cpp
 enum class EventType : uint8_t {
     None = 0,
 
     // Block lifecycle events
-    BlockPlaced,        // Block was placed in the world
-    BlockBroken,        // Block was broken/removed
+    BlockPlaced,        // Block was placed/replaced in the world
+    BlockBroken,        // Block is being broken/removed
     BlockChanged,       // Block state changed (rotation, data)
 
     // Tick events
@@ -57,9 +94,7 @@ enum class EventType : uint8_t {
 
 ---
 
-## 24.3 BlockEvent Structure
-
-Extends the existing BlockContext concept into a unified event container:
+## 24.4 BlockEvent Structure
 
 ```cpp
 /**
@@ -80,8 +115,8 @@ struct BlockEvent {
     ChunkPos chunkPos{0, 0, 0};
 
     // Block information (valid for block events)
-    BlockTypeId blockType;        // Current block type (or new type for Place)
-    BlockTypeId previousType;     // Previous block type (for Change/Break)
+    BlockTypeId blockType;        // Current/new block type
+    BlockTypeId previousType;     // Previous block type
     Rotation rotation;            // Block rotation (if applicable)
 
     // Interaction data (valid for PlayerUse/PlayerHit)
@@ -100,7 +135,8 @@ struct BlockEvent {
     // Factory Methods
     // ========================================================================
 
-    static BlockEvent blockPlaced(BlockPos pos, BlockTypeId newType, Rotation rot = Rotation::IDENTITY);
+    static BlockEvent blockPlaced(BlockPos pos, BlockTypeId newType,
+                                  BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
     static BlockEvent blockBroken(BlockPos pos, BlockTypeId oldType);
     static BlockEvent blockChanged(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
     static BlockEvent neighborChanged(BlockPos pos, Face changedFace);
@@ -109,7 +145,7 @@ struct BlockEvent {
     static BlockEvent playerHit(BlockPos pos, Face face);
 
     // ========================================================================
-    // Sentinel Values
+    // Sentinel Checks
     // ========================================================================
 
     // "No value" defaults for quick checking
@@ -133,438 +169,429 @@ struct BlockEvent {
 
 ---
 
-## 24.4 Event Handler Interface
-
-The dual-dispatch pattern provides both a generic entry point and type-specific methods:
+## 24.5 BlockContext for Handlers
 
 ```cpp
 /**
- * @brief Interface for systems that handle block events
+ * @brief Context passed to block event handlers
  *
- * Handlers implement specific methods for event types they care about.
- * The default generic handleEvent() dispatches to specific methods.
+ * Provides access to block state and allows handlers to modify
+ * the block or generate additional events.
  */
-class EventHandler {
+class BlockContext {
 public:
-    virtual ~EventHandler() = default;
+    BlockContext(World& world, SubChunk& subChunk,
+                 BlockPos pos, BlockPos localPos);
 
-    // ========================================================================
-    // Generic Entry Point
-    // ========================================================================
+    // Location
+    [[nodiscard]] World& world() { return world_; }
+    [[nodiscard]] SubChunk& subChunk() { return subChunk_; }
+    [[nodiscard]] BlockPos pos() const { return pos_; }
+    [[nodiscard]] BlockPos localPos() const { return localPos_; }
 
-    /**
-     * @brief Handle any event type
-     *
-     * Default implementation dispatches to specific methods based on type.
-     * Override for custom dispatch logic or to handle all events uniformly.
-     *
-     * @param event The event to handle
-     * @param world World containing the block
-     */
-    virtual void handleEvent(const BlockEvent& event, World& world) {
-        switch (event.type) {
-            case EventType::BlockPlaced:
-                onBlockPlaced(event, world);
-                break;
-            case EventType::BlockBroken:
-                onBlockBroken(event, world);
-                break;
-            case EventType::BlockChanged:
-                onBlockChanged(event, world);
-                break;
-            case EventType::NeighborChanged:
-                onNeighborChanged(event, world);
-                break;
-            case EventType::TickScheduled:
-            case EventType::TickRepeat:
-            case EventType::TickRandom:
-                onTick(event, world);
-                break;
-            case EventType::PlayerUse:
-                onPlayerUse(event, world);
-                break;
-            case EventType::PlayerHit:
-                onPlayerHit(event, world);
-                break;
-            case EventType::ChunkLoaded:
-                onChunkLoaded(event, world);
-                break;
-            case EventType::ChunkUnloaded:
-                onChunkUnloaded(event, world);
-                break;
-            case EventType::RepaintRequested:
-                onRepaintRequested(event, world);
-                break;
-            default:
-                break;
-        }
-    }
+    // Current block state
+    [[nodiscard]] BlockTypeId blockType() const;
+    [[nodiscard]] Rotation rotation() const;
+    [[nodiscard]] DataContainer* data();
 
-    // ========================================================================
-    // Type-Specific Methods (override what you need)
-    // ========================================================================
+    // Previous state (for place/break events)
+    [[nodiscard]] BlockTypeId previousType() const { return previousType_; }
+    [[nodiscard]] const DataContainer* previousData() const { return previousData_.get(); }
 
-    virtual void onBlockPlaced(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onBlockBroken(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onBlockChanged(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onNeighborChanged(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onTick(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onPlayerUse(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onPlayerHit(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onChunkLoaded(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onChunkUnloaded(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-    virtual void onRepaintRequested(const BlockEvent& event, World& world) {
-        (void)event; (void)world;
-    }
-};
-```
+    // Modify block (used by handlers to alter/undo placement)
+    void setBlock(BlockTypeId type);
+    void setRotation(Rotation rot);
 
----
-
-## 24.5 Event Queue
-
-Lock-free FIFO queue for delivering events to async systems like lighting:
-
-```cpp
-/**
- * @brief Thread-safe event queue for async event delivery
- *
- * Multiple producers can enqueue events; single consumer dequeues.
- * Uses lock-free implementation for minimal contention.
- */
-class EventQueue {
-public:
-    explicit EventQueue(size_t capacity = 16384);
-
-    /**
-     * @brief Enqueue an event (producer side)
-     * @return true if enqueued, false if queue is full
-     */
-    bool enqueue(BlockEvent event);
-
-    /**
-     * @brief Dequeue an event (consumer side)
-     * @param out Output parameter for the event
-     * @return true if an event was dequeued, false if queue is empty
-     */
-    bool dequeue(BlockEvent& out);
-
-    /**
-     * @brief Check if queue is empty
-     */
-    [[nodiscard]] bool empty() const;
-
-    /**
-     * @brief Get approximate number of pending events
-     */
-    [[nodiscard]] size_t size() const;
-
-    /**
-     * @brief Clear all pending events
-     */
-    void clear();
+    // Neighbor access
+    [[nodiscard]] BlockTypeId getNeighbor(Face face) const;
 
 private:
-    // Lock-free ring buffer implementation
-    std::vector<std::atomic<BlockEvent*>> buffer_;
-    std::atomic<size_t> head_{0};
-    std::atomic<size_t> tail_{0};
-    size_t capacity_;
+    World& world_;
+    SubChunk& subChunk_;
+    BlockPos pos_;
+    BlockPos localPos_;
+    BlockTypeId previousType_;
+    std::unique_ptr<DataContainer> previousData_;
 };
 ```
 
 ---
 
-## 24.6 Event Dispatcher
+## 24.6 Event Processing Flow
 
-Central dispatcher routes events to registered handlers:
-
-```cpp
-/**
- * @brief Central event dispatcher
- *
- * Routes events to registered handlers. Can dispatch synchronously
- * (for same-thread handlers) or enqueue to async queues.
- */
-class EventDispatcher {
-public:
-    EventDispatcher();
-
-    // ========================================================================
-    // Handler Registration
-    // ========================================================================
-
-    /**
-     * @brief Register a synchronous event handler
-     *
-     * Handler will be called on the dispatching thread.
-     */
-    void registerHandler(EventHandler* handler);
-
-    /**
-     * @brief Unregister a handler
-     */
-    void unregisterHandler(EventHandler* handler);
-
-    /**
-     * @brief Register an async event queue
-     *
-     * Events will be enqueued rather than dispatched synchronously.
-     * Used for systems running on separate threads (lighting, etc.).
-     */
-    void registerAsyncQueue(EventQueue* queue);
-
-    /**
-     * @brief Unregister an async queue
-     */
-    void unregisterAsyncQueue(EventQueue* queue);
-
-    // ========================================================================
-    // Event Dispatch
-    // ========================================================================
-
-    /**
-     * @brief Dispatch an event to all handlers
-     *
-     * Synchronous handlers are called immediately.
-     * Async queues receive a copy of the event.
-     */
-    void dispatch(const BlockEvent& event, World& world);
-
-    /**
-     * @brief Dispatch events for a block change
-     *
-     * Convenience method that creates appropriate events and dispatches.
-     */
-    void onBlockChange(BlockPos pos, BlockTypeId oldType, BlockTypeId newType, World& world);
-
-private:
-    std::vector<EventHandler*> handlers_;
-    std::vector<EventQueue*> asyncQueues_;
-    std::mutex mutex_;  // Protects handler/queue registration
-};
-```
-
----
-
-## 24.7 Lighting System Integration
-
-The lighting system uses an async event queue:
+### Block Place Event
 
 ```cpp
-class LightingEventHandler : public EventHandler {
-public:
-    explicit LightingEventHandler(LightEngine& engine);
+void EventProcessor::processBlockPlaceEvent(BlockEvent& event) {
+    SubChunk* subchunk = getSubChunk(event.chunkPos);
+    int localIdx = toLocalIndex(event.localPos);
 
-    // Process events from the queue (called on lighting thread)
-    void processQueue();
+    // 1. Capture old state (including extra data)
+    BlockTypeId oldType = subchunk->getBlock(localIdx);
+    auto oldData = subchunk->extractExtraData(localIdx);  // moves ownership
 
-    // EventHandler overrides
-    void onBlockPlaced(const BlockEvent& event, World& world) override;
-    void onBlockBroken(const BlockEvent& event, World& world) override;
-    void onChunkLoaded(const BlockEvent& event, World& world) override;
+    // 2. Make the change (setBlock increments blockVersion internally)
+    subchunk->setBlock(localIdx, event.blockType);
 
-private:
-    LightEngine& engine_;
-    EventQueue queue_;
-};
+    // 3. Build context with previous state
+    BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
+    ctx.setPreviousType(oldType);
+    ctx.setPreviousData(std::move(oldData));
 
-// Lighting thread loop
-void lightingThreadMain(LightingEventHandler& handler, std::atomic<bool>& running) {
-    while (running.load()) {
-        handler.processQueue();
-
-        // Sleep briefly if queue was empty to avoid spinning
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
-```
-
----
-
-## 24.8 BlockHandler Adapter
-
-Adapts the existing BlockHandler interface to the event system:
-
-```cpp
-/**
- * @brief Adapter that routes events to BlockHandler methods
- *
- * Bridges the new event system with existing BlockHandler interface.
- */
-class BlockHandlerAdapter : public EventHandler {
-public:
-    void onBlockPlaced(const BlockEvent& event, World& world) override {
-        // Get handler for this block type
-        BlockHandler* handler = getHandler(event.blockType);
-        if (!handler) return;
-
-        // Create BlockContext and call handler
-        SubChunk* subChunk = world.getSubChunk(event.chunkPos);
-        if (!subChunk) return;
-
-        BlockContext ctx(world, *subChunk, event.pos, event.localPos);
+    // 4. Call handler (may modify via setBlock, can alter/undo placement)
+    BlockHandler* handler = getHandler(event.blockType);
+    if (handler) {
         handler->onPlace(ctx);
     }
 
-    void onBlockBroken(const BlockEvent& event, World& world) override {
-        BlockHandler* handler = getHandler(event.previousType);
-        if (!handler) return;
+    // 5. Always enqueue lighting event (lighting thread handles no-ops)
+    BlockTypeId finalType = subchunk->getBlock(localIdx);
+    enqueueLightingUpdate(event.pos, oldType, finalType);
 
-        SubChunk* subChunk = world.getSubChunk(event.chunkPos);
-        if (!subChunk) return;
+    // 6. Generate neighbor updates → outbox
+    for (Face face : ALL_FACES) {
+        outbox_.push(BlockEvent::neighborChanged(
+            event.pos.neighbor(face), oppositeFace(face)));
+    }
+}
+```
 
-        BlockContext ctx(world, *subChunk, event.pos, event.localPos);
-        handler->onBreak(ctx);
+### Block Break Event
+
+```cpp
+void EventProcessor::processBlockBreakEvent(BlockEvent& event) {
+    SubChunk* subchunk = getSubChunk(event.chunkPos);
+    int localIdx = toLocalIndex(event.localPos);
+
+    // 1. Capture old state
+    BlockTypeId oldType = subchunk->getBlock(localIdx);
+    auto oldData = subchunk->extractExtraData(localIdx);
+
+    // 2. Build context (block still exists for handler inspection)
+    BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
+    ctx.setPreviousType(oldType);
+    ctx.setPreviousData(std::move(oldData));
+
+    // 3. Call handler BEFORE removal (can cancel by returning false)
+    BlockHandler* handler = getHandler(oldType);
+    if (handler && !handler->onBreak(ctx)) {
+        // Cancelled - restore extra data if we moved it
+        if (ctx.previousData()) {
+            subchunk->setExtraData(localIdx, /* restore */);
+        }
+        return;
     }
 
-    void onNeighborChanged(const BlockEvent& event, World& world) override {
-        BlockHandler* handler = getHandler(event.blockType);
-        if (!handler) return;
+    // 4. Make the change (setBlock increments blockVersion internally)
+    subchunk->setBlock(localIdx, AIR_BLOCK_TYPE);
 
-        SubChunk* subChunk = world.getSubChunk(event.chunkPos);
-        if (!subChunk) return;
+    // 5. Always enqueue lighting event
+    enqueueLightingUpdate(event.pos, oldType, AIR_BLOCK_TYPE);
 
-        BlockContext ctx(world, *subChunk, event.pos, event.localPos);
-        handler->onNeighborChanged(ctx, event.changedFace);
+    // 6. Generate neighbor updates → outbox
+    for (Face face : ALL_FACES) {
+        outbox_.push(BlockEvent::neighborChanged(
+            event.pos.neighbor(face), oppositeFace(face)));
+    }
+}
+```
+
+### Main Event Loop
+
+```cpp
+void EventProcessor::processEvents() {
+    // Drain external input into inbox (thread-safe)
+    drainExternalInput();
+
+    // Process until stable
+    while (!inbox_.empty() || !outbox_.empty()) {
+        // Process all events in inbox
+        while (!inbox_.empty()) {
+            BlockEvent event = inbox_.pop();
+            processEvent(event);
+        }
+
+        // Swap inbox/outbox (just pointer swap)
+        std::swap(inbox_, outbox_);
     }
 
-    void onTick(const BlockEvent& event, World& world) override {
-        BlockHandler* handler = getHandler(event.blockType);
-        if (!handler) return;
-
-        SubChunk* subChunk = world.getSubChunk(event.chunkPos);
-        if (!subChunk) return;
-
-        BlockContext ctx(world, *subChunk, event.pos, event.localPos);
-        handler->onTick(ctx, event.tickType);
-    }
-
-    void onPlayerUse(const BlockEvent& event, World& world) override {
-        BlockHandler* handler = getHandler(event.blockType);
-        if (!handler) return;
-
-        SubChunk* subChunk = world.getSubChunk(event.chunkPos);
-        if (!subChunk) return;
-
-        BlockContext ctx(world, *subChunk, event.pos, event.localPos);
-        handler->onUse(ctx, event.face);
-    }
-
-private:
-    BlockHandler* getHandler(BlockTypeId type) {
-        // Look up in BlockRegistry
-        return BlockRegistry::global().getHandler(type);
-    }
-};
+    // Block waiting for more external input
+    waitForExternalInput();
+}
 ```
 
 ---
 
-## 24.9 Lock-Free Light Access
+## 24.7 Handler Semantics
 
-For rendering, light values must be accessible without locks:
+### onBreak (called BEFORE removal)
 
 ```cpp
-// Light data is stored directly in SubChunk
-// Uses atomic operations for thread-safe access
+// Handler can:
+// - Inspect the block being broken (ctx.blockType())
+// - Access extra data (ctx.data())
+// - Drop items
+// - Return false to cancel the break
+bool BlockHandler::onBreak(BlockContext& ctx) {
+    // Drop item
+    dropItem(ctx.pos(), getDropFor(ctx.blockType()));
 
+    // Return true to allow break, false to cancel
+    return true;
+}
+```
+
+### onPlace (called AFTER placement)
+
+```cpp
+// Handler can:
+// - Inspect what was placed (ctx.blockType())
+// - See what was there before (ctx.previousType(), ctx.previousData())
+// - Modify the placement via ctx.setBlock()
+// - Undo by setting back to previousType
+void BlockHandler::onPlace(BlockContext& ctx) {
+    // Example: torch needs solid surface below
+    if (!canSupportTorch(ctx.getNeighbor(Face::NegY))) {
+        // Undo placement
+        ctx.setBlock(ctx.previousType());
+        return;
+    }
+
+    // Example: waterlogged variant
+    if (isWaterlogged(ctx.previousType())) {
+        ctx.setBlock(BlockTypeId::fromName("torch_waterlogged"));
+    }
+}
+```
+
+---
+
+## 24.8 Lighting Thread Integration
+
+The lighting thread has its own consolidating queue that can lag behind game logic without blocking it.
+
+```cpp
+/**
+ * @brief Lighting update event (lightweight)
+ */
+struct LightingUpdate {
+    BlockPos pos;
+    BlockTypeId oldType;
+    BlockTypeId newType;
+};
+
+/**
+ * @brief Consolidating queue for lighting thread
+ *
+ * If falling behind, only processes latest update per block position.
+ * This prevents unbounded queue growth during heavy activity.
+ */
+class LightingQueue {
+public:
+    void enqueue(LightingUpdate update);
+
+    // Bulk dequeue for efficiency
+    std::vector<LightingUpdate> dequeueBatch(size_t maxCount);
+
+    [[nodiscard]] bool empty() const;
+
+private:
+    // Consolidates by position - newer updates overwrite older
+    std::unordered_map<BlockPos, LightingUpdate> pending_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
+```
+
+### Lighting Thread Optimization
+
+```cpp
+void LightingThread::processUpdate(const LightingUpdate& update) {
+    uint8_t oldEmission = getEmission(update.oldType);
+    uint8_t newEmission = getEmission(update.newType);
+    uint8_t oldAttenuation = getAttenuation(update.oldType);
+    uint8_t newAttenuation = getAttenuation(update.newType);
+
+    // Quick check: opaque non-emitter → opaque non-emitter is no-op
+    if (oldAttenuation == 15 && newAttenuation == 15 &&
+        oldEmission == 0 && newEmission == 0) {
+        return;  // No light change possible
+    }
+
+    // Otherwise do full propagation...
+    if (oldEmission > 0 || newEmission > 0) {
+        updateBlockLight(update.pos, oldEmission, newEmission);
+    }
+    if (oldAttenuation != newAttenuation) {
+        updateSkyLight(update.pos);
+    }
+
+    // Increment light version for affected subchunks
+    markLightVersionChanged(update.pos);
+}
+```
+
+---
+
+## 24.9 Version Tracking
+
+```cpp
 class SubChunk {
 public:
-    // Light accessors use relaxed memory ordering for rendering
-    // (rendering doesn't need strict ordering, just eventual consistency)
-
-    uint8_t getSkyLight(int index) const {
-        return unpackSkyLight(light_[index]);
+    // Block version - incremented by setBlock()
+    [[nodiscard]] uint64_t blockVersion() const {
+        return blockVersion_.load(std::memory_order_acquire);
     }
 
-    uint8_t getBlockLight(int index) const {
-        return unpackBlockLight(light_[index]);
-    }
-
-    // Light version allows mesh builder to detect changes
-    uint64_t lightVersion() const {
+    // Light version - incremented by lighting thread
+    [[nodiscard]] uint64_t lightVersion() const {
         return lightVersion_.load(std::memory_order_acquire);
     }
 
+    // Called internally by setBlock
+    void incrementBlockVersion() {
+        blockVersion_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Called by lighting thread after updates complete
+    void incrementLightVersion() {
+        lightVersion_.fetch_add(1, std::memory_order_release);
+    }
+
 private:
-    std::array<uint8_t, VOLUME> light_;  // Non-atomic: single writer (lighting thread)
-    std::atomic<uint64_t> lightVersion_{1};  // Incremented after light updates
+    std::atomic<uint64_t> blockVersion_{1};
+    std::atomic<uint64_t> lightVersion_{1};
+};
+```
+
+### Mesher Version Check
+
+```cpp
+struct MeshCacheEntry {
+    uint64_t builtWithBlockVersion;
+    uint64_t builtWithLightVersion;
+    // ... mesh data ...
+};
+
+bool MeshWorker::needsRebuild(const SubChunk& chunk,
+                               const MeshCacheEntry& cached) {
+    return chunk.blockVersion() != cached.builtWithBlockVersion ||
+           chunk.lightVersion() != cached.builtWithLightVersion;
+}
+```
+
+---
+
+## 24.10 LightEngine Integration with World
+
+```cpp
+class World {
+public:
+    // Optional lighting - created based on config
+    void enableLighting();
+    void disableLighting();
+    [[nodiscard]] LightEngine* lightEngine() { return lightEngine_.get(); }
+
+    // Called by event processor
+    void enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+        if (lightEngine_) {
+            lightEngine_->enqueue({pos, oldType, newType});
+        }
+    }
+
+private:
+    std::unique_ptr<LightEngine> lightEngine_;  // null if disabled
+};
+
+class LightEngine {
+public:
+    explicit LightEngine(World& world);
+
+    // Enqueue update (called from game logic thread)
+    void enqueue(LightingUpdate update);
+
+    // Start/stop lighting thread
+    void start();
+    void stop();
+
+    // Lazy sky light initialization (called by mesher if needed)
+    void ensureColumnInitialized(ColumnPos pos);
+
+private:
+    World& world_;  // Back reference
+    LightingQueue queue_;
+    std::thread thread_;
+    std::atomic<bool> running_{false};
 };
 ```
 
 ---
 
-## 24.10 Usage Example
+## 24.11 Lazy Sky Light Initialization
+
+Sky light is initialized lazily when a chunk is first meshed, not when loaded.
 
 ```cpp
-// Setup
-EventDispatcher dispatcher;
-LightingEventHandler lightHandler(lightEngine);
-BlockHandlerAdapter blockAdapter;
+class ChunkColumn {
+public:
+    [[nodiscard]] bool lightInitialized() const { return lightInitialized_; }
+    void markLightInitialized() { lightInitialized_ = true; }
 
-dispatcher.registerHandler(&blockAdapter);
-dispatcher.registerAsyncQueue(lightHandler.queue());
+private:
+    bool lightInitialized_ = false;
+};
 
-// When a block changes
-void World::setBlock(BlockPos pos, BlockTypeId type) {
-    BlockTypeId oldType = getBlock(pos);
+// In mesh builder's light provider:
+uint8_t getLightForMeshing(BlockPos pos) {
+    ChunkColumn* col = world.getColumn(ColumnPos::fromBlock(pos));
+    if (!col) return 0;
 
-    // Actually set the block
-    // ...
+    // Lazy initialization
+    if (!col->lightInitialized() && world.lightEngine()) {
+        world.lightEngine()->initializeSkyLight(col);
+        col->markLightInitialized();
+    }
 
-    // Dispatch events
-    dispatcher_.onBlockChange(pos, oldType, type, *this);
+    return world.lightEngine()->getCombinedLight(pos);
 }
-
-// The dispatcher handles:
-// 1. Calling BlockHandler::onBreak for oldType (synchronous)
-// 2. Calling BlockHandler::onPlace for newType (synchronous)
-// 3. Queuing light update for lighting thread (async)
-// 4. Notifying neighbors (synchronous, triggers more events)
 ```
+
+If light data was loaded from disk (serialization), the column is already marked as initialized.
 
 ---
 
-## 24.11 Implementation Notes
+## 24.12 Implementation Notes
 
 ### Memory Efficiency
 
 - BlockEvent is ~64 bytes, fits in a cache line
-- Event queue uses ring buffer, no dynamic allocation during normal operation
+- Inbox/outbox are simple vectors, swap is O(1)
+- Lighting queue consolidates by position, bounded size
 - "No value" sentinels avoid copying unused fields
 
 ### Thread Safety
 
-- EventDispatcher holds mutex only during handler registration
-- Event dispatch is lock-free for async queues
-- Light data in SubChunk uses version numbers for change detection
-- Rendering reads light values without locks (eventual consistency is fine)
+- Game logic thread owns inbox/outbox (no locking needed)
+- External input queue is thread-safe (producer/consumer)
+- Lighting queue is thread-safe with consolidation
+- SubChunk versions use atomics for cross-thread visibility
+- setBlock() increments version automatically
 
-### Future Extensions
+### Performance Characteristics
 
-- **Network events** - Send events to remote players
-- **Entity events** - Entity movement, damage, etc.
-- **Chunk boundary events** - For cross-chunk updates
-- **Priority queues** - Urgent events (explosions) before routine ticks
+- Common case: lighting finishes before mesh starts → single correct mesh
+- Busy case: mesh proceeds with slightly stale light → remesh later
+- Lighting can lag without blocking game logic
+- Consolidation prevents lighting thread from falling infinitely behind
+
+---
+
+## 24.13 Future Extensions
+
+- **Network events** - Replicate events to remote players
+- **Entity events** - Entity movement, damage, spawning
+- **Undo/redo** - Event log for world edit history
+- **Priority levels** - Urgent events (explosions) before routine ticks
 
 ---
 

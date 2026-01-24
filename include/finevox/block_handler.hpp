@@ -3,6 +3,7 @@
 #include "finevox/string_interner.hpp"
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"
+#include <memory>
 #include <string_view>
 #include <cstdint>
 
@@ -334,11 +335,66 @@ public:
      */
     void notifyNeighbors();
 
+    // ========================================================================
+    // Previous State (for place/break events)
+    // ========================================================================
+
+    /**
+     * @brief Get the previous block type (before place/break)
+     *
+     * Only valid during onPlace/onBreak handlers.
+     */
+    [[nodiscard]] BlockTypeId previousType() const { return previousType_; }
+
+    /**
+     * @brief Get the previous block's extra data
+     *
+     * Only valid during onPlace handler when replacing a block that had data.
+     * The data is moved to the context, so this can only be accessed once.
+     *
+     * @return Pointer to DataContainer, or nullptr if no previous data
+     */
+    [[nodiscard]] const DataContainer* previousData() const { return previousData_.get(); }
+
+    /**
+     * @brief Take ownership of previous data (for restoring on undo)
+     * @return Unique pointer to the previous data, may be null
+     */
+    [[nodiscard]] std::unique_ptr<DataContainer> takePreviousData();
+
+    /**
+     * @brief Set the previous block type (called by EventProcessor)
+     */
+    void setPreviousType(BlockTypeId type) { previousType_ = type; }
+
+    /**
+     * @brief Set the previous block's extra data (called by EventProcessor)
+     */
+    void setPreviousData(std::unique_ptr<DataContainer> data);
+
+    // ========================================================================
+    // Block Modification (for handlers to alter/undo placement)
+    // ========================================================================
+
+    /**
+     * @brief Change the block at this position
+     *
+     * Used by handlers to modify or undo a placement.
+     * Example: torch placement fails validation, set back to previousType.
+     *
+     * @param type New block type to set
+     */
+    void setBlock(BlockTypeId type);
+
 private:
     World& world_;
     SubChunk& subChunk_;
     BlockPos pos_;
     BlockPos localPos_;
+
+    // Previous state (set by EventProcessor for place/break events)
+    BlockTypeId previousType_;
+    std::unique_ptr<DataContainer> previousData_;
 };
 
 }  // namespace finevox

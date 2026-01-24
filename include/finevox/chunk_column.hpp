@@ -6,6 +6,9 @@
 #include <memory>
 #include <optional>
 #include <functional>
+#include <array>
+#include <cstdint>
+#include <limits>
 
 namespace finevox {
 
@@ -70,15 +73,60 @@ public:
     // Compact all subchunk palettes (for serialization)
     void compactAll();
 
+    // ========================================================================
+    // Heightmap (for sky light calculation)
+    // ========================================================================
+
+    /// Get height of the highest sky-light-blocking block at local (x, z)
+    /// Returns the Y coordinate of the highest opaque block + 1, or MIN_HEIGHT if none
+    /// This is the Y where sky light starts being blocked
+    [[nodiscard]] int32_t getHeight(int32_t localX, int32_t localZ) const;
+
+    /// Update heightmap for a single column after block change
+    /// Call this after setting a block that may affect sky light
+    /// @param localX Local X within column (0-15)
+    /// @param localZ Local Z within column (0-15)
+    /// @param blockY World Y coordinate of the changed block
+    /// @param blocksSkyLight Whether the new block type blocks sky light
+    void updateHeight(int32_t localX, int32_t localZ, int32_t blockY, bool blocksSkyLight);
+
+    /// Recalculate entire heightmap from block data
+    /// Call this when loading a chunk or after major modifications
+    void recalculateHeightmap();
+
+    /// Get raw heightmap data for serialization (256 entries, one per X,Z column)
+    [[nodiscard]] const std::array<int32_t, 256>& heightmapData() const { return heightmap_; }
+
+    /// Set raw heightmap data from serialization
+    void setHeightmapData(const std::array<int32_t, 256>& data);
+
+    /// Check if the heightmap needs recalculation
+    [[nodiscard]] bool heightmapDirty() const { return heightmapDirty_; }
+
+    /// Mark heightmap as dirty (needs recalculation)
+    void markHeightmapDirty() { heightmapDirty_ = true; }
+
 private:
     ColumnPos pos_;
     std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
+
+    // Heightmap: Y coordinate of highest sky-light-blocking block + 1 for each (x, z)
+    // Index = z * 16 + x
+    // Value of INT32_MIN means no opaque blocks in this column
+    static constexpr int32_t NO_HEIGHT = std::numeric_limits<int32_t>::min();
+    std::array<int32_t, 256> heightmap_;
+    bool heightmapDirty_ = true;
 
     // Convert block Y to subchunk Y (handles negative correctly)
     [[nodiscard]] static int32_t blockYToChunkY(int32_t blockY);
 
     // Convert block Y to local Y within subchunk
     [[nodiscard]] static int32_t blockYToLocalY(int32_t blockY);
+
+    // Convert local X,Z to heightmap index
+    [[nodiscard]] static constexpr int32_t toHeightmapIndex(int32_t localX, int32_t localZ) {
+        return localZ * 16 + localX;
+    }
 };
 
 }  // namespace finevox

@@ -26,19 +26,25 @@ struct ChunkVertex {
     glm::vec2 texCoord;   // Texture coordinates (may extend beyond 0-1 for tiling)
     glm::vec4 tileBounds; // Texture tile bounds (minU, minV, maxU, maxV) for atlas tiling
     float ao;             // Ambient occlusion (0-1, 1 = fully lit)
+    float light;          // Smooth lighting (0-1, interpolated from block/sky light)
 
     ChunkVertex() = default;
     ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex,
-                const glm::vec4& tile, float ambientOcclusion)
-        : position(pos), normal(norm), texCoord(tex), tileBounds(tile), ao(ambientOcclusion) {}
+                const glm::vec4& tile, float ambientOcclusion, float lightLevel = 1.0f)
+        : position(pos), normal(norm), texCoord(tex), tileBounds(tile),
+          ao(ambientOcclusion), light(lightLevel) {}
 
     bool operator==(const ChunkVertex& other) const {
         return position == other.position &&
                normal == other.normal &&
                texCoord == other.texCoord &&
                tileBounds == other.tileBounds &&
-               ao == other.ao;
+               ao == other.ao &&
+               light == other.light;
     }
+
+    /// Get combined brightness (AO * light) for final rendering
+    [[nodiscard]] float combinedBrightness() const { return ao * light; }
 };
 
 // ============================================================================
@@ -133,6 +139,11 @@ using BlockTransparentProvider = std::function<bool(BlockTypeId type)>;
 // Returns UV coordinates (minU, minV, maxU, maxV) for the given block type and face
 using BlockTextureProvider = std::function<glm::vec4(BlockTypeId type, Face face)>;
 
+// Callback to get light level at a position for smooth lighting
+// Returns combined light level (0-15) at the given world position
+// If null, mesh builder will use default lighting (full brightness)
+using BlockLightProvider = std::function<uint8_t(const BlockPos& pos)>;
+
 // ============================================================================
 // MeshBuilder - Generates mesh data from subchunk blocks
 // ============================================================================
@@ -194,6 +205,14 @@ public:
     void setDisableFaceCulling(bool disabled) { disableFaceCulling_ = disabled; }
     [[nodiscard]] bool disableFaceCulling() const { return disableFaceCulling_; }
 
+    // Enable/disable smooth lighting (interpolates light at vertices)
+    void setSmoothLighting(bool enabled) { smoothLighting_ = enabled; }
+    [[nodiscard]] bool smoothLighting() const { return smoothLighting_; }
+
+    // Set light provider for smooth lighting calculations
+    void setLightProvider(BlockLightProvider provider) { lightProvider_ = std::move(provider); }
+    void clearLightProvider() { lightProvider_ = nullptr; }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -242,6 +261,8 @@ private:
     bool calculateAO_ = true;
     bool greedyMeshing_ = true;  // Enabled by default
     bool disableFaceCulling_ = false;
+    bool smoothLighting_ = false;  // Disabled by default (use when LightEngine is available)
+    BlockLightProvider lightProvider_;  // Optional provider for smooth lighting
 
     // Add a single face to the mesh data
     void addFace(
@@ -249,7 +270,8 @@ private:
         const glm::vec3& blockPos,   // Local block position within subchunk
         Face face,
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
-        const std::array<float, 4>& aoValues  // AO for each corner (CCW from bottom-left)
+        const std::array<float, 4>& aoValues,  // AO for each corner (CCW from bottom-left)
+        const std::array<float, 4>& lightValues = {1.0f, 1.0f, 1.0f, 1.0f}  // Light for each corner
     );
 
     // Add a scaled face to the mesh data (for LOD blocks)
@@ -287,6 +309,13 @@ private:
         const BlockOpaqueProvider& opaqueProvider
     ) const;
 
+    // Get the 4 smooth light values for a face (CCW from bottom-left)
+    // Averages light from the 4 blocks adjacent to each vertex
+    [[nodiscard]] std::array<float, 4> getFaceLight(
+        const BlockPos& blockWorldPos,
+        Face face
+    ) const;
+
     // Face vertex data (positions relative to block corner, normals, and UV corners)
     struct FaceData {
         std::array<glm::vec3, 4> positions;  // CCW winding
@@ -304,12 +333,14 @@ private:
         BlockTypeId blockType = AIR_BLOCK_TYPE;  // Block type (AIR means no visible face)
         glm::vec4 uvBounds{0.0f};                // Texture UVs
         std::array<float, 4> aoValues{1.0f, 1.0f, 1.0f, 1.0f};  // AO per corner
+        std::array<float, 4> lightValues{1.0f, 1.0f, 1.0f, 1.0f};  // Light per corner
 
         bool operator==(const FaceMaskEntry& other) const {
-            // For greedy meshing, faces can merge if they have same block type and AO
+            // For greedy meshing, faces can merge if they have same block type, AO, and light
             // UVs will be tiled, so we don't check them
             return blockType == other.blockType &&
-                   aoValues == other.aoValues;
+                   aoValues == other.aoValues &&
+                   lightValues == other.lightValues;
         }
 
         bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }

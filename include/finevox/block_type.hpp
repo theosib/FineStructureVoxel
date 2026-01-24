@@ -61,6 +61,14 @@ public:
     /// Set light emission level (0-15)
     BlockType& setLightEmission(uint8_t level);
 
+    /// Set light attenuation (how much light decreases passing through, 1-15)
+    /// Default is 15 for opaque blocks (blocks all light), 1 for transparent
+    BlockType& setLightAttenuation(uint8_t attenuation);
+
+    /// Set whether this block blocks sky light (affects heightmap calculation)
+    /// Default is true for opaque blocks, false for transparent
+    BlockType& setBlocksSkyLight(bool blocks);
+
     /// Set hardness (mining time factor)
     BlockType& setHardness(float hardness);
 
@@ -91,6 +99,12 @@ public:
     /// Get light emission level
     [[nodiscard]] uint8_t lightEmission() const { return lightEmission_; }
 
+    /// Get light attenuation (how much light decreases passing through)
+    [[nodiscard]] uint8_t lightAttenuation() const { return lightAttenuation_; }
+
+    /// Check if block blocks sky light (affects heightmap)
+    [[nodiscard]] bool blocksSkyLight() const { return blocksSkyLight_; }
+
     /// Get hardness
     [[nodiscard]] float hardness() const { return hardness_; }
 
@@ -104,7 +118,9 @@ private:
     bool hasExplicitHit_ = false;    // True if hit shape was explicitly set
     bool opaque_ = true;             // Blocks light by default
     bool transparent_ = false;       // Not transparent by default
+    bool blocksSkyLight_ = true;     // Blocks sky light by default
     uint8_t lightEmission_ = 0;      // No light emission by default
+    uint8_t lightAttenuation_ = 15;  // Full attenuation by default (opaque)
     float hardness_ = 1.0f;          // Default mining difficulty
 };
 

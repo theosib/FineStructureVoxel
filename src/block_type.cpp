@@ -2,6 +2,8 @@
 #include "finevox/block_handler.hpp"
 #include "finevox/world.hpp"
 
+#include <algorithm>
+
 namespace finevox {
 
 // ============================================================================
@@ -53,7 +55,18 @@ BlockType& BlockType::setTransparent(bool transparent) {
 }
 
 BlockType& BlockType::setLightEmission(uint8_t level) {
-    lightEmission_ = level;
+    lightEmission_ = std::min(level, uint8_t(15));
+    return *this;
+}
+
+BlockType& BlockType::setLightAttenuation(uint8_t attenuation) {
+    // Clamp to 1-15 range (0 would mean infinite propagation)
+    lightAttenuation_ = std::clamp(attenuation, uint8_t(1), uint8_t(15));
+    return *this;
+}
+
+BlockType& BlockType::setBlocksSkyLight(bool blocks) {
+    blocksSkyLight_ = blocks;
     return *this;
 }
 
@@ -101,6 +114,8 @@ BlockRegistry::BlockRegistry() {
        .setNoHit()
        .setOpaque(false)
        .setTransparent(true)
+       .setLightAttenuation(1)      // Light passes through with minimal loss
+       .setBlocksSkyLight(false)     // Doesn't block sky light
        .setHardness(0.0f);
 
     types_[AIR_BLOCK_TYPE] = std::move(air);
@@ -176,6 +191,8 @@ const BlockType& BlockRegistry::airType() {
          .setNoHit()
          .setOpaque(false)
          .setTransparent(true)
+         .setLightAttenuation(1)      // Light passes through with minimal loss
+         .setBlocksSkyLight(false)     // Doesn't block sky light
          .setHardness(0.0f);
         return b;
     }();

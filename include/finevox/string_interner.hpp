@@ -12,7 +12,11 @@ namespace finevox {
 
 // Interned string ID - used for cheap comparison of block type names
 using InternedId = uint32_t;
-constexpr InternedId INVALID_INTERNED_ID = 0;
+
+// Reserved IDs for special block types
+constexpr InternedId AIR_INTERNED_ID = 0;      // Air - default state
+constexpr InternedId INVALID_INTERNED_ID = 1;  // Invalid - error/uninitialized
+constexpr InternedId UNKNOWN_INTERNED_ID = 2;  // Unknown - unrecognized block type
 
 // Thread-safe string interner for block type names
 // Strings are interned once and never removed (lifetime of engine)
@@ -58,7 +62,7 @@ private:
 // Convenience wrapper for block type IDs
 // Provides type safety over raw InternedId
 struct BlockTypeId {
-    InternedId id = INVALID_INTERNED_ID;
+    InternedId id = AIR_INTERNED_ID;
 
     constexpr BlockTypeId() = default;
     constexpr explicit BlockTypeId(InternedId id_) : id(id_) {}
@@ -69,16 +73,27 @@ struct BlockTypeId {
     // Get the string name
     [[nodiscard]] std::string_view name() const;
 
-    // Check if this is the invalid/air type
+    // Check block type category
+    [[nodiscard]] constexpr bool isAir() const { return id == AIR_INTERNED_ID; }
+    [[nodiscard]] constexpr bool isInvalid() const { return id == INVALID_INTERNED_ID; }
+    [[nodiscard]] constexpr bool isUnknown() const { return id == UNKNOWN_INTERNED_ID; }
+
+    // Valid means "not invalid" - air and unknown are valid block types
     [[nodiscard]] constexpr bool isValid() const { return id != INVALID_INTERNED_ID; }
-    [[nodiscard]] constexpr bool isAir() const { return id == INVALID_INTERNED_ID; }
+
+    // Check if this is a "real" block type (not air, invalid, or unknown)
+    [[nodiscard]] constexpr bool isRealBlock() const {
+        return id > UNKNOWN_INTERNED_ID;
+    }
 
     constexpr bool operator==(const BlockTypeId&) const = default;
     constexpr auto operator<=>(const BlockTypeId&) const = default;
 };
 
-// Air/invalid block type constant
-constexpr BlockTypeId AIR_BLOCK_TYPE{};
+// Special block type constants
+constexpr BlockTypeId AIR_BLOCK_TYPE{AIR_INTERNED_ID};
+constexpr BlockTypeId INVALID_BLOCK_TYPE{INVALID_INTERNED_ID};
+constexpr BlockTypeId UNKNOWN_BLOCK_TYPE{UNKNOWN_INTERNED_ID};
 
 }  // namespace finevox
 

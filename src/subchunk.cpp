@@ -182,4 +182,170 @@ std::vector<SubChunk::LocalIndex> SubChunk::compactPalette() {
     return mapping;
 }
 
+// ============================================================================
+// Light Data Implementation
+// ============================================================================
+
+uint8_t SubChunk::getSkyLight(int32_t x, int32_t y, int32_t z) const {
+    return getSkyLight(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getSkyLight(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return 0;
+    return unpackSkyLight(light_[index]);
+}
+
+uint8_t SubChunk::getBlockLight(int32_t x, int32_t y, int32_t z) const {
+    return getBlockLight(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getBlockLight(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return 0;
+    return unpackBlockLight(light_[index]);
+}
+
+uint8_t SubChunk::getCombinedLight(int32_t x, int32_t y, int32_t z) const {
+    return getCombinedLight(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getCombinedLight(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return 0;
+    uint8_t sky = unpackSkyLight(light_[index]);
+    uint8_t block = unpackBlockLight(light_[index]);
+    return sky > block ? sky : block;
+}
+
+uint8_t SubChunk::getPackedLight(int32_t x, int32_t y, int32_t z) const {
+    return getPackedLight(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getPackedLight(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return 0;
+    return light_[index];
+}
+
+void SubChunk::setSkyLight(int32_t x, int32_t y, int32_t z, uint8_t level) {
+    setSkyLight(toIndex(x, y, z), level);
+}
+
+void SubChunk::setSkyLight(int32_t index, uint8_t level) {
+    if (index < 0 || index >= VOLUME) return;
+
+    uint8_t oldPacked = light_[index];
+    uint8_t newPacked = packLight(level & 0x0F, unpackBlockLight(oldPacked));
+
+    if (oldPacked != newPacked) {
+        light_[index] = newPacked;
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::setBlockLight(int32_t x, int32_t y, int32_t z, uint8_t level) {
+    setBlockLight(toIndex(x, y, z), level);
+}
+
+void SubChunk::setBlockLight(int32_t index, uint8_t level) {
+    if (index < 0 || index >= VOLUME) return;
+
+    uint8_t oldPacked = light_[index];
+    uint8_t newPacked = packLight(unpackSkyLight(oldPacked), level & 0x0F);
+
+    if (oldPacked != newPacked) {
+        light_[index] = newPacked;
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::setLight(int32_t x, int32_t y, int32_t z, uint8_t skyLight, uint8_t blockLight) {
+    setLight(toIndex(x, y, z), skyLight, blockLight);
+}
+
+void SubChunk::setLight(int32_t index, uint8_t skyLight, uint8_t blockLight) {
+    if (index < 0 || index >= VOLUME) return;
+
+    uint8_t oldPacked = light_[index];
+    uint8_t newPacked = packLight(skyLight & 0x0F, blockLight & 0x0F);
+
+    if (oldPacked != newPacked) {
+        light_[index] = newPacked;
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::setPackedLight(int32_t x, int32_t y, int32_t z, uint8_t packed) {
+    setPackedLight(toIndex(x, y, z), packed);
+}
+
+void SubChunk::setPackedLight(int32_t index, uint8_t packed) {
+    if (index < 0 || index >= VOLUME) return;
+
+    if (light_[index] != packed) {
+        light_[index] = packed;
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::clearLight() {
+    bool wasDark = isLightDark();
+    light_.fill(0);
+    if (!wasDark) {
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::fillSkyLight(uint8_t level) {
+    level &= 0x0F;
+    bool changed = false;
+
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        uint8_t oldPacked = light_[i];
+        uint8_t newPacked = packLight(level, unpackBlockLight(oldPacked));
+        if (oldPacked != newPacked) {
+            light_[i] = newPacked;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        bumpLightVersion();
+    }
+}
+
+void SubChunk::fillBlockLight(uint8_t level) {
+    level &= 0x0F;
+    bool changed = false;
+
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        uint8_t oldPacked = light_[i];
+        uint8_t newPacked = packLight(unpackSkyLight(oldPacked), level);
+        if (oldPacked != newPacked) {
+            light_[i] = newPacked;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        bumpLightVersion();
+    }
+}
+
+bool SubChunk::isLightDark() const {
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        if (light_[i] != 0) return false;
+    }
+    return true;
+}
+
+bool SubChunk::isFullSkyLight() const {
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        if (unpackSkyLight(light_[i]) != MAX_LIGHT) return false;
+    }
+    return true;
+}
+
+void SubChunk::setLightData(const std::array<uint8_t, VOLUME>& data) {
+    light_ = data;
+    bumpLightVersion();
+}
+
 }  // namespace finevox

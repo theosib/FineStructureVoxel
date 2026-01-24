@@ -1,10 +1,14 @@
 #include "finevox/chunk_column.hpp"
 #include <algorithm>
 #include <limits>
+#include <vector>
 
 namespace finevox {
 
-ChunkColumn::ChunkColumn(ColumnPos pos) : pos_(pos) {}
+ChunkColumn::ChunkColumn(ColumnPos pos) : pos_(pos) {
+    // Initialize heightmap to NO_HEIGHT (no opaque blocks)
+    heightmap_.fill(NO_HEIGHT);
+}
 
 int32_t ChunkColumn::blockYToChunkY(int32_t blockY) {
     // Floor division for negative numbers
@@ -152,6 +156,111 @@ void ChunkColumn::compactAll() {
             (void)subChunk->compactPalette();
         }
     }
+}
+
+// ============================================================================
+// Heightmap Implementation
+// ============================================================================
+
+int32_t ChunkColumn::getHeight(int32_t localX, int32_t localZ) const {
+    if (localX < 0 || localX >= 16 || localZ < 0 || localZ >= 16) {
+        return NO_HEIGHT;
+    }
+    return heightmap_[toHeightmapIndex(localX, localZ)];
+}
+
+void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, bool blocksSkyLight) {
+    if (localX < 0 || localX >= 16 || localZ < 0 || localZ >= 16) {
+        return;
+    }
+
+    int32_t idx = toHeightmapIndex(localX, localZ);
+    int32_t currentHeight = heightmap_[idx];
+
+    if (blocksSkyLight) {
+        // Placing an opaque block - update height if this is higher
+        int32_t newHeight = blockY + 1;  // Height is top of block
+        if (currentHeight == NO_HEIGHT || newHeight > currentHeight) {
+            heightmap_[idx] = newHeight;
+        }
+    } else {
+        // Removing/replacing with transparent block
+        // If this was at the current height, we need to recalculate
+        if (currentHeight != NO_HEIGHT && blockY + 1 == currentHeight) {
+            // Scan down to find new highest opaque block
+            heightmap_[idx] = NO_HEIGHT;
+
+            // We need to look through all subchunks at this X,Z
+            // Start from the block below the one we just removed
+            for (int32_t y = blockY - 1; y >= -2048; --y) {
+                int32_t chunkY = blockYToChunkY(y);
+                auto it = subChunks_.find(chunkY);
+                if (it == subChunks_.end()) {
+                    // Skip to next subchunk below
+                    y = chunkY * 16;  // Will be decremented by loop
+                    continue;
+                }
+
+                int32_t localY = blockYToLocalY(y);
+                BlockTypeId block = it->second->getBlock(localX, localY, localZ);
+
+                // Check if this block is opaque (blocks sky light)
+                // For now, we consider any non-air block as potentially blocking
+                // The caller should use BlockRegistry to check blocksSkyLight
+                if (!block.isAir()) {
+                    // Found a non-air block - assume it blocks sky light
+                    // (Proper implementation would check BlockRegistry)
+                    heightmap_[idx] = y + 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void ChunkColumn::recalculateHeightmap() {
+    // Reset heightmap
+    heightmap_.fill(NO_HEIGHT);
+
+    // Get sorted list of subchunk Y coordinates (highest first)
+    std::vector<int32_t> yCoords;
+    yCoords.reserve(subChunks_.size());
+    for (const auto& [y, subChunk] : subChunks_) {
+        yCoords.push_back(y);
+    }
+    std::sort(yCoords.begin(), yCoords.end(), std::greater<int32_t>());
+
+    // For each X,Z column, find the highest opaque block
+    for (int32_t localZ = 0; localZ < 16; ++localZ) {
+        for (int32_t localX = 0; localX < 16; ++localX) {
+            int32_t idx = toHeightmapIndex(localX, localZ);
+
+            // Scan from top to bottom
+            for (int32_t chunkY : yCoords) {
+                const SubChunk& subChunk = *subChunks_.at(chunkY);
+
+                // Scan this subchunk from top to bottom
+                for (int32_t localY = 15; localY >= 0; --localY) {
+                    BlockTypeId block = subChunk.getBlock(localX, localY, localZ);
+                    if (!block.isAir()) {
+                        // Found a non-air block
+                        // For proper implementation, check BlockRegistry::getType(block).blocksSkyLight()
+                        int32_t worldY = chunkY * 16 + localY;
+                        heightmap_[idx] = worldY + 1;
+                        goto next_column;
+                    }
+                }
+            }
+            next_column:;
+        }
+    }
+
+    heightmapDirty_ = false;
+}
+
+void ChunkColumn::setHeightmapData(const std::array<int32_t, 256>& data) {
+    heightmap_ = data;
+    heightmapDirty_ = false;
 }
 
 }  // namespace finevox

@@ -454,28 +454,36 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 
 ---
 
-## Phase 8: Lighting System
+## Phase 8: Lighting System ✓
 
 *Block and sky lighting.*
 
 ### 8.1 Light Storage
-- [ ] Separate lighting data from block data
-- [ ] Block light (0-15) per block
-- [ ] Sky light (0-15) per block
+- [x] `LightData` class - Separate lighting data from block data
+- [x] Block light (0-15) per block - 4 bits in packed byte
+- [x] Sky light (0-15) per block - 4 bits in packed byte
+- [x] Heightmap per ChunkColumn for sky light optimization
+- [x] BlockType lighting properties: `lightEmission`, `lightAttenuation`, `blocksSkyLight`
 
 ### 8.2 Light Propagation
-- [ ] BFS propagation on block changes
-- [ ] Sky light column propagation
-- [ ] Light removal algorithm
+- [x] `LightEngine` - BFS propagation on block changes
+- [x] Sky light column initialization and propagation
+- [x] Light removal algorithm with re-propagation
+- [x] Custom attenuation callbacks for special materials (water)
 
-### 8.3 Ambient Occlusion
-- [ ] Per-vertex AO calculation
-- [ ] Smooth AO across faces
+### 8.3 Smooth Lighting
+- [x] Per-vertex AO calculation (already existed)
+- [x] Per-vertex light values in ChunkVertex
+- [x] `getFaceLight()` averages light from 4 adjacent blocks per corner
+- [x] Smooth lighting integrated into MeshBuilder (configurable via `setSmoothLighting()`)
+- [x] `BlockLightProvider` callback for mesh generation
 
 ### Testing
-- [ ] Torches illuminate surroundings
-- [ ] Shadows under overhangs
-- [ ] Light updates on block changes
+- [x] LightData storage and access
+- [x] BlockType lighting properties
+- [x] Heightmap updates
+- [x] LightEngine propagation
+- [x] Light utility functions
 
 ---
 

@@ -372,3 +372,145 @@ TEST(SerializationEdgeCases, AllCornersSet) {
     EXPECT_EQ(restored->getBlock(0, 15, 15), stone);
     EXPECT_EQ(restored->getBlock(15, 15, 15), stone);
 }
+
+// ============================================================================
+// Light Data Serialization Tests
+// ============================================================================
+
+TEST(LightSerialization, DarkSubChunkNoLightData) {
+    SubChunk chunk;
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+    chunk.setBlock(0, 0, 0, stone);
+
+    // No light set - subchunk is dark
+    EXPECT_TRUE(chunk.isLightDark());
+
+    auto serialized = SubChunkSerializer::serialize(chunk, 0);
+    EXPECT_TRUE(serialized.lightData.empty());
+
+    auto bytes = SubChunkSerializer::toCBOR(chunk, 0);
+    auto restored = SubChunkSerializer::fromCBOR(bytes);
+
+    ASSERT_NE(restored, nullptr);
+    EXPECT_TRUE(restored->isLightDark());
+}
+
+TEST(LightSerialization, SubChunkWithLight) {
+    SubChunk chunk;
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+    chunk.setBlock(0, 0, 0, stone);
+
+    // Set some light values
+    chunk.setSkyLight(0, 0, 0, 15);
+    chunk.setBlockLight(0, 0, 0, 10);
+    chunk.setSkyLight(5, 5, 5, 8);
+    chunk.setBlockLight(10, 10, 10, 14);
+
+    EXPECT_FALSE(chunk.isLightDark());
+
+    auto serialized = SubChunkSerializer::serialize(chunk, 0);
+    EXPECT_EQ(serialized.lightData.size(), SubChunk::VOLUME);
+
+    auto bytes = SubChunkSerializer::toCBOR(chunk, 0);
+    auto restored = SubChunkSerializer::fromCBOR(bytes);
+
+    ASSERT_NE(restored, nullptr);
+    EXPECT_FALSE(restored->isLightDark());
+
+    // Check light values are preserved
+    EXPECT_EQ(restored->getSkyLight(0, 0, 0), 15);
+    EXPECT_EQ(restored->getBlockLight(0, 0, 0), 10);
+    EXPECT_EQ(restored->getSkyLight(5, 5, 5), 8);
+    EXPECT_EQ(restored->getBlockLight(10, 10, 10), 14);
+}
+
+TEST(LightSerialization, FullSkyLightSubChunk) {
+    SubChunk chunk;
+
+    // Fill with full sky light
+    chunk.fillSkyLight(15);
+    EXPECT_TRUE(chunk.isFullSkyLight());
+    EXPECT_FALSE(chunk.isLightDark());
+
+    auto bytes = SubChunkSerializer::toCBOR(chunk, 0);
+    auto restored = SubChunkSerializer::fromCBOR(bytes);
+
+    ASSERT_NE(restored, nullptr);
+    EXPECT_TRUE(restored->isFullSkyLight());
+
+    // Verify all positions have max sky light
+    for (int i = 0; i < SubChunk::VOLUME; ++i) {
+        EXPECT_EQ(restored->getSkyLight(i), 15);
+    }
+}
+
+TEST(LightSerialization, LightRoundTrip) {
+    SubChunk original;
+
+    // Set a pattern of light values
+    for (int y = 0; y < 16; ++y) {
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                uint8_t skyLight = (x + y) % 16;
+                uint8_t blockLight = (z + y) % 16;
+                original.setLight(x, y, z, skyLight, blockLight);
+            }
+        }
+    }
+
+    auto bytes = SubChunkSerializer::toCBOR(original, 3);
+    auto restored = SubChunkSerializer::fromCBOR(bytes);
+
+    ASSERT_NE(restored, nullptr);
+
+    // Verify all light values match
+    for (int y = 0; y < 16; ++y) {
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                EXPECT_EQ(restored->getSkyLight(x, y, z), original.getSkyLight(x, y, z))
+                    << "Sky light mismatch at (" << x << ", " << y << ", " << z << ")";
+                EXPECT_EQ(restored->getBlockLight(x, y, z), original.getBlockLight(x, y, z))
+                    << "Block light mismatch at (" << x << ", " << y << ", " << z << ")";
+            }
+        }
+    }
+}
+
+TEST(LightSerialization, ColumnWithLightData) {
+    ChunkColumn column(ColumnPos{0, 0});
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // Set some blocks
+    column.setBlock(0, 0, 0, stone);
+    column.setBlock(0, 16, 0, stone);
+
+    // Get the subchunks and set light
+    SubChunk* sc0 = column.getSubChunk(0);
+    SubChunk* sc1 = column.getSubChunk(1);
+
+    ASSERT_NE(sc0, nullptr);
+    ASSERT_NE(sc1, nullptr);
+
+    sc0->setSkyLight(0, 0, 0, 15);
+    sc0->setBlockLight(5, 5, 5, 10);
+    sc1->fillSkyLight(12);
+
+    auto bytes = ColumnSerializer::toCBOR(column, 0, 0);
+    auto restored = ColumnSerializer::fromCBOR(bytes);
+
+    ASSERT_NE(restored, nullptr);
+
+    // Check light in restored subchunks
+    SubChunk* rsc0 = restored->getSubChunk(0);
+    SubChunk* rsc1 = restored->getSubChunk(1);
+
+    ASSERT_NE(rsc0, nullptr);
+    ASSERT_NE(rsc1, nullptr);
+
+    EXPECT_EQ(rsc0->getSkyLight(0, 0, 0), 15);
+    EXPECT_EQ(rsc0->getBlockLight(5, 5, 5), 10);
+
+    // sc1 was filled with sky light 12
+    EXPECT_EQ(rsc1->getSkyLight(0, 0, 0), 12);
+    EXPECT_EQ(rsc1->getSkyLight(15, 15, 15), 12);
+}

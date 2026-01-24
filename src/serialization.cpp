@@ -70,6 +70,12 @@ SerializedSubChunk SubChunkSerializer::serialize(const SubChunk& chunk, int32_t 
     // TODO: Rotations - not yet implemented in SubChunk
     // For now, rotations is left empty (all default)
 
+    // Serialize light data (only if not all dark)
+    if (!chunk.isLightDark()) {
+        const auto& light = chunk.lightData();
+        result.lightData.assign(light.begin(), light.end());
+    }
+
     // TODO: Per-block data - not yet implemented in SubChunk
     // For now, blockData is left empty
 
@@ -80,11 +86,13 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
     SerializedSubChunk data = serialize(chunk, yLevel);
     std::vector<uint8_t> out;
 
-    // Count fields: y, palette, blocks, and optionally rotations, data
+    // Count fields: y, palette, blocks, and optionally rotations, light, data
     int fieldCount = 3;  // y, palette, blocks
     bool hasRotations = !data.rotations.empty();
+    bool hasLightData = !data.lightData.empty();
     bool hasBlockData = !data.blockData.empty();
     if (hasRotations) fieldCount++;
+    if (hasLightData) fieldCount++;
     if (hasBlockData) fieldCount++;
 
     cbor::encodeMapHeader(out, fieldCount);
@@ -108,6 +116,12 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
     if (hasRotations) {
         cbor::encodeString(out, "rotations");
         cbor::encodeBytes(out, data.rotations);
+    }
+
+    // "light": byte string (optional, 4096 bytes of packed light data)
+    if (hasLightData) {
+        cbor::encodeString(out, "light");
+        cbor::encodeBytes(out, data.lightData);
     }
 
     // "data": map (optional)
@@ -166,6 +180,13 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
 
     // TODO: Apply rotations when SubChunk supports them
 
+    // Apply light data if present
+    if (data.lightData.size() == SubChunk::VOLUME) {
+        std::array<uint8_t, SubChunk::VOLUME> lightArray;
+        std::copy(data.lightData.begin(), data.lightData.end(), lightArray.begin());
+        chunk->setLightData(lightArray);
+    }
+
     // TODO: Apply per-block data when SubChunk supports them
 
     return chunk;
@@ -220,6 +241,11 @@ std::unique_ptr<SubChunk> SubChunkSerializer::fromCBOR(std::span<const uint8_t> 
             auto [bytesType, bytesLen] = decoder.readHeader();
             if (bytesType == cbor::BYTE_STRING) {
                 serialized.rotations = decoder.readBytes(bytesLen);
+            }
+        } else if (key == "light") {
+            auto [bytesType, bytesLen] = decoder.readHeader();
+            if (bytesType == cbor::BYTE_STRING) {
+                serialized.lightData = decoder.readBytes(bytesLen);
             }
         } else if (key == "data") {
             auto [mapType, mapLen] = decoder.readHeader();
@@ -335,6 +361,7 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                     int32_t yLevel = 0;
                     std::vector<std::string> palette;
                     std::vector<uint8_t> blocks;
+                    std::vector<uint8_t> lightData;
                     bool use16Bit = false;
 
                     for (uint64_t k = 0; k < scFieldCount; ++k) {
@@ -366,6 +393,11 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                                 blocks = decoder.readBytes(bytesLen);
                                 use16Bit = (blocks.size() == SubChunk::VOLUME * 2);
                             }
+                        } else if (fieldKey == "light") {
+                            auto [bytesType, bytesLen] = decoder.readHeader();
+                            if (bytesType == cbor::BYTE_STRING) {
+                                lightData = decoder.readBytes(bytesLen);
+                            }
                         } else {
                             decoder.skipValue();
                         }
@@ -376,6 +408,7 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                     serialized.yLevel = yLevel;
                     serialized.palette = std::move(palette);
                     serialized.blocks = std::move(blocks);
+                    serialized.lightData = std::move(lightData);
                     serialized.use16Bit = use16Bit;
 
                     auto sc = SubChunkSerializer::deserialize(serialized);
@@ -409,6 +442,14 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                 // Convert to column-local Y
                 int worldY = y * 16 + ly;
                 column->setBlock(lx, worldY, lz, type);
+            }
+        }
+
+        // Copy light data to the column's subchunk
+        if (!sc->isLightDark()) {
+            SubChunk* targetSc = column->getSubChunk(y);
+            if (targetSc) {
+                targetSc->setLightData(sc->lightData());
             }
         }
     }

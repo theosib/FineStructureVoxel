@@ -22,6 +22,7 @@ struct SerializedSubChunk {
     std::vector<uint8_t> blocks;                 // 8-bit or 16-bit indices
     bool use16Bit = false;                       // True if blocks uses 16-bit indices
     std::vector<uint8_t> rotations;              // 1 byte per block (empty if all zero)
+    std::vector<uint8_t> lightData;              // 4096 bytes: packed sky+block light (empty if all dark)
     std::unordered_map<uint16_t, std::unique_ptr<DataContainer>> blockData;  // Sparse per-block data
 };
 

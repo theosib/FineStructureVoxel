@@ -273,8 +273,16 @@ void MeshBuilder::buildSimpleMesh(
                         aoValues = {1.0f, 1.0f, 1.0f, 1.0f};
                     }
 
+                    // Calculate smooth lighting for this face
+                    std::array<float, 4> lightValues;
+                    if (smoothLighting_ && lightProvider_) {
+                        lightValues = getFaceLight(blockWorldPos, face);
+                    } else {
+                        lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                    }
+
                     // Add the face to the mesh
-                    addFace(mesh, localPos, face, uvBounds, aoValues);
+                    addFace(mesh, localPos, face, uvBounds, aoValues, lightValues);
                 }
             }
         }
@@ -390,6 +398,10 @@ void MeshBuilder::greedyMeshFace(
 
                 if (calculateAO_) {
                     mask[maskIdx].aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
+                }
+
+                if (smoothLighting_ && lightProvider_) {
+                    mask[maskIdx].lightValues = getFaceLight(blockWorldPos, face);
                 }
             }
         }
@@ -566,10 +578,11 @@ void MeshBuilder::addGreedyQuad(
         {minU, minV + static_cast<float>(height) * tileHeight}
     };
 
-    // For greedy quads, we use uniform AO across the quad
+    // For greedy quads, we use uniform AO and light across the quad
     // (averaging would be complex and greedy meshing typically assumes uniform lighting)
-    // Use the entry's AO values directly
+    // Use the entry's AO and light values directly
     const auto& aoValues = entry.aoValues;
+    const auto& lightValues = entry.lightValues;
 
     // Add vertices
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -580,6 +593,7 @@ void MeshBuilder::addGreedyQuad(
         vertex.texCoord = uvs[i];
         vertex.tileBounds = tileBounds;  // Pass tile bounds for shader wrapping
         vertex.ao = aoValues[i];
+        vertex.light = lightValues[i];
         mesh.vertices.push_back(vertex);
     }
 
@@ -614,7 +628,8 @@ void MeshBuilder::addFace(
     const glm::vec3& blockPos,
     Face face,
     const glm::vec4& uvBounds,
-    const std::array<float, 4>& aoValues
+    const std::array<float, 4>& aoValues,
+    const std::array<float, 4>& lightValues
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -641,6 +656,7 @@ void MeshBuilder::addFace(
         vertex.tileBounds = uvBounds;
 
         vertex.ao = aoValues[i];
+        vertex.light = lightValues[i];
         mesh.vertices.push_back(vertex);
     }
 
@@ -756,6 +772,95 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     aoValues[3] = calculateCornerAO(b7, b3, b6);  // top-left
 
     return aoValues;
+}
+
+std::array<float, 4> MeshBuilder::getFaceLight(
+    const BlockPos& blockWorldPos,
+    Face face
+) const {
+    std::array<float, 4> lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+
+    if (!lightProvider_) {
+        return lightValues;
+    }
+
+    // Get tangent directions for this face (same as AO calculation)
+    glm::ivec3 tangent1, tangent2;
+
+    switch (face) {
+        case Face::PosX:
+        case Face::NegX:
+            tangent1 = {0, 0, 1};  // Z direction
+            tangent2 = {0, 1, 0};  // Y direction
+            break;
+        case Face::PosY:
+        case Face::NegY:
+            tangent1 = {1, 0, 0};  // X direction
+            tangent2 = {0, 0, 1};  // Z direction
+            break;
+        case Face::PosZ:
+        case Face::NegZ:
+            tangent1 = {1, 0, 0};  // X direction
+            tangent2 = {0, 1, 0};  // Y direction
+            break;
+    }
+
+    // Adjust tangent directions based on face direction (for consistent winding)
+    if (face == Face::NegX || face == Face::PosY || face == Face::NegZ) {
+        tangent1 = -tangent1;
+    }
+
+    // Get the face normal as offset
+    BlockPos normalOffset = faceOffset(face);
+
+    // The face is one block in the normal direction from the block position
+    BlockPos facePos(
+        blockWorldPos.x + normalOffset.x,
+        blockWorldPos.y + normalOffset.y,
+        blockWorldPos.z + normalOffset.z
+    );
+
+    // For smooth lighting, we sample light from 4 blocks around each corner
+    // and average them. This gives smooth interpolation across faces.
+    //
+    // For each corner, we sample the light at:
+    // - The face position itself
+    // - The position offset by tangent1
+    // - The position offset by tangent2
+    // - The position offset by both tangent1 and tangent2
+
+    auto getLightAt = [&](int dx, int dy) -> float {
+        BlockPos checkPos(
+            facePos.x + tangent1.x * dx + tangent2.x * dy,
+            facePos.y + tangent1.y * dx + tangent2.y * dy,
+            facePos.z + tangent1.z * dx + tangent2.z * dy
+        );
+        uint8_t light = lightProvider_(checkPos);
+        return static_cast<float>(light) / 15.0f;  // Normalize to 0-1
+    };
+
+    // Sample light at the 9 positions (3x3 grid centered on face)
+    float l00 = getLightAt(-1, -1);
+    float l10 = getLightAt( 0, -1);
+    float l20 = getLightAt( 1, -1);
+    float l01 = getLightAt(-1,  0);
+    float l11 = getLightAt( 0,  0);  // Face center
+    float l21 = getLightAt( 1,  0);
+    float l02 = getLightAt(-1,  1);
+    float l12 = getLightAt( 0,  1);
+    float l22 = getLightAt( 1,  1);
+
+    // Average light for each corner (CCW from bottom-left)
+    // Bottom-left corner: average of positions around (-0.5, -0.5)
+    lightValues[0] = (l00 + l10 + l01 + l11) * 0.25f;
+    // Bottom-right corner: average of positions around (0.5, -0.5)
+    lightValues[1] = (l10 + l20 + l11 + l21) * 0.25f;
+    // Top-right corner: average of positions around (0.5, 0.5)
+    lightValues[2] = (l11 + l21 + l12 + l22) * 0.25f;
+    // Top-left corner: average of positions around (-0.5, 0.5)
+    lightValues[3] = (l01 + l11 + l02 + l12) * 0.25f;
+
+    return lightValues;
 }
 
 // ============================================================================

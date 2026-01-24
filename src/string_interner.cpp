@@ -8,8 +8,17 @@ StringInterner& StringInterner::global() {
 }
 
 StringInterner::StringInterner() {
-    // Reserve ID 0 for air/invalid
-    strings_.emplace_back("");  // Empty string at index 0
+    // Reserve IDs 0, 1, 2 for special block types
+    strings_.emplace_back("finevox:air");       // ID 0: Air (proper name for printing)
+    strings_.emplace_back("finevox:invalid");   // ID 1: Invalid
+    strings_.emplace_back("finevox:unknown");   // ID 2: Unknown
+
+    // Add to lookup for reverse mapping
+    // Both empty string and "finevox:air" map to AIR_INTERNED_ID
+    lookup_[""] = AIR_INTERNED_ID;
+    lookup_["finevox:air"] = AIR_INTERNED_ID;
+    lookup_["finevox:invalid"] = INVALID_INTERNED_ID;
+    lookup_["finevox:unknown"] = UNKNOWN_INTERNED_ID;
 }
 
 InternedId StringInterner::intern(std::string_view str) {

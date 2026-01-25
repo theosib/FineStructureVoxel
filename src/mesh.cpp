@@ -273,10 +273,17 @@ void MeshBuilder::buildSimpleMesh(
                         aoValues = {1.0f, 1.0f, 1.0f, 1.0f};
                     }
 
-                    // Calculate smooth lighting for this face
+                    // Calculate lighting for this face
                     std::array<float, 4> lightValues;
                     if (smoothLighting_ && lightProvider_) {
+                        // Smooth lighting: sample 9 points, average to 4 corners
                         lightValues = getFaceLight(blockWorldPos, face);
+                    } else if (flatLighting_ && lightProvider_) {
+                        // Flat lighting: sample 1 point, apply to all corners (shows raw L1 ball)
+                        BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                        uint8_t lightLevel = lightProvider_(faceAirPos);
+                        float light = static_cast<float>(lightLevel) / 15.0f;
+                        lightValues = {light, light, light, light};
                     } else {
                         lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
                     }
@@ -401,7 +408,14 @@ void MeshBuilder::greedyMeshFace(
                 }
 
                 if (smoothLighting_ && lightProvider_) {
+                    // Smooth lighting: sample 9 points, average to 4 corners
                     mask[maskIdx].lightValues = getFaceLight(blockWorldPos, face);
+                } else if (flatLighting_ && lightProvider_) {
+                    // Flat lighting: sample 1 point, apply to all corners
+                    BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                    uint8_t lightLevel = lightProvider_(faceAirPos);
+                    float light = static_cast<float>(lightLevel) / 15.0f;
+                    mask[maskIdx].lightValues = {light, light, light, light};
                 }
             }
         }
@@ -805,7 +819,7 @@ std::array<float, 4> MeshBuilder::getFaceLight(
             break;
     }
 
-    // Adjust tangent directions based on face direction (for consistent winding)
+    // Match AO tangent adjustment for consistent corner mapping
     if (face == Face::NegX || face == Face::PosY || face == Face::NegZ) {
         tangent1 = -tangent1;
     }
@@ -820,13 +834,18 @@ std::array<float, 4> MeshBuilder::getFaceLight(
         blockWorldPos.z + normalOffset.z
     );
 
-    // For smooth lighting, we sample light from 4 blocks around each corner
-    // and average them. This gives smooth interpolation across faces.
+    // For smooth lighting, sample light from 4 blocks around each corner
+    // and average them. This matches Minecraft's smooth lighting algorithm.
     //
-    // For each corner, we sample the light at:
-    // - The face position itself
-    // - The position offset by tangent1
-    // - The position offset by tangent2
+    // The light sampling grid is:
+    //   (-1,1)  (0,1)  (1,1)
+    //   (-1,0)  (0,0)  (1,0)
+    //   (-1,-1) (0,-1) (1,-1)
+    //
+    // Each vertex corner averages the 4 samples around it:
+    // - Vertex 0 (bottom-left): (-1,-1), (0,-1), (-1,0), (0,0)
+    // - Vertex 1 (bottom-right): (0,-1), (1,-1), (0,0), (1,0)
+    // - etc.
     // - The position offset by both tangent1 and tangent2
 
     auto getLightAt = [&](int dx, int dy) -> float {
@@ -850,15 +869,29 @@ std::array<float, 4> MeshBuilder::getFaceLight(
     float l12 = getLightAt( 0,  1);
     float l22 = getLightAt( 1,  1);
 
-    // Average light for each corner (CCW from bottom-left)
-    // Bottom-left corner: average of positions around (-0.5, -0.5)
-    lightValues[0] = (l00 + l10 + l01 + l11) * 0.25f;
-    // Bottom-right corner: average of positions around (0.5, -0.5)
-    lightValues[1] = (l10 + l20 + l11 + l21) * 0.25f;
-    // Top-right corner: average of positions around (0.5, 0.5)
-    lightValues[2] = (l11 + l21 + l12 + l22) * 0.25f;
-    // Top-left corner: average of positions around (-0.5, 0.5)
-    lightValues[3] = (l01 + l11 + l02 + l12) * 0.25f;
+    // Average light for each corner
+    // Vertex indices match FACE_DATA: 0=bottom-left (uv 0,0), 1=bottom-right (uv 1,0),
+    // 2=top-right (uv 1,1), 3=top-left (uv 0,1)
+    //
+    // The tangent1 negation for NegX/PosY/NegZ faces means the sampling grid
+    // is mirrored in the U direction for those faces. We need to account for this
+    // when mapping samples to vertex corners.
+
+    bool mirroredU = (face == Face::NegX || face == Face::PosY || face == Face::NegZ);
+
+    if (mirroredU) {
+        // Grid is mirrored: what we sampled as "left" is actually "right" in vertex space
+        lightValues[0] = (l20 + l10 + l21 + l11) * 0.25f;  // vertex 0 (uv 0,0) from right side
+        lightValues[1] = (l10 + l00 + l11 + l01) * 0.25f;  // vertex 1 (uv 1,0) from left side
+        lightValues[2] = (l11 + l01 + l12 + l02) * 0.25f;  // vertex 2 (uv 1,1) from left side
+        lightValues[3] = (l21 + l11 + l22 + l12) * 0.25f;  // vertex 3 (uv 0,1) from right side
+    } else {
+        // Normal mapping
+        lightValues[0] = (l00 + l10 + l01 + l11) * 0.25f;  // bottom-left
+        lightValues[1] = (l10 + l20 + l11 + l21) * 0.25f;  // bottom-right
+        lightValues[2] = (l11 + l21 + l12 + l22) * 0.25f;  // top-right
+        lightValues[3] = (l01 + l11 + l02 + l12) * 0.25f;  // top-left
+    }
 
     return lightValues;
 }
@@ -873,7 +906,8 @@ void MeshBuilder::addScaledFace(
     Face face,
     float blockScale,
     const glm::vec4& uvBounds,
-    const std::array<float, 4>& aoValues
+    const std::array<float, 4>& aoValues,
+    float light
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -904,6 +938,7 @@ void MeshBuilder::addScaledFace(
         vertex.tileBounds = uvBounds;
 
         vertex.ao = aoValues[i];
+        vertex.light = light;  // Uniform light across LOD face
         mesh.vertices.push_back(vertex);
     }
 
@@ -923,7 +958,8 @@ void MeshBuilder::addHeightLimitedFace(
     float blockScale,
     float height,
     const glm::vec4& uvBounds,
-    const std::array<float, 4>& aoValues
+    const std::array<float, 4>& aoValues,
+    float light
 ) {
     // For height-limited blocks:
     // - Top face (PosY): at height instead of blockScale
@@ -984,6 +1020,7 @@ void MeshBuilder::addHeightLimitedFace(
         vertex.texCoord = getUVScale(faceData.uvOffsets[i]);
         vertex.tileBounds = uvBounds;
         vertex.ao = aoValues[i];
+        vertex.light = light;  // Uniform light across LOD face
         mesh.vertices.push_back(vertex);
     }
 
@@ -1124,11 +1161,27 @@ MeshData MeshBuilder::buildLODMesh(
                         // Get texture UVs for this face
                         glm::vec4 uvBounds = textureProvider(blockInfo.type, face);
 
+                        // Sample light for this LOD cell if lighting is enabled
+                        float faceLight = 1.0f;
+                        if ((smoothLighting_ || flatLighting_) && lightProvider_) {
+                            // Sample light from the air block adjacent to this face
+                            // Use the center of the LOD cell offset by face normal
+                            auto normal = faceNormal(face);
+                            int32_t halfGrouping = grouping / 2;
+                            BlockPos samplePos{
+                                static_cast<int32_t>(worldX) + halfGrouping + normal[0],
+                                static_cast<int32_t>(worldY) + halfGrouping + normal[1],
+                                static_cast<int32_t>(worldZ) + halfGrouping + normal[2]
+                            };
+                            uint8_t lightLevel = lightProvider_(samplePos);
+                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                        }
+
                         // Add the face with height limitation
                         if (mergeMode == LODMergeMode::HeightLimited && height < blockScale) {
-                            addHeightLimitedFace(mesh, localPos, face, blockScale, height, uvBounds, defaultAO);
+                            addHeightLimitedFace(mesh, localPos, face, blockScale, height, uvBounds, defaultAO, faceLight);
                         } else {
-                            addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO);
+                            addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO, faceLight);
                         }
                     }
                 }
@@ -1282,6 +1335,19 @@ void MeshBuilder::greedyMeshLODFace(
                     mask[maskIdx].height = height;
                 } else {
                     mask[maskIdx].height = blockScale;  // FullHeight mode
+                }
+
+                // Sample light for this LOD cell if lighting is enabled
+                if ((smoothLighting_ || flatLighting_) && lightProvider_) {
+                    auto normal = faceNormal(face);
+                    int32_t halfGrouping = grouping / 2;
+                    BlockPos samplePos{
+                        static_cast<int32_t>(worldX) + halfGrouping + normal[0],
+                        static_cast<int32_t>(worldY) + halfGrouping + normal[1],
+                        static_cast<int32_t>(worldZ) + halfGrouping + normal[2]
+                    };
+                    uint8_t lightLevel = lightProvider_(samplePos);
+                    mask[maskIdx].light = static_cast<float>(lightLevel) / 15.0f;
                 }
             }
         }
@@ -1480,7 +1546,8 @@ void MeshBuilder::addGreedyLODQuad(
         vertex.normal = normal;
         vertex.texCoord = uvs[i];
         vertex.tileBounds = tileBounds;
-        vertex.ao = 1.0f;  // No AO for LOD meshes
+        vertex.ao = 1.0f;      // No AO for LOD meshes
+        vertex.light = entry.light;  // Use sampled light from mask entry
         mesh.vertices.push_back(vertex);
     }
 

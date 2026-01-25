@@ -15,6 +15,7 @@ layout(location = 3) in vec4 fragTileBounds;   // Texture tile bounds (minU, min
 layout(location = 4) in float fragAO;
 layout(location = 5) in vec4 fragClipPos;      // DEBUG
 layout(location = 6) in float fragDistance;    // Distance from camera (for fog)
+layout(location = 7) in float fragLight;       // Smooth lighting (0-1, from block/sky light)
 
 // Output color
 layout(location = 0) out vec4 outColor;
@@ -151,18 +152,25 @@ void main() {
     // Calculate lighting
     vec3 normal = normalize(fragNormal);
 
-    // Simple directional light
+    // Simple directional light (sun)
     float NdotL = max(dot(normal, LIGHT_DIR), 0.0);
     float diffuse = NdotL * DIFFUSE;
 
     // Per-face shading for that classic voxel look
     float faceShade = getFaceShade(normal);
 
-    // Combine lighting
-    float lighting = (AMBIENT + diffuse) * faceShade;
+    // Combine directional lighting with face shading
+    float dirLighting = (AMBIENT + diffuse) * faceShade;
 
     // Apply ambient occlusion
-    lighting *= fragAO;
+    dirLighting *= fragAO;
+
+    // Apply smooth lighting from block/sky light
+    // fragLight is 0-1 (from LightEngine), combine with directional lighting
+    // When smooth lighting is disabled, fragLight is 1.0
+    // Add minimum ambient (0.1) so unlit areas aren't completely black
+    float smoothLight = max(fragLight, 0.1);
+    float lighting = dirLighting * smoothLight;
 
     // Final color before fog
     vec3 finalColor = texColor.rgb * lighting;

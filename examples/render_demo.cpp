@@ -8,6 +8,7 @@
  * - Debug camera offset for frustum culling visualization
  * - View-relative rendering at large coordinates
  * - Greedy meshing optimization
+ * - Smooth lighting with LightEngine (sky + block light)
  *
  * Controls:
  * - WASD: Move camera
@@ -17,6 +18,7 @@
  * - F3: Teleport to origin
  * - F4: Toggle hidden face culling (debug)
  * - F6: Toggle async meshing (background mesh generation)
+ * - B: Toggle smooth lighting (sky + block light)
  * - C: Toggle frustum culling (off = render all chunks for profiling)
  * - G: Toggle greedy meshing (compare vertex counts)
  * - L: Toggle LOD system (off = all LOD0, no merging)
@@ -31,6 +33,7 @@
 #include <finevox/block_type.hpp>
 #include <finevox/string_interner.hpp>
 #include <finevox/resource_locator.hpp>
+#include <finevox/light_engine.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -103,10 +106,21 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
     auto dirt = BlockTypeId::fromName("dirt");
     auto grass = BlockTypeId::fromName("grass");
     auto cobble = BlockTypeId::fromName("cobble");
+    auto glowstone = BlockTypeId::fromName("glowstone");
+
+    // Register glowstone as a light-emitting block
+    auto& registry = BlockRegistry::global();
+    if (!registry.hasType(glowstone)) {
+        BlockType glowstoneType;
+        glowstoneType.setLightEmission(15);  // Maximum brightness
+        glowstoneType.setLightAttenuation(0);  // Doesn't block light
+        registry.registerType(glowstone, glowstoneType);
+    }
 
     std::cout << "Building test world...\n";
     std::cout << "  Block IDs: stone=" << stone.id << " dirt=" << dirt.id
-              << " grass=" << grass.id << " cobble=" << cobble.id << "\n";
+              << " grass=" << grass.id << " cobble=" << cobble.id
+              << " glowstone=" << glowstone.id << "\n";
 
     // Base offset for large coordinate testing
     // At 1,000,000 blocks, float32 has ~0.06 block precision loss
@@ -152,6 +166,12 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
                 }
             }
         }
+
+        // Add glowstone lights inside the house and scattered around
+        world.setBlock({baseX + 3, 7, baseZ + 3}, glowstone);  // Inside house ceiling
+        world.setBlock({baseX + 5, 7, baseZ + 5}, glowstone);  // Inside house ceiling
+        world.setBlock({baseX + 20, 50, baseZ + 20}, glowstone);  // On top of tower
+        world.setBlock({baseX - 10, 5, baseZ - 10}, glowstone);  // Standalone
 
         // A tall tower for frustum culling testing
         for (int y = 5; y < 50; y++) {
@@ -270,10 +290,58 @@ int main(int argc, char* argv[]) {
         atlas.setBlockTexture(BlockTypeId::fromName("dirt"), 1, 0);     // Brown
         atlas.setBlockTexture(BlockTypeId::fromName("grass"), 2, 0);    // Green (top)
         atlas.setBlockTexture(BlockTypeId::fromName("cobble"), 3, 0);   // Dark gray
+        atlas.setBlockTexture(BlockTypeId::fromName("glowstone"), 4, 0); // Yellow (light source)
 
         worldRenderer.setBlockAtlas(atlas.texture());
         worldRenderer.setTextureProvider(atlas.createProvider());
         worldRenderer.initialize();
+
+        // Create LightEngine for smooth lighting
+        LightEngine lightEngine(world);
+        // Increase propagation limit to allow full L1 ball (default 256 is too small)
+        lightEngine.setMaxPropagationDistance(10000);
+
+        // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
+        int lightingMode = 2;  // Start with smooth lighting
+        auto applyLightingMode = [&]() {
+            worldRenderer.setSmoothLighting(lightingMode == 2);
+            worldRenderer.setFlatLighting(lightingMode == 1);
+            const char* modeNames[] = {"OFF", "FLAT (raw L1 ball)", "SMOOTH (interpolated)"};
+            std::cout << "Lighting mode: " << modeNames[lightingMode] << "\n";
+        };
+
+        // Skip sky light for now - it fills the open world with light level 15,
+        // which overwhelms block light and makes testing difficult.
+        // TODO: Re-enable when testing underground areas or night time
+        // std::cout << "Initializing sky light...\n";
+        // for (const auto& pos : world.getAllSubChunkPositions()) {
+        //     ColumnPos colPos{pos.x, pos.z};
+        //     auto* column = world.getColumn(colPos);
+        //     if (column && !column->isLightInitialized()) {
+        //         lightEngine.initializeSkyLight(colPos);
+        //         column->markLightInitialized();
+        //     }
+        // }
+
+        // Propagate block light from glowstone blocks
+        // Note: We can't use recalculateSubChunk in a loop because it clears light,
+        // which destroys cross-chunk propagation. Instead, directly propagate from
+        // known light source positions.
+        int32_t baseX = startAtLargeCoords ? 1000000 : 0;
+        int32_t baseZ = startAtLargeCoords ? 1000000 : 0;
+        if (!singleBlockMode) {
+            lightEngine.propagateBlockLight({baseX + 3, 7, baseZ + 3}, 15);
+            lightEngine.propagateBlockLight({baseX + 5, 7, baseZ + 5}, 15);
+            lightEngine.propagateBlockLight({baseX + 20, 50, baseZ + 20}, 15);
+            lightEngine.propagateBlockLight({baseX - 10, 5, baseZ - 10}, 15);
+        }
+        std::cout << "Block light propagated.\n";
+
+        // Set up light provider for lighting calculations
+        worldRenderer.setLightProvider([&lightEngine](const BlockPos& pos) -> uint8_t {
+            return lightEngine.getCombinedLight(pos);
+        });
+        applyLightingMode();
 
         // Enable async meshing if requested
         if (useAsyncMeshing) {
@@ -453,6 +521,13 @@ int main(int argc, char* argv[]) {
                 worldRenderer.setFrustumCullingEnabled(enabled);
                 std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
             }
+
+            if (key == GLFW_KEY_B && action == finevk::Action::Press) {
+                // Cycle lighting mode: OFF -> FLAT -> SMOOTH -> OFF
+                lightingMode = (lightingMode + 1) % 3;
+                applyLightingMode();
+                worldRenderer.markAllDirty();  // Rebuild meshes with new lighting
+            }
         });
 
         // Mouse button callback
@@ -494,6 +569,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  F3: Teleport to origin\n";
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
         std::cout << "  F6: Toggle async meshing\n";
+        std::cout << "  B: Toggle smooth lighting\n";
         std::cout << "  C: Toggle frustum culling\n";
         std::cout << "  G: Toggle greedy meshing\n";
         std::cout << "  L: Toggle LOD (off = no merging)\n";

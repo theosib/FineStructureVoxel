@@ -209,7 +209,13 @@ public:
     void setSmoothLighting(bool enabled) { smoothLighting_ = enabled; }
     [[nodiscard]] bool smoothLighting() const { return smoothLighting_; }
 
-    // Set light provider for smooth lighting calculations
+    // Enable/disable flat lighting (single light sample per face, no interpolation)
+    // When enabled, shows the raw L1 ball without smoothing. Requires light provider.
+    // Note: smoothLighting takes precedence if both are enabled.
+    void setFlatLighting(bool enabled) { flatLighting_ = enabled; }
+    [[nodiscard]] bool flatLighting() const { return flatLighting_; }
+
+    // Set light provider for smooth/flat lighting calculations
     void setLightProvider(BlockLightProvider provider) { lightProvider_ = std::move(provider); }
     void clearLightProvider() { lightProvider_ = nullptr; }
 
@@ -262,7 +268,8 @@ private:
     bool greedyMeshing_ = true;  // Enabled by default
     bool disableFaceCulling_ = false;
     bool smoothLighting_ = false;  // Disabled by default (use when LightEngine is available)
-    BlockLightProvider lightProvider_;  // Optional provider for smooth lighting
+    bool flatLighting_ = false;   // Single light sample per face (shows raw L1 ball)
+    BlockLightProvider lightProvider_;  // Optional provider for smooth/flat lighting
 
     // Add a single face to the mesh data
     void addFace(
@@ -282,7 +289,8 @@ private:
         Face face,
         float blockScale,            // Scale factor for the block
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
-        const std::array<float, 4>& aoValues  // AO for each corner
+        const std::array<float, 4>& aoValues,  // AO for each corner
+        float light = 1.0f           // Light value (uniform across face for LOD)
     );
 
     // Add a height-limited scaled face (for HeightLimited LOD mode)
@@ -294,7 +302,8 @@ private:
         float blockScale,            // Full scale factor
         float height,                // Actual height (1 to blockScale)
         const glm::vec4& uvBounds,
-        const std::array<float, 4>& aoValues
+        const std::array<float, 4>& aoValues,
+        float light = 1.0f           // Light value (uniform across face for LOD)
     );
 
     // Calculate ambient occlusion for a face corner
@@ -400,11 +409,15 @@ private:
         BlockTypeId blockType = AIR_BLOCK_TYPE;
         glm::vec4 uvBounds{0.0f};
         float height = 0.0f;  // For height-limited mode
+        float light = 1.0f;   // Light value for smooth lighting
 
         bool operator==(const LODFaceMaskEntry& other) const {
-            // For greedy meshing, faces can merge if same block type
-            // Heights must also match for HeightLimited mode
-            return blockType == other.blockType && height == other.height;
+            // For greedy meshing, faces can merge if same block type, height, and light
+            // Note: using exact float comparison for light - faces with different
+            // light levels shouldn't merge to preserve lighting gradients
+            return blockType == other.blockType &&
+                   height == other.height &&
+                   light == other.light;
         }
 
         bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }

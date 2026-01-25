@@ -335,6 +335,27 @@ public:
     void setGreedyMeshing(bool enabled) { meshBuilder_.setGreedyMeshing(enabled); }
     [[nodiscard]] bool greedyMeshing() const { return meshBuilder_.greedyMeshing(); }
 
+    /**
+     * @brief Enable/disable smooth lighting (per-vertex light interpolation)
+     * Requires a light provider to be set via setLightProvider()
+     */
+    void setSmoothLighting(bool enabled) { meshBuilder_.setSmoothLighting(enabled); }
+    [[nodiscard]] bool smoothLighting() const { return meshBuilder_.smoothLighting(); }
+
+    /**
+     * @brief Enable/disable flat lighting (single light sample per face, no interpolation)
+     * Shows the raw L1 ball from light propagation. Requires a light provider.
+     * Note: smooth lighting takes precedence if both are enabled.
+     */
+    void setFlatLighting(bool enabled) { meshBuilder_.setFlatLighting(enabled); }
+    [[nodiscard]] bool flatLighting() const { return meshBuilder_.flatLighting(); }
+
+    /**
+     * @brief Set the light provider for smooth/flat lighting
+     * @param provider Function that returns combined light (0-15) for a world position
+     */
+    void setLightProvider(BlockLightProvider provider) { meshBuilder_.setLightProvider(std::move(provider)); }
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================

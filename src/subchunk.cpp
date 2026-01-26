@@ -1,4 +1,5 @@
 #include "finevox/subchunk.hpp"
+#include "finevox/data_container.hpp"
 
 namespace finevox {
 
@@ -8,6 +9,8 @@ SubChunk::SubChunk() {
     // Air starts with count equal to volume
     usageCounts_.push_back(VOLUME);
 }
+
+SubChunk::~SubChunk() = default;
 
 BlockTypeId SubChunk::getBlock(int32_t x, int32_t y, int32_t z) const {
     return getBlock(toIndex(x, y, z));
@@ -346,6 +349,96 @@ bool SubChunk::isFullSkyLight() const {
 void SubChunk::setLightData(const std::array<uint8_t, VOLUME>& data) {
     light_ = data;
     bumpLightVersion();
+}
+
+// ============================================================================
+// Block Extra Data Implementation
+// ============================================================================
+
+DataContainer* SubChunk::blockData(int32_t index) {
+    auto it = blockData_.find(index);
+    return it != blockData_.end() ? it->second.get() : nullptr;
+}
+
+const DataContainer* SubChunk::blockData(int32_t index) const {
+    auto it = blockData_.find(index);
+    return it != blockData_.end() ? it->second.get() : nullptr;
+}
+
+DataContainer* SubChunk::blockData(int32_t x, int32_t y, int32_t z) {
+    return blockData(toIndex(x, y, z));
+}
+
+const DataContainer* SubChunk::blockData(int32_t x, int32_t y, int32_t z) const {
+    return blockData(toIndex(x, y, z));
+}
+
+DataContainer& SubChunk::getOrCreateBlockData(int32_t index) {
+    auto it = blockData_.find(index);
+    if (it != blockData_.end()) {
+        return *it->second;
+    }
+    auto result = blockData_.emplace(index, std::make_unique<DataContainer>());
+    return *result.first->second;
+}
+
+DataContainer& SubChunk::getOrCreateBlockData(int32_t x, int32_t y, int32_t z) {
+    return getOrCreateBlockData(toIndex(x, y, z));
+}
+
+bool SubChunk::hasBlockData(int32_t index) const {
+    return blockData_.find(index) != blockData_.end();
+}
+
+bool SubChunk::hasBlockData(int32_t x, int32_t y, int32_t z) const {
+    return hasBlockData(toIndex(x, y, z));
+}
+
+void SubChunk::removeBlockData(int32_t index) {
+    blockData_.erase(index);
+}
+
+void SubChunk::removeBlockData(int32_t x, int32_t y, int32_t z) {
+    removeBlockData(toIndex(x, y, z));
+}
+
+size_t SubChunk::blockDataCount() const {
+    return blockData_.size();
+}
+
+const std::unordered_map<int32_t, std::unique_ptr<DataContainer>>& SubChunk::allBlockData() const {
+    return blockData_;
+}
+
+std::unordered_map<int32_t, std::unique_ptr<DataContainer>>& SubChunk::allBlockData() {
+    return blockData_;
+}
+
+// ============================================================================
+// SubChunk Extra Data Implementation
+// ============================================================================
+
+DataContainer* SubChunk::data() {
+    return data_.get();
+}
+
+const DataContainer* SubChunk::data() const {
+    return data_.get();
+}
+
+DataContainer& SubChunk::getOrCreateData() {
+    if (!data_) {
+        data_ = std::make_unique<DataContainer>();
+    }
+    return *data_;
+}
+
+bool SubChunk::hasData() const {
+    return data_ != nullptr;
+}
+
+void SubChunk::removeData() {
+    data_.reset();
 }
 
 }  // namespace finevox

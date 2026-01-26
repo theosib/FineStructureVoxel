@@ -12,6 +12,9 @@
 
 namespace finevox {
 
+// Forward declaration
+class DataContainer;
+
 // A vertical column of SubChunks at a given (X, Z) position
 // - Uses sparse storage: SubChunks only exist when they contain non-air blocks
 // - Automatically creates SubChunks when blocks are set
@@ -22,6 +25,13 @@ namespace finevox {
 class ChunkColumn {
 public:
     explicit ChunkColumn(ColumnPos pos);
+    ~ChunkColumn();  // Defined in .cpp for unique_ptr<DataContainer>
+
+    // Allow move, prevent copy
+    ChunkColumn(ChunkColumn&&) noexcept;
+    ChunkColumn& operator=(ChunkColumn&&) noexcept;
+    ChunkColumn(const ChunkColumn&) = delete;
+    ChunkColumn& operator=(const ChunkColumn&) = delete;
 
     // Column position
     [[nodiscard]] ColumnPos position() const { return pos_; }
@@ -120,6 +130,26 @@ public:
     /// Reset light initialization flag (e.g., after major terrain changes)
     void resetLightInitialized() { lightInitialized_ = false; }
 
+    // ========================================================================
+    // Column Extra Data (per-column game state)
+    // ========================================================================
+    // Used for column-level state like pending block events when unloading
+    // mid-update, biome data, etc. Game modules define the format.
+
+    /// Get column-level extra data
+    /// @return Pointer to DataContainer, or nullptr if no data exists
+    [[nodiscard]] DataContainer* data();
+    [[nodiscard]] const DataContainer* data() const;
+
+    /// Get or create column-level extra data
+    DataContainer& getOrCreateData();
+
+    /// Check if column has extra data
+    [[nodiscard]] bool hasData() const;
+
+    /// Remove column-level extra data
+    void removeData();
+
 private:
     ColumnPos pos_;
     std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
@@ -134,6 +164,9 @@ private:
     // Light initialization: false until sky light is first calculated
     // Used for lazy initialization - mesher can wait for this before building
     bool lightInitialized_ = false;
+
+    // Column-level extra data (pending events, biome data, etc.)
+    std::unique_ptr<DataContainer> data_;
 
     // Convert block Y to subchunk Y (handles negative correctly)
     [[nodiscard]] static int32_t blockYToChunkY(int32_t blockY);

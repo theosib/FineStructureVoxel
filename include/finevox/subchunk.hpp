@@ -6,8 +6,13 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <unordered_map>
 
 namespace finevox {
+
+// Forward declaration
+class DataContainer;
 
 // Callback type for block change notifications
 // Parameters: subchunk position, local block position (0-15 each), old block type, new block type
@@ -35,6 +40,13 @@ public:
     using LocalIndex = SubChunkPalette::LocalIndex;
 
     SubChunk();
+    ~SubChunk();  // Defined in .cpp for unique_ptr<DataContainer>
+
+    // Non-copyable, non-movable (stored in shared_ptr, has atomic members)
+    SubChunk(const SubChunk&) = delete;
+    SubChunk& operator=(const SubChunk&) = delete;
+    SubChunk(SubChunk&&) = delete;
+    SubChunk& operator=(SubChunk&&) = delete;
 
     // Get block type at local coordinates (0-15 each)
     [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const;
@@ -151,6 +163,64 @@ public:
     }
 
     // ========================================================================
+    // Block Extra Data (tile entity data - chests, signs, etc.)
+    // ========================================================================
+    // Most blocks have no extra data. Storage is sparse - only blocks with data
+    // have entries in the map. Data uses standard hierarchy:
+    //   "inventory" - for blocks with inventory (chests, hoppers)
+    //   "geometry"  - for blocks with dynamic geometry based on neighbors
+    //   "display"   - for blocks with custom display (signs, banners)
+    //   Block-specific keys as needed
+
+    /// Get extra data for a block at local index
+    /// @return Pointer to DataContainer, or nullptr if no data exists
+    [[nodiscard]] DataContainer* blockData(int32_t index);
+    [[nodiscard]] const DataContainer* blockData(int32_t index) const;
+    [[nodiscard]] DataContainer* blockData(int32_t x, int32_t y, int32_t z);
+    [[nodiscard]] const DataContainer* blockData(int32_t x, int32_t y, int32_t z) const;
+
+    /// Get or create extra data for a block at local index
+    /// Creates a new DataContainer if none exists
+    DataContainer& getOrCreateBlockData(int32_t index);
+    DataContainer& getOrCreateBlockData(int32_t x, int32_t y, int32_t z);
+
+    /// Check if a block has extra data
+    [[nodiscard]] bool hasBlockData(int32_t index) const;
+    [[nodiscard]] bool hasBlockData(int32_t x, int32_t y, int32_t z) const;
+
+    /// Remove extra data for a block (no-op if none exists)
+    void removeBlockData(int32_t index);
+    void removeBlockData(int32_t x, int32_t y, int32_t z);
+
+    /// Get count of blocks with extra data
+    [[nodiscard]] size_t blockDataCount() const;
+
+    /// Get access to block data map for iteration
+    /// Prefer using this in .cpp files rather than templates for cleaner compilation
+    [[nodiscard]] const std::unordered_map<int32_t, std::unique_ptr<DataContainer>>& allBlockData() const;
+    [[nodiscard]] std::unordered_map<int32_t, std::unique_ptr<DataContainer>>& allBlockData();
+
+    // ========================================================================
+    // SubChunk Extra Data (per-subchunk game state)
+    // ========================================================================
+    // Used for subchunk-level state like lighting cache, biome blends, etc.
+    // Game modules define the format.
+
+    /// Get subchunk-level extra data
+    /// @return Pointer to DataContainer, or nullptr if no data exists
+    [[nodiscard]] DataContainer* data();
+    [[nodiscard]] const DataContainer* data() const;
+
+    /// Get or create subchunk-level extra data
+    DataContainer& getOrCreateData();
+
+    /// Check if subchunk has extra data
+    [[nodiscard]] bool hasData() const;
+
+    /// Remove subchunk-level extra data
+    void removeData();
+
+    // ========================================================================
     // Change Notifications
     // ========================================================================
 
@@ -185,6 +255,13 @@ private:
 
     // Optional callback for block changes
     BlockChangeCallback blockChangeCallback_;
+
+    // Block extra data: sparse map from local index to DataContainer
+    // Most blocks have no data, so this is typically empty or very small
+    std::unordered_map<int32_t, std::unique_ptr<DataContainer>> blockData_;
+
+    // SubChunk-level extra data (game state, caches, etc.)
+    std::unique_ptr<DataContainer> data_;
 
     // Convert local coordinates to array index
     [[nodiscard]] static constexpr int32_t toIndex(int32_t x, int32_t y, int32_t z) {

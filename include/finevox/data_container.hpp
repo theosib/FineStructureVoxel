@@ -148,11 +148,11 @@ public:
     // Keys are interned during loading
     [[nodiscard]] static std::unique_ptr<DataContainer> fromCBOR(std::span<const uint8_t> data);
 
+    // Helper to deep-copy a DataValue (public for serialization use)
+    [[nodiscard]] static DataValue cloneValue(const DataValue& value);
+
 private:
     std::unordered_map<DataKey, DataValue> data_;
-
-    // Helper to deep-copy a DataValue
-    static DataValue cloneValue(const DataValue& value);
 };
 
 // ============================================================================

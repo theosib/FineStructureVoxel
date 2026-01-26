@@ -39,15 +39,11 @@ void BlockContext::setRotation(Rotation rot) {
 }
 
 DataContainer* BlockContext::data() {
-    // TODO: Implement extra data storage in SubChunk (Phase 9)
-    // For now, return nullptr
-    return nullptr;
+    return subChunk_.blockData(localPos_.x, localPos_.y, localPos_.z);
 }
 
 DataContainer& BlockContext::getOrCreateData() {
-    // TODO: Implement extra data storage in SubChunk (Phase 9)
-    // For now, throw exception since we can't create data yet
-    throw std::runtime_error("BlockContext::getOrCreateData not yet implemented (Phase 9)");
+    return subChunk_.getOrCreateBlockData(localPos_.x, localPos_.y, localPos_.z);
 }
 
 void BlockContext::scheduleTick(int ticksFromNow) {

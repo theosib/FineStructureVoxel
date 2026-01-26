@@ -36,7 +36,7 @@ namespace finevox {
 
 /// Get Vulkan vertex input attribute descriptions for ChunkVertex
 [[nodiscard]] inline std::vector<VkVertexInputAttributeDescription> getChunkVertexAttributeDescriptions() {
-    std::vector<VkVertexInputAttributeDescription> attributes(5);
+    std::vector<VkVertexInputAttributeDescription> attributes(6);
 
     // Position (location 0)
     attributes[0].binding = 0;
@@ -67,6 +67,12 @@ namespace finevox {
     attributes[4].location = 4;
     attributes[4].format = VK_FORMAT_R32_SFLOAT;
     attributes[4].offset = offsetof(ChunkVertex, ao);
+
+    // Smooth Lighting (location 5)
+    attributes[5].binding = 0;
+    attributes[5].location = 5;
+    attributes[5].format = VK_FORMAT_R32_SFLOAT;
+    attributes[5].offset = offsetof(ChunkVertex, light);
 
     return attributes;
 }

@@ -1,4 +1,5 @@
 #include "finevox/chunk_column.hpp"
+#include "finevox/data_container.hpp"
 #include <algorithm>
 #include <limits>
 #include <vector>
@@ -9,6 +10,11 @@ ChunkColumn::ChunkColumn(ColumnPos pos) : pos_(pos) {
     // Initialize heightmap to NO_HEIGHT (no opaque blocks)
     heightmap_.fill(NO_HEIGHT);
 }
+
+ChunkColumn::~ChunkColumn() = default;
+
+ChunkColumn::ChunkColumn(ChunkColumn&&) noexcept = default;
+ChunkColumn& ChunkColumn::operator=(ChunkColumn&&) noexcept = default;
 
 int32_t ChunkColumn::blockYToChunkY(int32_t blockY) {
     // Floor division for negative numbers
@@ -261,6 +267,33 @@ void ChunkColumn::recalculateHeightmap() {
 void ChunkColumn::setHeightmapData(const std::array<int32_t, 256>& data) {
     heightmap_ = data;
     heightmapDirty_ = false;
+}
+
+// ============================================================================
+// Column Extra Data Implementation
+// ============================================================================
+
+DataContainer* ChunkColumn::data() {
+    return data_.get();
+}
+
+const DataContainer* ChunkColumn::data() const {
+    return data_.get();
+}
+
+DataContainer& ChunkColumn::getOrCreateData() {
+    if (!data_) {
+        data_ = std::make_unique<DataContainer>();
+    }
+    return *data_;
+}
+
+bool ChunkColumn::hasData() const {
+    return data_ != nullptr;
+}
+
+void ChunkColumn::removeData() {
+    data_.reset();
 }
 
 }  // namespace finevox

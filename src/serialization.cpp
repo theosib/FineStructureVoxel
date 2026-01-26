@@ -76,8 +76,17 @@ SerializedSubChunk SubChunkSerializer::serialize(const SubChunk& chunk, int32_t 
         result.lightData.assign(light.begin(), light.end());
     }
 
-    // TODO: Per-block data - not yet implemented in SubChunk
-    // For now, blockData is left empty
+    // Serialize per-block extra data (sparse map)
+    for (const auto& [index, dataPtr] : chunk.allBlockData()) {
+        if (dataPtr && !dataPtr->empty()) {
+            result.blockData[static_cast<uint16_t>(index)] = dataPtr->clone();
+        }
+    }
+
+    // Serialize subchunk-level extra data
+    if (chunk.hasData() && !chunk.data()->empty()) {
+        result.subchunkData = chunk.data()->clone();
+    }
 
     return result;
 }
@@ -86,14 +95,16 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
     SerializedSubChunk data = serialize(chunk, yLevel);
     std::vector<uint8_t> out;
 
-    // Count fields: y, palette, blocks, and optionally rotations, light, data
+    // Count fields: y, palette, blocks, and optionally rotations, light, blockData, subchunkData
     int fieldCount = 3;  // y, palette, blocks
     bool hasRotations = !data.rotations.empty();
     bool hasLightData = !data.lightData.empty();
     bool hasBlockData = !data.blockData.empty();
+    bool hasSubchunkData = data.subchunkData && !data.subchunkData->empty();
     if (hasRotations) fieldCount++;
     if (hasLightData) fieldCount++;
     if (hasBlockData) fieldCount++;
+    if (hasSubchunkData) fieldCount++;
 
     cbor::encodeMapHeader(out, fieldCount);
 
@@ -124,9 +135,9 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
         cbor::encodeBytes(out, data.lightData);
     }
 
-    // "data": map (optional)
+    // "blockData": map of block index -> DataContainer (optional, sparse per-block extra data)
     if (hasBlockData) {
-        cbor::encodeString(out, "data");
+        cbor::encodeString(out, "blockData");
         cbor::encodeMapHeader(out, data.blockData.size());
         for (const auto& [index, container] : data.blockData) {
             cbor::encodeInt(out, index);
@@ -134,6 +145,13 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
             // Embed the container CBOR directly (it's already a valid CBOR value)
             out.insert(out.end(), containerBytes.begin(), containerBytes.end());
         }
+    }
+
+    // "data": DataContainer (optional, subchunk-level extra data)
+    if (hasSubchunkData) {
+        cbor::encodeString(out, "data");
+        auto containerBytes = data.subchunkData->toCBOR();
+        out.insert(out.end(), containerBytes.begin(), containerBytes.end());
     }
 
     return out;
@@ -187,7 +205,25 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
         chunk->setLightData(lightArray);
     }
 
-    // TODO: Apply per-block data when SubChunk supports them
+    // Apply per-block extra data
+    for (const auto& [index, container] : data.blockData) {
+        if (container && !container->empty()) {
+            DataContainer& blockData = chunk->getOrCreateBlockData(index);
+            // Copy the data from the serialized container
+            container->forEach([&blockData](DataKey key, const DataValue& value) {
+                // Clone the value and set it
+                blockData.set(key, DataContainer::cloneValue(value));
+            });
+        }
+    }
+
+    // Apply subchunk-level extra data
+    if (data.subchunkData && !data.subchunkData->empty()) {
+        DataContainer& subchunkData = chunk->getOrCreateData();
+        data.subchunkData->forEach([&subchunkData](DataKey key, const DataValue& value) {
+            subchunkData.set(key, DataContainer::cloneValue(value));
+        });
+    }
 
     return chunk;
 }
@@ -247,18 +283,34 @@ std::unique_ptr<SubChunk> SubChunkSerializer::fromCBOR(std::span<const uint8_t> 
             if (bytesType == cbor::BYTE_STRING) {
                 serialized.lightData = decoder.readBytes(bytesLen);
             }
-        } else if (key == "data") {
+        } else if (key == "blockData") {
+            // Per-block extra data: map of block index -> DataContainer
             auto [mapType, mapLen] = decoder.readHeader();
             if (mapType == cbor::MAP) {
                 for (uint64_t j = 0; j < mapLen; ++j) {
                     int64_t index = decoder.readInt();
                     // The value is an embedded CBOR DataContainer
-                    // We need to read it as raw bytes and parse
-                    // For now, skip it (TODO: implement proper nested CBOR reading)
+                    // Save position, skip to measure, then extract and parse
+                    size_t startPos = decoder.position();
                     decoder.skipValue();
-                    (void)index;
+                    size_t endPos = decoder.position();
+
+                    // Extract the bytes for this DataContainer
+                    std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
+                    auto container = DataContainer::fromCBOR(containerData);
+                    if (container) {
+                        serialized.blockData[static_cast<uint16_t>(index)] = std::move(container);
+                    }
                 }
             }
+        } else if (key == "data") {
+            // Subchunk-level extra data: DataContainer
+            size_t startPos = decoder.position();
+            decoder.skipValue();
+            size_t endPos = decoder.position();
+
+            std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
+            serialized.subchunkData = DataContainer::fromCBOR(containerData);
         } else {
             decoder.skipValue();
         }
@@ -288,6 +340,8 @@ std::vector<uint8_t> ColumnSerializer::toCBOR(const ChunkColumn& column, int32_t
 
     // Field count: x, z, subchunks, and optionally heightmap, biomes, data
     int fieldCount = 3;  // x, z, subchunks
+    bool hasColumnData = column.hasData() && !column.data()->empty();
+    if (hasColumnData) fieldCount++;
 
     cbor::encodeMapHeader(out, fieldCount);
 
@@ -306,6 +360,13 @@ std::vector<uint8_t> ColumnSerializer::toCBOR(const ChunkColumn& column, int32_t
     for (const auto& [y, sc] : nonEmptySubchunks) {
         auto scBytes = SubChunkSerializer::toCBOR(*sc, y);
         out.insert(out.end(), scBytes.begin(), scBytes.end());
+    }
+
+    // "data": DataContainer (optional, column-level extra data)
+    if (hasColumnData) {
+        cbor::encodeString(out, "data");
+        auto containerBytes = column.data()->toCBOR();
+        out.insert(out.end(), containerBytes.begin(), containerBytes.end());
     }
 
     return out;
@@ -327,6 +388,7 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
 
     int32_t x = 0, z = 0;
     std::vector<std::pair<int32_t, std::unique_ptr<SubChunk>>> subchunks;
+    std::unique_ptr<DataContainer> columnData;
 
     for (uint64_t i = 0; i < fieldCount; ++i) {
         // Read key
@@ -341,6 +403,14 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
             x = static_cast<int32_t>(decoder.readInt());
         } else if (key == "z") {
             z = static_cast<int32_t>(decoder.readInt());
+        } else if (key == "data") {
+            // Column-level extra data
+            size_t startPos = decoder.position();
+            decoder.skipValue();
+            size_t endPos = decoder.position();
+
+            std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
+            columnData = DataContainer::fromCBOR(containerData);
         } else if (key == "subchunks") {
             auto [arrType, arrLen] = decoder.readHeader();
             if (arrType == cbor::ARRAY) {
@@ -358,11 +428,7 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                     // to track byte boundaries.
                     // For now, let's manually parse the subchunk inline
 
-                    int32_t yLevel = 0;
-                    std::vector<std::string> palette;
-                    std::vector<uint8_t> blocks;
-                    std::vector<uint8_t> lightData;
-                    bool use16Bit = false;
+                    SerializedSubChunk serialized;
 
                     for (uint64_t k = 0; k < scFieldCount; ++k) {
                         auto [fieldKeyType, fieldKeyLen] = decoder.readHeader();
@@ -373,47 +439,64 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                         std::string fieldKey = decoder.readString(fieldKeyLen);
 
                         if (fieldKey == "y") {
-                            yLevel = static_cast<int32_t>(decoder.readInt());
+                            serialized.yLevel = static_cast<int32_t>(decoder.readInt());
                         } else if (fieldKey == "palette") {
                             auto [paletteType, paletteLen] = decoder.readHeader();
                             if (paletteType == cbor::ARRAY) {
-                                palette.reserve(paletteLen);
+                                serialized.palette.reserve(paletteLen);
                                 for (uint64_t p = 0; p < paletteLen; ++p) {
                                     auto [strType, strLen] = decoder.readHeader();
                                     if (strType == cbor::TEXT_STRING) {
-                                        palette.push_back(decoder.readString(strLen));
+                                        serialized.palette.push_back(decoder.readString(strLen));
                                     } else {
-                                        palette.push_back("");
+                                        serialized.palette.push_back("");
                                     }
                                 }
                             }
                         } else if (fieldKey == "blocks") {
                             auto [bytesType, bytesLen] = decoder.readHeader();
                             if (bytesType == cbor::BYTE_STRING) {
-                                blocks = decoder.readBytes(bytesLen);
-                                use16Bit = (blocks.size() == SubChunk::VOLUME * 2);
+                                serialized.blocks = decoder.readBytes(bytesLen);
+                                serialized.use16Bit = (serialized.blocks.size() == SubChunk::VOLUME * 2);
                             }
                         } else if (fieldKey == "light") {
                             auto [bytesType, bytesLen] = decoder.readHeader();
                             if (bytesType == cbor::BYTE_STRING) {
-                                lightData = decoder.readBytes(bytesLen);
+                                serialized.lightData = decoder.readBytes(bytesLen);
                             }
+                        } else if (fieldKey == "blockData") {
+                            // Per-block extra data: map of block index -> DataContainer
+                            auto [mapType, mapLen] = decoder.readHeader();
+                            if (mapType == cbor::MAP) {
+                                for (uint64_t m = 0; m < mapLen; ++m) {
+                                    int64_t index = decoder.readInt();
+                                    size_t startPos = decoder.position();
+                                    decoder.skipValue();
+                                    size_t endPos = decoder.position();
+
+                                    std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
+                                    auto container = DataContainer::fromCBOR(containerData);
+                                    if (container) {
+                                        serialized.blockData[static_cast<uint16_t>(index)] = std::move(container);
+                                    }
+                                }
+                            }
+                        } else if (fieldKey == "data") {
+                            // Subchunk-level extra data
+                            size_t startPos = decoder.position();
+                            decoder.skipValue();
+                            size_t endPos = decoder.position();
+
+                            std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
+                            serialized.subchunkData = DataContainer::fromCBOR(containerData);
                         } else {
                             decoder.skipValue();
                         }
                     }
 
-                    // Create subchunk from parsed data
-                    SerializedSubChunk serialized;
-                    serialized.yLevel = yLevel;
-                    serialized.palette = std::move(palette);
-                    serialized.blocks = std::move(blocks);
-                    serialized.lightData = std::move(lightData);
-                    serialized.use16Bit = use16Bit;
-
                     auto sc = SubChunkSerializer::deserialize(serialized);
                     if (sc) {
-                        subchunks.emplace_back(yLevel, std::move(sc));
+                        subchunks.emplace_back(serialized.yLevel, std::move(sc));
                     }
                 }
             }
@@ -445,13 +528,39 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
             }
         }
 
-        // Copy light data to the column's subchunk
-        if (!sc->isLightDark()) {
-            SubChunk* targetSc = column->getSubChunk(y);
-            if (targetSc) {
+        SubChunk* targetSc = column->getSubChunk(y);
+        if (targetSc) {
+            // Copy light data
+            if (!sc->isLightDark()) {
                 targetSc->setLightData(sc->lightData());
             }
+
+            // Copy block extra data
+            for (const auto& [blockIdx, dataPtr] : sc->allBlockData()) {
+                if (dataPtr && !dataPtr->empty()) {
+                    DataContainer& targetData = targetSc->getOrCreateBlockData(blockIdx);
+                    dataPtr->forEach([&targetData](DataKey key, const DataValue& value) {
+                        targetData.set(key, DataContainer::cloneValue(value));
+                    });
+                }
+            }
+
+            // Copy subchunk-level extra data
+            if (sc->hasData() && !sc->data()->empty()) {
+                DataContainer& targetData = targetSc->getOrCreateData();
+                sc->data()->forEach([&targetData](DataKey key, const DataValue& value) {
+                    targetData.set(key, DataContainer::cloneValue(value));
+                });
+            }
         }
+    }
+
+    // Apply column-level extra data
+    if (columnData && !columnData->empty()) {
+        DataContainer& colData = column->getOrCreateData();
+        columnData->forEach([&colData](DataKey key, const DataValue& value) {
+            colData.set(key, DataContainer::cloneValue(value));
+        });
     }
 
     return column;

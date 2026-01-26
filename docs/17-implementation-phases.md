@@ -428,6 +428,12 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
   - Extra data access (storage deferred to Phase 9)
   - Tick scheduling (deferred to Phase 9)
   - Neighbor notification
+  - [x] `previousType()`, `previousData()` for place/break undo support
+  - [x] `setBlock()` for handlers to modify/undo placements
+- [x] `BlockEvent` - Unified event container for event system
+  - EventType enum (BlockPlaced, BlockBroken, NeighborChanged, Tick, PlayerUse/Hit, etc.)
+  - Factory methods for creating events
+  - Sentinel checks for event type classification
 
 ### 7.4 Module Context
 - [x] `ModuleRegistry` - Context provided during registration
@@ -464,6 +470,7 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 - [x] Sky light (0-15) per block - 4 bits in packed byte
 - [x] Heightmap per ChunkColumn for sky light optimization
 - [x] BlockType lighting properties: `lightEmission`, `lightAttenuation`, `blocksSkyLight`
+- [x] `lightInitialized_` flag in ChunkColumn for lazy sky light init
 
 ### 8.2 Light Propagation
 - [x] `LightEngine` - BFS propagation on block changes
@@ -477,6 +484,19 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 - [x] `getFaceLight()` averages light from 4 adjacent blocks per corner
 - [x] Smooth lighting integrated into MeshBuilder (configurable via `setSmoothLighting()`)
 - [x] `BlockLightProvider` callback for mesh generation
+
+### 8.4 Version Tracking (for mesh invalidation)
+- [x] `blockVersion_` atomic in SubChunk (auto-incremented by setBlock)
+- [x] `lightVersion_` atomic in SubChunk (incremented on light changes)
+- [x] Version comparison for mesh staleness detection
+
+### 8.5 Event System Integration (Partial - See doc 24)
+- [x] `BlockEvent` struct with factory methods
+- [x] `EventType` enum for event classification
+- [x] `BlockContext` extended with previousType/previousData for undo
+- [ ] `EventProcessor` with inbox/outbox pattern
+- [ ] `LightingQueue` - consolidating queue for lighting thread
+- [ ] Integration of LightEngine with World (optional, config-driven)
 
 ### Testing
 - [x] LightData storage and access
@@ -493,18 +513,47 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 
 **Note:** This phase spans engine and game layers. Engine provides scheduling mechanisms; game modules define update behavior.
 
-### 9.1 Engine: Data Storage
-- [ ] Add block extra data to SubChunk (tile entity data - chests, signs, etc.)
-  - `DataContainer* getBlockData(LocalPos pos)` - returns nullptr if no data
-  - `DataContainer& getOrCreateBlockData(LocalPos pos)` - creates if needed
+### 9.1 Engine: Data Storage ✓
+- [x] Add block extra data to SubChunk (tile entity data - chests, signs, etc.)
+  - `blockData(index)` - returns nullptr if no data
+  - `getOrCreateBlockData(index)` - creates if needed
   - Sparse map storage (most blocks have no extra data)
-- [ ] Add `extraData()` to SubChunk for per-subchunk game state
+- [x] Add `data()` to SubChunk for per-subchunk game state
   - Lighting cache, local heightmaps, biome blends
   - Game-defined format via DataContainer
-- [ ] Add `extraData()` to ChunkColumn for per-column game state
+- [x] Add `data()` to ChunkColumn for per-column game state
   - Stores pending block events when unloading mid-update
   - Game-defined format via DataContainer
-- [ ] Serialize block/subchunk/column extra data with chunks
+- [x] Serialize block/subchunk/column extra data with chunks
+- [x] BlockContext `data()` and `getOrCreateData()` implemented
+
+**Standard Data Hierarchy:**
+
+Block, subchunk, and column extra data use DataContainer with standard top-level keys:
+
+| Key | Description | Example usage |
+|-----|-------------|---------------|
+| `inventory` | Item storage for blocks with inventories | Chests, hoppers, furnaces |
+| `geometry` | Dynamic geometry data based on neighbors | Stairs orientation, fence connections |
+| `display` | Custom display/rendering data | Sign text, banner patterns |
+| `state` | Block-specific state | Furnace progress, hopper cooldown |
+
+Game modules may define additional keys. Use namespace prefixes for mod-specific keys (e.g., `mymod:custom_data`).
+
+Example usage:
+```cpp
+// In a chest's onPlace handler:
+DataContainer& data = ctx.getOrCreateData();
+auto inventory = std::make_unique<DataContainer>();
+inventory->set("slots", 27);  // 27 slots
+data.set("inventory", std::move(inventory));
+
+// In onUse handler:
+DataContainer* data = ctx.data();
+if (data && data->has("inventory")) {
+    // Open inventory UI
+}
+```
 
 ### 9.2 Engine: Update Scheduler
 - [ ] `BlockUpdateScheduler` - schedule/cancel timed updates

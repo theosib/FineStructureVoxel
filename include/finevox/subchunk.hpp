@@ -2,6 +2,7 @@
 
 #include "finevox/position.hpp"
 #include "finevox/palette.hpp"
+#include "finevox/rotation.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -172,6 +173,45 @@ public:
     }
 
     // ========================================================================
+    // Block Rotation Storage
+    // ========================================================================
+    // Each block stores a rotation index (0-23) representing one of 24 cube rotations.
+    // Default is 0 (identity = no rotation).
+    // Used for oriented blocks like stairs, logs, pistons, etc.
+
+    /// Get rotation for block at local coordinates
+    [[nodiscard]] Rotation getRotation(int32_t x, int32_t y, int32_t z) const;
+    [[nodiscard]] Rotation getRotation(int32_t index) const;
+    [[nodiscard]] Rotation getRotation(LocalBlockPos pos) const;
+
+    /// Get raw rotation index (0-23) for block at local coordinates
+    [[nodiscard]] uint8_t getRotationIndex(int32_t x, int32_t y, int32_t z) const;
+    [[nodiscard]] uint8_t getRotationIndex(int32_t index) const;
+    [[nodiscard]] uint8_t getRotationIndex(LocalBlockPos pos) const;
+
+    /// Set rotation for block at local coordinates
+    void setRotation(int32_t x, int32_t y, int32_t z, const Rotation& rotation);
+    void setRotation(int32_t index, const Rotation& rotation);
+    void setRotation(LocalBlockPos pos, const Rotation& rotation);
+
+    /// Set rotation by index (0-23) for block at local coordinates
+    void setRotationIndex(int32_t x, int32_t y, int32_t z, uint8_t rotationIndex);
+    void setRotationIndex(int32_t index, uint8_t rotationIndex);
+    void setRotationIndex(LocalBlockPos pos, uint8_t rotationIndex);
+
+    /// Clear all rotations to identity (0)
+    void clearRotations();
+
+    /// Get raw rotation data for serialization (4096 bytes)
+    [[nodiscard]] const std::array<uint8_t, VOLUME>& rotationData() const;
+
+    /// Set raw rotation data from serialization
+    void setRotationData(const std::array<uint8_t, VOLUME>& data);
+
+    /// Check if all rotations are identity (useful for serialization optimization)
+    [[nodiscard]] bool hasNonIdentityRotations() const;
+
+    // ========================================================================
     // Block Extra Data (tile entity data - chests, signs, etc.)
     // ========================================================================
     // Most blocks have no extra data. Storage is sparse - only blocks with data
@@ -297,6 +337,10 @@ private:
 
     // Light version for mesh invalidation (starts at 1, incremented on each light change)
     std::atomic<uint64_t> lightVersion_{1};
+
+    // Block rotation indices (0-23 for each of 24 cube rotations), 4096 bytes
+    // 0 = identity (no rotation), default value
+    std::array<uint8_t, VOLUME> rotations_{};  // Zero-initialized (identity)
 
     // Position (for change callbacks)
     ChunkPos position_{0, 0, 0};

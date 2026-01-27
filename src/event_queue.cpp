@@ -35,6 +35,7 @@ int EventOutbox::eventPriority(EventType type) {
         case EventType::TickRepeat:     return 80;
         case EventType::TickRandom:     return 70;
         case EventType::NeighborChanged: return 60;
+        case EventType::BlockUpdate:   return 55;  // Just below NeighborChanged
         case EventType::PlayerUse:      return 50;
         case EventType::PlayerHit:      return 50;
         case EventType::ChunkLoaded:    return 40;
@@ -292,6 +293,12 @@ void UpdateScheduler::processEvent(const BlockEvent& event) {
                 event.forEachChangedNeighbor([&](Face face) {
                     handler->onNeighborChanged(ctx, face);
                 });
+            }
+            break;
+
+        case EventType::BlockUpdate:
+            if (handler) {
+                handler->onBlockUpdate(ctx);
             }
             break;
 

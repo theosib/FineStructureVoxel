@@ -28,15 +28,11 @@ BlockTypeId BlockContext::blockType() const {
 }
 
 Rotation BlockContext::rotation() const {
-    // TODO: Implement rotation storage in SubChunk (Phase 9)
-    // For now, return identity rotation
-    return Rotation::IDENTITY;
+    return subChunk_.getRotation(localPos_);
 }
 
 void BlockContext::setRotation(Rotation rot) {
-    // TODO: Implement rotation storage in SubChunk (Phase 9)
-    // For now, this is a no-op
-    (void)rot;
+    subChunk_.setRotation(localPos_, rot);
 }
 
 DataContainer* BlockContext::data() {

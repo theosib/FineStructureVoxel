@@ -113,15 +113,17 @@ void SubChunk::incrementUsage(LocalIndex index) {
 
 void SubChunk::clear() {
     bool wasNotEmpty = nonAirCount_ > 0;
+    bool hadRotations = hasNonIdentityRotations();
 
     blocks_.fill(0);
     palette_.clear();
     usageCounts_.clear();
     usageCounts_.push_back(VOLUME);  // Air has all blocks
     nonAirCount_ = 0;
+    rotations_.fill(0);  // Reset all rotations to identity
 
-    // Increment block version if there was any content
-    if (wasNotEmpty) {
+    // Increment block version if there was any content or rotations
+    if (wasNotEmpty || hadRotations) {
         blockVersion_.fetch_add(1, std::memory_order_release);
     }
 }
@@ -155,6 +157,7 @@ void SubChunk::fill(BlockTypeId type) {
     usageCounts_[1] = VOLUME;
 
     nonAirCount_ = VOLUME;
+    rotations_.fill(0);  // Reset all rotations to identity
 
     // Increment block version
     blockVersion_.fetch_add(1, std::memory_order_release);
@@ -348,6 +351,98 @@ bool SubChunk::isFullSkyLight() const {
 void SubChunk::setLightData(const std::array<uint8_t, VOLUME>& data) {
     light_ = data;
     bumpLightVersion();
+}
+
+// ============================================================================
+// Block Rotation Implementation
+// ============================================================================
+
+Rotation SubChunk::getRotation(int32_t x, int32_t y, int32_t z) const {
+    return getRotation(toIndex(x, y, z));
+}
+
+Rotation SubChunk::getRotation(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return Rotation::IDENTITY;
+    uint8_t rotIdx = rotations_[index];
+    if (rotIdx >= Rotation::count()) return Rotation::IDENTITY;
+    return Rotation::byIndex(rotIdx);
+}
+
+Rotation SubChunk::getRotation(LocalBlockPos pos) const {
+    return getRotation(pos.toIndex());
+}
+
+uint8_t SubChunk::getRotationIndex(int32_t x, int32_t y, int32_t z) const {
+    return getRotationIndex(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getRotationIndex(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return 0;
+    return rotations_[index];
+}
+
+uint8_t SubChunk::getRotationIndex(LocalBlockPos pos) const {
+    return getRotationIndex(pos.toIndex());
+}
+
+void SubChunk::setRotation(int32_t x, int32_t y, int32_t z, const Rotation& rotation) {
+    setRotation(toIndex(x, y, z), rotation);
+}
+
+void SubChunk::setRotation(int32_t index, const Rotation& rotation) {
+    if (index < 0 || index >= VOLUME) return;
+    uint8_t newIdx = rotation.index();
+    if (rotations_[index] != newIdx) {
+        rotations_[index] = newIdx;
+        // Rotation changes affect rendering, bump block version
+        blockVersion_.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void SubChunk::setRotation(LocalBlockPos pos, const Rotation& rotation) {
+    setRotation(pos.toIndex(), rotation);
+}
+
+void SubChunk::setRotationIndex(int32_t x, int32_t y, int32_t z, uint8_t rotationIndex) {
+    setRotationIndex(toIndex(x, y, z), rotationIndex);
+}
+
+void SubChunk::setRotationIndex(int32_t index, uint8_t rotationIndex) {
+    if (index < 0 || index >= VOLUME) return;
+    if (rotationIndex >= Rotation::count()) rotationIndex = 0;
+    if (rotations_[index] != rotationIndex) {
+        rotations_[index] = rotationIndex;
+        // Rotation changes affect rendering, bump block version
+        blockVersion_.fetch_add(1, std::memory_order_release);
+    }
+}
+
+void SubChunk::setRotationIndex(LocalBlockPos pos, uint8_t rotationIndex) {
+    setRotationIndex(pos.toIndex(), rotationIndex);
+}
+
+void SubChunk::clearRotations() {
+    bool hadRotations = hasNonIdentityRotations();
+    rotations_.fill(0);
+    if (hadRotations) {
+        blockVersion_.fetch_add(1, std::memory_order_release);
+    }
+}
+
+const std::array<uint8_t, SubChunk::VOLUME>& SubChunk::rotationData() const {
+    return rotations_;
+}
+
+void SubChunk::setRotationData(const std::array<uint8_t, VOLUME>& data) {
+    rotations_ = data;
+    blockVersion_.fetch_add(1, std::memory_order_release);
+}
+
+bool SubChunk::hasNonIdentityRotations() const {
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        if (rotations_[i] != 0) return true;
+    }
+    return false;
 }
 
 // ============================================================================

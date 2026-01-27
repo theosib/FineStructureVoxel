@@ -33,6 +33,7 @@ enum class EventType : uint8_t {
 
     // Neighbor events
     NeighborChanged,    // Adjacent block changed
+    BlockUpdate,        // Block should re-evaluate state (redstone-like propagation)
 
     // Interaction events
     PlayerUse,          // Player right-clicked
@@ -144,6 +145,16 @@ struct BlockEvent {
      */
     static BlockEvent playerHit(BlockPos pos, Face face);
 
+    /**
+     * @brief Create a block update event (redstone-like propagation)
+     *
+     * Used by handlers to notify a block that it should re-evaluate its state.
+     * Unlike NeighborChanged, this doesn't specify which neighbor changed.
+     *
+     * @param pos World position of block to update
+     */
+    static BlockEvent blockUpdate(BlockPos pos);
+
     // ========================================================================
     // Sentinel Checks
     // ========================================================================
@@ -182,6 +193,13 @@ struct BlockEvent {
                type == EventType::TickScheduled ||
                type == EventType::TickRepeat ||
                type == EventType::TickRandom;
+    }
+
+    /**
+     * @brief Check if this is a neighbor/update event
+     */
+    [[nodiscard]] bool isNeighborEvent() const {
+        return type == EventType::NeighborChanged || type == EventType::BlockUpdate;
     }
 
     /**

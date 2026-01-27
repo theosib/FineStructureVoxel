@@ -91,4 +91,13 @@ BlockEvent BlockEvent::playerHit(BlockPos pos, Face face) {
     return event;
 }
 
+BlockEvent BlockEvent::blockUpdate(BlockPos pos) {
+    BlockEvent event;
+    event.type = EventType::BlockUpdate;
+    event.pos = pos;
+    event.localPos = pos.local();
+    event.chunkPos = ChunkPos::fromBlock(pos);
+    return event;
+}
+
 }  // namespace finevox

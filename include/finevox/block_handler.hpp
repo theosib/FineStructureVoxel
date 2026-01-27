@@ -127,6 +127,20 @@ public:
         (void)changedFace;
     }
 
+    /**
+     * @brief Called when a block update event is received
+     *
+     * Use for redstone-like propagation where a block needs to re-evaluate
+     * its state. Unlike onNeighborChanged, this doesn't specify which
+     * neighbor triggered the update.
+     *
+     * Handlers can push BlockUpdate events to the outbox to propagate
+     * updates to other blocks.
+     *
+     * @param ctx Context providing access to block state and world
+     */
+    virtual void onBlockUpdate(BlockContext& ctx) { (void)ctx; }
+
     // ========================================================================
     // Interaction Events
     // ========================================================================
@@ -241,16 +255,15 @@ public:
     /**
      * @brief Get the block's rotation
      *
-     * Note: Rotation storage is not yet implemented in SubChunk.
-     * Returns IDENTITY for now.
+     * Each block stores a rotation index (0-23) for one of 24 cube rotations.
+     * Default is identity (0).
      */
     [[nodiscard]] Rotation rotation() const;
 
     /**
      * @brief Set the block's rotation
      *
-     * Note: Rotation storage is not yet implemented in SubChunk.
-     * This is a no-op for now.
+     * Stores the rotation index in the SubChunk and triggers mesh rebuild.
      */
     void setRotation(Rotation rot);
 

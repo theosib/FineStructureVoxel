@@ -67,8 +67,11 @@ SerializedSubChunk SubChunkSerializer::serialize(const SubChunk& chunk, int32_t 
         }
     }
 
-    // TODO: Rotations - not yet implemented in SubChunk
-    // For now, rotations is left empty (all default)
+    // Serialize rotation data (only if there are non-identity rotations)
+    if (chunk.hasNonIdentityRotations()) {
+        const auto& rotations = chunk.rotationData();
+        result.rotations.assign(rotations.begin(), rotations.end());
+    }
 
     // Serialize light data (only if not all dark)
     if (!chunk.isLightDark()) {
@@ -196,7 +199,12 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
         }
     }
 
-    // TODO: Apply rotations when SubChunk supports them
+    // Apply rotation data if present
+    if (data.rotations.size() == SubChunk::VOLUME) {
+        std::array<uint8_t, SubChunk::VOLUME> rotationArray;
+        std::copy(data.rotations.begin(), data.rotations.end(), rotationArray.begin());
+        chunk->setRotationData(rotationArray);
+    }
 
     // Apply light data if present
     if (data.lightData.size() == SubChunk::VOLUME) {
@@ -459,6 +467,11 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                                 serialized.blocks = decoder.readBytes(bytesLen);
                                 serialized.use16Bit = (serialized.blocks.size() == SubChunk::VOLUME * 2);
                             }
+                        } else if (fieldKey == "rotations") {
+                            auto [bytesType, bytesLen] = decoder.readHeader();
+                            if (bytesType == cbor::BYTE_STRING) {
+                                serialized.rotations = decoder.readBytes(bytesLen);
+                            }
                         } else if (fieldKey == "light") {
                             auto [bytesType, bytesLen] = decoder.readHeader();
                             if (bytesType == cbor::BYTE_STRING) {
@@ -528,6 +541,11 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
 
         SubChunk* targetSc = column->getSubChunk(y);
         if (targetSc) {
+            // Copy rotation data
+            if (sc->hasNonIdentityRotations()) {
+                targetSc->setRotationData(sc->rotationData());
+            }
+
             // Copy light data
             if (!sc->isLightDark()) {
                 targetSc->setLightData(sc->lightData());

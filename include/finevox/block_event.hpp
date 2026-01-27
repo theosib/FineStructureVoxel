@@ -26,6 +26,7 @@ enum class EventType : uint8_t {
     BlockChanged,       // Block state changed (rotation, data)
 
     // Tick events
+    TickGame,           // Regular game tick (for registered blocks)
     TickScheduled,      // Scheduled tick fired
     TickRepeat,         // Repeating tick fired
     TickRandom,         // Random tick fired
@@ -65,7 +66,7 @@ struct BlockEvent {
 
     // Location (always valid)
     BlockPos pos{0, 0, 0};
-    BlockPos localPos{0, 0, 0};  // Position within subchunk
+    LocalBlockPos localPos{0, 0, 0};  // Position within subchunk
     ChunkPos chunkPos{0, 0, 0};
 
     // Block information (valid for block events)
@@ -76,8 +77,9 @@ struct BlockEvent {
     // Interaction data (valid for PlayerUse/PlayerHit)
     Face face = Face::PosY;       // Which face was interacted with
 
-    // For NeighborChanged
-    Face changedFace = Face::PosY;  // Which neighbor changed
+    // For NeighborChanged (supports consolidation via bitmask)
+    Face changedFace = Face::PosY;  // Primary face that changed (for single-face events)
+    uint8_t neighborFaceMask = 0;   // Bitmask of all changed faces (1 << Face value)
 
     // For tick events
     TickType tickType;  // Initialized in factory methods
@@ -176,7 +178,8 @@ struct BlockEvent {
      * @brief Check if this is a tick event
      */
     [[nodiscard]] bool isTickEvent() const {
-        return type == EventType::TickScheduled ||
+        return type == EventType::TickGame ||
+               type == EventType::TickScheduled ||
                type == EventType::TickRepeat ||
                type == EventType::TickRandom;
     }
@@ -185,6 +188,79 @@ struct BlockEvent {
      * @brief Check if this event is valid (has a type)
      */
     [[nodiscard]] bool isValid() const { return type != EventType::None; }
+
+    // ========================================================================
+    // Face Mask Helpers (for NeighborChanged consolidation)
+    // ========================================================================
+
+    /**
+     * @brief Check if a specific neighbor face is marked as changed
+     */
+    [[nodiscard]] bool hasNeighborChanged(Face f) const {
+        return neighborFaceMask & (1 << static_cast<uint8_t>(f));
+    }
+
+    /**
+     * @brief Add a face to the neighbor change mask
+     */
+    void addNeighborFace(Face f) {
+        neighborFaceMask |= (1 << static_cast<uint8_t>(f));
+    }
+
+    /**
+     * @brief Iterate over all changed neighbor faces
+     * @param func Callback called for each changed face
+     */
+    template<typename Func>
+    void forEachChangedNeighbor(Func&& func) const {
+        for (int i = 0; i < 6; ++i) {
+            if (neighborFaceMask & (1 << i)) {
+                func(static_cast<Face>(i));
+            }
+        }
+    }
+
+    /**
+     * @brief Get count of changed neighbor faces
+     */
+    [[nodiscard]] int changedNeighborCount() const {
+        int count = 0;
+        for (int i = 0; i < 6; ++i) {
+            if (neighborFaceMask & (1 << i)) ++count;
+        }
+        return count;
+    }
+};
+
+// ============================================================================
+// TickConfig - Configuration for game tick and random tick behavior
+// ============================================================================
+
+/**
+ * @brief Configuration for the tick system
+ *
+ * Controls how often game ticks occur and how many random ticks are
+ * generated per subchunk per game tick.
+ */
+struct TickConfig {
+    /// Interval between game ticks in milliseconds
+    /// Default: 50ms (20 ticks per second, like Minecraft)
+    uint32_t gameTickIntervalMs = 50;
+
+    /// Number of random tick attempts per subchunk per game tick
+    /// Each attempt selects a random block position
+    /// Default: 3 (like Minecraft's randomTickSpeed)
+    uint32_t randomTicksPerSubchunk = 3;
+
+    /// Optional RNG seed for random ticks (0 = use system random)
+    /// Useful for deterministic testing
+    uint64_t randomSeed = 0;
+
+    /// Whether game ticks are enabled
+    bool gameTicksEnabled = true;
+
+    /// Whether random ticks are enabled
+    bool randomTicksEnabled = true;
 };
 
 }  // namespace finevox

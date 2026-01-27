@@ -1,5 +1,6 @@
 #include "finevox/subchunk.hpp"
 #include "finevox/data_container.hpp"
+#include "finevox/block_type.hpp"
 
 namespace finevox {
 
@@ -12,37 +13,17 @@ SubChunk::SubChunk() {
 
 SubChunk::~SubChunk() = default;
 
-BlockTypeId SubChunk::getBlock(int32_t x, int32_t y, int32_t z) const {
-    return getBlock(toIndex(x, y, z));
+BlockTypeId SubChunk::getBlock(LocalBlockPos pos) const {
+    return getBlock(pos.toIndex());
 }
 
-BlockTypeId SubChunk::getBlock(int32_t index) const {
+BlockTypeId SubChunk::getBlock(uint16_t index) const {
     LocalIndex localIdx = blocks_[index];
     return palette_.getGlobalId(localIdx);
 }
 
-void SubChunk::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-    LocalIndex oldIndex = blocks_[toIndex(x, y, z)];
-    BlockTypeId oldType = palette_.getGlobalId(oldIndex);
-
-    // No change needed
-    if (oldType == type) {
-        return;
-    }
-
-    // Perform the actual block change
-    setBlockInternal(toIndex(x, y, z), type, oldType);
-
-    // Increment block version (signals mesh needs rebuild)
-    blockVersion_.fetch_add(1, std::memory_order_release);
-
-    // Notify callback if set
-    if (blockChangeCallback_) {
-        blockChangeCallback_(position_, x, y, z, oldType, type);
-    }
-}
-
-void SubChunk::setBlock(int32_t index, BlockTypeId type) {
+void SubChunk::setBlock(LocalBlockPos pos, BlockTypeId type) {
+    uint16_t index = pos.toIndex();
     LocalIndex oldIndex = blocks_[index];
     BlockTypeId oldType = palette_.getGlobalId(oldIndex);
 
@@ -57,12 +38,30 @@ void SubChunk::setBlock(int32_t index, BlockTypeId type) {
     // Increment block version (signals mesh needs rebuild)
     blockVersion_.fetch_add(1, std::memory_order_release);
 
-    // Notify callback if set (convert index to coordinates)
+    // Notify callback if set
     if (blockChangeCallback_) {
-        int32_t x = index % SIZE;
-        int32_t z = (index / SIZE) % SIZE;
-        int32_t y = index / (SIZE * SIZE);
-        blockChangeCallback_(position_, x, y, z, oldType, type);
+        blockChangeCallback_(position_, pos, oldType, type);
+    }
+}
+
+void SubChunk::setBlock(uint16_t index, BlockTypeId type) {
+    LocalIndex oldIndex = blocks_[index];
+    BlockTypeId oldType = palette_.getGlobalId(oldIndex);
+
+    // No change needed
+    if (oldType == type) {
+        return;
+    }
+
+    // Perform the actual block change
+    setBlockInternal(index, type, oldType);
+
+    // Increment block version (signals mesh needs rebuild)
+    blockVersion_.fetch_add(1, std::memory_order_release);
+
+    // Notify callback if set (convert index to LocalBlockPos)
+    if (blockChangeCallback_) {
+        blockChangeCallback_(position_, LocalBlockPos::fromIndex(index), oldType, type);
     }
 }
 
@@ -439,6 +438,41 @@ bool SubChunk::hasData() const {
 
 void SubChunk::removeData() {
     data_.reset();
+}
+
+// ============================================================================
+// Game Tick Registry Implementation
+// ============================================================================
+
+void SubChunk::registerForGameTicks(int32_t index) {
+    if (index < 0 || index >= VOLUME) return;
+    gameTickBlocks_.insert(static_cast<uint16_t>(index));
+}
+
+void SubChunk::unregisterFromGameTicks(int32_t index) {
+    if (index < 0 || index >= VOLUME) return;
+    gameTickBlocks_.erase(static_cast<uint16_t>(index));
+}
+
+bool SubChunk::isRegisteredForGameTicks(int32_t index) const {
+    if (index < 0 || index >= VOLUME) return false;
+    return gameTickBlocks_.contains(static_cast<uint16_t>(index));
+}
+
+void SubChunk::rebuildGameTickRegistry() {
+    gameTickBlocks_.clear();
+
+    const BlockRegistry& registry = BlockRegistry::global();
+
+    for (int32_t i = 0; i < VOLUME; ++i) {
+        BlockTypeId typeId = getBlock(i);
+        if (typeId.isAir()) continue;
+
+        const BlockType& type = registry.getType(typeId);
+        if (type.wantsGameTicks()) {
+            gameTickBlocks_.insert(static_cast<uint16_t>(i));
+        }
+    }
 }
 
 }  // namespace finevox

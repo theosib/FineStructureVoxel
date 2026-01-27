@@ -3,6 +3,7 @@
 #include "finevox/subchunk.hpp"
 #include "finevox/block_type.hpp"
 #include "finevox/data_container.hpp"
+#include "finevox/event_queue.hpp"  // For UpdateScheduler
 
 #include <cassert>
 #include <stdexcept>
@@ -14,7 +15,7 @@ namespace finevox {
 // ============================================================================
 
 BlockContext::BlockContext(World& world, SubChunk& subChunk,
-                           BlockPos pos, BlockPos localPos)
+                           BlockPos pos, LocalBlockPos localPos)
     : world_(world)
     , subChunk_(subChunk)
     , pos_(pos)
@@ -47,15 +48,19 @@ DataContainer& BlockContext::getOrCreateData() {
 }
 
 void BlockContext::scheduleTick(int ticksFromNow) {
-    // TODO: Implement tick scheduling (Phase 9)
-    // For now, this is a no-op
-    (void)ticksFromNow;
+    if (scheduler_) {
+        scheduler_->scheduleTick(pos_, ticksFromNow, TickType::Scheduled);
+    }
 }
 
 void BlockContext::setRepeatTickInterval(int interval) {
-    // TODO: Implement tick scheduling (Phase 9)
-    // For now, this is a no-op
-    (void)interval;
+    if (scheduler_ && interval > 0) {
+        // Schedule a repeating tick
+        scheduler_->scheduleTick(pos_, interval, TickType::Repeat);
+    }
+    // Note: interval of 0 cancels repeating ticks, but that requires
+    // additional infrastructure to track which blocks have repeating ticks.
+    // For now, only scheduling is implemented.
 }
 
 void BlockContext::requestMeshRebuild() {
@@ -104,10 +109,7 @@ void BlockContext::notifyNeighbors() {
         }
 
         // Calculate local position within neighbor's subchunk
-        BlockPos neighborLocalPos;
-        neighborLocalPos.x = ((neighborPos.x % 16) + 16) % 16;
-        neighborLocalPos.y = ((neighborPos.y % 16) + 16) % 16;
-        neighborLocalPos.z = ((neighborPos.z % 16) + 16) % 16;
+        LocalBlockPos neighborLocalPos = neighborPos.local();
 
         // Create context for neighbor and notify
         BlockContext neighborCtx(world_, *neighborSubChunk, neighborPos, neighborLocalPos);

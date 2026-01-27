@@ -8,7 +8,7 @@ BlockEvent BlockEvent::blockPlaced(BlockPos pos, BlockTypeId newType,
     BlockEvent event;
     event.type = EventType::BlockPlaced;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.blockType = newType;
     event.previousType = oldType;
@@ -20,7 +20,7 @@ BlockEvent BlockEvent::blockBroken(BlockPos pos, BlockTypeId oldType) {
     BlockEvent event;
     event.type = EventType::BlockBroken;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.previousType = oldType;
     event.blockType = AIR_BLOCK_TYPE;
@@ -31,7 +31,7 @@ BlockEvent BlockEvent::blockChanged(BlockPos pos, BlockTypeId oldType, BlockType
     BlockEvent event;
     event.type = EventType::BlockChanged;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.previousType = oldType;
     event.blockType = newType;
@@ -42,7 +42,7 @@ BlockEvent BlockEvent::neighborChanged(BlockPos pos, Face changedFace) {
     BlockEvent event;
     event.type = EventType::NeighborChanged;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.changedFace = changedFace;
     return event;
@@ -65,7 +65,7 @@ BlockEvent BlockEvent::tick(BlockPos pos, TickType tickType) {
             break;
     }
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.tickType = tickType;
     return event;
@@ -75,7 +75,7 @@ BlockEvent BlockEvent::playerUse(BlockPos pos, Face face) {
     BlockEvent event;
     event.type = EventType::PlayerUse;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.face = face;
     return event;
@@ -85,7 +85,7 @@ BlockEvent BlockEvent::playerHit(BlockPos pos, Face face) {
     BlockEvent event;
     event.type = EventType::PlayerHit;
     event.pos = pos;
-    event.localPos = BlockPos(pos.localX(), pos.localY(), pos.localZ());
+    event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.face = face;
     return event;

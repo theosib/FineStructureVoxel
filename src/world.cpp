@@ -1,13 +1,15 @@
 #include "finevox/world.hpp"
 
+#include <algorithm>
+#include <cstdlib>
+
 namespace finevox {
 
 World::World() = default;
 World::~World() = default;
 
 ColumnPos World::blockToColumn(BlockPos pos) {
-    // Arithmetic right shift gives floor division for signed integers
-    return ColumnPos(pos.x >> 4, pos.z >> 4);
+    return ColumnPos::fromBlock(pos);
 }
 
 BlockTypeId World::getBlock(BlockPos pos) const {
@@ -216,6 +218,55 @@ std::vector<ChunkPos> World::getAffectedSubChunks(BlockPos blockPos) const {
     }
 
     return affected;
+}
+
+// ============================================================================
+// Force-Loading
+// ============================================================================
+
+void World::registerForceLoader(BlockPos pos, int32_t radius) {
+    std::unique_lock lock(forceLoaderMutex_);
+    forceLoaders_[pos] = radius;
+}
+
+void World::unregisterForceLoader(BlockPos pos) {
+    std::unique_lock lock(forceLoaderMutex_);
+    forceLoaders_.erase(pos);
+}
+
+bool World::canUnloadChunk(ChunkPos pos) const {
+    std::shared_lock lock(forceLoaderMutex_);
+
+    for (const auto& [loaderPos, radius] : forceLoaders_) {
+        ChunkPos loaderChunk = ChunkPos::fromBlock(loaderPos);
+
+        // Calculate Chebyshev distance (max of axis distances)
+        int32_t dx = std::abs(pos.x - loaderChunk.x);
+        int32_t dy = std::abs(pos.y - loaderChunk.y);
+        int32_t dz = std::abs(pos.z - loaderChunk.z);
+        int32_t distance = std::max({dx, dy, dz});
+
+        if (distance <= radius) {
+            return false;  // Chunk is within force-load radius
+        }
+    }
+
+    return true;  // No force-loader is keeping this chunk loaded
+}
+
+bool World::isForceLoader(BlockPos pos) const {
+    std::shared_lock lock(forceLoaderMutex_);
+    return forceLoaders_.contains(pos);
+}
+
+const std::unordered_map<BlockPos, int32_t>& World::forceLoaders() const {
+    // Note: Caller must ensure thread safety if iterating
+    return forceLoaders_;
+}
+
+void World::setForceLoaders(std::unordered_map<BlockPos, int32_t> loaders) {
+    std::unique_lock lock(forceLoaderMutex_);
+    forceLoaders_ = std::move(loaders);
 }
 
 }  // namespace finevox

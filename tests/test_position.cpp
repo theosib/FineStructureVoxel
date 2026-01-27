@@ -83,34 +83,37 @@ TEST(BlockPosTest, Neighbor) {
 TEST(BlockPosTest, LocalCoordinates) {
     // Positive coordinates
     BlockPos pos(35, 67, 49);
-    EXPECT_EQ(pos.localX(), 3);   // 35 % 16 = 3
-    EXPECT_EQ(pos.localY(), 3);   // 67 % 16 = 3
-    EXPECT_EQ(pos.localZ(), 1);   // 49 % 16 = 1
+    LocalBlockPos local = pos.local();
+    EXPECT_EQ(local.x, 3);   // 35 % 16 = 3
+    EXPECT_EQ(local.y, 3);   // 67 % 16 = 3
+    EXPECT_EQ(local.z, 1);   // 49 % 16 = 1
 
     // Negative coordinates - should still give 0-15
     BlockPos negPos(-1, -1, -1);
-    EXPECT_EQ(negPos.localX(), 15);  // -1 & 0xF = 15
-    EXPECT_EQ(negPos.localY(), 15);
-    EXPECT_EQ(negPos.localZ(), 15);
+    LocalBlockPos negLocal = negPos.local();
+    EXPECT_EQ(negLocal.x, 15);  // -1 & 0xF = 15
+    EXPECT_EQ(negLocal.y, 15);
+    EXPECT_EQ(negLocal.z, 15);
 }
 
 TEST(BlockPosTest, LocalIndex) {
     // Index layout: y*256 + z*16 + x
     BlockPos pos(3, 5, 7);
-    EXPECT_EQ(pos.toLocalIndex(), 5*256 + 7*16 + 3);
+    EXPECT_EQ(pos.localIndex(), 5*256 + 7*16 + 3);
 
     // Corner cases
     BlockPos origin(0, 0, 0);
-    EXPECT_EQ(origin.toLocalIndex(), 0);
+    EXPECT_EQ(origin.localIndex(), 0);
 
     BlockPos max(15, 15, 15);
-    EXPECT_EQ(max.toLocalIndex(), 15*256 + 15*16 + 15);
+    EXPECT_EQ(max.localIndex(), 15*256 + 15*16 + 15);
 }
 
 TEST(BlockPosTest, FromLocalIndex) {
     // Chunk at (2, 4, 6), local index corresponds to (3, 5, 7)
-    int32_t index = 5*256 + 7*16 + 3;
-    BlockPos pos = BlockPos::fromLocalIndex(2, 4, 6, index);
+    uint16_t index = 5*256 + 7*16 + 3;
+    ChunkPos chunk(2, 4, 6);
+    BlockPos pos = chunk.toWorld(index);
 
     EXPECT_EQ(pos.x, 2*16 + 3);  // 35
     EXPECT_EQ(pos.y, 4*16 + 5);  // 69
@@ -155,9 +158,9 @@ TEST(ChunkPosTest, FromBlock) {
     EXPECT_EQ(ChunkPos::fromBlock({-17, -17, -17}), ChunkPos(-2, -2, -2));
 }
 
-TEST(ChunkPosTest, ToBlockPos) {
+TEST(ChunkPosTest, CornerBlockPos) {
     ChunkPos chunk(2, 3, 4);
-    BlockPos block = chunk.toBlockPos();
+    BlockPos block = chunk.cornerBlockPos();
 
     EXPECT_EQ(block.x, 32);
     EXPECT_EQ(block.y, 48);

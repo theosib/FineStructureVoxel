@@ -3,6 +3,7 @@
 #include "finevox/string_interner.hpp"
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"
+#include "finevox/data_container.hpp"
 #include <memory>
 #include <string_view>
 #include <cstdint>
@@ -12,8 +13,8 @@ namespace finevox {
 // Forward declarations
 class World;
 class SubChunk;
-class DataContainer;
 class BlockContext;
+class UpdateScheduler;
 
 // ============================================================================
 // TickType - Types of block tick events
@@ -200,7 +201,7 @@ public:
      * @param localPos Position within subchunk (0-15 on each axis)
      */
     BlockContext(World& world, SubChunk& subChunk,
-                 BlockPos pos, BlockPos localPos);
+                 BlockPos pos, LocalBlockPos localPos);
 
     // ========================================================================
     // Location
@@ -226,7 +227,7 @@ public:
     /**
      * @brief Get block position within subchunk (0-15 on each axis)
      */
-    [[nodiscard]] BlockPos localPos() const { return localPos_; }
+    [[nodiscard]] LocalBlockPos localPos() const { return localPos_; }
 
     /**
      * @brief Get the block type at this position
@@ -372,6 +373,14 @@ public:
      */
     void setPreviousData(std::unique_ptr<DataContainer> data);
 
+    /**
+     * @brief Set the scheduler for tick scheduling (called by UpdateScheduler)
+     *
+     * When set, scheduleTick() and setRepeatTickInterval() will work.
+     * When nullptr, those methods are no-ops.
+     */
+    void setScheduler(UpdateScheduler* scheduler) { scheduler_ = scheduler; }
+
     // ========================================================================
     // Block Modification (for handlers to alter/undo placement)
     // ========================================================================
@@ -390,11 +399,14 @@ private:
     World& world_;
     SubChunk& subChunk_;
     BlockPos pos_;
-    BlockPos localPos_;
+    LocalBlockPos localPos_;
 
     // Previous state (set by EventProcessor for place/break events)
     BlockTypeId previousType_;
     std::unique_ptr<DataContainer> previousData_;
+
+    // Scheduler for tick scheduling (optional, set by UpdateScheduler)
+    UpdateScheduler* scheduler_ = nullptr;
 };
 
 }  // namespace finevox

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <array>
+#include <optional>
 
 namespace finevox {
 
@@ -36,7 +37,70 @@ constexpr std::array<int32_t, 3> faceNormal(Face f) {
     return normals[static_cast<size_t>(f)];
 }
 
-// Block position in world coordinates
+// ============================================================================
+// LocalBlockPos - Block position within a subchunk (0-15 each axis)
+// ============================================================================
+//
+// Distinct type from BlockPos to prevent accidental mixing of world and local
+// coordinates. All conversions between LocalBlockPos and BlockPos are explicit.
+//
+struct LocalBlockPos {
+    uint8_t x = 0;
+    uint8_t y = 0;
+    uint8_t z = 0;
+
+    constexpr LocalBlockPos() = default;
+    constexpr LocalBlockPos(uint8_t x_, uint8_t y_, uint8_t z_) : x(x_), y(y_), z(z_) {}
+
+    // Construct from int32_t (masks to 0-15)
+    constexpr LocalBlockPos(int32_t x_, int32_t y_, int32_t z_)
+        : x(static_cast<uint8_t>(x_ & 0xF))
+        , y(static_cast<uint8_t>(y_ & 0xF))
+        , z(static_cast<uint8_t>(z_ & 0xF)) {}
+
+    // Pack to 12-bit index (Y-major layout: y*256 + z*16 + x)
+    [[nodiscard]] constexpr uint16_t toIndex() const {
+        return static_cast<uint16_t>((y << 8) | (z << 4) | x);
+    }
+
+    // Unpack from 12-bit index
+    [[nodiscard]] static constexpr LocalBlockPos fromIndex(uint16_t index) {
+        return {
+            static_cast<uint8_t>(index & 0xF),
+            static_cast<uint8_t>((index >> 8) & 0xF),
+            static_cast<uint8_t>((index >> 4) & 0xF)
+        };
+    }
+
+    // Get neighbor position if within bounds (0-15), nullopt if outside
+    [[nodiscard]] constexpr std::optional<LocalBlockPos> neighbor(Face face) const {
+        auto n = faceNormal(face);
+        int32_t nx = static_cast<int32_t>(x) + n[0];
+        int32_t ny = static_cast<int32_t>(y) + n[1];
+        int32_t nz = static_cast<int32_t>(z) + n[2];
+
+        if (nx < 0 || nx > 15 || ny < 0 || ny > 15 || nz < 0 || nz > 15) {
+            return std::nullopt;
+        }
+        return LocalBlockPos{static_cast<uint8_t>(nx), static_cast<uint8_t>(ny), static_cast<uint8_t>(nz)};
+    }
+
+    // Check if neighbor is within bounds
+    [[nodiscard]] constexpr bool hasNeighbor(Face face) const {
+        auto n = faceNormal(face);
+        int32_t nx = static_cast<int32_t>(x) + n[0];
+        int32_t ny = static_cast<int32_t>(y) + n[1];
+        int32_t nz = static_cast<int32_t>(z) + n[2];
+        return nx >= 0 && nx <= 15 && ny >= 0 && ny <= 15 && nz >= 0 && nz <= 15;
+    }
+
+    constexpr bool operator==(const LocalBlockPos& other) const = default;
+    constexpr auto operator<=>(const LocalBlockPos& other) const = default;
+};
+
+// ============================================================================
+// BlockPos - Block position in world coordinates
+// ============================================================================
 struct BlockPos {
     int32_t x = 0;
     int32_t y = 0;
@@ -56,23 +120,18 @@ struct BlockPos {
         return {x + n[0], y + n[1], z + n[2]};
     }
 
-    // Get local position within subchunk (0-15 for each axis)
-    [[nodiscard]] constexpr int32_t localX() const { return x & 0xF; }
-    [[nodiscard]] constexpr int32_t localY() const { return y & 0xF; }
-    [[nodiscard]] constexpr int32_t localZ() const { return z & 0xF; }
-
-    // Convert local coordinates to array index (Y-major: y*256 + z*16 + x)
-    [[nodiscard]] constexpr int32_t toLocalIndex() const {
-        return (localY() << 8) | (localZ() << 4) | localX();
+    // Get local position within subchunk as LocalBlockPos
+    [[nodiscard]] constexpr LocalBlockPos local() const {
+        return LocalBlockPos{
+            static_cast<uint8_t>(x & 0xF),
+            static_cast<uint8_t>(y & 0xF),
+            static_cast<uint8_t>(z & 0xF)
+        };
     }
 
-    // Create from local index
-    [[nodiscard]] static constexpr BlockPos fromLocalIndex(int32_t chunkX, int32_t chunkY, int32_t chunkZ, int32_t index) {
-        return {
-            (chunkX << 4) | (index & 0xF),
-            (chunkY << 4) | ((index >> 8) & 0xF),
-            (chunkZ << 4) | ((index >> 4) & 0xF)
-        };
+    // Get local index within subchunk (Y-major: y*256 + z*16 + x)
+    [[nodiscard]] constexpr uint16_t localIndex() const {
+        return local().toIndex();
     }
 
     constexpr bool operator==(const BlockPos& other) const = default;
@@ -95,8 +154,22 @@ struct ChunkPos {
     }
 
     // Get the block position of the corner (minimum x,y,z)
-    [[nodiscard]] constexpr BlockPos toBlockPos() const {
+    [[nodiscard]] constexpr BlockPos cornerBlockPos() const {
         return {x << 4, y << 4, z << 4};
+    }
+
+    // Convert local block position to world block position
+    [[nodiscard]] constexpr BlockPos toWorld(LocalBlockPos local) const {
+        return {
+            (x << 4) + local.x,
+            (y << 4) + local.y,
+            (z << 4) + local.z
+        };
+    }
+
+    // Convert local block index to world block position
+    [[nodiscard]] constexpr BlockPos toWorld(uint16_t localIndex) const {
+        return toWorld(LocalBlockPos::fromIndex(localIndex));
     }
 
     // Pack into 64-bit value
@@ -142,6 +215,13 @@ struct ColumnPos {
 }  // namespace finevox
 
 // Hash specializations for use in unordered containers
+template<>
+struct std::hash<finevox::LocalBlockPos> {
+    size_t operator()(const finevox::LocalBlockPos& pos) const noexcept {
+        return std::hash<uint16_t>{}(pos.toIndex());
+    }
+};
+
 template<>
 struct std::hash<finevox::BlockPos> {
     size_t operator()(const finevox::BlockPos& pos) const noexcept {

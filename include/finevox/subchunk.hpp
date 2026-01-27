@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace finevox {
 
@@ -15,8 +16,8 @@ namespace finevox {
 class DataContainer;
 
 // Callback type for block change notifications
-// Parameters: subchunk position, local block position (0-15 each), old block type, new block type
-using BlockChangeCallback = std::function<void(ChunkPos pos, int32_t x, int32_t y, int32_t z,
+// Parameters: subchunk position, local block position, old block type, new block type
+using BlockChangeCallback = std::function<void(ChunkPos pos, LocalBlockPos local,
                                                BlockTypeId oldType, BlockTypeId newType)>;
 
 // A 16x16x16 block volume
@@ -48,14 +49,22 @@ public:
     SubChunk(SubChunk&&) = delete;
     SubChunk& operator=(SubChunk&&) = delete;
 
-    // Get block type at local coordinates (0-15 each)
-    [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const;
-    [[nodiscard]] BlockTypeId getBlock(int32_t index) const;
+    // Get block type at local position
+    [[nodiscard]] BlockTypeId getBlock(LocalBlockPos pos) const;
+    [[nodiscard]] BlockTypeId getBlock(uint16_t index) const;
+    // Convenience overload for int32_t coordinates
+    [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const {
+        return getBlock(LocalBlockPos{x, y, z});
+    }
 
-    // Set block type at local coordinates
+    // Set block type at local position
     // Handles palette management and reference counting automatically
-    void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type);
-    void setBlock(int32_t index, BlockTypeId type);
+    void setBlock(LocalBlockPos pos, BlockTypeId type);
+    void setBlock(uint16_t index, BlockTypeId type);
+    // Convenience overload for int32_t coordinates
+    void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
+        setBlock(LocalBlockPos{x, y, z}, type);
+    }
 
     // Check if subchunk is entirely air (for optimization/culling)
     [[nodiscard]] bool isEmpty() const { return nonAirCount_ == 0; }
@@ -221,12 +230,51 @@ public:
     void removeData();
 
     // ========================================================================
+    // Game Tick Registry
+    // ========================================================================
+    // Blocks that want game tick events register here (by local index).
+    // Registry is auto-populated on chunk load based on BlockType::wantsGameTicks().
+    // Registry is updated on block place/break.
+
+    /// Get set of local block indices that want game ticks
+    [[nodiscard]] const std::unordered_set<uint16_t>& gameTickBlocks() const { return gameTickBlocks_; }
+
+    /// Register a block index to receive game ticks
+    /// No-op if already registered
+    void registerForGameTicks(int32_t index);
+
+    /// Unregister a block index from game ticks
+    /// No-op if not registered
+    void unregisterFromGameTicks(int32_t index);
+
+    /// Rebuild game tick registry by scanning all blocks
+    /// Called on chunk load; checks each block's type against BlockRegistry
+    void rebuildGameTickRegistry();
+
+    /// Check if a specific block is registered for game ticks
+    [[nodiscard]] bool isRegisteredForGameTicks(int32_t index) const;
+
+    // ========================================================================
     // Change Notifications
     // ========================================================================
 
     // Set position (needed for change callbacks)
     void setPosition(ChunkPos pos) { position_ = pos; }
     [[nodiscard]] ChunkPos position() const { return position_; }
+
+    // ========================================================================
+    // Coordinate Conversion
+    // ========================================================================
+
+    // Convert local block position to world block position
+    [[nodiscard]] BlockPos toWorld(LocalBlockPos local) const {
+        return position_.toWorld(local);
+    }
+
+    // Convert local block index to world block position
+    [[nodiscard]] BlockPos toWorld(uint16_t localIndex) const {
+        return position_.toWorld(localIndex);
+    }
 
     // Set callback for block changes (called on every setBlock that changes a block)
     // The callback receives the subchunk position and local coordinates
@@ -262,6 +310,10 @@ private:
 
     // SubChunk-level extra data (game state, caches, etc.)
     std::unique_ptr<DataContainer> data_;
+
+    // Game tick registry: local indices of blocks that want game ticks
+    // O(1) insert/remove/lookup via hash set
+    std::unordered_set<uint16_t> gameTickBlocks_;
 
     // Convert local coordinates to array index
     [[nodiscard]] static constexpr int32_t toIndex(int32_t x, int32_t y, int32_t z) {

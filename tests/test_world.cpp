@@ -334,3 +334,164 @@ TEST(WorldTest, GetAffectedSubChunks_NegativeCoordinates) {
     EXPECT_EQ(affected[1], ChunkPos(-2, 0, 0));  // Affects -X neighbor
 }
 
+// ============================================================================
+// Force-Loading tests
+// ============================================================================
+
+TEST(WorldForceLoadTest, InitiallyEmpty) {
+    World world;
+    EXPECT_TRUE(world.forceLoaders().empty());
+}
+
+TEST(WorldForceLoadTest, RegisterForceLoader) {
+    World world;
+    BlockPos pos(100, 64, 200);
+
+    world.registerForceLoader(pos, 0);
+
+    EXPECT_TRUE(world.isForceLoader(pos));
+    EXPECT_EQ(world.forceLoaders().size(), 1);
+}
+
+TEST(WorldForceLoadTest, UnregisterForceLoader) {
+    World world;
+    BlockPos pos(100, 64, 200);
+
+    world.registerForceLoader(pos, 0);
+    EXPECT_TRUE(world.isForceLoader(pos));
+
+    world.unregisterForceLoader(pos);
+    EXPECT_FALSE(world.isForceLoader(pos));
+    EXPECT_TRUE(world.forceLoaders().empty());
+}
+
+TEST(WorldForceLoadTest, UnregisterNonexistentIsNoOp) {
+    World world;
+    BlockPos pos(100, 64, 200);
+
+    // Should not throw or cause issues
+    world.unregisterForceLoader(pos);
+    EXPECT_FALSE(world.isForceLoader(pos));
+}
+
+TEST(WorldForceLoadTest, CanUnloadChunk_NoForceLoaders) {
+    World world;
+
+    // With no force-loaders, any chunk can be unloaded
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(0, 0, 0)));
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(100, 5, -50)));
+}
+
+TEST(WorldForceLoadTest, CanUnloadChunk_SameChunk) {
+    World world;
+    BlockPos pos(100, 64, 200);  // Chunk (6, 4, 12)
+
+    world.registerForceLoader(pos, 0);
+
+    // The chunk containing the force-loader cannot be unloaded
+    ChunkPos loaderChunk = ChunkPos::fromBlock(pos);
+    EXPECT_FALSE(world.canUnloadChunk(loaderChunk));
+
+    // Other chunks can be unloaded
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(0, 0, 0)));
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(7, 4, 12)));  // Adjacent chunk
+}
+
+TEST(WorldForceLoadTest, CanUnloadChunk_WithRadius) {
+    World world;
+    BlockPos pos(32, 32, 32);  // Chunk (2, 2, 2)
+
+    world.registerForceLoader(pos, 1);  // Keep 3x3 area loaded
+
+    ChunkPos loaderChunk = ChunkPos::fromBlock(pos);
+    EXPECT_EQ(loaderChunk, ChunkPos(2, 2, 2));
+
+    // Center chunk cannot be unloaded
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 2, 2)));
+
+    // Adjacent chunks (distance 1) cannot be unloaded
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(1, 2, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 1, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 3, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 2, 1)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 2, 3)));
+
+    // Corner chunks (still distance 1 in Chebyshev) cannot be unloaded
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(1, 1, 1)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 3, 3)));
+
+    // Chunks at distance 2 can be unloaded
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(0, 2, 2)));
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(4, 2, 2)));
+}
+
+TEST(WorldForceLoadTest, MultipleForceLoaders) {
+    World world;
+    BlockPos pos1(32, 32, 32);   // Chunk (2, 2, 2)
+    BlockPos pos2(160, 32, 32);  // Chunk (10, 2, 2)
+
+    world.registerForceLoader(pos1, 0);
+    world.registerForceLoader(pos2, 0);
+
+    // Both chunks cannot be unloaded
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 2, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(10, 2, 2)));
+
+    // Chunks in between can be unloaded
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(5, 2, 2)));
+
+    // Unregister one
+    world.unregisterForceLoader(pos1);
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(2, 2, 2)));
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(10, 2, 2)));
+}
+
+TEST(WorldForceLoadTest, OverlappingRadii) {
+    World world;
+    BlockPos pos1(32, 32, 32);  // Chunk (2, 2, 2)
+    BlockPos pos2(64, 32, 32);  // Chunk (4, 2, 2)
+
+    world.registerForceLoader(pos1, 1);  // Covers chunks 1-3
+    world.registerForceLoader(pos2, 1);  // Covers chunks 3-5
+
+    // Chunk 3 is covered by both
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
+
+    // Remove first loader - chunk 3 still covered by second
+    world.unregisterForceLoader(pos1);
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(1, 2, 2)));  // No longer covered
+}
+
+TEST(WorldForceLoadTest, SetForceLoaders) {
+    World world;
+
+    std::unordered_map<BlockPos, int32_t> loaders;
+    loaders[BlockPos(0, 0, 0)] = 0;
+    loaders[BlockPos(100, 64, 100)] = 2;
+
+    world.setForceLoaders(std::move(loaders));
+
+    EXPECT_EQ(world.forceLoaders().size(), 2);
+    EXPECT_TRUE(world.isForceLoader(BlockPos(0, 0, 0)));
+    EXPECT_TRUE(world.isForceLoader(BlockPos(100, 64, 100)));
+}
+
+TEST(WorldForceLoadTest, UpdateRadius) {
+    World world;
+    BlockPos pos(32, 32, 32);  // Chunk (2, 2, 2)
+
+    world.registerForceLoader(pos, 0);
+
+    // Only center chunk protected
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(2, 2, 2)));
+    EXPECT_TRUE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
+
+    // Update to larger radius
+    world.registerForceLoader(pos, 1);
+
+    // Now adjacent chunks are also protected
+    EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
+}
+

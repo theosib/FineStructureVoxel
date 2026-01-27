@@ -276,12 +276,12 @@ TEST(SubChunkTest, IndexLayoutMatchesBlockPos) {
     SubChunk chunk;
     auto stone = BlockTypeId::fromName("layouttest:stone");
 
-    // Test that our index calculation matches BlockPos::toLocalIndex
+    // Test that our index calculation matches BlockPos::localIndex
     for (int y = 0; y < 16; y += 5) {
         for (int z = 0; z < 16; z += 5) {
             for (int x = 0; x < 16; x += 5) {
                 BlockPos pos(x, y, z);
-                int32_t index = pos.toLocalIndex();
+                uint16_t index = pos.localIndex();
 
                 chunk.setBlock(x, y, z, stone);
                 EXPECT_EQ(chunk.getBlock(index), stone);
@@ -375,16 +375,14 @@ TEST(SubChunkTest, BlockChangeCallback) {
     // Track callback invocations
     int callbackCount = 0;
     ChunkPos lastPos;
-    int lastX = 0, lastY = 0, lastZ = 0;
+    LocalBlockPos lastLocal;
     BlockTypeId lastOldType, lastNewType;
 
-    chunk.setBlockChangeCallback([&](ChunkPos pos, int32_t x, int32_t y, int32_t z,
+    chunk.setBlockChangeCallback([&](ChunkPos pos, LocalBlockPos local,
                                      BlockTypeId oldType, BlockTypeId newType) {
         ++callbackCount;
         lastPos = pos;
-        lastX = x;
-        lastY = y;
-        lastZ = z;
+        lastLocal = local;
         lastOldType = oldType;
         lastNewType = newType;
     });
@@ -397,9 +395,9 @@ TEST(SubChunkTest, BlockChangeCallback) {
     EXPECT_EQ(lastPos.x, 1);
     EXPECT_EQ(lastPos.y, 2);
     EXPECT_EQ(lastPos.z, 3);
-    EXPECT_EQ(lastX, 5);
-    EXPECT_EQ(lastY, 7);
-    EXPECT_EQ(lastZ, 9);
+    EXPECT_EQ(lastLocal.x, 5);
+    EXPECT_EQ(lastLocal.y, 7);
+    EXPECT_EQ(lastLocal.z, 9);
     EXPECT_TRUE(lastOldType.isAir());
     EXPECT_EQ(lastNewType, stone);
 

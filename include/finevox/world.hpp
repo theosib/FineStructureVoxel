@@ -86,10 +86,44 @@ public:
     // affected if the block is at a boundary (useful for mesh rebuild scheduling).
     [[nodiscard]] std::vector<ChunkPos> getAffectedSubChunks(BlockPos blockPos) const;
 
+    // ========================================================================
+    // Force-Loading
+    // ========================================================================
+    // Blocks can register to force-load chunks around them.
+    // This prevents chunks from being unloaded even when no players are nearby.
+    // Used for chunk loaders, spawn chunks, etc.
+
+    /// Register a force-loader at the given position
+    /// @param pos Block position of the force-loader
+    /// @param radius Chunk radius to keep loaded (0 = just this chunk, 1 = 3x3, etc.)
+    void registerForceLoader(BlockPos pos, int32_t radius = 0);
+
+    /// Unregister a force-loader
+    /// No-op if position wasn't registered
+    void unregisterForceLoader(BlockPos pos);
+
+    /// Check if a chunk can be unloaded
+    /// Returns false if any force-loader is keeping this chunk loaded
+    [[nodiscard]] bool canUnloadChunk(ChunkPos pos) const;
+
+    /// Check if a position is a registered force-loader
+    [[nodiscard]] bool isForceLoader(BlockPos pos) const;
+
+    /// Get all registered force-loaders (for serialization)
+    [[nodiscard]] const std::unordered_map<BlockPos, int32_t>& forceLoaders() const;
+
+    /// Set force-loaders from deserialization
+    /// Replaces any existing force-loaders
+    void setForceLoaders(std::unordered_map<BlockPos, int32_t> loaders);
+
 private:
     mutable std::shared_mutex columnMutex_;
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> columns_;
     ColumnGenerator columnGenerator_;
+
+    // Force-loader registry: block position -> chunk radius
+    mutable std::shared_mutex forceLoaderMutex_;
+    std::unordered_map<BlockPos, int32_t> forceLoaders_;
 
     // Helper to convert block position to column position
     [[nodiscard]] static ColumnPos blockToColumn(BlockPos pos);

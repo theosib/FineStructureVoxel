@@ -60,6 +60,7 @@ add_library(finevox STATIC
     src/lod.cpp
     src/light_data.cpp
     src/light_engine.cpp
+    src/event_queue.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -232,6 +233,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_lod.cpp
         tests/test_module.cpp
         tests/test_lighting.cpp
+        tests/test_event_system.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

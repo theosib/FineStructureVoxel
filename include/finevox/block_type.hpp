@@ -72,6 +72,10 @@ public:
     /// Set hardness (mining time factor)
     BlockType& setHardness(float hardness);
 
+    /// Set whether this block type wants to receive game tick events
+    /// Blocks with this enabled are auto-registered in per-subchunk registry
+    BlockType& setWantsGameTicks(bool wants);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -108,6 +112,9 @@ public:
     /// Get hardness
     [[nodiscard]] float hardness() const { return hardness_; }
 
+    /// Check if block wants game tick events
+    [[nodiscard]] bool wantsGameTicks() const { return wantsGameTicks_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -122,6 +129,7 @@ private:
     uint8_t lightEmission_ = 0;      // No light emission by default
     uint8_t lightAttenuation_ = 15;  // Full attenuation by default (opaque)
     float hardness_ = 1.0f;          // Default mining difficulty
+    bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
 };
 
 /**

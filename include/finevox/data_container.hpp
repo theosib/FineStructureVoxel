@@ -26,6 +26,38 @@ inline std::string_view lookupKey(DataKey key) {
     return StringInterner::global().lookup(key);
 }
 
+// ============================================================================
+// Interned String Value Type
+// ============================================================================
+// Wrapper for strings that should be interned on load/save.
+// Use for repeated enum-like string values (e.g., block type names, state names).
+// - Stored in memory as uint32_t (intern ID) for fast comparison
+// - Serialized as CBOR tagged string (un-interned for portability)
+// - Re-interned on load (intern IDs are not stable across sessions)
+//
+// For unique strings like sign text or user input, use regular std::string.
+
+struct InternedString {
+    uint32_t id = 0;
+
+    InternedString() = default;
+    explicit InternedString(uint32_t internId) : id(internId) {}
+    explicit InternedString(std::string_view str) : id(StringInterner::global().intern(str)) {}
+
+    // Get the actual string value
+    [[nodiscard]] std::string_view str() const {
+        return StringInterner::global().lookup(id);
+    }
+
+    // Comparison operators
+    bool operator==(const InternedString& other) const { return id == other.id; }
+    bool operator!=(const InternedString& other) const { return id != other.id; }
+
+    // Allow comparison with string_view (compares actual strings)
+    bool operator==(std::string_view s) const { return str() == s; }
+    bool operator!=(std::string_view s) const { return str() != s; }
+};
+
 // Forward declaration for recursive variant
 class DataContainer;
 
@@ -34,7 +66,8 @@ class DataContainer;
 // - monostate: null/empty value
 // - int64_t: all integers (power levels, counters, IDs)
 // - double: all floats (progress, rotations)
-// - string: text data (sign text, names)
+// - string: text data (sign text, names) - NOT interned
+// - InternedString: repeated enum-like strings - interned for fast comparison
 // - vector<uint8_t>: binary blobs
 // - unique_ptr<DataContainer>: nested compound data
 // - vector<int64_t>: integer arrays
@@ -45,6 +78,7 @@ using DataValue = std::variant<
     int64_t,
     double,
     std::string,
+    InternedString,
     std::vector<uint8_t>,
     std::unique_ptr<DataContainer>,
     std::vector<int64_t>,
@@ -186,6 +220,18 @@ T DataContainer::get(DataKey key, T defaultValue) const {
         if (auto* val = std::get_if<std::string>(&it->second)) {
             return *val;
         }
+        // Also allow getting InternedString as string
+        if (auto* val = std::get_if<InternedString>(&it->second)) {
+            return std::string(val->str());
+        }
+    } else if constexpr (std::is_same_v<T, InternedString>) {
+        if (auto* val = std::get_if<InternedString>(&it->second)) {
+            return *val;
+        }
+        // Also allow getting string as InternedString (interns on access)
+        if (auto* val = std::get_if<std::string>(&it->second)) {
+            return InternedString(*val);
+        }
     } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
         if (auto* val = std::get_if<std::vector<uint8_t>>(&it->second)) {
             return *val;
@@ -224,6 +270,8 @@ void DataContainer::set(DataKey key, T value) {
         data_[key] = std::string(value);
     } else if constexpr (std::is_same_v<T, std::string_view>) {
         data_[key] = std::string(value);
+    } else if constexpr (std::is_same_v<T, InternedString>) {
+        data_[key] = value;
     } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
         data_[key] = std::move(value);
     } else if constexpr (std::is_same_v<T, std::unique_ptr<DataContainer>>) {

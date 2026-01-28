@@ -122,8 +122,9 @@ struct BlockEvent {
     // Interaction data (valid for PlayerUse/PlayerHit)
     Face face = Face::PosY;       // Which face was interacted with
 
-    // For NeighborChanged
-    Face changedFace = Face::PosY;  // Which neighbor changed
+    // For NeighborChanged (supports consolidation via bitmask)
+    Face changedFace = Face::PosY;  // Primary face that changed (for single-face events)
+    uint8_t neighborFaceMask = 0;   // Bitmask of all changed faces (1 << Face value)
 
     // For tick events
     TickType tickType = TickType::Scheduled;
@@ -163,6 +164,28 @@ struct BlockEvent {
         return type == EventType::TickScheduled ||
                type == EventType::TickRepeat ||
                type == EventType::TickRandom;
+    }
+
+    // ========================================================================
+    // NeighborChanged Face Mask Helpers
+    // ========================================================================
+
+    [[nodiscard]] bool hasNeighborChanged(Face f) const {
+        return neighborFaceMask & (1 << static_cast<uint8_t>(f));
+    }
+
+    void addNeighborFace(Face f) {
+        neighborFaceMask |= (1 << static_cast<uint8_t>(f));
+    }
+
+    // Iterate all changed faces
+    template<typename Func>
+    void forEachChangedNeighbor(Func&& func) const {
+        for (int i = 0; i < 6; ++i) {
+            if (neighborFaceMask & (1 << i)) {
+                func(static_cast<Face>(i));
+            }
+        }
     }
 };
 ```
@@ -586,12 +609,278 @@ If light data was loaded from disk (serialization), the column is already marked
 
 ---
 
-## 24.13 Future Extensions
+## 24.13 Three-Queue Architecture
+
+The full event processing uses three queues with distinct purposes:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Input Queue                               │
+│  (AlarmQueue-style: blocks until external or timer event)       │
+│  - External events (user input, network)                         │
+│  - Timer events (generated internally by alarm)                  │
+│    - Game tick alarms (regular interval, e.g., 50ms)            │
+│    - Scheduled tick alarms (specific future time)               │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ highest priority
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Event Processing                             │
+│  process(event) → handlers may push to outbox                   │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              ▼                       ▼
+        ┌──────────┐            ┌──────────┐
+        │  Inbox   │◄── swap ───│  Outbox  │
+        │(2nd pri) │            │(staging) │
+        └──────────┘            └──────────┘
+```
+
+### Processing Priority
+
+1. **Input queue** (external + timer events) - highest priority
+2. **Inbox** - second priority, processes block-generated events
+3. When processing any event, handlers put new events in **outbox**
+4. When input AND inbox empty, swap outbox→inbox, continue
+5. When all three empty, block on input queue
+
+### Outbox Consolidation
+
+The outbox consolidates events by block position to avoid redundant processing:
+
+```cpp
+class EventOutbox {
+public:
+    void push(BlockEvent event) {
+        auto [it, inserted] = pending_.try_emplace(event.pos, event);
+        if (!inserted) {
+            // Merge with existing event for this position
+            it->second = mergeEvents(it->second, event);
+        }
+    }
+
+    // Swap contents to inbox (clears outbox)
+    void swapTo(std::vector<BlockEvent>& inbox) {
+        inbox.clear();
+        inbox.reserve(pending_.size());
+        for (auto& [pos, event] : pending_) {
+            inbox.push_back(std::move(event));
+        }
+        pending_.clear();
+    }
+
+private:
+    std::unordered_map<BlockPos, BlockEvent> pending_;
+
+    static BlockEvent mergeEvents(const BlockEvent& existing, const BlockEvent& incoming) {
+        // Same event type: keep latest (incoming)
+        if (existing.type == incoming.type) {
+            return incoming;
+        }
+
+        // NeighborChanged from multiple faces: combine face masks
+        if (existing.type == EventType::NeighborChanged &&
+            incoming.type == EventType::NeighborChanged) {
+            BlockEvent merged = incoming;
+            merged.neighborFaceMask |= existing.neighborFaceMask;
+            return merged;
+        }
+
+        // Different event types: prioritize by importance
+        // BlockPlaced/BlockBroken > NeighborChanged > Tick
+        return higherPriority(existing, incoming) ? existing : incoming;
+    }
+};
+```
+
+**Consolidation rules:**
+- **Same event type, same position**: Keep latest (newer data wins)
+- **Multiple NeighborChanged**: Merge face masks (block needs to check all changed neighbors)
+- **Different event types**: Higher priority event wins (block changes > neighbor updates > ticks)
+- **BlockPlaced then BlockBroken**: Could cancel, but safer to process both in sequence
+
+This prevents scenarios like:
+- Block receives 6 separate NeighborChanged events (one per face) → consolidated to 1
+- Rapid block updates causing unbounded event queue growth
+
+### Timer Event Generation
+
+The input queue internally generates timer events:
+- **Game tick**: Regular interval alarm generates `TickType::GameTick` events
+- **Scheduled ticks**: Per-block scheduled alarms stored in priority queue
+
+```cpp
+void InputQueue::waitForEvent() {
+    // Calculate next alarm time
+    auto nextAlarm = std::min(nextGameTick_, scheduledTicks_.top().targetTime);
+
+    // Block until event or alarm
+    auto event = externalQueue_.waitUntil(nextAlarm);
+
+    if (event) {
+        return *event;  // External event
+    }
+
+    // Alarm fired - generate appropriate tick events
+    if (now >= nextGameTick_) {
+        generateGameTickEvents();
+        nextGameTick_ += gameTickInterval_;
+    }
+
+    while (!scheduledTicks_.empty() && scheduledTicks_.top().targetTime <= now) {
+        auto tick = scheduledTicks_.pop();
+        return BlockEvent::tick(tick.pos, TickType::Scheduled);
+    }
+}
+```
+
+---
+
+## 24.14 Game Tick and Random Tick System
+
+### Tick Types
+
+| Tick Type | Registration | When Fired | Use Case |
+|-----------|--------------|------------|----------|
+| **Game Tick** | Per-subchunk registry (from BlockType) | Every game tick interval | Hoppers, observers, active machines |
+| **Random Tick** | None (any block can receive) | N random per subchunk per game tick | Crop growth, grass spread, decay |
+| **Scheduled Tick** | Explicit via `scheduleTick()` | At specific future time | Redstone delays, piston retraction |
+
+### Game Tick Registry
+
+Blocks auto-register for game ticks based on their BlockType property:
+
+```cpp
+// In BlockType
+class BlockType {
+public:
+    BlockType& setWantsGameTicks(bool wants);
+    [[nodiscard]] bool wantsGameTicks() const { return wantsGameTicks_; }
+
+private:
+    bool wantsGameTicks_ = false;
+};
+
+// In SubChunk - auto-populated from BlockType on place/load
+class SubChunk {
+public:
+    void registerGameTick(int32_t index);
+    void unregisterGameTick(int32_t index);
+    [[nodiscard]] const std::vector<uint16_t>& gameTickBlocks() const;
+
+private:
+    std::vector<uint16_t> gameTickBlocks_;  // Block indices wanting game ticks
+};
+```
+
+**Auto-registration flow:**
+1. On chunk load: scan all blocks, register those with `wantsGameTicks()`
+2. On block place: if `wantsGameTicks()`, add to registry
+3. On block break: remove from registry
+
+The registry is **not serialized** - it's rebuilt from block types on load.
+
+### Random Ticks (No Registration)
+
+Random ticks don't require registration. Every block can receive them:
+
+```cpp
+void processGameTick(World& world) {
+    for (auto& [pos, column] : world.loadedColumns()) {
+        column.forEachSubChunk([&](int32_t y, SubChunk& subchunk) {
+            // Game ticks to registered blocks
+            for (uint16_t idx : subchunk.gameTickBlocks()) {
+                BlockPos blockPos = toWorldPos(pos, y, idx);
+                outbox_.push(BlockEvent::tick(blockPos, TickType::GameTick));
+            }
+
+            // Random ticks (no registration needed)
+            if (config_.randomTicksPerSubchunk > 0) {
+                for (int i = 0; i < config_.randomTicksPerSubchunk; ++i) {
+                    uint16_t idx = randomBlockIndex();
+                    BlockPos blockPos = toWorldPos(pos, y, idx);
+                    outbox_.push(BlockEvent::tick(blockPos, TickType::RandomTick));
+                }
+            }
+        });
+    }
+}
+```
+
+**Rationale for no registration:**
+- Random ticks are lightweight - handler can just return if nothing to do
+- Avoids registration bugs and storage overhead
+- Lookup cost is the same either way (must find handler for block type)
+- "Always happens" means fewer points of failure
+
+### Scheduled Ticks
+
+Blocks schedule future ticks explicitly via BlockContext:
+
+```cpp
+void BlockContext::scheduleTick(int ticksFromNow, TickType type) {
+    uint64_t targetTick = world_.currentTick() + ticksFromNow;
+    world_.scheduleBlockTick(pos_, targetTick, type);
+}
+
+// In World - priority queue of scheduled ticks
+struct ScheduledTick {
+    BlockPos pos;
+    uint64_t targetTick;
+    TickType type;
+
+    bool operator>(const ScheduledTick& other) const {
+        return targetTick > other.targetTick;  // min-heap
+    }
+};
+
+class World {
+    std::priority_queue<ScheduledTick, std::vector<ScheduledTick>,
+                        std::greater<ScheduledTick>> scheduledTicks_;
+};
+```
+
+### Tick Configuration
+
+```cpp
+struct TickConfig {
+    // Game tick interval (default: 50ms = 20 ticks/sec like Minecraft)
+    std::chrono::milliseconds gameTickInterval{50};
+
+    // Random ticks per subchunk per game tick (0 = disabled)
+    int randomTicksPerSubchunk = 3;
+
+    // Optional: deterministic RNG seed for reproducible worlds
+    std::optional<uint64_t> randomTickSeed;
+};
+```
+
+### Serialization
+
+**Scheduled ticks** must be serialized with the world for persistence:
+
+```cpp
+// Per-column pending ticks (stored in column extra data on save)
+struct PendingTicks {
+    std::vector<ScheduledTick> ticks;  // Serialized as CBOR array
+};
+
+// On column unload: move pending ticks for this column to column data
+// On column load: restore pending ticks to world scheduler
+```
+
+**Game tick registry** is NOT serialized - rebuilt from BlockType on load.
+
+---
+
+## 24.15 Future Extensions
 
 - **Network events** - Replicate events to remote players
 - **Entity events** - Entity movement, damage, spawning
 - **Undo/redo** - Event log for world edit history
 - **Priority levels** - Urgent events (explosions) before routine ticks
+- **Chunk-level ticks** - Mob spawning, weather effects
 
 ---
 

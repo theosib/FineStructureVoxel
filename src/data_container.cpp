@@ -59,6 +59,7 @@ namespace cbor {
     constexpr uint8_t TEXT_STRING = 3;
     constexpr uint8_t ARRAY = 4;
     constexpr uint8_t MAP = 5;
+    constexpr uint8_t TAG = 6;
     constexpr uint8_t SIMPLE = 7;
 
     // Simple values
@@ -68,6 +69,10 @@ namespace cbor {
     // constexpr uint8_t FLOAT16 = 25;  // Not used - we only encode float64
     // constexpr uint8_t FLOAT32 = 26;  // Not used - we only encode float64
     constexpr uint8_t FLOAT64 = 27;
+
+    // Application-defined tags (IANA "first come first served" range)
+    // Tag 39 is unassigned - we use it for interned strings
+    constexpr uint64_t TAG_INTERNED_STRING = 39;
 
     // Encode a type and value into CBOR header bytes
     void encodeHeader(std::vector<uint8_t>& out, uint8_t majorType, uint64_t value) {
@@ -130,6 +135,11 @@ namespace cbor {
 
     void encodeNull(std::vector<uint8_t>& out) {
         out.push_back((SIMPLE << 5) | NULL_VALUE);
+    }
+
+    // Encode a semantic tag (followed by the tagged value)
+    void encodeTag(std::vector<uint8_t>& out, uint64_t tag) {
+        encodeHeader(out, TAG, tag);
     }
 
     // Decode helpers
@@ -242,6 +252,10 @@ static void encodeValue(std::vector<uint8_t>& out, const DataValue& value) {
             cbor::encodeDouble(out, v);
         } else if constexpr (std::is_same_v<T, std::string>) {
             cbor::encodeString(out, v);
+        } else if constexpr (std::is_same_v<T, InternedString>) {
+            // Interned strings are tagged so they get re-interned on load
+            cbor::encodeTag(out, cbor::TAG_INTERNED_STRING);
+            cbor::encodeString(out, v.str());
         } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
             cbor::encodeBytes(out, v);
         } else if constexpr (std::is_same_v<T, std::unique_ptr<DataContainer>>) {
@@ -384,6 +398,22 @@ static DataValue decodeValue(cbor::Decoder& decoder) {
 
         case cbor::MAP: {
             return decodeContainer(decoder);
+        }
+
+        case cbor::TAG: {
+            auto [mt, tagValue] = decoder.readHeader();
+
+            if (tagValue == cbor::TAG_INTERNED_STRING) {
+                // Tagged interned string - read the string and intern it
+                auto [strType, strLen] = decoder.readHeader();
+                if (strType == cbor::TEXT_STRING) {
+                    std::string str = decoder.readString(strLen);
+                    return InternedString(str);
+                }
+            }
+            // Unknown tag - skip the tagged value and return null
+            decodeValue(decoder);
+            return std::monostate{};
         }
 
         case cbor::SIMPLE: {

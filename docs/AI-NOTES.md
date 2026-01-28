@@ -233,8 +233,21 @@ items[0]                # Array indexing (brackets - future)
   - Large world support with double-precision camera position
   - View-relative frustum culling with double-precision AABB
   - Tested at 1,000,000 block coordinates - smooth rendering confirmed
+- Phase 9.1 (complete): Block extra data storage in SubChunk
+- Phase 9.2 (mostly complete):
+  - `UpdateScheduler` class with three-queue architecture
+  - `EventOutbox` with event consolidation by position
+  - `ScheduledTick` priority queue for scheduled ticks
+  - `BlockType::wantsGameTicks()` property
+  - `SubChunk::gameTickBlocks_` registry (unordered_set)
+  - Auto-register/unregister on block place/break
+  - `ChunkColumn::rebuildGameTickRegistries()` for chunk load
+  - `BlockContext::scheduleTick()` implementation
+  - `TickConfig` for game tick and random tick settings
+  - Game tick and random tick event generation
+  - Remaining: scheduled tick persistence across save/load
 
-**Next task:** Phase 5 (Mesh Optimization) or documentation updates
+**Next task:** Phase 9.2 persistence or Phase 9.3 force loading
 **Blockers:** None
 
 ---

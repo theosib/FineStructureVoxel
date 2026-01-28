@@ -458,6 +458,28 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 - [x] Handler lookup by BlockTypeId
 - [x] Entity/Item registry stubs
 
+### 7.6 Module Loading Order
+
+Modules are loaded **eagerly at world startup**, not lazily on block encounter.
+
+**Rationale:**
+- Game tick registry needs `BlockType::wantsGameTicks()` when chunks load
+- One module registers many block types (lazy loading saves little)
+- Avoids unpredictable hitches during gameplay
+- Simpler code (no "module not loaded" edge cases)
+
+**World startup sequence:**
+1. Read world config (includes `modules = [...]` list)
+2. Load all required modules (dependency resolution, initialization)
+3. All BlockTypes and handlers now registered
+4. Begin loading chunks (BlockType info guaranteed available)
+
+**World config example:**
+```toml
+[world]
+modules = ["blockgame:core", "blockgame:redstone", "mymod:machines"]
+```
+
 ---
 
 ## Phase 8: Lighting System ✓
@@ -555,11 +577,69 @@ if (data && data->has("inventory")) {
 }
 ```
 
+**InternedString Type:**
+
+DataContainer supports `InternedString` for repeated enum-like string values. Unlike regular strings:
+- Stored in memory as `uint32_t` (intern ID) for O(1) comparison
+- Serialized as CBOR tagged string (tag 39) for portability
+- Re-interned on load (intern IDs are not stable across sessions)
+
+Use `InternedString` for state names, material types, and other repeated values. Use regular `std::string` for unique content like sign text.
+
+**Block Type Helpers:**
+
+When storing `BlockTypeId` in extra data, use the helpers from `block_data_helpers.hpp`:
+
+```cpp
+#include "finevox/block_data_helpers.hpp"
+
+// Store a block type reference (serializes by name, not numeric ID)
+setBlockType(data, "material", BlockTypeId::fromName("minecraft:stone"));
+
+// Retrieve with default
+BlockTypeId mat = getBlockType(data, "material", AIR_BLOCK_TYPE);
+
+// Check if key contains a block type
+if (hasBlockType(data, "material")) { ... }
+```
+
+This ensures block type references remain valid across game sessions, since the block's name is serialized rather than its numeric ID.
+
 ### 9.2 Engine: Update Scheduler
-- [ ] `BlockUpdateScheduler` - schedule/cancel timed updates
-- [ ] Per-chunk update queues with distance filtering
-- [ ] Persistence of pending updates across save/load
-- [ ] Cross-chunk update boundary handling
+
+See [24 - Event System](24-event-system.md) sections 24.13-24.14 for detailed design.
+
+**Three-Queue Event Architecture:**
+- [x] `UpdateScheduler` class with external input queue
+- [x] `EventOutbox` with consolidation for handler-generated events
+- [x] Inbox/outbox pattern for event processing
+- [x] Queue swap logic when inbox empty
+
+**Game Tick System:**
+- [x] `BlockType::setWantsGameTicks()` / `wantsGameTicks()` property
+- [x] `SubChunk::gameTickBlocks_` registry (unordered_set of block indices)
+- [x] Auto-register on block place if `wantsGameTicks()` (in processEvent)
+- [x] Auto-unregister on block break (in processEvent)
+- [x] `ChunkColumn::rebuildGameTickRegistries()` for chunk load
+- [x] `TickConfig` with `gameTickIntervalMs`, `randomTicksPerSubchunk`
+
+**Random Tick System:**
+- [x] No registration - pick N random positions per subchunk per game tick
+- [x] Configurable count via `TickConfig::randomTicksPerSubchunk`
+- [x] Optional deterministic RNG seed for reproducible worlds
+
+**Scheduled Tick System:**
+- [x] `BlockContext::scheduleTick(ticksFromNow)` implementation
+- [x] `ScheduledTick` struct and priority queue in `UpdateScheduler`
+- [x] `UpdateScheduler::cancelScheduledTicks(pos)` for block break cleanup
+- [ ] Persistence: save pending ticks to column data on unload
+- [ ] Restore pending ticks from column data on load
+
+**Timer Event Generation:**
+- [x] `UpdateScheduler::advanceGameTick()` drives the tick system
+- [x] Game tick events generated for all registered blocks
+- [x] Random tick events generated for random positions
+- [x] Scheduled tick alarms processed from priority queue
 
 ### 9.3 Engine: Force Loading
 - [ ] `ChunkForceLoader` - ticket-based force loading
@@ -574,7 +654,13 @@ if (data && data->has("inventory")) {
 See [23 - Distance and Loading](23-distance-and-loading.md) for detailed design.
 
 ### Testing
-- [ ] Schedule and execute block updates
+- [x] EventOutbox consolidation tests
+- [x] BlockEvent face mask helpers tests
+- [x] TickConfig default values test
+- [x] SubChunk game tick registry tests
+- [x] UpdateScheduler scheduling and tick firing tests
+- [x] Auto-register/unregister on block place/break tests
+- [x] ChunkColumn::rebuildGameTickRegistries test
 - [ ] Updates persist across save/load
 - [ ] Force-load prevents chunk unloading
 - [ ] Cross-chunk updates handled correctly

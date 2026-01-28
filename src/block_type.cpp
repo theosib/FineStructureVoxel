@@ -75,6 +75,11 @@ BlockType& BlockType::setHardness(float hardness) {
     return *this;
 }
 
+BlockType& BlockType::setWantsGameTicks(bool wants) {
+    wantsGameTicks_ = wants;
+    return *this;
+}
+
 const CollisionShape& BlockType::collisionShape(const Rotation& rotation) const {
     return collisionShapes_[rotation.index()];
 }

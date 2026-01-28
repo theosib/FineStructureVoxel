@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/data_container.hpp"
+#include "finevox/block_data_helpers.hpp"
 #include <cmath>
 
 using namespace finevox;
@@ -614,4 +615,176 @@ TEST(DataContainer, CBORComplexStructure) {
               (std::vector<std::string>{"coal", "iron_ore", ""}));
     EXPECT_EQ((*inv)->get<std::vector<int64_t>>("counts"),
               (std::vector<int64_t>{32, 16, 0}));
+}
+
+// ============================================================================
+// InternedString Tests
+// ============================================================================
+
+TEST(DataContainer, InternedStringBasic) {
+    DataContainer dc;
+    InternedString is("test_value");
+
+    dc.set("key", is);
+    EXPECT_TRUE(dc.has("key"));
+
+    InternedString result = dc.get<InternedString>("key");
+    EXPECT_EQ(result.id, is.id);
+    EXPECT_EQ(result.str(), "test_value");
+}
+
+TEST(DataContainer, InternedStringEquality) {
+    InternedString a("hello");
+    InternedString b("hello");
+    InternedString c("world");
+
+    EXPECT_EQ(a, b);  // Same string -> same intern ID
+    EXPECT_NE(a, c);
+    EXPECT_EQ(a, "hello");
+    EXPECT_NE(a, "world");
+}
+
+TEST(DataContainer, InternedStringAsString) {
+    // Can retrieve InternedString as std::string
+    DataContainer dc;
+    dc.set("key", InternedString("interned_value"));
+
+    std::string str = dc.get<std::string>("key");
+    EXPECT_EQ(str, "interned_value");
+}
+
+TEST(DataContainer, StringAsInternedString) {
+    // Can retrieve std::string as InternedString (interns on access)
+    DataContainer dc;
+    dc.set("key", std::string("some_value"));
+
+    InternedString is = dc.get<InternedString>("key");
+    EXPECT_EQ(is.str(), "some_value");
+}
+
+TEST(DataContainer, InternedStringCBORRoundtrip) {
+    DataContainer dc;
+    dc.set("state", InternedString("powered"));
+    dc.set("material", InternedString("stone"));
+    dc.set("variant", InternedString("polished"));
+
+    auto bytes = dc.toCBOR();
+    auto restored = DataContainer::fromCBOR(bytes);
+
+    // Values should be restored as InternedString, not regular string
+    InternedString state = restored->get<InternedString>("state");
+    InternedString material = restored->get<InternedString>("material");
+    InternedString variant = restored->get<InternedString>("variant");
+
+    EXPECT_EQ(state.str(), "powered");
+    EXPECT_EQ(material.str(), "stone");
+    EXPECT_EQ(variant.str(), "polished");
+
+    // The IDs should match after re-interning
+    EXPECT_EQ(state, InternedString("powered"));
+    EXPECT_EQ(material, InternedString("stone"));
+    EXPECT_EQ(variant, InternedString("polished"));
+}
+
+TEST(DataContainer, InternedStringDistinctFromString) {
+    // InternedString and std::string are stored as distinct types
+    DataContainer dc;
+    dc.set("interned", InternedString("value"));
+    dc.set("regular", std::string("value"));
+
+    // getRaw should give different variant types
+    const DataValue* internedRaw = dc.getRaw(internKey("interned"));
+    const DataValue* regularRaw = dc.getRaw(internKey("regular"));
+
+    EXPECT_NE(internedRaw, nullptr);
+    EXPECT_NE(regularRaw, nullptr);
+
+    EXPECT_TRUE(std::holds_alternative<InternedString>(*internedRaw));
+    EXPECT_TRUE(std::holds_alternative<std::string>(*regularRaw));
+}
+
+TEST(DataContainer, InternedStringClone) {
+    DataContainer dc;
+    dc.set("is", InternedString("cloned_value"));
+
+    auto clone = dc.clone();
+
+    InternedString original = dc.get<InternedString>("is");
+    InternedString cloned = clone->get<InternedString>("is");
+
+    EXPECT_EQ(original.id, cloned.id);
+    EXPECT_EQ(cloned.str(), "cloned_value");
+}
+
+// ============================================================================
+// Block Type Helper Tests
+// ============================================================================
+
+TEST(DataContainer, BlockTypeHelperBasic) {
+    DataContainer dc;
+    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
+
+    setBlockType(dc, "material", stone);
+    EXPECT_TRUE(hasBlockType(dc, "material"));
+
+    BlockTypeId result = getBlockType(dc, "material");
+    EXPECT_EQ(result, stone);
+    EXPECT_EQ(result.name(), "blockgame:stone");
+}
+
+TEST(DataContainer, BlockTypeHelperDefault) {
+    DataContainer dc;
+    BlockTypeId iron = BlockTypeId::fromName("blockgame:iron");
+
+    // Missing key returns default
+    BlockTypeId result = getBlockType(dc, "missing", iron);
+    EXPECT_EQ(result, iron);
+
+    // Air block as default
+    BlockTypeId airResult = getBlockType(dc, "also_missing");
+    EXPECT_TRUE(airResult.isAir());
+}
+
+TEST(DataContainer, BlockTypeHelperStringKey) {
+    DataContainer dc;
+    BlockTypeId obsidian = BlockTypeId::fromName("blockgame:obsidian");
+
+    setBlockType(dc, "block", obsidian);
+    BlockTypeId result = getBlockType(dc, "block");
+
+    EXPECT_EQ(result, obsidian);
+}
+
+TEST(DataContainer, BlockTypeHelperCBORRoundtrip) {
+    DataContainer dc;
+    BlockTypeId diamond = BlockTypeId::fromName("blockgame:diamond_block");
+    BlockTypeId emerald = BlockTypeId::fromName("blockgame:emerald_block");
+
+    setBlockType(dc, "primary", diamond);
+    setBlockType(dc, "secondary", emerald);
+
+    auto bytes = dc.toCBOR();
+    auto restored = DataContainer::fromCBOR(bytes);
+
+    // Block types should be restored correctly
+    BlockTypeId p = getBlockType(*restored, "primary");
+    BlockTypeId s = getBlockType(*restored, "secondary");
+
+    EXPECT_EQ(p.name(), "blockgame:diamond_block");
+    EXPECT_EQ(s.name(), "blockgame:emerald_block");
+
+    // IDs should match after re-interning
+    EXPECT_EQ(p, diamond);
+    EXPECT_EQ(s, emerald);
+}
+
+TEST(DataContainer, BlockTypeHelperNotBlockType) {
+    DataContainer dc;
+    dc.set("not_block", 42);  // Integer, not block type
+
+    EXPECT_FALSE(hasBlockType(dc, "not_block"));
+
+    // getBlockType returns default when type doesn't match
+    BlockTypeId result = getBlockType(dc, "not_block");
+    EXPECT_TRUE(result.isAir());
 }

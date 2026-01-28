@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file block_type.hpp
+ * @brief Block type definitions, properties, and the global BlockRegistry
+ *
+ * Design: [04-core-data-structures.md] §4.5 BlockType
+ */
+
 #include "finevox/string_interner.hpp"
 #include "finevox/physics.hpp"
 #include "finevox/rotation.hpp"

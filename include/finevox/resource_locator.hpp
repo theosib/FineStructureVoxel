@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file resource_locator.hpp
+ * @brief Unified path resolution for all engine resources
+ *
+ * Design: [Appendix A] Asset path resolution
+ */
+
 #include <filesystem>
 #include <optional>
 #include <shared_mutex>

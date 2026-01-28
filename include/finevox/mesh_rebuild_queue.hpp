@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file mesh_rebuild_queue.hpp
+ * @brief Priority queue for mesh rebuild scheduling
+ *
+ * Design: [06-rendering.md] §6.3 Priority Queue
+ */
+
 #include "finevox/alarm_queue.hpp"
 #include "finevox/position.hpp"
 #include "finevox/lod.hpp"

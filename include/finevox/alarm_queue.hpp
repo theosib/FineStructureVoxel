@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file alarm_queue.hpp
+ * @brief Thread-safe FIFO queue with alarm-based wakeup support
+ *
+ * Design: [24-event-system.md] §24.3 AlarmQueue
+ */
+
 #include <deque>
 #include <unordered_set>
 #include <unordered_map>

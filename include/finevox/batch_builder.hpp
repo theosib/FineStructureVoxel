@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file batch_builder.hpp
+ * @brief Block operation batching and coalescing
+ *
+ * Design: [13-batch-builder.md] §13.1 BatchBuilder
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/string_interner.hpp"
 #include <unordered_map>

@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file data_container.hpp
+ * @brief Key-value storage for block/subchunk/column extra data
+ *
+ * Design: [17-implementation-phases.md] §9.1 Extra Data Storage
+ */
+
 #include "finevox/string_interner.hpp"
 #include <cstdint>
 #include <memory>

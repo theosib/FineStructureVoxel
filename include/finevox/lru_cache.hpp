@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file lru_cache.hpp
+ * @brief Generic LRU cache for column unload queue
+ *
+ * Design: [05-world-management.md] §5.4.2 LRU Cache
+ */
+
 #include <list>
 #include <unordered_map>
 #include <optional>

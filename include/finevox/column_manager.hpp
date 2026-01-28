@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file column_manager.hpp
+ * @brief Column lifecycle state machine with LRU caching
+ *
+ * Design: [05-world-management.md] §5.4 Column Lifecycle
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/lru_cache.hpp"
@@ -53,18 +60,23 @@ struct ManagedColumn {
     }
 };
 
-// SubChunkManager coordinates column lifecycle:
-// - Tracks active columns and their reference counts
-// - Manages save queue for dirty columns
-// - Maintains LRU cache for clean columns awaiting eviction
-// - Prevents loading from disk while saving
-//
-// Thread-safety: Uses internal locking for thread-safe access
-//
-class SubChunkManager {
+/**
+ * @brief Manages ChunkColumn lifecycle: loading, saving, and unloading
+ *
+ * Design: [05-world-management.md] §5.4 Column Lifecycle
+ *
+ * Coordinates column lifecycle:
+ * - Tracks active columns and their reference counts
+ * - Manages save queue for dirty columns
+ * - Maintains LRU cache for clean columns awaiting eviction
+ * - Prevents loading from disk while saving
+ *
+ * Thread-safety: Uses internal locking for thread-safe access
+ */
+class ColumnManager {
 public:
-    explicit SubChunkManager(size_t cacheCapacity = 64);
-    ~SubChunkManager();
+    explicit ColumnManager(size_t cacheCapacity = 64);
+    ~ColumnManager();
 
     // Get a column - checks active, save queue, and unload cache
     // Returns nullptr if not in memory
@@ -121,7 +133,7 @@ public:
     // ========================================================================
 
     // Bind an IOManager for automatic persistence
-    // When bound, SubChunkManager will:
+    // When bound, ColumnManager will:
     // - Queue saves to IOManager when columns need saving
     // - Handle IOManager callbacks for save completion
     void bindIOManager(IOManager* io);

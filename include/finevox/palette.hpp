@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file palette.hpp
+ * @brief Per-subchunk block type mapping
+ *
+ * Design: [04-core-data-structures.md] §4.4 SubChunkPalette
+ */
+
 #include <cstdint>
 #include <vector>
 #include <unordered_map>

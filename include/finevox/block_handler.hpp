@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file block_handler.hpp
+ * @brief BlockContext and BlockHandler for event-driven block behavior
+ *
+ * Design: [24-event-system.md] §24.7 Handlers
+ */
+
 #include "finevox/string_interner.hpp"
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"

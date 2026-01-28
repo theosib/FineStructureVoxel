@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file config_parser.hpp
+ * @brief Parser utilities for key-value config files
+ *
+ * Design: [Appendix A] Config File Format
+ */
+
 #include <string>
 #include <string_view>
 #include <vector>

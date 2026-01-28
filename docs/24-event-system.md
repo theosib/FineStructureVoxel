@@ -245,7 +245,7 @@ private:
 ### Block Place Event
 
 ```cpp
-void EventProcessor::processBlockPlaceEvent(BlockEvent& event) {
+void UpdateScheduler::processBlockPlaceEvent(BlockEvent& event) {
     SubChunk* subchunk = getSubChunk(event.chunkPos);
     int localIdx = toLocalIndex(event.localPos);
 
@@ -282,7 +282,7 @@ void EventProcessor::processBlockPlaceEvent(BlockEvent& event) {
 ### Block Break Event
 
 ```cpp
-void EventProcessor::processBlockBreakEvent(BlockEvent& event) {
+void UpdateScheduler::processBlockBreakEvent(BlockEvent& event) {
     SubChunk* subchunk = getSubChunk(event.chunkPos);
     int localIdx = toLocalIndex(event.localPos);
 
@@ -322,7 +322,7 @@ void EventProcessor::processBlockBreakEvent(BlockEvent& event) {
 ### Main Event Loop
 
 ```cpp
-void EventProcessor::processEvents() {
+void UpdateScheduler::processEvents() {
     // Drain external input into inbox (thread-safe)
     drainExternalInput();
 
@@ -647,62 +647,67 @@ The full event processing uses three queues with distinct purposes:
 
 ### Outbox Consolidation
 
-The outbox consolidates events by block position to avoid redundant processing:
+**Implementation:** [event_queue.hpp](../include/finevox/event_queue.hpp), [event_queue.cpp](../src/event_queue.cpp)
+
+The outbox consolidates events by **(position, event type)** to avoid redundant processing while keeping different event types separate:
 
 ```cpp
 class EventOutbox {
 public:
     void push(BlockEvent event) {
-        auto [it, inserted] = pending_.try_emplace(event.pos, event);
+        EventKey key{event.pos, event.type};
+        auto [it, inserted] = pending_.try_emplace(key, event);
         if (!inserted) {
-            // Merge with existing event for this position
+            // Merge with existing event for this (pos, type)
             it->second = mergeEvents(it->second, event);
         }
     }
 
     // Swap contents to inbox (clears outbox)
-    void swapTo(std::vector<BlockEvent>& inbox) {
-        inbox.clear();
-        inbox.reserve(pending_.size());
-        for (auto& [pos, event] : pending_) {
-            inbox.push_back(std::move(event));
-        }
-        pending_.clear();
-    }
+    void swapTo(std::vector<BlockEvent>& inbox);
+    void clear() { pending_.clear(); }
 
 private:
-    std::unordered_map<BlockPos, BlockEvent> pending_;
+    // Key for outbox: (BlockPos, EventType)
+    // Different event types at same position are kept separate
+    struct EventKey {
+        BlockPos pos;
+        EventType type;
+
+        bool operator==(const EventKey& other) const {
+            return pos == other.pos && type == other.type;
+        }
+    };
+
+    struct EventKeyHash {
+        size_t operator()(const EventKey& key) const;
+    };
+
+    std::unordered_map<EventKey, BlockEvent, EventKeyHash> pending_;
 
     static BlockEvent mergeEvents(const BlockEvent& existing, const BlockEvent& incoming) {
-        // Same event type: keep latest (incoming)
-        if (existing.type == incoming.type) {
-            return incoming;
-        }
-
         // NeighborChanged from multiple faces: combine face masks
-        if (existing.type == EventType::NeighborChanged &&
-            incoming.type == EventType::NeighborChanged) {
+        if (existing.type == EventType::NeighborChanged) {
             BlockEvent merged = incoming;
             merged.neighborFaceMask |= existing.neighborFaceMask;
             return merged;
         }
 
-        // Different event types: prioritize by importance
-        // BlockPlaced/BlockBroken > NeighborChanged > Tick
-        return higherPriority(existing, incoming) ? existing : incoming;
+        // Same event type at same position: keep latest (incoming)
+        return incoming;
     }
 };
 ```
 
 **Consolidation rules:**
-- **Same event type, same position**: Keep latest (newer data wins)
-- **Multiple NeighborChanged**: Merge face masks (block needs to check all changed neighbors)
-- **Different event types**: Higher priority event wins (block changes > neighbor updates > ticks)
-- **BlockPlaced then BlockBroken**: Could cancel, but safer to process both in sequence
+- **Key is (position, event type)**: Different event types at same position are NOT merged
+- **Same type, same position**: Keep latest (newer data wins)
+- **Multiple NeighborChanged at same position**: Merge face masks (block needs to check all changed neighbors)
 
-This prevents scenarios like:
-- Block receives 6 separate NeighborChanged events (one per face) → consolidated to 1
-- Rapid block updates causing unbounded event queue growth
+This design means:
+- A BlockPlaced event and a NeighborChanged event at the same position are both processed
+- 6 separate NeighborChanged events (one per face) → consolidated to 1 with combined face mask
+- Rapid block updates at the same position with same event type get deduplicated
 
 ### Timer Event Generation
 

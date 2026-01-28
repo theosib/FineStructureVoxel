@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file block_event.hpp
+ * @brief Event types and BlockEvent data structure
+ *
+ * Design: [24-event-system.md] §24.2 BlockEvent
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"
 #include "finevox/string_interner.hpp"

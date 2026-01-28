@@ -1,5 +1,20 @@
 #pragma once
 
+/**
+ * @file position.hpp
+ * @brief Position types and coordinate conversions for the voxel world
+ *
+ * Design: [04-core-data-structures.md] §4.1 Position Types
+ *
+ * Defines:
+ * - Face: 6 block face directions
+ * - LocalBlockPos: Position within a subchunk (0-15 each axis)
+ * - BlockPos: World-space block position
+ * - ChunkPos: 16³ subchunk position
+ * - ColumnPos: 16x∞x16 column position (X, Z only)
+ * - RegionPos: 32x32 region position for persistence
+ */
+
 #include <cstdint>
 #include <functional>
 #include <array>

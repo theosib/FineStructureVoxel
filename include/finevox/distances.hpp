@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file distances.hpp
+ * @brief Distance zone calculations for rendering, loading, and processing
+ *
+ * Design: [23-distance-and-loading.md] §23.1 Distance Zones
+ */
+
 #include <glm/glm.hpp>
 
 namespace finevox {

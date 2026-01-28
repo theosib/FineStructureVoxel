@@ -86,6 +86,7 @@ SubChunk& ChunkColumn::getOrCreateSubChunk(int32_t chunkY) {
     auto& ptr = subChunks_[chunkY];
     if (!ptr) {
         ptr = std::make_shared<SubChunk>();
+        ptr->setPosition(toChunkPos(chunkY));
     }
     return *ptr;
 }

@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file config.hpp
+ * @brief Engine and world configuration management
+ *
+ * Design: [23-distance-and-loading.md] §23.2 Configuration
+ */
+
 #include "finevox/data_container.hpp"
 #include <filesystem>
 #include <shared_mutex>

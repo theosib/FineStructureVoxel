@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file config_file.hpp
+ * @brief Config file parsing with comment preservation
+ *
+ * Design: [Appendix A] Config File Format
+ */
+
 #include "finevox/config_parser.hpp"
 #include "finevox/data_container.hpp"
 #include <filesystem>

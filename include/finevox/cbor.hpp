@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file cbor.hpp
+ * @brief CBOR encoding and decoding for serialization
+ *
+ * Design: [11-persistence.md] §11.2 CBOR Format
+ */
+
 #include <cstdint>
 #include <cstring>
 #include <span>

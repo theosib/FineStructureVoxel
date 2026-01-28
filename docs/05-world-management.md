@@ -190,9 +190,11 @@ private:
 
 ---
 
-## 5.4 SubChunk Lifecycle and Caching
+## 5.4 Column Lifecycle and Caching
 
-SubChunks go through multiple lifecycle stages. The key insight is that **saving doesn't mean unloading** - a saved subchunk can remain in memory for fast access.
+**Implementation:** [column_manager.hpp](../include/finevox/column_manager.hpp), [column_manager.cpp](../src/column_manager.cpp)
+
+ChunkColumns go through multiple lifecycle stages managed by the `ColumnManager`. The key insight is that **saving doesn't mean unloading** - a saved column can remain in memory for fast access.
 
 ### 5.4.1 Lifecycle Diagram
 
@@ -208,7 +210,7 @@ SubChunks go through multiple lifecycle stages. The key insight is that **saving
        │ refs drop        │ refs drop (clean - skip save queue)
        ▼                  │
 ┌─────────────┐           │
-│ Save Queue  │◄──────────┼─── periodic save of active dirty chunks
+│ SaveQueued  │◄──────────┼─── periodic save of active dirty columns
 │  (dirty)    │           │
 └──────┬──────┘           │
        │                  │
@@ -222,111 +224,132 @@ SubChunks go through multiple lifecycle stages. The key insight is that **saving
        │ save complete    │
        ▼                  ▼
 ┌──────────────────────────┐
-│      Unload Queue        │ ◄── clean subchunks wait here
-│  (clean, retrievable)    │
+│   UnloadQueued (LRU)     │ ◄── clean columns wait here
+│   (clean, retrievable)   │
 └──────────┬───────────────┘
            │
-           │ time expires OR memory pressure
+           │ LRU eviction OR capacity reached
            ▼
 ┌─────────────┐
 │   Evicted   │  (disk only, must reload)
 └─────────────┘
 ```
 
-### 5.4.2 SubChunk State Machine
+### 5.4.2 Column State and ManagedColumn
+
+The `ColumnManager` wraps each `ChunkColumn` in a `ManagedColumn` that tracks lifecycle state:
 
 ```cpp
 namespace finevox {
 
-class SubChunk : public std::enable_shared_from_this<SubChunk> {
-public:
-    enum class State {
-        Loading,       // Being loaded from disk or generated
-        Active,        // In use (may be clean or dirty)
-        InSaveQueue,   // Queued for background save
-        Saving,        // Currently being written to disk
-        InUnloadQueue, // Saved, waiting for eviction
-        Evicted        // Only on disk (not really a state we track - it's gone)
-    };
+// Lifecycle state for managed columns
+enum class ColumnState {
+    Active,        // In use, may be dirty or clean (refCount > 0 or recently used)
+    SaveQueued,    // Dirty with refs == 0, waiting to be saved
+    Saving,        // Currently being written to disk
+    UnloadQueued,  // Clean, in LRU cache waiting for eviction
+    Evicted        // Not in memory (conceptual, not tracked)
+};
 
-    // State management
-    State state() const { return state_; }
+// Extended column info for lifecycle management
+struct ManagedColumn {
+    std::unique_ptr<ChunkColumn> column;
+    ColumnState state = ColumnState::Active;
+    bool dirty = false;
+    std::chrono::steady_clock::time_point lastModified;
+    std::chrono::steady_clock::time_point lastAccessed;
+    int32_t refCount = 0;  // Number of active references
 
-    // Dirty tracking (orthogonal to state - active chunks can be clean or dirty)
-    bool isDirty() const { return dirty_; }
+    explicit ManagedColumn(std::unique_ptr<ChunkColumn> col);
+
+    void touch();       // Updates lastAccessed
     void markDirty();   // Sets dirty, updates lastModified
     void markClean();   // Called after successful save
-
-    // Timestamps for lifecycle management
-    std::chrono::steady_clock::time_point lastModified() const { return lastModified_; }
-    std::chrono::steady_clock::time_point lastAccessed() const { return lastAccessed_; }
-    void touch() { lastAccessed_ = std::chrono::steady_clock::now(); }
-
-private:
-    State state_ = State::Loading;
-    bool dirty_ = false;
-    std::chrono::steady_clock::time_point lastModified_;
-    std::chrono::steady_clock::time_point lastAccessed_;
 };
 
 }  // namespace finevox
 ```
 
-### 5.4.3 SubChunk Manager
+### 5.4.3 ColumnManager
 
-The SubChunkManager coordinates all the queues and tracks subchunks across their lifecycle:
+The `ColumnManager` coordinates all lifecycle state and tracks columns through their lifecycle:
 
 ```cpp
 namespace finevox {
 
-class SubChunkManager {
+class ColumnManager {
 public:
-    explicit SubChunkManager(World& world);
+    explicit ColumnManager(size_t cacheCapacity = 64);
 
-    // Retrieve a subchunk - checks active, save queue, unload queue
-    // Returns nullptr only if truly not in memory
-    std::shared_ptr<SubChunk> get(ChunkPos pos);
+    // Retrieve a column - checks active, save queue, and unload cache
+    // Returns nullptr if not in memory
+    // Automatically moves retrieved columns to active state
+    ManagedColumn* get(ColumnPos pos);
 
-    // Called when a subchunk loses all external references
-    void onRefsDropped(std::shared_ptr<SubChunk> subchunk);
+    // Add a new column to active management
+    void add(std::unique_ptr<ChunkColumn> column);
+
+    // Mark a column as dirty (needs saving)
+    void markDirty(ColumnPos pos);
+
+    // Reference counting for safe concurrent access
+    void addRef(ColumnPos pos);   // Increment ref count
+    void release(ColumnPos pos);  // Decrement ref count, may trigger save/unload
+
+    // Check if a column is currently being saved (don't load from disk!)
+    bool isSaving(ColumnPos pos) const;
+
+    // Get columns queued for saving
+    std::vector<ColumnPos> getSaveQueue();
+
+    // Called when a save operation completes
+    void onSaveComplete(ColumnPos pos);
 
     // Periodic maintenance (call from game loop)
     void tick();
 
     // Configuration
     void setPeriodicSaveInterval(std::chrono::seconds interval);
-    void setUnloadQueueTimeout(std::chrono::seconds timeout);
-    void setMaxMemoryUsage(size_t bytes);
+    void setCacheCapacity(size_t capacity);
+    void setActivityTimeout(int64_t timeoutMs);
+
+    // Callback to check if a column can be unloaded (for force-loading)
+    using CanUnloadCallback = std::function<bool(ColumnPos)>;
+    void setCanUnloadCallback(CanUnloadCallback callback);
+
+    // IOManager integration for async persistence
+    void bindIOManager(IOManager* io);
+    void processSaveQueue();
+
+    // Statistics
+    size_t activeCount() const;
+    size_t saveQueueSize() const;
+    size_t cacheSize() const;
 
 private:
-    World& world_;
+    mutable std::shared_mutex mutex_;
 
-    // Active subchunks (have external references)
-    std::unordered_map<uint64_t, std::weak_ptr<SubChunk>> active_;
+    // Active columns (refCount > 0 or recently used)
+    std::unordered_map<uint64_t, std::unique_ptr<ManagedColumn>> active_;
 
-    // Save queue - dirty subchunks waiting to be saved
-    // Ordered by lastModified (oldest first for fairness)
-    std::deque<std::shared_ptr<SubChunk>> saveQueue_;
+    // Save queue - dirty columns with refs == 0
+    BlockingQueue<uint64_t> saveQueue_;
 
     // Currently being saved - CRITICAL: don't load from disk while here!
     std::unordered_set<uint64_t> currentlySaving_;
 
-    // Unload queue - clean subchunks that can be retrieved or evicted
-    // LRU: front = most recent, back = oldest
-    std::list<std::shared_ptr<SubChunk>> unloadQueue_;
-    std::unordered_map<uint64_t, std::list<std::shared_ptr<SubChunk>>::iterator> unloadIndex_;
+    // LRU cache for clean columns with refs == 0
+    LRUCache<uint64_t, std::unique_ptr<ManagedColumn>> unloadCache_;
 
-    // Periodic save tracking for active dirty chunks
+    // Periodic save tracking
     std::chrono::steady_clock::time_point lastPeriodicSave_;
-    std::chrono::seconds periodicSaveInterval_{60};  // Save active dirty chunks every 60s
+    std::chrono::seconds periodicSaveInterval_{60};
 
-    // Eviction parameters
-    std::chrono::seconds unloadTimeout_{300};  // 5 minutes in unload queue
-    size_t maxMemoryBytes_ = 512 * 1024 * 1024;  // 512 MB default
+    // Activity timeout for cross-chunk update protection (default 5 seconds)
+    int64_t activityTimeoutMs_ = 5000;
 
-    void processPeriodicSaves();
-    void processSaveQueue();
-    void evictIfNeeded();
+    // IOManager for persistence (optional, not owned)
+    IOManager* ioManager_ = nullptr;
 };
 
 }  // namespace finevox
@@ -334,176 +357,163 @@ private:
 
 ### 5.4.4 Lifecycle Transitions
 
-```cpp
-void SubChunkManager::onRefsDropped(std::shared_ptr<SubChunk> subchunk) {
-    uint64_t key = subchunk->pos().pack();
+When a column's reference count drops to zero, it transitions based on dirty state:
 
-    if (subchunk->isDirty()) {
-        // Dirty: must save before we can unload
-        subchunk->setState(SubChunk::State::InSaveQueue);
-        saveQueue_.push_back(subchunk);
+```cpp
+void ColumnManager::release(ColumnPos pos) {
+    uint64_t key = pos.pack();
+    std::unique_lock lock(mutex_);
+
+    auto it = active_.find(key);
+    if (it == active_.end()) return;
+
+    --it->second->refCount;
+    if (it->second->refCount > 0) return;
+
+    // Refs dropped to zero - transition based on dirty state
+    if (it->second->dirty) {
+        transitionToSaveQueue(key);  // Dirty: must save first
     } else {
-        // Clean: can go directly to unload queue
-        subchunk->setState(SubChunk::State::InUnloadQueue);
-        unloadQueue_.push_front(subchunk);
-        unloadIndex_[key] = unloadQueue_.begin();
+        transitionToUnloadCache(key);  // Clean: go to LRU cache
     }
 }
+```
 
-std::shared_ptr<SubChunk> SubChunkManager::get(ChunkPos pos) {
+Retrieving a column checks multiple locations:
+
+```cpp
+ManagedColumn* ColumnManager::get(ColumnPos pos) {
     uint64_t key = pos.pack();
+    std::unique_lock lock(mutex_);
 
-    // 1. Check active (most common case)
-    if (auto it = active_.find(key); it != active_.end()) {
-        if (auto sp = it->second.lock()) {
-            sp->touch();
-            return sp;
-        }
-    }
-
-    // 2. Check save queue (dirty, waiting to save)
-    for (auto& sc : saveQueue_) {
-        if (sc->pos().pack() == key) {
-            sc->touch();
-            sc->setState(SubChunk::State::Active);
-            // Remove from save queue, add back to active
-            // (will re-enter save queue when refs drop again)
-            return sc;
-        }
-    }
-
-    // 3. Check if currently being saved - retrieve but DON'T load from disk!
+    // 1. Check if currently being saved - can't retrieve during save
     if (currentlySaving_.contains(key)) {
-        // The save thread has it - wait for it to finish and put in unload queue
-        // For now, return nullptr and let caller retry
-        // (Better: have save thread notify when done)
         return nullptr;
     }
 
-    // 4. Check unload queue (clean, retrievable)
-    if (auto it = unloadIndex_.find(key); it != unloadIndex_.end()) {
-        auto sc = *it->second;
-        unloadQueue_.erase(it->second);
-        unloadIndex_.erase(it);
-        sc->touch();
-        sc->setState(SubChunk::State::Active);
-        active_[key] = sc;
-        return sc;
+    // 2. Check active columns (most common case)
+    if (auto it = active_.find(key); it != active_.end()) {
+        it->second->touch();
+        return it->second.get();
     }
 
-    // 5. Not in memory - must load from disk
+    // 3. Check unload cache
+    auto cached = unloadCache_.remove(key);
+    if (cached) {
+        // Move back to active
+        auto& col = *cached;
+        col->state = ColumnState::Active;
+        col->touch();
+        auto ptr = col.get();
+        active_[key] = std::move(*cached);
+        return ptr;
+    }
+
+    // Not in memory
     return nullptr;
-}
-
-void SubChunkManager::processPeriodicSaves() {
-    auto now = std::chrono::steady_clock::now();
-    if (now - lastPeriodicSave_ < periodicSaveInterval_) return;
-    lastPeriodicSave_ = now;
-
-    // Find active dirty subchunks and queue them for save
-    for (auto& [key, weak] : active_) {
-        if (auto sc = weak.lock()) {
-            if (sc->isDirty()) {
-                // Queue for save, but keep active (don't change state)
-                // The save will mark it clean, then it may get dirty again
-                saveQueue_.push_back(sc);
-            }
-        }
-    }
 }
 ```
 
 ### 5.4.5 Save Thread Safety
 
-The critical rule: **Never load from disk while a subchunk is being saved.**
+The critical rule: **Never load from disk while a column is being saved.**
+
+The `currentlySaving_` set ensures this:
 
 ```cpp
-void SaveThread::saveSubChunk(std::shared_ptr<SubChunk> subchunk) {
-    uint64_t key = subchunk->pos().pack();
+void ColumnManager::processSaveQueue() {
+    // ... get columns from save queue ...
 
-    // Mark as currently saving BEFORE starting I/O
-    {
-        std::lock_guard lock(manager_.mutex_);
-        manager_.currentlySaving_.insert(key);
-    }
-
-    // Perform the actual save (slow I/O)
-    subchunk->serialize(getRegionFile(subchunk->pos()));
-
-    // Mark clean and move to unload queue
-    {
-        std::lock_guard lock(manager_.mutex_);
-        manager_.currentlySaving_.erase(key);
-        subchunk->markClean();
-
-        if (subchunk->state() == SubChunk::State::Saving) {
-            // No one reclaimed it during save - move to unload queue
-            subchunk->setState(SubChunk::State::InUnloadQueue);
-            manager_.unloadQueue_.push_front(subchunk);
-            manager_.unloadIndex_[key] = manager_.unloadQueue_.begin();
-        }
-        // else: someone reclaimed it, it's now Active again
+    for (auto& [pos, col] : toSave) {
+        io->queueSave(pos, *col, [this](ColumnPos savedPos, bool success) {
+            if (success) {
+                onSaveComplete(savedPos);  // Mark clean, move to unload cache
+            } else {
+                // Save failed - re-queue for retry
+                std::unique_lock lock(mutex_);
+                currentlySaving_.erase(savedPos.pack());
+                // Re-queue for next tick
+            }
+        });
     }
 }
-```
 
-### 5.4.6 Memory Pressure Eviction
+void ColumnManager::onSaveComplete(ColumnPos pos) {
+    uint64_t key = pos.pack();
+    std::unique_lock lock(mutex_);
 
-```cpp
-void SubChunkManager::evictIfNeeded() {
-    size_t currentMemory = estimateMemoryUsage();
-    auto now = std::chrono::steady_clock::now();
+    currentlySaving_.erase(key);
 
-    while (!unloadQueue_.empty()) {
-        auto& oldest = unloadQueue_.back();
-        bool shouldEvict = false;
+    auto it = active_.find(key);
+    if (it == active_.end()) return;
 
-        // Time-based eviction
-        if (now - oldest->lastAccessed() > unloadTimeout_) {
-            shouldEvict = true;
-        }
+    it->second->markClean();
 
-        // Memory pressure eviction
-        if (currentMemory > maxMemoryBytes_) {
-            shouldEvict = true;
-        }
-
-        if (!shouldEvict) break;
-
-        // Evict
-        uint64_t key = oldest->pos().pack();
-        unloadIndex_.erase(key);
-        unloadQueue_.pop_back();
-        // shared_ptr destructor handles cleanup
-        currentMemory = estimateMemoryUsage();
+    // If still no refs, move to unload cache
+    if (it->second->refCount == 0) {
+        transitionToUnloadCache(key);
+    } else {
+        it->second->state = ColumnState::Active;
     }
 }
 ```
 
-### 5.4.7 Safe Concurrent Access with shared_ptr
+### 5.4.6 LRU Cache Eviction
 
-Using `shared_ptr` for subchunks ensures that:
-
-1. **Render thread safety** - Render thread holds `shared_ptr` during rendering, subchunk can't be destroyed mid-frame
-2. **Save thread safety** - Save thread holds `shared_ptr`, subchunk can't be destroyed during I/O
-3. **Natural ref counting** - When all users are done, `onRefsDropped` is called via weak_ptr monitoring
+Clean columns with zero references go to an LRU cache. When the cache reaches capacity, the least-recently-used columns are evicted:
 
 ```cpp
-// In Block struct
-struct Block {
-    std::shared_ptr<SubChunk> subchunk;  // Keeps subchunk alive during block operations
-    // ...
-};
+void ColumnManager::transitionToUnloadCache(uint64_t key) {
+    // Assumes lock is held
+    auto it = active_.find(key);
+    if (it == active_.end()) return;
 
-// Render thread
-void ChunkRenderer::render(CommandBuffer& cmd) {
-    auto subchunk = manager.get(pos);  // shared_ptr keeps it alive
-    if (!subchunk) return;
+    ColumnPos pos = ColumnPos::unpack(key);
 
-    // Safe to use subchunk throughout this frame
-    // Even if player moves away, subchunk won't be destroyed
+    // Check if column has recent activity (cross-chunk update protection)
+    if (it->second->column && !it->second->column->activityExpired(activityTimeoutMs_)) {
+        // Activity timer not expired - keep in active state
+        return;
+    }
+
+    // Check if external callback allows unloading (force loader check)
+    if (canUnloadCallback_ && !canUnloadCallback_(pos)) {
+        // Force loader prevents unloading - keep in active state
+        return;
+    }
+
+    auto col = std::move(it->second);
+    active_.erase(it);
+    col->state = ColumnState::UnloadQueued;
+
+    auto evicted = unloadCache_.put(key, std::move(col));
+    if (evicted && evictionCallback_) {
+        evictionCallback_(std::move(evicted->second->column));
+    }
 }
 ```
+
+### 5.4.7 Cross-Chunk Update Protection
+
+When a block update event is delivered to a column (e.g., redstone propagation), the column's activity timer is touched. The `ColumnManager` respects this timer and won't unload the column until the timeout expires:
+
+```cpp
+// In ChunkColumn
+void ChunkColumn::touchActivity() {
+    lastActivityTime_ = std::chrono::steady_clock::now();
+}
+
+bool ChunkColumn::activityExpired(int64_t timeoutMs) const {
+    return activityAgeMs() >= timeoutMs;
+}
+
+// In ColumnManager::transitionToUnloadCache
+if (!column->activityExpired(activityTimeoutMs_)) {
+    return;  // Don't unload - activity timer not expired
+}
+```
+
+This prevents premature unload during redstone-like propagation across chunk boundaries
 
 ---
 

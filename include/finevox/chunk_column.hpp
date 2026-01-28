@@ -1,5 +1,14 @@
 #pragma once
 
+/**
+ * @file chunk_column.hpp
+ * @brief Vertical column of SubChunks at a given (X, Z) position
+ *
+ * Design: [05-world-management.md] §5.1, §5.2 ChunkColumn
+ * Heightmap: [09-lighting.md] §9.1 Sky Light
+ * Activity timer: [24-event-system.md] Cross-chunk update protection
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/subchunk.hpp"
 #include <unordered_map>

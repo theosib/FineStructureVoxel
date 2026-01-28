@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file light_engine.hpp
+ * @brief BFS-based light propagation engine
+ *
+ * Design: [24-event-system.md] §24.8-24.11 Lighting
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/light_data.hpp"  // Keep for utility functions (packLightValue, etc.)
 #include "finevox/string_interner.hpp"

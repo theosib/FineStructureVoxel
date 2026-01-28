@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file block_data_helpers.hpp
+ * @brief Helper functions for BlockTypeId storage in DataContainer
+ *
+ * Design: [17-implementation-phases.md] §9.1 Extra Data
+ */
+
 #include "finevox/data_container.hpp"
 #include "finevox/string_interner.hpp"  // For BlockTypeId
 

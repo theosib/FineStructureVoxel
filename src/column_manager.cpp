@@ -1,15 +1,15 @@
-#include "finevox/subchunk_manager.hpp"
+#include "finevox/column_manager.hpp"
 #include "finevox/io_manager.hpp"
 
 namespace finevox {
 
-SubChunkManager::SubChunkManager(size_t cacheCapacity)
+ColumnManager::ColumnManager(size_t cacheCapacity)
     : unloadCache_(cacheCapacity)
     , lastPeriodicSave_(std::chrono::steady_clock::now()) {}
 
-SubChunkManager::~SubChunkManager() = default;
+ColumnManager::~ColumnManager() = default;
 
-ManagedColumn* SubChunkManager::get(ColumnPos pos) {
+ManagedColumn* ColumnManager::get(ColumnPos pos) {
     uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
@@ -41,7 +41,7 @@ ManagedColumn* SubChunkManager::get(ColumnPos pos) {
     return nullptr;
 }
 
-void SubChunkManager::add(std::unique_ptr<ChunkColumn> column) {
+void ColumnManager::add(std::unique_ptr<ChunkColumn> column) {
     ColumnPos pos = column->position();
     uint64_t key = pos.pack();
 
@@ -57,7 +57,7 @@ void SubChunkManager::add(std::unique_ptr<ChunkColumn> column) {
     }
 }
 
-void SubChunkManager::markDirty(ColumnPos pos) {
+void ColumnManager::markDirty(ColumnPos pos) {
     uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
@@ -67,7 +67,7 @@ void SubChunkManager::markDirty(ColumnPos pos) {
     }
 }
 
-void SubChunkManager::addRef(ColumnPos pos) {
+void ColumnManager::addRef(ColumnPos pos) {
     uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
@@ -78,7 +78,7 @@ void SubChunkManager::addRef(ColumnPos pos) {
     }
 }
 
-void SubChunkManager::release(ColumnPos pos) {
+void ColumnManager::release(ColumnPos pos) {
     uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
@@ -101,12 +101,12 @@ void SubChunkManager::release(ColumnPos pos) {
     }
 }
 
-bool SubChunkManager::isSaving(ColumnPos pos) const {
+bool ColumnManager::isSaving(ColumnPos pos) const {
     std::shared_lock lock(mutex_);
     return currentlySaving_.contains(pos.pack());
 }
 
-std::vector<ColumnPos> SubChunkManager::getSaveQueue() {
+std::vector<ColumnPos> ColumnManager::getSaveQueue() {
     std::unique_lock lock(mutex_);
 
     std::vector<ColumnPos> result;
@@ -130,7 +130,7 @@ std::vector<ColumnPos> SubChunkManager::getSaveQueue() {
     return result;
 }
 
-void SubChunkManager::onSaveComplete(ColumnPos pos) {
+void ColumnManager::onSaveComplete(ColumnPos pos) {
     uint64_t key = pos.pack();
 
     std::unique_lock lock(mutex_);
@@ -152,7 +152,7 @@ void SubChunkManager::onSaveComplete(ColumnPos pos) {
     }
 }
 
-void SubChunkManager::tick() {
+void ColumnManager::tick() {
     auto now = std::chrono::steady_clock::now();
 
     std::unique_lock lock(mutex_);
@@ -171,7 +171,7 @@ void SubChunkManager::tick() {
     }
 }
 
-std::vector<ColumnPos> SubChunkManager::getAllDirty() {
+std::vector<ColumnPos> ColumnManager::getAllDirty() {
     std::shared_lock lock(mutex_);
 
     std::vector<ColumnPos> result;
@@ -183,12 +183,12 @@ std::vector<ColumnPos> SubChunkManager::getAllDirty() {
     return result;
 }
 
-void SubChunkManager::setPeriodicSaveInterval(std::chrono::seconds interval) {
+void ColumnManager::setPeriodicSaveInterval(std::chrono::seconds interval) {
     std::unique_lock lock(mutex_);
     periodicSaveInterval_ = interval;
 }
 
-void SubChunkManager::setCacheCapacity(size_t capacity) {
+void ColumnManager::setCacheCapacity(size_t capacity) {
     std::unique_lock lock(mutex_);
 
     auto evicted = unloadCache_.setCapacity(capacity);
@@ -200,42 +200,42 @@ void SubChunkManager::setCacheCapacity(size_t capacity) {
     }
 }
 
-size_t SubChunkManager::activeCount() const {
+size_t ColumnManager::activeCount() const {
     std::shared_lock lock(mutex_);
     return active_.size();
 }
 
-size_t SubChunkManager::saveQueueSize() const {
+size_t ColumnManager::saveQueueSize() const {
     std::shared_lock lock(mutex_);
     return saveQueue_.size();
 }
 
-size_t SubChunkManager::cacheSize() const {
+size_t ColumnManager::cacheSize() const {
     std::shared_lock lock(mutex_);
     return unloadCache_.size();
 }
 
-void SubChunkManager::setEvictionCallback(EvictionCallback callback) {
+void ColumnManager::setEvictionCallback(EvictionCallback callback) {
     std::unique_lock lock(mutex_);
     evictionCallback_ = std::move(callback);
 }
 
-void SubChunkManager::setChunkLoadCallback(ChunkLoadCallback callback) {
+void ColumnManager::setChunkLoadCallback(ChunkLoadCallback callback) {
     std::unique_lock lock(mutex_);
     chunkLoadCallback_ = std::move(callback);
 }
 
-void SubChunkManager::setActivityTimeout(int64_t timeoutMs) {
+void ColumnManager::setActivityTimeout(int64_t timeoutMs) {
     std::unique_lock lock(mutex_);
     activityTimeoutMs_ = timeoutMs;
 }
 
-void SubChunkManager::setCanUnloadCallback(CanUnloadCallback callback) {
+void ColumnManager::setCanUnloadCallback(CanUnloadCallback callback) {
     std::unique_lock lock(mutex_);
     canUnloadCallback_ = std::move(callback);
 }
 
-void SubChunkManager::transitionToSaveQueue(uint64_t key) {
+void ColumnManager::transitionToSaveQueue(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
     if (it == active_.end()) return;
@@ -244,7 +244,7 @@ void SubChunkManager::transitionToSaveQueue(uint64_t key) {
     saveQueue_.push(key);
 }
 
-void SubChunkManager::transitionToUnloadCache(uint64_t key) {
+void ColumnManager::transitionToUnloadCache(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
     if (it == active_.end()) return;
@@ -274,7 +274,7 @@ void SubChunkManager::transitionToUnloadCache(uint64_t key) {
     }
 }
 
-void SubChunkManager::transitionToActive(uint64_t key, std::unique_ptr<ManagedColumn> column) {
+void ColumnManager::transitionToActive(uint64_t key, std::unique_ptr<ManagedColumn> column) {
     // Assumes lock is held
     column->state = ColumnState::Active;
     active_[key] = std::move(column);
@@ -284,17 +284,17 @@ void SubChunkManager::transitionToActive(uint64_t key, std::unique_ptr<ManagedCo
 // IOManager integration
 // ============================================================================
 
-void SubChunkManager::bindIOManager(IOManager* io) {
+void ColumnManager::bindIOManager(IOManager* io) {
     std::unique_lock lock(mutex_);
     ioManager_ = io;
 }
 
-void SubChunkManager::unbindIOManager() {
+void ColumnManager::unbindIOManager() {
     std::unique_lock lock(mutex_);
     ioManager_ = nullptr;
 }
 
-bool SubChunkManager::requestLoad(ColumnPos pos, LoadCallback callback) {
+bool ColumnManager::requestLoad(ColumnPos pos, LoadCallback callback) {
     std::unique_lock lock(mutex_);
 
     // Can't load if currently saving this column
@@ -345,7 +345,7 @@ bool SubChunkManager::requestLoad(ColumnPos pos, LoadCallback callback) {
     return true;
 }
 
-void SubChunkManager::processSaveQueue() {
+void ColumnManager::processSaveQueue() {
     IOManager* io = nullptr;
     std::vector<std::pair<ColumnPos, ChunkColumn*>> toSave;
 

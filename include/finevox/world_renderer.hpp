@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file world_renderer.hpp
+ * @brief View-relative rendering coordination
+ *
+ * Design: [06-rendering.md] §6.1 WorldRenderer
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/subchunk_view.hpp"
 #include "finevox/mesh.hpp"
@@ -241,7 +248,7 @@ public:
      * @brief Mark all subchunks in a column as needing mesh rebuild
      *
      * Call this when a new column is loaded to ensure all its subchunks get meshes.
-     * This is typically connected to SubChunkManager::setChunkLoadCallback().
+     * This is typically connected to ColumnManager::setChunkLoadCallback().
      *
      * @param pos Column position
      */

@@ -1,5 +1,13 @@
 #pragma once
 
+/**
+ * @file world.hpp
+ * @brief Main world interface for block access and force-loading
+ *
+ * Design: [05-world-management.md] §5.2 World
+ * Force-loading: [23-distance-and-loading.md] §23.3
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/subchunk.hpp"
@@ -13,7 +21,7 @@
 namespace finevox {
 
 // Forward declarations
-class SubChunkManager;
+class ColumnManager;
 
 // World contains all chunk columns and provides block access
 // Thread-safe for concurrent read access; writes require exclusive access
@@ -108,7 +116,7 @@ public:
 
     /// Check if a column can be unloaded
     /// Returns false if any subchunk in the column is kept loaded by a force-loader
-    /// Use this for SubChunkManager's canUnloadCallback
+    /// Use this for ColumnManager's canUnloadCallback
     [[nodiscard]] bool canUnloadColumn(ColumnPos pos) const;
 
     /// Check if a position is a registered force-loader

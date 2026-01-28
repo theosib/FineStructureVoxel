@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/subchunk_manager.hpp"
+#include "finevox/column_manager.hpp"
 #include "finevox/io_manager.hpp"
 #include <filesystem>
 #include <thread>
@@ -8,18 +8,18 @@
 using namespace finevox;
 
 // ============================================================================
-// Basic SubChunkManager tests
+// Basic ColumnManager tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, EmptyManager) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, EmptyManager) {
+    ColumnManager manager;
     EXPECT_EQ(manager.activeCount(), 0);
     EXPECT_EQ(manager.saveQueueSize(), 0);
     EXPECT_EQ(manager.cacheSize(), 0);
 }
 
-TEST(SubChunkManagerTest, AddColumn) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, AddColumn) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(5, 10));
     manager.add(std::move(column));
@@ -31,8 +31,8 @@ TEST(SubChunkManagerTest, AddColumn) {
     EXPECT_EQ(col->column->position(), ColumnPos(5, 10));
 }
 
-TEST(SubChunkManagerTest, GetNonexistent) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, GetNonexistent) {
+    ColumnManager manager;
     EXPECT_EQ(manager.get(ColumnPos(99, 99)), nullptr);
 }
 
@@ -40,8 +40,8 @@ TEST(SubChunkManagerTest, GetNonexistent) {
 // Reference counting tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, RefCountBasic) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, RefCountBasic) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -58,8 +58,8 @@ TEST(SubChunkManagerTest, RefCountBasic) {
     EXPECT_EQ(manager.cacheSize(), 1);
 }
 
-TEST(SubChunkManagerTest, DirtyColumnGoesToSaveQueue) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, DirtyColumnGoesToSaveQueue) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -77,8 +77,8 @@ TEST(SubChunkManagerTest, DirtyColumnGoesToSaveQueue) {
 // Save queue tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, GetSaveQueue) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, GetSaveQueue) {
+    ColumnManager manager;
 
     auto col1 = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     auto col2 = std::make_unique<ChunkColumn>(ColumnPos(1, 0));
@@ -99,8 +99,8 @@ TEST(SubChunkManagerTest, GetSaveQueue) {
     EXPECT_TRUE(manager.isSaving(ColumnPos(1, 0)));
 }
 
-TEST(SubChunkManagerTest, OnSaveComplete) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, OnSaveComplete) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -122,8 +122,8 @@ TEST(SubChunkManagerTest, OnSaveComplete) {
 // Cache tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, RetrieveFromCache) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, RetrieveFromCache) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -143,8 +143,8 @@ TEST(SubChunkManagerTest, RetrieveFromCache) {
     EXPECT_EQ(manager.activeCount(), 1);
 }
 
-TEST(SubChunkManagerTest, CacheEviction) {
-    SubChunkManager manager(2);  // Small cache
+TEST(ColumnManagerTest, CacheEviction) {
+    ColumnManager manager(2);  // Small cache
 
     // Add 3 columns
     for (int i = 0; i < 3; ++i) {
@@ -158,8 +158,8 @@ TEST(SubChunkManagerTest, CacheEviction) {
     EXPECT_EQ(manager.cacheSize(), 2);
 }
 
-TEST(SubChunkManagerTest, EvictionCallback) {
-    SubChunkManager manager(2);
+TEST(ColumnManagerTest, EvictionCallback) {
+    ColumnManager manager(2);
 
     int evictionCount = 0;
     manager.setEvictionCallback([&evictionCount](std::unique_ptr<ChunkColumn>) {
@@ -176,8 +176,8 @@ TEST(SubChunkManagerTest, EvictionCallback) {
     EXPECT_EQ(evictionCount, 1);
 }
 
-TEST(SubChunkManagerTest, ChunkLoadCallback) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, ChunkLoadCallback) {
+    ColumnManager manager;
 
     std::vector<ColumnPos> loadedPositions;
     manager.setChunkLoadCallback([&loadedPositions](ColumnPos pos) {
@@ -199,8 +199,8 @@ TEST(SubChunkManagerTest, ChunkLoadCallback) {
 // Currently saving protection
 // ============================================================================
 
-TEST(SubChunkManagerTest, CantRetrieveWhileSaving) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, CantRetrieveWhileSaving) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -221,8 +221,8 @@ TEST(SubChunkManagerTest, CantRetrieveWhileSaving) {
 // GetAllDirty tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, GetAllDirty) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, GetAllDirty) {
+    ColumnManager manager;
 
     auto col1 = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     auto col2 = std::make_unique<ChunkColumn>(ColumnPos(1, 0));
@@ -244,8 +244,8 @@ TEST(SubChunkManagerTest, GetAllDirty) {
 // State tracking tests
 // ============================================================================
 
-TEST(SubChunkManagerTest, ColumnState) {
-    SubChunkManager manager;
+TEST(ColumnManagerTest, ColumnState) {
+    ColumnManager manager;
 
     auto column = std::make_unique<ChunkColumn>(ColumnPos(0, 0));
     manager.add(std::move(column));
@@ -277,7 +277,7 @@ TEST(SubChunkManagerTest, ColumnState) {
 // IOManager integration tests
 // ============================================================================
 
-class SubChunkManagerIOTest : public ::testing::Test {
+class ColumnManagerIOTest : public ::testing::Test {
 protected:
     std::filesystem::path tempDir;
 
@@ -291,8 +291,8 @@ protected:
     }
 };
 
-TEST_F(SubChunkManagerIOTest, BindUnbindIOManager) {
-    SubChunkManager manager;
+TEST_F(ColumnManagerIOTest, BindUnbindIOManager) {
+    ColumnManager manager;
     IOManager io(tempDir);
     io.start();
 
@@ -303,8 +303,8 @@ TEST_F(SubChunkManagerIOTest, BindUnbindIOManager) {
     io.stop();
 }
 
-TEST_F(SubChunkManagerIOTest, SaveViaIOManager) {
-    SubChunkManager manager;
+TEST_F(ColumnManagerIOTest, SaveViaIOManager) {
+    ColumnManager manager;
     IOManager io(tempDir);
     io.start();
 
@@ -338,7 +338,7 @@ TEST_F(SubChunkManagerIOTest, SaveViaIOManager) {
     EXPECT_TRUE(std::filesystem::exists(tempDir / "r.0.0.dat"));
 }
 
-TEST_F(SubChunkManagerIOTest, LoadViaIOManager) {
+TEST_F(ColumnManagerIOTest, LoadViaIOManager) {
     BlockTypeId stone = BlockTypeId::fromName("test:stone");
 
     // First, save a column directly via IOManager
@@ -353,9 +353,9 @@ TEST_F(SubChunkManagerIOTest, LoadViaIOManager) {
         io.stop();
     }
 
-    // Now use SubChunkManager to load it
+    // Now use ColumnManager to load it
     {
-        SubChunkManager manager;
+        ColumnManager manager;
         IOManager io(tempDir);
         io.start();
 
@@ -384,8 +384,8 @@ TEST_F(SubChunkManagerIOTest, LoadViaIOManager) {
     }
 }
 
-TEST_F(SubChunkManagerIOTest, RoundTripWithCompression) {
-    SubChunkManager manager;
+TEST_F(ColumnManagerIOTest, RoundTripWithCompression) {
+    ColumnManager manager;
     IOManager io(tempDir);
     io.start();
 
@@ -416,7 +416,7 @@ TEST_F(SubChunkManagerIOTest, RoundTripWithCompression) {
     io.stop();
 
     // Create new manager and load back
-    SubChunkManager manager2;
+    ColumnManager manager2;
     IOManager io2(tempDir);
     io2.start();
 

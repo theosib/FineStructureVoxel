@@ -1,5 +1,13 @@
 #pragma once
 
+/**
+ * @file event_queue.hpp
+ * @brief Three-queue event architecture and UpdateScheduler
+ *
+ * Design: [24-event-system.md] §24.6 Three-Queue, §24.13 UpdateScheduler
+ * Outbox consolidation: keyed by (BlockPos, EventType)
+ */
+
 #include "finevox/block_event.hpp"
 #include "finevox/position.hpp"
 

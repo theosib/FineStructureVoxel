@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file region_file.hpp
+ * @brief 32x32 chunk region file I/O
+ *
+ * Design: [11-persistence.md] §11.4 Region Files
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include <cstdint>

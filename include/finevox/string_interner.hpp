@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file string_interner.hpp
+ * @brief Global string-to-ID mapping for block type names
+ *
+ * Design: [04-core-data-structures.md] §4.3 StringInterner
+ */
+
 #include <cstdint>
 #include <string>
 #include <string_view>

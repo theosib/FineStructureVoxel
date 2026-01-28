@@ -1,5 +1,13 @@
 #pragma once
 
+/**
+ * @file blocking_queue.hpp
+ * @brief Thread-safe FIFO queue with deduplication (deprecated)
+ *
+ * Design: [24-event-system.md] §24.3 AlarmQueue
+ * @deprecated Use AlarmQueue from alarm_queue.hpp instead
+ */
+
 #include <deque>
 #include <unordered_set>
 #include <unordered_map>

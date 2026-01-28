@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file item_registry.hpp
+ * @brief Item type registration (stub)
+ *
+ * Design: [18-modules.md] §18.5 Registries
+ */
+
 #include <string>
 #include <string_view>
 #include <unordered_map>

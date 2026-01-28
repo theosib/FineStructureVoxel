@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file light_data.hpp
+ * @brief Per-block light storage and accessors
+ *
+ * Design: [09-lighting.md] §9.1 Light Data
+ */
+
 #include "finevox/position.hpp"
 #include <array>
 #include <cstdint>

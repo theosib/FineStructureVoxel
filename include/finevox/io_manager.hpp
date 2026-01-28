@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file io_manager.hpp
+ * @brief Async save/load for world persistence
+ *
+ * Design: [11-persistence.md] §11.5 IOManager
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/region_file.hpp"
@@ -15,17 +22,17 @@
 namespace finevox {
 
 // Forward declaration
-class SubChunkManager;
+class ColumnManager;
 
 // ============================================================================
 // IOManager - Async save/load for world persistence
 // ============================================================================
 //
 // Manages background I/O operations for world persistence:
-// - Save thread processes dirty columns from SubChunkManager
+// - Save thread processes dirty columns from ColumnManager
 // - Load thread handles async column loading requests
 // - Maintains open region files (LRU-cached)
-// - Coordinates with SubChunkManager to prevent save/load races
+// - Coordinates with ColumnManager to prevent save/load races
 //
 // Thread safety: All public methods are thread-safe
 //

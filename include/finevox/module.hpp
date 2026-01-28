@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file module.hpp
+ * @brief Game module loading, registration, and lifecycle
+ *
+ * Design: [18-modules.md] §18.4 ModuleLoader
+ */
+
 #include <string>
 #include <string_view>
 #include <vector>

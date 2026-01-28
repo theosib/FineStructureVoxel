@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file lod.hpp
+ * @brief Level of detail system for distant chunks
+ *
+ * Design: [07-lod.md], [22-lod-extended.md]
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/subchunk.hpp"
 #include <array>

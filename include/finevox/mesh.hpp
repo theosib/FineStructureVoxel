@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file mesh.hpp
+ * @brief Greedy meshing for SubChunk rendering
+ *
+ * Design: [06-rendering.md] §6.2 Mesh Generation
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/string_interner.hpp"  // For BlockTypeId
 #include "finevox/physics.hpp"

@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file mesh_worker_pool.hpp
+ * @brief Parallel mesh generation worker threads
+ *
+ * Design: [06-rendering.md] §6.4 Async Workers
+ */
+
 #include "finevox/mesh_rebuild_queue.hpp"
 #include "finevox/mesh.hpp"
 #include "finevox/position.hpp"

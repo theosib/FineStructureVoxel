@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file texture_manager.hpp
+ * @brief Texture and atlas management with named lookups
+ *
+ * Design: [06-rendering.md] §6.6 Textures
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/string_interner.hpp"
 #include "finevox/mesh.hpp"

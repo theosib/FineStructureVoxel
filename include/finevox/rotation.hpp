@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file rotation.hpp
+ * @brief 24 cube rotations for oriented blocks
+ *
+ * Design: [04-core-data-structures.md] §4.6 Rotation
+ */
+
 #include <cstdint>
 #include <array>
 #include "finevox/position.hpp"

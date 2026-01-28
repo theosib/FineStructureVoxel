@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file subchunk.hpp
+ * @brief 16x16x16 block volume with palette-based storage
+ *
+ * Design: [04-core-data-structures.md] §4.2 SubChunk
+ * Light storage: [09-lighting.md] §9.1
+ * Rotation storage: [04-core-data-structures.md] §4.6
+ * Block extra data: [17-implementation-phases.md] §9.1 Extra Data
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/palette.hpp"
 #include "finevox/rotation.hpp"

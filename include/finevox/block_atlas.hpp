@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file block_atlas.hpp
+ * @brief Block texture atlas and UV coordinate lookups
+ *
+ * Design: [06-rendering.md] §6.6 Block Atlas
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/string_interner.hpp"
 #include "finevox/mesh.hpp"

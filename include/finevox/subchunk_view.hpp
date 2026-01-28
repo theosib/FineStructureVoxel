@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file subchunk_view.hpp
+ * @brief GPU mesh handle and read-only subchunk access
+ *
+ * Design: [06-rendering.md] §6.5 SubChunkView
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/mesh.hpp"
 #include "finevox/lod.hpp"

@@ -38,7 +38,7 @@ add_library(finevox STATIC
     src/chunk_column.cpp
     src/rotation.cpp
     src/world.cpp
-    src/subchunk_manager.cpp
+    src/column_manager.cpp
     src/batch_builder.cpp
     src/data_container.cpp
     src/serialization.cpp
@@ -215,7 +215,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_rotation.cpp
         tests/test_world.cpp
         tests/test_lru_cache.cpp
-        tests/test_subchunk_manager.cpp
+        tests/test_column_manager.cpp
         tests/test_batch_builder.cpp
         tests/test_data_container.cpp
         tests/test_serialization.cpp

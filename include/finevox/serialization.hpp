@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file serialization.hpp
+ * @brief CBOR-based serialization for SubChunks and ChunkColumns
+ *
+ * Design: [11-persistence.md] §11.3 Serialization
+ */
+
 #include "finevox/subchunk.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/data_container.hpp"

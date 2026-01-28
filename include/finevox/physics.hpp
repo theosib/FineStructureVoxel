@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file physics.hpp
+ * @brief AABB collision detection, raycasting, and step-climbing
+ *
+ * Design: [08-physics.md] §8.1-8.7
+ */
+
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"
 #include <glm/glm.hpp>

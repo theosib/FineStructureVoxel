@@ -106,6 +106,16 @@ public:
     void setPeriodicSaveInterval(std::chrono::seconds interval);
     void setCacheCapacity(size_t capacity);
 
+    // Set activity timeout for cross-chunk update protection (default 5000ms)
+    // Columns with recent activity won't be unloaded until the timeout expires
+    void setActivityTimeout(int64_t timeoutMs);
+
+    // Set callback to check if a column can be unloaded
+    // Used by World to prevent unloading force-loaded columns
+    // Return true if unload is allowed, false to keep column loaded
+    using CanUnloadCallback = std::function<bool(ColumnPos)>;
+    void setCanUnloadCallback(CanUnloadCallback callback);
+
     // ========================================================================
     // IOManager integration
     // ========================================================================
@@ -169,6 +179,12 @@ private:
 
     // Chunk load callback (notifies when new chunks become available)
     ChunkLoadCallback chunkLoadCallback_;
+
+    // Can-unload callback (for force loader checks)
+    CanUnloadCallback canUnloadCallback_;
+
+    // Activity timeout for cross-chunk update protection (default 5 seconds)
+    int64_t activityTimeoutMs_ = 5000;
 
     // IOManager for persistence (optional, not owned)
     IOManager* ioManager_ = nullptr;

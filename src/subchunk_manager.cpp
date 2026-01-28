@@ -225,6 +225,16 @@ void SubChunkManager::setChunkLoadCallback(ChunkLoadCallback callback) {
     chunkLoadCallback_ = std::move(callback);
 }
 
+void SubChunkManager::setActivityTimeout(int64_t timeoutMs) {
+    std::unique_lock lock(mutex_);
+    activityTimeoutMs_ = timeoutMs;
+}
+
+void SubChunkManager::setCanUnloadCallback(CanUnloadCallback callback) {
+    std::unique_lock lock(mutex_);
+    canUnloadCallback_ = std::move(callback);
+}
+
 void SubChunkManager::transitionToSaveQueue(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
@@ -238,6 +248,20 @@ void SubChunkManager::transitionToUnloadCache(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
     if (it == active_.end()) return;
+
+    ColumnPos pos = ColumnPos::unpack(key);
+
+    // Check if column has recent activity (cross-chunk update protection)
+    if (it->second->column && !it->second->column->activityExpired(activityTimeoutMs_)) {
+        // Activity timer not expired - keep in active state
+        return;
+    }
+
+    // Check if external callback allows unloading (force loader check)
+    if (canUnloadCallback_ && !canUnloadCallback_(pos)) {
+        // Force loader or other reason prevents unloading - keep in active state
+        return;
+    }
 
     auto col = std::move(it->second);
     active_.erase(it);

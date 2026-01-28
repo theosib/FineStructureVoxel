@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <chrono>
 
 namespace finevox {
 
@@ -35,6 +36,26 @@ public:
 
     // Column position
     [[nodiscard]] ColumnPos position() const { return pos_; }
+
+    // ========================================================================
+    // Coordinate Conversion
+    // ========================================================================
+
+    // Get ChunkPos for a subchunk at the given Y level (subchunk Y coordinate)
+    [[nodiscard]] ChunkPos toChunkPos(int32_t chunkY) const {
+        return ChunkPos{pos_.x, chunkY, pos_.z};
+    }
+
+    // Convert world block Y to subchunk Y coordinate
+    [[nodiscard]] static int32_t worldYToChunkY(int32_t blockY) {
+        // Arithmetic right shift handles negative coordinates correctly
+        return blockY >> 4;
+    }
+
+    // Convert world block Y to local Y within subchunk (0-15)
+    [[nodiscard]] static int32_t worldYToLocalY(int32_t blockY) {
+        return blockY & 0xF;
+    }
 
     // Get block at absolute world coordinates
     // Returns AIR_BLOCK_TYPE if position is outside loaded subchunks
@@ -150,6 +171,40 @@ public:
     /// Remove column-level extra data
     void removeData();
 
+    // ========================================================================
+    // Game Tick Registry (called after loading)
+    // ========================================================================
+
+    /// Rebuild game tick registries for all subchunks in this column
+    /// Call this after loading a column from disk so that blocks with
+    /// wantsGameTicks() are properly registered.
+    /// Requires that all block type modules are already loaded.
+    void rebuildGameTickRegistries();
+
+    // ========================================================================
+    // Activity Timer (for cross-chunk update unload protection)
+    // ========================================================================
+    // When a block update event is delivered to this column, the activity
+    // timer is touched. The chunk loading system respects this timer and
+    // won't unload the column until the timer expires, preventing premature
+    // unload during redstone-like propagation across chunk boundaries.
+
+    /// Touch the activity timer (call when delivering BlockUpdate events)
+    void touchActivity();
+
+    /// Get time since last activity in milliseconds
+    /// Returns a very large value if never touched
+    [[nodiscard]] int64_t activityAgeMs() const;
+
+    /// Check if activity timer has expired
+    /// @param timeoutMs Timeout in milliseconds (default 5000 = 5 seconds)
+    [[nodiscard]] bool activityExpired(int64_t timeoutMs = 5000) const;
+
+    /// Get the last activity time point (for debugging/testing)
+    [[nodiscard]] std::chrono::steady_clock::time_point lastActivityTime() const {
+        return lastActivityTime_;
+    }
+
 private:
     ColumnPos pos_;
     std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
@@ -168,11 +223,9 @@ private:
     // Column-level extra data (pending events, biome data, etc.)
     std::unique_ptr<DataContainer> data_;
 
-    // Convert block Y to subchunk Y (handles negative correctly)
-    [[nodiscard]] static int32_t blockYToChunkY(int32_t blockY);
-
-    // Convert block Y to local Y within subchunk
-    [[nodiscard]] static int32_t blockYToLocalY(int32_t blockY);
+    // Activity timer for cross-chunk update protection
+    // Initialized to epoch (very old) so activityExpired() returns true initially
+    std::chrono::steady_clock::time_point lastActivityTime_{};
 
     // Convert local X,Z to heightmap index
     [[nodiscard]] static constexpr int32_t toHeightmapIndex(int32_t localX, int32_t localZ) {

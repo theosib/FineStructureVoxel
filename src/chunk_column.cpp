@@ -16,33 +16,19 @@ ChunkColumn::~ChunkColumn() = default;
 ChunkColumn::ChunkColumn(ChunkColumn&&) noexcept = default;
 ChunkColumn& ChunkColumn::operator=(ChunkColumn&&) noexcept = default;
 
-int32_t ChunkColumn::blockYToChunkY(int32_t blockY) {
-    // Floor division for negative numbers
-    if (blockY >= 0) {
-        return blockY / SubChunk::SIZE;
-    } else {
-        return (blockY - SubChunk::SIZE + 1) / SubChunk::SIZE;
-    }
-}
-
-int32_t ChunkColumn::blockYToLocalY(int32_t blockY) {
-    // Modulo that always gives positive result 0-15
-    return blockY & (SubChunk::SIZE - 1);
-}
-
 BlockTypeId ChunkColumn::getBlock(BlockPos pos) const {
     return getBlock(pos.x, pos.y, pos.z);
 }
 
 BlockTypeId ChunkColumn::getBlock(int32_t x, int32_t y, int32_t z) const {
-    int32_t chunkY = blockYToChunkY(y);
+    int32_t chunkY = worldYToChunkY(y);
     auto it = subChunks_.find(chunkY);
     if (it == subChunks_.end()) {
         return AIR_BLOCK_TYPE;
     }
 
     int32_t localX = x & (SubChunk::SIZE - 1);
-    int32_t localY = blockYToLocalY(y);
+    int32_t localY = worldYToLocalY(y);
     int32_t localZ = z & (SubChunk::SIZE - 1);
 
     return it->second->getBlock(localX, localY, localZ);
@@ -53,10 +39,10 @@ void ChunkColumn::setBlock(BlockPos pos, BlockTypeId type) {
 }
 
 void ChunkColumn::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-    int32_t chunkY = blockYToChunkY(y);
+    int32_t chunkY = worldYToChunkY(y);
 
     int32_t localX = x & (SubChunk::SIZE - 1);
-    int32_t localY = blockYToLocalY(y);
+    int32_t localY = worldYToLocalY(y);
     int32_t localZ = z & (SubChunk::SIZE - 1);
 
     // If setting to air and subchunk doesn't exist, nothing to do
@@ -199,7 +185,7 @@ void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, b
             // We need to look through all subchunks at this X,Z
             // Start from the block below the one we just removed
             for (int32_t y = blockY - 1; y >= -2048; --y) {
-                int32_t chunkY = blockYToChunkY(y);
+                int32_t chunkY = worldYToChunkY(y);
                 auto it = subChunks_.find(chunkY);
                 if (it == subChunks_.end()) {
                     // Skip to next subchunk below
@@ -207,7 +193,7 @@ void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, b
                     continue;
                 }
 
-                int32_t localY = blockYToLocalY(y);
+                int32_t localY = worldYToLocalY(y);
                 BlockTypeId block = it->second->getBlock(localX, localY, localZ);
 
                 // Check if this block is opaque (blocks sky light)
@@ -294,6 +280,35 @@ bool ChunkColumn::hasData() const {
 
 void ChunkColumn::removeData() {
     data_.reset();
+}
+
+// ============================================================================
+// Game Tick Registry Implementation
+// ============================================================================
+
+void ChunkColumn::rebuildGameTickRegistries() {
+    for (auto& [y, subChunk] : subChunks_) {
+        subChunk->rebuildGameTickRegistry();
+    }
+}
+
+// ============================================================================
+// Activity Timer Implementation
+// ============================================================================
+
+void ChunkColumn::touchActivity() {
+    lastActivityTime_ = std::chrono::steady_clock::now();
+}
+
+int64_t ChunkColumn::activityAgeMs() const {
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - lastActivityTime_);
+    return duration.count();
+}
+
+bool ChunkColumn::activityExpired(int64_t timeoutMs) const {
+    return activityAgeMs() >= timeoutMs;
 }
 
 }  // namespace finevox

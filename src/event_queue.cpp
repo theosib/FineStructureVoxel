@@ -1,15 +1,17 @@
 #include "finevox/event_queue.hpp"
 #include "finevox/world.hpp"
 #include "finevox/subchunk.hpp"
+#include "finevox/chunk_column.hpp"  // For ChunkColumn activity timer
 #include "finevox/block_type.hpp"    // For BlockRegistry
 #include "finevox/block_handler.hpp" // For BlockContext, BlockHandler
 
 namespace finevox {
 
 void EventOutbox::push(BlockEvent event) {
-    auto [it, inserted] = pending_.try_emplace(event.pos, event);
+    EventKey key{event.pos, event.type};
+    auto [it, inserted] = pending_.emplace(key, event);
     if (!inserted) {
-        // Event already exists for this position - merge them
+        // Same event type at same position - merge them
         it->second = mergeEvents(it->second, event);
     }
 }
@@ -24,69 +26,36 @@ void EventOutbox::swapTo(std::vector<BlockEvent>& inbox) {
     pending_.clear();
 }
 
-int EventOutbox::eventPriority(EventType type) {
-    // Higher priority events should be kept when merging different types
-    switch (type) {
-        case EventType::BlockPlaced:    return 100;
-        case EventType::BlockBroken:    return 100;
-        case EventType::BlockChanged:   return 90;
-        case EventType::TickGame:       return 80;
-        case EventType::TickScheduled:  return 80;
-        case EventType::TickRepeat:     return 80;
-        case EventType::TickRandom:     return 70;
-        case EventType::NeighborChanged: return 60;
-        case EventType::BlockUpdate:   return 55;  // Just below NeighborChanged
-        case EventType::PlayerUse:      return 50;
-        case EventType::PlayerHit:      return 50;
-        case EventType::ChunkLoaded:    return 40;
-        case EventType::ChunkUnloaded:  return 40;
-        case EventType::RepaintRequested: return 10;
-        case EventType::None:           return 0;
-    }
-    return 0;
-}
-
 BlockEvent EventOutbox::mergeEvents(const BlockEvent& existing, const BlockEvent& incoming) {
-    // Same event type - merge based on type
-    if (existing.type == incoming.type) {
-        BlockEvent merged = incoming;  // Start with incoming (more recent)
+    // Events are keyed by (pos, type), so existing.type == incoming.type is guaranteed
+    BlockEvent merged = incoming;  // Start with incoming (more recent)
 
-        switch (existing.type) {
-            case EventType::NeighborChanged:
-                // Merge face masks - OR them together
-                merged.neighborFaceMask = existing.neighborFaceMask | incoming.neighborFaceMask;
-                // Keep changedFace from incoming (most recent primary face)
-                break;
+    switch (existing.type) {
+        case EventType::NeighborChanged:
+            // Merge face masks - OR them together
+            merged.neighborFaceMask = existing.neighborFaceMask | incoming.neighborFaceMask;
+            // Keep changedFace from incoming (most recent primary face)
+            break;
 
-            case EventType::BlockPlaced:
-            case EventType::BlockBroken:
-            case EventType::BlockChanged:
-                // For block changes, keep the most recent block type info
-                // but preserve the original previousType for the full change history
-                if (existing.hasPreviousType() && !incoming.hasPreviousType()) {
-                    merged.previousType = existing.previousType;
-                }
-                break;
+        case EventType::BlockPlaced:
+        case EventType::BlockBroken:
+        case EventType::BlockChanged:
+            // For block changes, keep the most recent block type info
+            // but preserve the original previousType for the full change history
+            if (existing.hasPreviousType() && !incoming.hasPreviousType()) {
+                merged.previousType = existing.previousType;
+            }
+            break;
 
-            default:
-                // For other event types, just use the incoming event
-                break;
-        }
-
-        // Keep the earlier timestamp for ordering
-        merged.timestamp = std::min(existing.timestamp, incoming.timestamp);
-
-        return merged;
+        default:
+            // For other event types, just use the incoming event
+            break;
     }
 
-    // Different event types - keep the higher priority one
-    int existingPriority = eventPriority(existing.type);
-    int incomingPriority = eventPriority(incoming.type);
+    // Keep the earlier timestamp for ordering
+    merged.timestamp = std::min(existing.timestamp, incoming.timestamp);
 
-    if (incomingPriority >= existingPriority) {
-        return incoming;
-    }
-    return existing;
+    return merged;
 }
 
 // ============================================================================
@@ -171,6 +140,14 @@ size_t UpdateScheduler::pendingEventCount() const {
     return externalInput_.size() + inbox_.size() + outbox_.size();
 }
 
+size_t UpdateScheduler::deferredEventCount() const {
+    return deferredEvents_.size();
+}
+
+void UpdateScheduler::setChunkLoadCallback(std::function<void(ColumnPos)> callback) {
+    chunkLoadCallback_ = std::move(callback);
+}
+
 void UpdateScheduler::drainExternalInput() {
     std::lock_guard<std::mutex> lock(externalMutex_);
     for (auto& event : externalInput_) {
@@ -208,6 +185,9 @@ size_t UpdateScheduler::processEvents() {
 void UpdateScheduler::advanceGameTick() {
     ++currentTick_;
 
+    // Process deferred events whose chunks are now loaded
+    processDeferredEvents();
+
     // Generate tick events
     if (config_.gameTicksEnabled) {
         generateGameTickEvents();
@@ -221,11 +201,51 @@ void UpdateScheduler::advanceGameTick() {
     processScheduledTicks();
 }
 
-void UpdateScheduler::processEvent(const BlockEvent& event) {
+void UpdateScheduler::processDeferredEvents() {
+    if (deferredEvents_.empty()) {
+        return;
+    }
+
+    // Try to process deferred events - keep those that still can't be processed
+    std::vector<BlockEvent> stillDeferred;
+
+    for (auto& event : deferredEvents_) {
+        SubChunk* subchunk = world_.getSubChunk(event.chunkPos);
+        if (subchunk) {
+            // Chunk is now loaded - move to inbox for processing
+            inbox_.push_back(std::move(event));
+        } else {
+            // Still not loaded - keep deferred
+            stillDeferred.push_back(std::move(event));
+        }
+    }
+
+    deferredEvents_ = std::move(stillDeferred);
+}
+
+bool UpdateScheduler::processEvent(const BlockEvent& event) {
     // Get the subchunk
     SubChunk* subchunk = world_.getSubChunk(event.chunkPos);
     if (!subchunk) {
-        return;  // Chunk not loaded
+        // Chunk not loaded - for BlockUpdate events, defer and request load
+        if (event.type == EventType::BlockUpdate) {
+            deferredEvents_.push_back(event);
+            if (chunkLoadCallback_) {
+                ColumnPos colPos{event.chunkPos.x, event.chunkPos.z};
+                chunkLoadCallback_(colPos);
+            }
+            return false;  // Event was deferred, not processed
+        }
+        return true;  // Other events are dropped if chunk not loaded
+    }
+
+    // For BlockUpdate events, touch the column's activity timer
+    if (event.type == EventType::BlockUpdate) {
+        ColumnPos colPos{event.chunkPos.x, event.chunkPos.z};
+        ChunkColumn* column = world_.getColumn(colPos);
+        if (column) {
+            column->touchActivity();
+        }
     }
 
     // Calculate local index for game tick registration
@@ -251,12 +271,12 @@ void UpdateScheduler::processEvent(const BlockEvent& event) {
                 handler->onBreak(ctx);
             }
         }
-        return;
+        return true;
     }
 
     // For non-break events, need a valid block with handler
     if (blockType.isAir()) {
-        return;  // No handler for air
+        return true;  // No handler for air
     }
 
     // Look up handler (may be null for simple blocks)
@@ -333,6 +353,8 @@ void UpdateScheduler::processEvent(const BlockEvent& event) {
             // Ignore other event types for now
             break;
     }
+
+    return true;  // Event was processed
 }
 
 void UpdateScheduler::generateGameTickEvents() {

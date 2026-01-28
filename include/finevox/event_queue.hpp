@@ -72,26 +72,31 @@ public:
     void clear() { pending_.clear(); }
 
 private:
-    // Hash function for BlockPos
-    struct BlockPosHash {
-        size_t operator()(const BlockPos& pos) const {
-            // Combine x, y, z into a single hash
-            size_t h = std::hash<int32_t>{}(pos.x);
-            h ^= std::hash<int32_t>{}(pos.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            h ^= std::hash<int32_t>{}(pos.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    // Key for outbox: (BlockPos, EventType)
+    // Different event types at same position are kept separate
+    struct EventKey {
+        BlockPos pos;
+        EventType type;
+
+        bool operator==(const EventKey& other) const {
+            return pos.x == other.pos.x && pos.y == other.pos.y &&
+                   pos.z == other.pos.z && type == other.type;
+        }
+    };
+
+    // Hash function for EventKey
+    struct EventKeyHash {
+        size_t operator()(const EventKey& key) const {
+            size_t h = std::hash<int32_t>{}(key.pos.x);
+            h ^= std::hash<int32_t>{}(key.pos.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<int32_t>{}(key.pos.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.type)) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
         }
     };
 
-    // Equality for BlockPos
-    struct BlockPosEqual {
-        bool operator()(const BlockPos& a, const BlockPos& b) const {
-            return a.x == b.x && a.y == b.y && a.z == b.z;
-        }
-    };
-
     /**
-     * @brief Merge two events at the same position
+     * @brief Merge two events of the same type at the same position
      *
      * @param existing The event already in the outbox
      * @param incoming The new event being pushed
@@ -99,12 +104,7 @@ private:
      */
     static BlockEvent mergeEvents(const BlockEvent& existing, const BlockEvent& incoming);
 
-    /**
-     * @brief Get priority of an event type (higher = more important)
-     */
-    static int eventPriority(EventType type);
-
-    std::unordered_map<BlockPos, BlockEvent, BlockPosHash, BlockPosEqual> pending_;
+    std::unordered_map<EventKey, BlockEvent, EventKeyHash> pending_;
 };
 
 // ============================================================================
@@ -239,6 +239,21 @@ public:
 
     [[nodiscard]] size_t scheduledTickCount() const { return scheduledTicks_.size(); }
     [[nodiscard]] size_t pendingEventCount() const;
+    [[nodiscard]] size_t deferredEventCount() const;
+
+    // ========================================================================
+    // Deferred Events (for cross-chunk updates to unloaded chunks)
+    // ========================================================================
+
+    /**
+     * @brief Set callback to request chunk loading
+     *
+     * When a BlockUpdate targets an unloaded chunk, this callback is invoked
+     * to request the chunk be loaded. The callback should trigger async load.
+     *
+     * @param callback Function taking ColumnPos to load
+     */
+    void setChunkLoadCallback(std::function<void(ColumnPos)> callback);
 
 private:
     World& world_;
@@ -260,8 +275,18 @@ private:
     std::vector<BlockEvent> externalInput_;
     mutable std::mutex externalMutex_;
 
-    // Process a single event
-    void processEvent(const BlockEvent& event);
+    // Deferred events (for cross-chunk updates to unloaded chunks)
+    // These are checked every game tick to see if target chunks are now loaded
+    std::vector<BlockEvent> deferredEvents_;
+
+    // Callback to request chunk loading
+    std::function<void(ColumnPos)> chunkLoadCallback_;
+
+    // Process a single event (returns true if processed, false if deferred)
+    bool processEvent(const BlockEvent& event);
+
+    // Process deferred events whose chunks are now loaded
+    void processDeferredEvents();
 
     // Generate game tick events for all registered blocks
     void generateGameTickEvents();

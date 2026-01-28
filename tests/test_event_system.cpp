@@ -80,25 +80,34 @@ TEST(EventOutboxTest, DifferentPositionsNotConsolidated) {
     EXPECT_EQ(outbox.size(), 3);
 }
 
-TEST(EventOutboxTest, HigherPriorityEventKept) {
+TEST(EventOutboxTest, DifferentEventTypesKeptSeparate) {
     EventOutbox outbox;
 
     BlockPos pos{10, 20, 30};
 
-    // Push low priority event first
+    // Push two different event types at the same position
     outbox.push(BlockEvent::neighborChanged(pos, Face::PosX));
 
-    // Push higher priority event
     auto stone = BlockTypeId::fromName("eventtest:stone");
     outbox.push(BlockEvent::blockPlaced(pos, stone, AIR_BLOCK_TYPE));
 
-    EXPECT_EQ(outbox.size(), 1);
+    // Both events should be kept (keyed by pos + type)
+    EXPECT_EQ(outbox.size(), 2);
 
     std::vector<BlockEvent> inbox;
     outbox.swapTo(inbox);
 
-    EXPECT_EQ(inbox.size(), 1);
-    EXPECT_EQ(inbox[0].type, EventType::BlockPlaced);
+    EXPECT_EQ(inbox.size(), 2);
+
+    // Check both event types are present
+    bool hasNeighborChanged = false;
+    bool hasBlockPlaced = false;
+    for (const auto& event : inbox) {
+        if (event.type == EventType::NeighborChanged) hasNeighborChanged = true;
+        if (event.type == EventType::BlockPlaced) hasBlockPlaced = true;
+    }
+    EXPECT_TRUE(hasNeighborChanged);
+    EXPECT_TRUE(hasBlockPlaced);
 }
 
 // ============================================================================

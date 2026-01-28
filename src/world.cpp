@@ -269,4 +269,24 @@ void World::setForceLoaders(std::unordered_map<BlockPos, int32_t> loaders) {
     forceLoaders_ = std::move(loaders);
 }
 
+bool World::canUnloadColumn(ColumnPos pos) const {
+    std::shared_lock lock(forceLoaderMutex_);
+
+    for (const auto& [loaderPos, radius] : forceLoaders_) {
+        ChunkPos loaderChunk = ChunkPos::fromBlock(loaderPos);
+
+        // Check XZ distance only - a column spans all Y values, so if XZ distance
+        // is within radius, there's always a subchunk Y that would be in range
+        int32_t dx = std::abs(pos.x - loaderChunk.x);
+        int32_t dz = std::abs(pos.z - loaderChunk.z);
+        int32_t xzDistance = std::max(dx, dz);
+
+        if (xzDistance <= radius) {
+            return false;  // Column is within force-load radius
+        }
+    }
+
+    return true;  // No force-loader is keeping this column loaded
+}
+
 }  // namespace finevox

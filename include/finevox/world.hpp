@@ -106,6 +106,11 @@ public:
     /// Returns false if any force-loader is keeping this chunk loaded
     [[nodiscard]] bool canUnloadChunk(ChunkPos pos) const;
 
+    /// Check if a column can be unloaded
+    /// Returns false if any subchunk in the column is kept loaded by a force-loader
+    /// Use this for SubChunkManager's canUnloadCallback
+    [[nodiscard]] bool canUnloadColumn(ColumnPos pos) const;
+
     /// Check if a position is a registered force-loader
     [[nodiscard]] bool isForceLoader(BlockPos pos) const;
 

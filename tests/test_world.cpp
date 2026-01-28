@@ -495,3 +495,33 @@ TEST(WorldForceLoadTest, UpdateRadius) {
     EXPECT_FALSE(world.canUnloadChunk(ChunkPos(3, 2, 2)));
 }
 
+TEST(WorldForceLoadTest, CanUnloadColumn) {
+    World world;
+    BlockPos pos(32, 64, 32);  // Chunk (2, 4, 2), Column (2, 2)
+
+    world.registerForceLoader(pos, 0);
+
+    // Same column should not be unloadable
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(2, 2)));
+
+    // Adjacent columns should be unloadable (radius 0)
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(3, 2)));
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(2, 3)));
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(1, 2)));
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(2, 1)));
+
+    // Now test with radius
+    world.registerForceLoader(pos, 1);
+
+    // Adjacent columns should now be protected
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(3, 2)));
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(2, 3)));
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(1, 2)));
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(2, 1)));
+    EXPECT_FALSE(world.canUnloadColumn(ColumnPos(3, 3)));  // Diagonal
+
+    // Columns outside radius should be unloadable
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(4, 2)));
+    EXPECT_TRUE(world.canUnloadColumn(ColumnPos(2, 4)));
+}
+

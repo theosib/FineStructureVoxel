@@ -52,9 +52,9 @@
 - [x] `DataContainer` - Interned-key arbitrary data storage with CBOR serialization
 
 ### 0.4 Utilities
-- [x] `CoalescingQueue<T>` - Deduplicating work queue
-- [x] `CoalescingQueueTS<T>` - Thread-safe version
-- [x] `CoalescingQueueWithData<K,V>` - Version with associated data
+- [x] `BlockingQueue<T>` - Thread-safe deduplicating work queue (originally `CoalescingQueue`)
+- [x] `BlockingQueueWithData<K,V>` - Version with associated data
+- [x] `AlarmQueue<T>` / `AlarmQueueWithData<K,V>` - Evolved replacement with alarm-based wakeup
 - [x] Rotation utilities (24 rotations, composition, inverse)
 
 ### Testing
@@ -63,7 +63,7 @@
 - [x] Unit tests for palette (add types, lookup, bit-width calculations)
 - [x] Unit tests for SubChunk (get/set blocks, palette expansion)
 - [x] Unit tests for ChunkColumn
-- [x] Unit tests for CoalescingQueue variants
+- [x] Unit tests for BlockingQueue / AlarmQueue variants
 - [x] Unit tests for Rotation
 
 ---
@@ -79,7 +79,7 @@
 - [x] Subchunk iteration utilities
 
 ### 1.2 Lifecycle Management
-- [x] `SubChunkManager` - Lifecycle state machine
+- [x] `ColumnManager` - Lifecycle state machine
 - [x] States: Active, SaveQueued, Saving, UnloadQueued, Evicted
 - [x] LRU cache for recently-unloaded columns
 - [x] Reference counting for active columns
@@ -98,7 +98,7 @@
 ### 1.4 Dirty Tracking (Two Kinds)
 **Persistence dirty** (implemented in Phase 1):
 - Tracks columns that need saving to disk
-- Managed by SubChunkManager lifecycle state machine
+- Managed by ColumnManager lifecycle state machine
 - Periodic saves prevent data loss for long-lived active columns
 
 **Mesh dirty** (Phase 4-5):
@@ -137,7 +137,7 @@
 - [x] Save thread (processes save queue with callbacks)
 - [x] Load thread (async load with callbacks)
 - [x] Region file caching with LRU eviction
-- [x] Integration with SubChunkManager (coordinate lifecycle)
+- [x] Integration with ColumnManager (coordinate lifecycle)
 
 ### 2.4 Configuration & Resource Location
 - [x] ConfigManager - Global engine settings (singleton, CBOR persistence)
@@ -340,13 +340,13 @@
 - [x] `BlockingQueue` deprecated in favor of `AlarmQueue`
 
 ### 6.5 Chunk Lifecycle Integration
-- [x] `SubChunkManager::setChunkLoadCallback()` for chunk load notifications
+- [x] `ColumnManager::setChunkLoadCallback()` for chunk load notifications
 - [x] `WorldRenderer::markColumnDirty()` for marking newly loaded columns
 - [x] `MeshCacheEntry` uses `weak_ptr<SubChunk>` for version checking without ownership
 - [x] Stale meshes continue rendering after chunk unload (graceful degradation)
 - [x] Decoupled chunk lifecycle from mesh lifecycle (semi-independent systems)
 
-**Design Note:** The chunk lifecycle (SubChunkManager) and rendering lifecycle (WorldRenderer/MeshWorkerPool) are intentionally semi-independent:
+**Design Note:** The chunk lifecycle (ColumnManager) and rendering lifecycle (WorldRenderer/MeshWorkerPool) are intentionally semi-independent:
 - **Chunk unload**: Mesh views use weak pointers, so stale meshes can persist and render
 - **Chunk load**: Callback notifies renderer to request meshes for new chunks
 - **Version tracking**: Atomic `blockVersion_` counter enables lock-free staleness detection
@@ -388,7 +388,7 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 - [x] LOD mesh generation (scaling, face culling at each level)
 - [x] MeshWorkerPool cache API (getMesh, markUploaded, version/LOD tracking)
 - [x] AlarmQueue alarm-based wakeup and FIFO ordering
-- [x] SubChunkManager ChunkLoadCallback fires on add() and requestLoad()
+- [x] ColumnManager ChunkLoadCallback fires on add() and requestLoad()
 - [ ] Runtime LOD transitions at boundaries (visual testing)
 - [x] Memory usage bounded via hysteresis unloading and budget enforcement
 
@@ -516,7 +516,7 @@ modules = ["blockgame:core", "blockgame:redstone", "mymod:machines"]
 - [x] `BlockEvent` struct with factory methods
 - [x] `EventType` enum for event classification
 - [x] `BlockContext` extended with previousType/previousData for undo
-- [ ] `EventProcessor` with inbox/outbox pattern
+- [x] `UpdateScheduler` with inbox/outbox pattern (renamed from `EventProcessor`)
 - [ ] `LightingQueue` - consolidating queue for lighting thread
 - [ ] Integration of LightEngine with World (optional, config-driven)
 
@@ -641,10 +641,12 @@ See [24 - Event System](24-event-system.md) sections 24.13-24.14 for detailed de
 - [x] Random tick events generated for random positions
 - [x] Scheduled tick alarms processed from priority queue
 
-### 9.3 Engine: Force Loading
-- [ ] `ChunkForceLoader` - ticket-based force loading
-- [ ] Activity timer per chunk
-- [ ] Unload veto mechanism
+### 9.3 Engine: Force Loading ✓
+- [x] Force-loader registry in World (block position → radius)
+- [x] `registerForceLoader()` / `unregisterForceLoader()` API
+- [x] `canUnloadChunk()` / `canUnloadColumn()` veto mechanism
+- [x] Activity timeout via `ColumnManager::setActivityTimeout()`
+- [x] `CanUnloadCallback` integration with ColumnManager
 
 ### 9.4 Game: Update Propagation (Module-Defined)
 - [ ] `UpdatePropagationPolicy` interface

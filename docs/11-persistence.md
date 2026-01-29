@@ -285,6 +285,8 @@ auto regions = ResourceLocator::instance().regionPath("MyWorld", "nether");
 
 ## 11.7 Save/Load Threading
 
+> **Implementation Note:** The actual implementation is `IOManager` in `io_manager.hpp`. The threading model matches this design, but uses `BlockingQueue` instead of `CoalescingQueueTS` and integrates with `ColumnManager` for lifecycle coordination.
+
 ```cpp
 class WorldPersistence {
 public:
@@ -302,9 +304,9 @@ private:
     // One region file cache per open region
     LRUCache<RegionPos, RegionFile> regionCache_;
 
-    // Thread-safe queues
-    CoalescingQueueTS<ColumnPos, std::unique_ptr<ChunkColumn>> saveQueue_;
-    CoalescingQueueTS<ColumnPos, std::promise<...>> loadQueue_;
+    // Thread-safe queues (actual impl uses BlockingQueueWithData)
+    BlockingQueueWithData<ColumnPos, std::unique_ptr<ChunkColumn>> saveQueue_;
+    BlockingQueueWithData<ColumnPos, std::promise<...>> loadQueue_;
 };
 ```
 

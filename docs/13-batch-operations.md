@@ -186,6 +186,8 @@ batch.execute();  // Places 10,000 blocks efficiently
 
 ## 13.6 Coalescing Update Queue (Engine Utility)
 
+> **Implementation Note:** This design evolved into `BlockingQueue<T>` and then `AlarmQueue<T>` in the actual implementation. The API differs slightly (uses `push()`/`tryPop()` instead of `enqueue()`/`drain()`), and adds alarm-based wakeup for frame synchronization. See `alarm_queue.hpp` for current API.
+
 The engine provides a generic coalescing queue that games can use for their update systems:
 
 ```cpp

@@ -11,6 +11,7 @@
 #include "finevox/position.hpp"
 #include "finevox/rotation.hpp"
 #include "finevox/data_container.hpp"
+#include "finevox/block_type.hpp"
 #include <memory>
 #include <string_view>
 #include <cstdint>
@@ -251,9 +252,45 @@ public:
     [[nodiscard]] LocalBlockPos localPos() const { return localPos_; }
 
     /**
-     * @brief Get the block type at this position
+     * @brief Get the block type ID at this position
      */
     [[nodiscard]] BlockTypeId blockType() const;
+
+    /**
+     * @brief Get the BlockType definition from the registry
+     *
+     * Returns raw pointer - the registry outlives all blocks.
+     */
+    [[nodiscard]] const BlockType* type() const;
+
+    /**
+     * @brief Get the subchunk position (ChunkPos)
+     */
+    [[nodiscard]] ChunkPos chunkPos() const;
+
+    /**
+     * @brief Get the local index within the subchunk (0-4095)
+     */
+    [[nodiscard]] int32_t localIndex() const;
+
+    // ========================================================================
+    // Type Convenience Methods
+    // ========================================================================
+
+    /**
+     * @brief Check if this block is air
+     */
+    [[nodiscard]] bool isAir() const;
+
+    /**
+     * @brief Check if this block is opaque (blocks light)
+     */
+    [[nodiscard]] bool isOpaque() const;
+
+    /**
+     * @brief Check if this block is transparent
+     */
+    [[nodiscard]] bool isTransparent() const;
 
     // ========================================================================
     // Block State (Rotation)
@@ -273,6 +310,35 @@ public:
      * Stores the rotation index in the SubChunk and triggers mesh rebuild.
      */
     void setRotation(Rotation rot);
+
+    /**
+     * @brief Get the block's rotation index (0-23)
+     */
+    [[nodiscard]] uint8_t rotationIndex() const;
+
+    /**
+     * @brief Set the block's rotation by index (0-23)
+     */
+    void setRotationIndex(uint8_t index);
+
+    // ========================================================================
+    // Light Access
+    // ========================================================================
+
+    /**
+     * @brief Get sky light level at this block (0-15)
+     */
+    [[nodiscard]] uint8_t skyLight() const;
+
+    /**
+     * @brief Get block light level at this block (0-15)
+     */
+    [[nodiscard]] uint8_t blockLight() const;
+
+    /**
+     * @brief Get combined light level (max of sky and block light)
+     */
+    [[nodiscard]] uint8_t combinedLight() const;
 
     // ========================================================================
     // Extra Data (Phase 9)

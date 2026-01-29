@@ -27,12 +27,57 @@ BlockTypeId BlockContext::blockType() const {
     return subChunk_.getBlock(localPos_.x, localPos_.y, localPos_.z);
 }
 
+const BlockType* BlockContext::type() const {
+    return &BlockRegistry::global().getType(blockType());
+}
+
+ChunkPos BlockContext::chunkPos() const {
+    return subChunk_.position();
+}
+
+int32_t BlockContext::localIndex() const {
+    // Index layout: y*256 + z*16 + x
+    return localPos_.y * 256 + localPos_.z * 16 + localPos_.x;
+}
+
+bool BlockContext::isAir() const {
+    return blockType() == AIR_BLOCK_TYPE;
+}
+
+bool BlockContext::isOpaque() const {
+    return type()->isOpaque();
+}
+
+bool BlockContext::isTransparent() const {
+    return type()->isTransparent();
+}
+
 Rotation BlockContext::rotation() const {
     return subChunk_.getRotation(localPos_);
 }
 
 void BlockContext::setRotation(Rotation rot) {
     subChunk_.setRotation(localPos_, rot);
+}
+
+uint8_t BlockContext::rotationIndex() const {
+    return subChunk_.getRotationIndex(localPos_);
+}
+
+void BlockContext::setRotationIndex(uint8_t index) {
+    subChunk_.setRotationIndex(localPos_, index);
+}
+
+uint8_t BlockContext::skyLight() const {
+    return subChunk_.getSkyLight(localIndex());
+}
+
+uint8_t BlockContext::blockLight() const {
+    return subChunk_.getBlockLight(localIndex());
+}
+
+uint8_t BlockContext::combinedLight() const {
+    return subChunk_.getCombinedLight(localIndex());
 }
 
 DataContainer* BlockContext::data() {

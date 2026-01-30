@@ -210,6 +210,25 @@ public:
      */
     void pushExternalEvent(BlockEvent event);
 
+    /**
+     * @brief Push multiple external events (bulk enqueue)
+     *
+     * More efficient than multiple single pushes - takes lock once.
+     * Thread-safe: Can be called from any thread.
+     */
+    void pushExternalEvents(std::vector<BlockEvent> events);
+
+    /**
+     * @brief Push external events from a range
+     *
+     * Thread-safe: Can be called from any thread.
+     */
+    template<typename Iterator>
+    void pushExternalEvents(Iterator begin, Iterator end) {
+        std::lock_guard<std::mutex> lock(externalMutex_);
+        externalInput_.insert(externalInput_.end(), begin, end);
+    }
+
     // ========================================================================
     // Event Processing (single-threaded)
     // ========================================================================

@@ -34,6 +34,8 @@
 #include <finevox/string_interner.hpp>
 #include <finevox/resource_locator.hpp>
 #include <finevox/light_engine.hpp>
+#include <finevox/event_queue.hpp>
+#include <finevox/physics.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -43,6 +45,19 @@
 #include <cmath>
 
 using namespace finevox;
+
+// Get the block position to place a block adjacent to the hit face
+BlockPos getPlacePosition(const BlockPos& hitPos, Face face) {
+    switch (face) {
+        case Face::PosX: return BlockPos(hitPos.x + 1, hitPos.y, hitPos.z);
+        case Face::NegX: return BlockPos(hitPos.x - 1, hitPos.y, hitPos.z);
+        case Face::PosY: return BlockPos(hitPos.x, hitPos.y + 1, hitPos.z);
+        case Face::NegY: return BlockPos(hitPos.x, hitPos.y - 1, hitPos.z);
+        case Face::PosZ: return BlockPos(hitPos.x, hitPos.y, hitPos.z + 1);
+        case Face::NegZ: return BlockPos(hitPos.x, hitPos.y, hitPos.z - 1);
+        default: return hitPos;
+    }
+}
 
 // Simple first-person camera input handler
 // Uses FineVK's Camera with double-precision position support
@@ -296,10 +311,21 @@ int main(int argc, char* argv[]) {
         worldRenderer.setTextureProvider(atlas.createProvider());
         worldRenderer.initialize();
 
+        // Create UpdateScheduler for event-driven block changes
+        UpdateScheduler scheduler(world);
+
         // Create LightEngine for smooth lighting
         LightEngine lightEngine(world);
         // Increase propagation limit to allow full L1 ball (default 256 is too small)
         lightEngine.setMaxPropagationDistance(10000);
+
+        // Wire up systems to World for event-driven block changes
+        world.setLightEngine(&lightEngine);
+        world.setUpdateScheduler(&scheduler);
+
+        // Start lighting thread (processes lighting updates asynchronously)
+        lightEngine.start();
+        std::cout << "Lighting thread started (async lighting updates enabled)\n";
 
         // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
         int lightingMode = 2;  // Start with smooth lighting
@@ -379,6 +405,17 @@ int main(int argc, char* argv[]) {
         // Input state
         bool cursorCaptured = false;
         double lastMouseX = 0, lastMouseY = 0;
+
+        // Block placement state
+        BlockTypeId selectedBlock = BlockTypeId::fromName("stone");
+        int selectedBlockIndex = 0;
+        std::vector<BlockTypeId> blockPalette = {
+            BlockTypeId::fromName("stone"),
+            BlockTypeId::fromName("dirt"),
+            BlockTypeId::fromName("grass"),
+            BlockTypeId::fromName("cobble"),
+            BlockTypeId::fromName("glowstone")
+        };
 
         // Key callback
         window->onKey([&](finevk::Key key, finevk::Action action, finevk::Modifier) {
@@ -528,17 +565,71 @@ int main(int argc, char* argv[]) {
                 applyLightingMode();
                 worldRenderer.markAllDirty();  // Rebuild meshes with new lighting
             }
+
+            if (key == GLFW_KEY_TAB && action == finevk::Action::Press) {
+                // Cycle through block palette
+                selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
+                selectedBlock = blockPalette[selectedBlockIndex];
+                std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+            }
+
+            if (key >= GLFW_KEY_1 && key <= GLFW_KEY_5 && action == finevk::Action::Press) {
+                // Number keys 1-5 select block directly
+                int index = key - GLFW_KEY_1;
+                if (index < static_cast<int>(blockPalette.size())) {
+                    selectedBlockIndex = index;
+                    selectedBlock = blockPalette[selectedBlockIndex];
+                    std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+                }
+            }
         });
+
+        // Block shape provider for raycasting - full block collision for non-air blocks
+        BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode) -> const CollisionShape* {
+            BlockTypeId blockType = world.getBlock(pos);
+            if (blockType.isAir()) {
+                return nullptr;  // No collision
+            }
+            return &CollisionShape::FULL_BLOCK;
+        };
 
         // Mouse button callback
         window->onMouseButton([&](finevk::MouseButton button, finevk::Action action, finevk::Modifier) {
             if (button == GLFW_MOUSE_BUTTON_LEFT && action == finevk::Action::Press) {
                 if (!cursorCaptured) {
+                    // First click captures mouse
                     window->setMouseCaptured(true);
                     cursorCaptured = true;
                     auto mousePos = window->mousePosition();
                     lastMouseX = mousePos.x;
                     lastMouseY = mousePos.y;
+                } else {
+                    // Left click while captured = break block
+                    glm::dvec3 camPos = camera.positionD();
+                    Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+                    Vec3 direction = input.forwardVec();
+
+                    RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+                    if (result.hit) {
+                        // Use external API - triggers events, lighting, etc.
+                        world.breakBlock(result.blockPos);
+                        std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
+                    }
+                }
+            }
+            if (button == GLFW_MOUSE_BUTTON_RIGHT && action == finevk::Action::Press && cursorCaptured) {
+                // Right click = place block
+                glm::dvec3 camPos = camera.positionD();
+                Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+                Vec3 direction = input.forwardVec();
+
+                RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+                if (result.hit) {
+                    BlockPos placePos = getPlacePosition(result.blockPos, result.face);
+                    // Use external API - triggers events, lighting, etc.
+                    world.placeBlock(placePos, selectedBlock);
+                    std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                              << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                 }
             }
         });
@@ -564,6 +655,9 @@ int main(int argc, char* argv[]) {
         std::cout << "\nControls:\n";
         std::cout << "  WASD + Mouse: Move and look\n";
         std::cout << "  Space/Shift: Up/Down\n";
+        std::cout << "  Left Click: Break block (uses event system)\n";
+        std::cout << "  Right Click: Place block (uses event system)\n";
+        std::cout << "  1-5 / Tab: Select block type\n";
         std::cout << "  F1: Toggle debug camera offset\n";
         std::cout << "  F2: Teleport to large coords (1M)\n";
         std::cout << "  F3: Teleport to origin\n";
@@ -612,6 +706,14 @@ int main(int argc, char* argv[]) {
             camera.setOrientation(input.forwardVec(), glm::vec3(0, 1, 0));
             camera.updateState();
 
+            // Process events from external API (block place/break)
+            // This triggers handlers, lighting updates, neighbor notifications
+            size_t eventsProcessed = scheduler.processEvents();
+            if (eventsProcessed > 0) {
+                // Mark affected chunks dirty for mesh rebuild
+                worldRenderer.markAllDirty();  // TODO: More targeted dirty marking
+            }
+
             // Update world renderer - camera.positionD() provides high-precision position
             worldRenderer.updateCamera(camera.state(), camera.positionD());
             worldRenderer.updateMeshes(16);  // Max 16 mesh updates per frame
@@ -630,6 +732,11 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "\n\nShutting down...\n";
+
+        // Stop lighting thread before destroying world
+        lightEngine.stop();
+        std::cout << "Lighting thread stopped.\n";
+
         renderer->waitIdle();
 
     } catch (const std::exception& e) {

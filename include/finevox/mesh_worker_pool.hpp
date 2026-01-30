@@ -26,9 +26,9 @@ class World;
 class SubChunk;
 
 // Function type for checking if a chunk's mesh is stale
-// Parameters: current block version from SubChunk
+// Parameters: current block version and light version from SubChunk
 // Returns: true if mesh needs rebuild
-using StalenessChecker = std::function<bool(uint64_t currentBlockVersion)>;
+using StalenessChecker = std::function<bool(uint64_t currentBlockVersion, uint64_t currentLightVersion)>;
 
 // Chunk entry for stale chunk scanning
 // Contains what we need to check if a chunk is stale without owning it
@@ -47,11 +47,13 @@ struct ChunkTrackingEntry {
 struct MeshCacheEntry {
     // Pending mesh data (written by worker, consumed by graphics thread)
     std::optional<MeshData> pendingMesh;
-    uint64_t pendingVersion = 0;        // Block version the pending mesh was built from
+    uint64_t pendingVersion = 0;            // Block version the pending mesh was built from
+    uint64_t pendingLightVersion = 0;       // Light version the pending mesh was built from
     LODLevel pendingLOD = LODLevel::LOD0;
 
     // Uploaded mesh state (tracked for staleness detection)
-    uint64_t uploadedVersion = 0;       // Block version of currently uploaded mesh
+    uint64_t uploadedVersion = 0;           // Block version of currently uploaded mesh
+    uint64_t uploadedLightVersion = 0;      // Light version of currently uploaded mesh
     LODLevel uploadedLOD = LODLevel::LOD0;
 
     // Weak reference to subchunk for version checking
@@ -64,7 +66,8 @@ struct MeshCacheEntry {
     // Returns true if the subchunk's current version differs from uploaded version
     [[nodiscard]] bool isStale() const {
         if (auto sc = subchunk.lock()) {
-            return sc->blockVersion() != uploadedVersion;
+            return sc->blockVersion() != uploadedVersion ||
+                   sc->lightVersion() != uploadedLightVersion;
         }
         return false;  // Subchunk unloaded, not stale (will be removed)
     }

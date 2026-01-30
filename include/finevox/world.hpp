@@ -22,6 +22,10 @@ namespace finevox {
 
 // Forward declarations
 class ColumnManager;
+class LightEngine;
+class UpdateScheduler;
+struct LightingUpdate;
+struct BlockChange;  // Defined in batch_builder.hpp
 
 // World contains all chunk columns and provides block access
 // Thread-safe for concurrent read access; writes require exclusive access
@@ -36,15 +40,48 @@ public:
     World();
     ~World();
 
-    // Block access - the primary interface
+    // ========================================================================
+    // Block Access
+    // ========================================================================
+
     // Returns AIR_BLOCK_TYPE if position not loaded
     [[nodiscard]] BlockTypeId getBlock(BlockPos pos) const;
     [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const;
 
-    // Set block at position
-    // Creates column and subchunk if needed
+    // ========================================================================
+    // Internal Block API (Direct, No Events)
+    // ========================================================================
+    // Use for: terrain generation, chunk loading, bulk initialization
+    // Does NOT trigger: handlers, lighting updates, neighbor notifications
+
+    /// Set block directly without triggering events
+    /// Creates column and subchunk if needed
     void setBlock(BlockPos pos, BlockTypeId type);
     void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type);
+
+    // ========================================================================
+    // External Block API (Event-Driven)
+    // ========================================================================
+    // Use for: player actions, game logic block changes
+    // Triggers: handlers, lighting updates, neighbor notifications
+    // Requires: UpdateScheduler to be set via setUpdateScheduler()
+
+    /// Place a block through the event system
+    /// @return true if event was queued, false if no scheduler set
+    bool placeBlock(BlockPos pos, BlockTypeId type);
+
+    /// Break a block through the event system
+    /// @return true if event was queued, false if no scheduler set
+    bool breakBlock(BlockPos pos);
+
+    /// Place multiple blocks through the event system (bulk)
+    /// More efficient than individual placeBlock calls
+    /// @return number of events queued (0 if no scheduler set)
+    size_t placeBlocks(const std::vector<BlockChange>& changes);
+
+    /// Break multiple blocks through the event system (bulk)
+    /// @return number of events queued (0 if no scheduler set)
+    size_t breakBlocks(const std::vector<BlockPos>& positions);
 
     // Column access
     [[nodiscard]] ChunkColumn* getColumn(ColumnPos pos);
@@ -129,6 +166,43 @@ public:
     /// Replaces any existing force-loaders
     void setForceLoaders(std::unordered_map<BlockPos, int32_t> loaders);
 
+    // ========================================================================
+    // Lighting Integration
+    // ========================================================================
+    // Optional lighting system integration.
+    // Design: [24-event-system.md] §24.10
+
+    /// Set the light engine for this world
+    /// World does not take ownership; caller must ensure lifetime
+    void setLightEngine(LightEngine* engine);
+
+    /// Get the light engine (may be null if not set)
+    [[nodiscard]] LightEngine* lightEngine() { return lightEngine_; }
+    [[nodiscard]] const LightEngine* lightEngine() const { return lightEngine_; }
+
+    /// Enqueue a lighting update to async thread (for bulk/batch operations)
+    /// No-op if light engine is not set
+    void enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
+
+    /// Process a lighting update synchronously (for immediate visual feedback)
+    /// Use this for player-driven block changes that need instant response
+    /// No-op if light engine is not set
+    void processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
+
+    // ========================================================================
+    // Event System Integration
+    // ========================================================================
+    // Optional update scheduler for the external block API.
+    // Design: [24-event-system.md]
+
+    /// Set the update scheduler for this world
+    /// World does not take ownership; caller must ensure lifetime
+    void setUpdateScheduler(UpdateScheduler* scheduler);
+
+    /// Get the update scheduler (may be null if not set)
+    [[nodiscard]] UpdateScheduler* updateScheduler() { return updateScheduler_; }
+    [[nodiscard]] const UpdateScheduler* updateScheduler() const { return updateScheduler_; }
+
 private:
     mutable std::shared_mutex columnMutex_;
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> columns_;
@@ -140,6 +214,12 @@ private:
 
     // Helper to convert block position to column position
     [[nodiscard]] static ColumnPos blockToColumn(BlockPos pos);
+
+    // Optional light engine (not owned)
+    LightEngine* lightEngine_ = nullptr;
+
+    // Optional update scheduler for external API (not owned)
+    UpdateScheduler* updateScheduler_ = nullptr;
 };
 
 }  // namespace finevox

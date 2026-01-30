@@ -206,8 +206,9 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         // The LODRequest::accepts() method handles the hysteresis logic:
         // - Exact requests only match one LOD level
         // - Flexible requests match either neighboring level
-        uint64_t currentVersion = subchunk->blockVersion();
-        if (view->needsRebuild(currentVersion, lodRequest)) {
+        uint64_t currentBlockVersion = subchunk->blockVersion();
+        uint64_t currentLightVersion = subchunk->lightVersion();
+        if (view->needsRebuild(currentBlockVersion, currentLightVersion, lodRequest)) {
             chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
         }
     }
@@ -260,11 +261,12 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         SubChunkView* view = getOrCreateView(info.pos);
         if (!view) continue;
 
-        // CRITICAL: Capture version BEFORE reading any block data (see mesh_worker_pool.cpp)
-        // This gives us a "floor" version - if the chunk is modified during mesh build,
-        // we'll have a stale version number which triggers a rebuild next frame.
+        // CRITICAL: Capture versions BEFORE reading any block/light data (see mesh_worker_pool.cpp)
+        // This gives us "floor" versions - if the chunk is modified during mesh build,
+        // we'll have stale version numbers which triggers a rebuild next frame.
         const SubChunk* subchunk = world_.getSubChunk(info.pos);
-        uint64_t versionBeforeBuild = subchunk ? subchunk->blockVersion() : 0;
+        uint64_t blockVersionBeforeBuild = subchunk ? subchunk->blockVersion() : 0;
+        uint64_t lightVersionBeforeBuild = subchunk ? subchunk->lightVersion() : 0;
 
         // Build mesh at the LOD level specified by the request
         // For flexible requests, buildLevel() returns the finer (lower number) of the two acceptable levels
@@ -278,8 +280,9 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
         }
 
-        // Record the version and LOD we built
-        view->setLastBuiltVersion(versionBeforeBuild);
+        // Record the versions and LOD we built
+        view->setLastBuiltVersion(blockVersionBeforeBuild);
+        view->setLastBuiltLightVersion(lightVersionBeforeBuild);
         view->setLastBuiltLOD(buildLOD);
 
         ++updates;
@@ -308,16 +311,18 @@ void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
             : LODRequest::exact(LODLevel::LOD0);
 
         // Queue rebuild request - workers will build it
-        uint64_t version = subchunk->blockVersion();
-        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal(version, lodRequest));
+        uint64_t blockVersion = subchunk->blockVersion();
+        uint64_t lightVersion = subchunk->lightVersion();
+        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion, lodRequest));
 
         // Track this chunk for future stale scanning
         if (views_.find(pos) == views_.end()) {
             getOrCreateView(pos);  // Ensure view exists
         }
         auto* viewPtr = views_[pos].get();
-        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentVersion) {
-            return viewPtr->lastBuiltVersion() != currentVersion;
+        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentBlockVersion, uint64_t currentLightVersion) {
+            return viewPtr->lastBuiltVersion() != currentBlockVersion ||
+                   viewPtr->lastBuiltLightVersion() != currentLightVersion;
         });
     }
     dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
@@ -349,8 +354,9 @@ void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
                 view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
             }
 
-            // Record the version and LOD from the pending mesh
+            // Record the versions and LOD from the pending mesh
             view->setLastBuiltVersion(result.entry->pendingVersion);
+            view->setLastBuiltLightVersion(result.entry->pendingLightVersion);
             view->setLastBuiltLOD(result.entry->pendingLOD);
 
             // Mark as uploaded in the cache
@@ -724,8 +730,9 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
 
         // Create staleness checker that captures the view
         auto* viewPtr = view.get();
-        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentVersion) {
-            return viewPtr->lastBuiltVersion() != currentVersion;
+        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentBlockVersion, uint64_t currentLightVersion) {
+            return viewPtr->lastBuiltVersion() != currentBlockVersion ||
+                   viewPtr->lastBuiltLightVersion() != currentLightVersion;
         });
     }
 }

@@ -37,7 +37,7 @@ protected:
 
     // Helper to push a chunk with default request
     void pushChunk(ChunkPos pos) {
-        queue_->push(pos, MeshRebuildRequest::normal(1));
+        queue_->push(pos, MeshRebuildRequest::normal(1, 1));  // block version 1, light version 1
     }
 
     // Helper to create a shared_ptr<SubChunk> for testing

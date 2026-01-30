@@ -26,6 +26,9 @@ struct MeshRebuildRequest {
     /// If the SubChunk's version changes before processing, we build that instead
     uint64_t targetVersion = 0;
 
+    /// Target light version to build against
+    uint64_t targetLightVersion = 0;
+
     /// Priority for rebuild queue (lower = more urgent)
     /// Typical values:
     /// - 0-99: Immediate (player-initiated changes, visible chunks)
@@ -42,36 +45,36 @@ struct MeshRebuildRequest {
     /// Default constructor
     MeshRebuildRequest() = default;
 
-    /// Create request with specific priority, version, and LOD request
-    MeshRebuildRequest(uint64_t version, uint32_t prio, LODRequest lod)
-        : targetVersion(version), priority(prio), lodRequest(lod) {}
+    /// Create request with specific priority, versions, and LOD request
+    MeshRebuildRequest(uint64_t blockVersion, uint64_t lightVersion, uint32_t prio, LODRequest lod)
+        : targetVersion(blockVersion), targetLightVersion(lightVersion), priority(prio), lodRequest(lod) {}
 
-    /// Create request with specific priority, version, and exact LOD level
-    MeshRebuildRequest(uint64_t version, uint32_t prio, LODLevel lod = LODLevel::LOD0)
-        : targetVersion(version), priority(prio), lodRequest(LODRequest::exact(lod)) {}
+    /// Create request with specific priority, versions, and exact LOD level
+    MeshRebuildRequest(uint64_t blockVersion, uint64_t lightVersion, uint32_t prio, LODLevel lod = LODLevel::LOD0)
+        : targetVersion(blockVersion), targetLightVersion(lightVersion), priority(prio), lodRequest(LODRequest::exact(lod)) {}
 
     /// High priority for immediate rebuild (player action, visible change)
-    static MeshRebuildRequest immediate(uint64_t version, LODRequest lod) {
-        return MeshRebuildRequest(version, 0, lod);
+    static MeshRebuildRequest immediate(uint64_t blockVersion, uint64_t lightVersion, LODRequest lod) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 0, lod);
     }
-    static MeshRebuildRequest immediate(uint64_t version, LODLevel lod = LODLevel::LOD0) {
-        return MeshRebuildRequest(version, 0, LODRequest::exact(lod));
+    static MeshRebuildRequest immediate(uint64_t blockVersion, uint64_t lightVersion, LODLevel lod = LODLevel::LOD0) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 0, LODRequest::exact(lod));
     }
 
     /// Normal priority for regular rebuilds
-    static MeshRebuildRequest normal(uint64_t version, LODRequest lod) {
-        return MeshRebuildRequest(version, 100, lod);
+    static MeshRebuildRequest normal(uint64_t blockVersion, uint64_t lightVersion, LODRequest lod) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 100, lod);
     }
-    static MeshRebuildRequest normal(uint64_t version, LODLevel lod = LODLevel::LOD0) {
-        return MeshRebuildRequest(version, 100, LODRequest::exact(lod));
+    static MeshRebuildRequest normal(uint64_t blockVersion, uint64_t lightVersion, LODLevel lod = LODLevel::LOD0) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 100, LODRequest::exact(lod));
     }
 
     /// Low priority for background/proactive rebuilds
-    static MeshRebuildRequest background(uint64_t version, LODRequest lod) {
-        return MeshRebuildRequest(version, 1000, lod);
+    static MeshRebuildRequest background(uint64_t blockVersion, uint64_t lightVersion, LODRequest lod) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 1000, lod);
     }
-    static MeshRebuildRequest background(uint64_t version, LODLevel lod = LODLevel::LOD0) {
-        return MeshRebuildRequest(version, 1000, LODRequest::exact(lod));
+    static MeshRebuildRequest background(uint64_t blockVersion, uint64_t lightVersion, LODLevel lod = LODLevel::LOD0) {
+        return MeshRebuildRequest(blockVersion, lightVersion, 1000, LODRequest::exact(lod));
     }
 };
 
@@ -81,13 +84,14 @@ struct MeshRebuildRequest {
 
 /// Merge function for mesh rebuild requests:
 /// - Keep the higher urgency (lower priority number)
-/// - Update target version to latest
+/// - Update target versions to latest
 inline MeshRebuildRequest mergeMeshRebuildRequest(
     const MeshRebuildRequest& existing,
     const MeshRebuildRequest& newReq)
 {
     return MeshRebuildRequest(
-        newReq.targetVersion,  // Always use latest version
+        newReq.targetVersion,       // Always use latest block version
+        newReq.targetLightVersion,  // Always use latest light version
         std::min(existing.priority, newReq.priority),  // Keep highest urgency
         newReq.lodRequest  // Use latest LOD request
     );

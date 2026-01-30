@@ -1,4 +1,8 @@
 #include "finevox/world.hpp"
+#include "finevox/light_engine.hpp"
+#include "finevox/event_queue.hpp"
+#include "finevox/block_event.hpp"
+#include "finevox/batch_builder.hpp"  // For BlockChange
 
 #include <algorithm>
 #include <cstdlib>
@@ -287,6 +291,90 @@ bool World::canUnloadColumn(ColumnPos pos) const {
     }
 
     return true;  // No force-loader is keeping this column loaded
+}
+
+// ============================================================================
+// Lighting Integration
+// ============================================================================
+
+void World::setLightEngine(LightEngine* engine) {
+    lightEngine_ = engine;
+}
+
+void World::enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+    if (lightEngine_) {
+        lightEngine_->enqueue(LightingUpdate{pos, oldType, newType});
+    }
+}
+
+void World::processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+    if (lightEngine_) {
+        lightEngine_->onBlockPlaced(pos, oldType, newType);
+    }
+}
+
+// ============================================================================
+// Event System Integration
+// ============================================================================
+
+void World::setUpdateScheduler(UpdateScheduler* scheduler) {
+    updateScheduler_ = scheduler;
+}
+
+// ============================================================================
+// External Block API (Event-Driven)
+// ============================================================================
+
+bool World::placeBlock(BlockPos pos, BlockTypeId type) {
+    if (!updateScheduler_) {
+        return false;
+    }
+
+    BlockTypeId oldType = getBlock(pos);
+    updateScheduler_->pushExternalEvent(BlockEvent::blockPlaced(pos, type, oldType));
+    return true;
+}
+
+bool World::breakBlock(BlockPos pos) {
+    if (!updateScheduler_) {
+        return false;
+    }
+
+    updateScheduler_->pushExternalEvent(BlockEvent::blockBroken(pos, getBlock(pos)));
+    return true;
+}
+
+size_t World::placeBlocks(const std::vector<BlockChange>& changes) {
+    if (!updateScheduler_ || changes.empty()) {
+        return 0;
+    }
+
+    std::vector<BlockEvent> events;
+    events.reserve(changes.size());
+
+    for (const auto& change : changes) {
+        BlockTypeId oldType = getBlock(change.pos);
+        events.push_back(BlockEvent::blockPlaced(change.pos, change.newType, oldType));
+    }
+
+    updateScheduler_->pushExternalEvents(std::move(events));
+    return changes.size();
+}
+
+size_t World::breakBlocks(const std::vector<BlockPos>& positions) {
+    if (!updateScheduler_ || positions.empty()) {
+        return 0;
+    }
+
+    std::vector<BlockEvent> events;
+    events.reserve(positions.size());
+
+    for (const auto& pos : positions) {
+        events.push_back(BlockEvent::blockBroken(pos, getBlock(pos)));
+    }
+
+    updateScheduler_->pushExternalEvents(std::move(events));
+    return positions.size();
 }
 
 }  // namespace finevox

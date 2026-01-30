@@ -14,8 +14,114 @@
 #include <queue>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
 
 namespace finevox {
+
+// ============================================================================
+// LightingUpdate - Lightweight event for lighting thread
+// ============================================================================
+
+/**
+ * @brief Lighting update event (lightweight)
+ *
+ * Represents a block change that requires lighting recalculation.
+ * Design: [24-event-system.md] §24.8
+ */
+struct LightingUpdate {
+    BlockPos pos;
+    BlockTypeId oldType;
+    BlockTypeId newType;
+};
+
+// ============================================================================
+// LightingQueue - Thread-safe consolidating queue
+// ============================================================================
+
+/**
+ * @brief Consolidating queue for lighting thread
+ *
+ * If the lighting thread falls behind, only processes the latest update per
+ * block position. This prevents unbounded queue growth during heavy activity.
+ *
+ * Thread safety: All methods are thread-safe.
+ *
+ * Design: [24-event-system.md] §24.8
+ */
+class LightingQueue {
+public:
+    LightingQueue() = default;
+    ~LightingQueue() = default;
+
+    // Non-copyable
+    LightingQueue(const LightingQueue&) = delete;
+    LightingQueue& operator=(const LightingQueue&) = delete;
+
+    /**
+     * @brief Enqueue a lighting update
+     *
+     * If an update already exists for this position, the new update
+     * replaces it (consolidation by position).
+     *
+     * Thread-safe: Can be called from any thread.
+     */
+    void enqueue(LightingUpdate update);
+
+    /**
+     * @brief Dequeue a batch of updates
+     *
+     * Returns up to maxCount updates. If queue is empty, blocks until
+     * updates are available or stop() is called.
+     *
+     * @param maxCount Maximum number of updates to return
+     * @return Vector of updates (may be empty if stopped)
+     */
+    std::vector<LightingUpdate> dequeueBatch(size_t maxCount);
+
+    /**
+     * @brief Non-blocking dequeue
+     *
+     * Returns available updates without blocking.
+     *
+     * @param maxCount Maximum number of updates to return
+     * @return Vector of updates (may be empty)
+     */
+    std::vector<LightingUpdate> tryDequeueBatch(size_t maxCount);
+
+    /**
+     * @brief Check if queue is empty
+     */
+    [[nodiscard]] bool empty() const;
+
+    /**
+     * @brief Get number of pending updates (after consolidation)
+     */
+    [[nodiscard]] size_t size() const;
+
+    /**
+     * @brief Signal the queue to stop (wakes up waiting threads)
+     */
+    void stop();
+
+    /**
+     * @brief Reset the stop flag (for reuse)
+     */
+    void reset();
+
+private:
+    // Internal helper (caller must hold mutex_)
+    std::vector<LightingUpdate> tryDequeueBatchUnlocked(size_t maxCount);
+
+    // Consolidates by position - newer updates overwrite older
+    mutable std::mutex mutex_;
+    std::unordered_map<BlockPos, LightingUpdate> pending_;
+    std::condition_variable cv_;
+    std::atomic<bool> stopped_{false};
+};
 
 // Forward declarations
 class World;
@@ -46,10 +152,16 @@ using LightAttenuationCallback = std::function<uint8_t(
  * - Sky light (propagates down from exposed sky)
  * - Light attenuation through transparent blocks
  * - Custom attenuation callbacks for special materials (water)
+ * - Async lighting thread with consolidating queue
  *
  * Light values range from 0 (complete darkness) to 15 (maximum brightness).
  *
- * Thread safety: Not thread-safe. Use one LightEngine per thread or synchronize externally.
+ * Threading model:
+ * - Game logic thread calls enqueue() to submit lighting updates
+ * - Lighting thread processes updates asynchronously via LightingQueue
+ * - Consolidation prevents unbounded queue growth
+ *
+ * Design: [24-event-system.md] §24.8-24.11
  */
 class LightEngine {
 public:
@@ -58,6 +170,8 @@ public:
      * @param world World to operate on
      */
     explicit LightEngine(World& world);
+
+    ~LightEngine();
 
     // ========================================================================
     // Light Access
@@ -153,6 +267,43 @@ public:
     void clearAttenuationCallback(BlockTypeId blockType);
 
     // ========================================================================
+    // Async Lighting Thread
+    // ========================================================================
+
+    /**
+     * @brief Enqueue a lighting update (called from game logic thread)
+     *
+     * Thread-safe. Updates are consolidated by position - only the latest
+     * update for each position is processed.
+     */
+    void enqueue(LightingUpdate update);
+
+    /**
+     * @brief Start the lighting thread
+     *
+     * The thread processes updates from the queue asynchronously.
+     */
+    void start();
+
+    /**
+     * @brief Stop the lighting thread
+     *
+     * Signals the thread to stop and waits for it to finish.
+     */
+    void stop();
+
+    /**
+     * @brief Check if the lighting thread is running
+     */
+    [[nodiscard]] bool isRunning() const { return running_.load(std::memory_order_acquire); }
+
+    /**
+     * @brief Get the lighting queue (for advanced use)
+     */
+    [[nodiscard]] LightingQueue& queue() { return queue_; }
+    [[nodiscard]] const LightingQueue& queue() const { return queue_; }
+
+    // ========================================================================
     // Configuration
     // ========================================================================
 
@@ -161,6 +312,12 @@ public:
 
     /// Set maximum propagation distance per update
     void setMaxPropagationDistance(int32_t distance) { maxPropagationDistance_ = distance; }
+
+    /// Set batch size for lighting thread (updates per iteration)
+    void setBatchSize(size_t size) { batchSize_ = size; }
+
+    /// Get batch size
+    [[nodiscard]] size_t batchSize() const { return batchSize_; }
 
 private:
     World& world_;
@@ -206,6 +363,21 @@ private:
 
     // Light removal with re-propagation
     void removeLightBFS(const BlockPos& start, uint8_t startLevel, bool isSkyLight);
+
+    // Process a single lighting update (called by lighting thread)
+    void processLightingUpdate(const LightingUpdate& update);
+
+    // Lighting thread main loop
+    void lightingThreadLoop();
+
+    // ========================================================================
+    // Async Lighting Thread State
+    // ========================================================================
+
+    LightingQueue queue_;
+    std::thread thread_;
+    std::atomic<bool> running_{false};
+    size_t batchSize_ = 64;  // Updates per iteration
 };
 
 }  // namespace finevox

@@ -1162,19 +1162,47 @@ MeshData MeshBuilder::buildLODMesh(
                         glm::vec4 uvBounds = textureProvider(blockInfo.type, face);
 
                         // Sample light for this LOD cell if lighting is enabled
+                        // Sample at 4 corners of the face and take max to avoid missing nearby lights
                         float faceLight = 1.0f;
                         if ((smoothLighting_ || flatLighting_) && lightProvider_) {
-                            // Sample light from the air block adjacent to this face
-                            // Use the center of the LOD cell offset by face normal
                             auto normal = faceNormal(face);
-                            int32_t halfGrouping = grouping / 2;
-                            BlockPos samplePos{
-                                static_cast<int32_t>(worldX) + halfGrouping + normal[0],
-                                static_cast<int32_t>(worldY) + halfGrouping + normal[1],
-                                static_cast<int32_t>(worldZ) + halfGrouping + normal[2]
-                            };
-                            uint8_t lightLevel = lightProvider_(samplePos);
-                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                            uint8_t maxLight = 0;
+
+                            // Face position in the normal direction (just outside the LOD cell)
+                            int32_t normalOffset = (normal[0] + normal[1] + normal[2]) > 0 ? grouping : -1;
+
+                            // Sample at 4 corners of the face (iterate non-normal axes at 0 and grouping-1)
+                            for (int corner = 0; corner < 4; ++corner) {
+                                int32_t off1 = (corner & 1) ? grouping - 1 : 0;
+                                int32_t off2 = (corner & 2) ? grouping - 1 : 0;
+
+                                BlockPos samplePos;
+                                if (normal[0] != 0) {
+                                    // X is the face axis
+                                    samplePos = BlockPos{
+                                        static_cast<int32_t>(worldX) + normalOffset,
+                                        static_cast<int32_t>(worldY) + off1,
+                                        static_cast<int32_t>(worldZ) + off2
+                                    };
+                                } else if (normal[1] != 0) {
+                                    // Y is the face axis
+                                    samplePos = BlockPos{
+                                        static_cast<int32_t>(worldX) + off1,
+                                        static_cast<int32_t>(worldY) + normalOffset,
+                                        static_cast<int32_t>(worldZ) + off2
+                                    };
+                                } else {
+                                    // Z is the face axis
+                                    samplePos = BlockPos{
+                                        static_cast<int32_t>(worldX) + off1,
+                                        static_cast<int32_t>(worldY) + off2,
+                                        static_cast<int32_t>(worldZ) + normalOffset
+                                    };
+                                }
+
+                                maxLight = std::max(maxLight, lightProvider_(samplePos));
+                            }
+                            faceLight = static_cast<float>(maxLight) / 15.0f;
                         }
 
                         // Add the face with height limitation
@@ -1338,16 +1366,43 @@ void MeshBuilder::greedyMeshLODFace(
                 }
 
                 // Sample light for this LOD cell if lighting is enabled
+                // Sample at 4 corners of the face and take max to avoid missing nearby lights
                 if ((smoothLighting_ || flatLighting_) && lightProvider_) {
                     auto normal = faceNormal(face);
-                    int32_t halfGrouping = grouping / 2;
-                    BlockPos samplePos{
-                        static_cast<int32_t>(worldX) + halfGrouping + normal[0],
-                        static_cast<int32_t>(worldY) + halfGrouping + normal[1],
-                        static_cast<int32_t>(worldZ) + halfGrouping + normal[2]
-                    };
-                    uint8_t lightLevel = lightProvider_(samplePos);
-                    mask[maskIdx].light = static_cast<float>(lightLevel) / 15.0f;
+                    uint8_t maxLight = 0;
+
+                    // Face position in the normal direction (just outside the LOD cell)
+                    int32_t normalOffset = (normal[0] + normal[1] + normal[2]) > 0 ? grouping : -1;
+
+                    // Sample at 4 corners of the face (iterate non-normal axes at 0 and grouping-1)
+                    for (int corner = 0; corner < 4; ++corner) {
+                        int32_t off1 = (corner & 1) ? grouping - 1 : 0;
+                        int32_t off2 = (corner & 2) ? grouping - 1 : 0;
+
+                        BlockPos samplePos;
+                        if (normal[0] != 0) {
+                            samplePos = BlockPos{
+                                static_cast<int32_t>(worldX) + normalOffset,
+                                static_cast<int32_t>(worldY) + off1,
+                                static_cast<int32_t>(worldZ) + off2
+                            };
+                        } else if (normal[1] != 0) {
+                            samplePos = BlockPos{
+                                static_cast<int32_t>(worldX) + off1,
+                                static_cast<int32_t>(worldY) + normalOffset,
+                                static_cast<int32_t>(worldZ) + off2
+                            };
+                        } else {
+                            samplePos = BlockPos{
+                                static_cast<int32_t>(worldX) + off1,
+                                static_cast<int32_t>(worldY) + off2,
+                                static_cast<int32_t>(worldZ) + normalOffset
+                            };
+                        }
+
+                        maxLight = std::max(maxLight, lightProvider_(samplePos));
+                    }
+                    mask[maskIdx].light = static_cast<float>(maxLight) / 15.0f;
                 }
             }
         }

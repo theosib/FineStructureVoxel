@@ -364,7 +364,7 @@ TEST(MeshRebuildQueueTest, BasicPushPop) {
     // MeshRebuildQueue is BlockingQueueWithData<ChunkPos, MeshRebuildRequest>
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
-    queue.push(ChunkPos(1, 2, 3), MeshRebuildRequest::normal(1));
+    queue.push(ChunkPos(1, 2, 3), MeshRebuildRequest::normal(1, 1));
     EXPECT_EQ(queue.size(), 1);
 
     auto result = queue.pop();
@@ -377,11 +377,11 @@ TEST(MeshRebuildQueueTest, PriorityMerging) {
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
     // Push with normal priority
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal(1));
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal(1, 1));
     EXPECT_EQ(queue.size(), 1);
 
     // Push same position with higher priority (immediate = 0)
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::immediate(2));
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::immediate(2, 2));
     EXPECT_EQ(queue.size(), 1);  // Still 1 - merged
 
     auto result = queue.pop();
@@ -393,11 +393,11 @@ TEST(MeshRebuildQueueTest, PriorityMerging) {
 TEST(MeshRebuildQueueTest, VersionUpdate) {
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
-    // Push with version 5
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(5, 100));
+    // Push with block version 5, light version 1
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(5, 1, 100));
 
-    // Push same position with version 10
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(10, 100));
+    // Push same position with block version 10, light version 2
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(10, 2, 100));
 
     auto result = queue.pop();
     ASSERT_TRUE(result.has_value());

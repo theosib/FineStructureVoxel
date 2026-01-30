@@ -100,21 +100,25 @@ MeshWorkerPool::GetMeshResult MeshWorkerPool::getMesh(
         return result;
     }
 
-    uint64_t currentVersion = sc->blockVersion();
+    uint64_t currentBlockVersion = sc->blockVersion();
+    uint64_t currentLightVersion = sc->lightVersion();
 
     // Need rebuild if:
     // 1. No pending mesh AND (version stale OR LOD not satisfied)
     // 2. Pending mesh exists but is also stale (rare race condition)
-    bool versionStale = (entry.uploadedVersion != currentVersion);
+    bool blockVersionStale = (entry.uploadedVersion != currentBlockVersion);
+    bool lightVersionStale = (entry.uploadedLightVersion != currentLightVersion);
     bool lodMismatch = !lodRequest.accepts(entry.uploadedLOD);
-    bool pendingStale = entry.hasPendingMesh() && (entry.pendingVersion != currentVersion);
+    bool pendingStale = entry.hasPendingMesh() &&
+        (entry.pendingVersion != currentBlockVersion || entry.pendingLightVersion != currentLightVersion);
 
-    if ((!entry.hasPendingMesh() && (versionStale || lodMismatch)) || pendingStale) {
+    if ((!entry.hasPendingMesh() && (blockVersionStale || lightVersionStale || lodMismatch)) || pendingStale) {
         // Queue a rebuild request
         if (inputQueue_) {
             MeshRebuildRequest request;
             request.lodRequest = lodRequest;
-            request.targetVersion = currentVersion;
+            request.targetVersion = currentBlockVersion;
+            request.targetLightVersion = currentLightVersion;
             inputQueue_->push(pos, request);
             result.rebuildTriggered = true;
         }
@@ -135,6 +139,7 @@ void MeshWorkerPool::markUploaded(ChunkPos pos) {
     if (entry.hasPendingMesh()) {
         // Transfer pending state to uploaded state
         entry.uploadedVersion = entry.pendingVersion;
+        entry.uploadedLightVersion = entry.pendingLightVersion;
         entry.uploadedLOD = entry.pendingLOD;
         entry.pendingMesh.reset();
     }
@@ -208,7 +213,8 @@ bool MeshWorkerPool::buildMeshToCache(ChunkPos pos, const MeshRebuildRequest& re
     LODLevel buildLOD = request.lodRequest.buildLevel();
 
     MeshData meshData;
-    uint64_t builtVersion = 0;
+    uint64_t builtBlockVersion = 0;
+    uint64_t builtLightVersion = 0;
     bool success = false;
 
     try {
@@ -223,23 +229,25 @@ bool MeshWorkerPool::buildMeshToCache(ChunkPos pos, const MeshRebuildRequest& re
             if (it != meshCache_.end()) {
                 it->second.pendingMesh = MeshData{};
                 it->second.pendingVersion = 0;
+                it->second.pendingLightVersion = 0;
                 it->second.pendingLOD = buildLOD;
             }
             return true;
         }
 
-        // CRITICAL: Capture the block version BEFORE reading any block data.
+        // CRITICAL: Capture versions BEFORE reading any block/light data.
         //
         // Memory ordering ensures correctness:
-        // - Writer: blockVersion_.fetch_add(1, release) happens AFTER block data is written
-        // - Reader: blockVersion_.load(acquire) synchronizes with those writes
+        // - Writer: version_.fetch_add(1, release) happens AFTER data is written
+        // - Reader: version_.load(acquire) synchronizes with those writes
         //
-        // By reading version FIRST, we get a "floor" on what version we're building:
-        // - If chunk is modified during our read, we may see some newer blocks but miss others
+        // By reading versions FIRST, we get a "floor" on what version we're building:
+        // - If chunk is modified during our read, we may see some newer data but miss others
         // - The mesh will have version V but contain some data from V+1
         // - This is safe: the version mismatch will trigger a rebuild next frame
         // - If we read version AFTER, we'd claim version V+1 but have stale V data (unsafe!)
-        builtVersion = subchunk->blockVersion();
+        builtBlockVersion = subchunk->blockVersion();
+        builtLightVersion = subchunk->lightVersion();
 
         if (subchunk->isEmpty()) {
             // Empty subchunk - write empty mesh to cache
@@ -247,7 +255,8 @@ bool MeshWorkerPool::buildMeshToCache(ChunkPos pos, const MeshRebuildRequest& re
             auto it = meshCache_.find(pos);
             if (it != meshCache_.end()) {
                 it->second.pendingMesh = MeshData{};
-                it->second.pendingVersion = builtVersion;
+                it->second.pendingVersion = builtBlockVersion;
+                it->second.pendingLightVersion = builtLightVersion;
                 it->second.pendingLOD = buildLOD;
             }
             return true;
@@ -304,7 +313,8 @@ bool MeshWorkerPool::buildMeshToCache(ChunkPos pos, const MeshRebuildRequest& re
         auto it = meshCache_.find(pos);
         if (it != meshCache_.end()) {
             it->second.pendingMesh = std::move(meshData);
-            it->second.pendingVersion = builtVersion;
+            it->second.pendingVersion = builtBlockVersion;
+            it->second.pendingLightVersion = builtLightVersion;
             it->second.pendingLOD = buildLOD;
         }
     }
@@ -404,8 +414,9 @@ std::optional<std::pair<ChunkPos, MeshRebuildRequest>> MeshWorkerPool::findStale
             if (entry.isStale()) {
                 auto sc = entry.subchunk.lock();
                 if (sc) {
-                    uint64_t currentVersion = sc->blockVersion();
-                    return std::make_pair(pos, MeshRebuildRequest::background(currentVersion));
+                    uint64_t currentBlockVersion = sc->blockVersion();
+                    uint64_t currentLightVersion = sc->lightVersion();
+                    return std::make_pair(pos, MeshRebuildRequest::background(currentBlockVersion, currentLightVersion));
                 }
             }
         }
@@ -429,10 +440,11 @@ std::optional<std::pair<ChunkPos, MeshRebuildRequest>> MeshWorkerPool::findStale
                 continue;
             }
 
-            uint64_t currentVersion = subchunk->blockVersion();
-            if (it->isStale(currentVersion)) {
+            uint64_t currentBlockVersion = subchunk->blockVersion();
+            uint64_t currentLightVersion = subchunk->lightVersion();
+            if (it->isStale(currentBlockVersion, currentLightVersion)) {
                 // Found a stale chunk
-                return std::make_pair(it->pos, MeshRebuildRequest::background(currentVersion));
+                return std::make_pair(it->pos, MeshRebuildRequest::background(currentBlockVersion, currentLightVersion));
             }
         }
     }

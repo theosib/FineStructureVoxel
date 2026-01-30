@@ -135,6 +135,16 @@ void UpdateScheduler::pushExternalEvent(BlockEvent event) {
     externalInput_.push_back(std::move(event));
 }
 
+void UpdateScheduler::pushExternalEvents(std::vector<BlockEvent> events) {
+    if (events.empty()) return;
+
+    std::lock_guard<std::mutex> lock(externalMutex_);
+    externalInput_.reserve(externalInput_.size() + events.size());
+    for (auto& event : events) {
+        externalInput_.push_back(std::move(event));
+    }
+}
+
 size_t UpdateScheduler::pendingEventCount() const {
     std::lock_guard<std::mutex> lock(externalMutex_);
     return externalInput_.size() + inbox_.size() + outbox_.size();
@@ -262,7 +272,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         // Cancel any scheduled ticks for this position
         cancelScheduledTicks(event.pos);
 
-        // Call handler if exists
+        // Call handler if exists (before removing the block)
         if (!blockType.isAir()) {
             BlockHandler* handler = BlockRegistry::global().getHandler(blockType);
             if (handler) {
@@ -271,10 +281,48 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
                 handler->onBreak(ctx);
             }
         }
+
+        // Actually remove the block from the world
+        world_.setBlock(event.pos, AIR_BLOCK_TYPE);
+
+        // Process lighting update synchronously for immediate visual feedback
+        world_.processLightingUpdateSync(event.pos, blockType, AIR_BLOCK_TYPE);
         return true;
     }
 
-    // For non-break events, need a valid block with handler
+    // Handle BlockPlaced - need to place the block first, then call handler
+    if (event.type == EventType::BlockPlaced) {
+        // Place the block in the world first
+        world_.setBlock(event.pos, event.blockType);
+
+        // Look up handler for the NEW block type
+        BlockHandler* handler = BlockRegistry::global().getHandler(event.blockType);
+
+        // Create context and call handler
+        BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
+        ctx.setScheduler(this);
+        if (handler) {
+            ctx.setPreviousType(event.previousType);
+            handler->onPlace(ctx);
+        }
+
+        // After handler returns, check if block wants game ticks
+        // (Re-read block type in case handler changed it)
+        BlockTypeId currentType = subchunk->getBlock(
+            event.localPos.x, event.localPos.y, event.localPos.z);
+        if (!currentType.isAir()) {
+            const BlockType& typeInfo = BlockRegistry::global().getType(currentType);
+            if (typeInfo.wantsGameTicks()) {
+                subchunk->registerForGameTicks(localIndex);
+            }
+        }
+
+        // Process lighting update synchronously for immediate visual feedback
+        world_.processLightingUpdateSync(event.pos, event.previousType, currentType);
+        return true;
+    }
+
+    // For other events, need a valid block with handler
     if (blockType.isAir()) {
         return true;  // No handler for air
     }
@@ -287,25 +335,6 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
     ctx.setScheduler(this);
 
     switch (event.type) {
-        case EventType::BlockPlaced: {
-            // Call handler first
-            if (handler) {
-                ctx.setPreviousType(event.previousType);
-                handler->onPlace(ctx);
-            }
-
-            // After handler returns, check if block wants game ticks
-            // (Re-read block type in case handler changed it)
-            BlockTypeId currentType = subchunk->getBlock(
-                event.localPos.x, event.localPos.y, event.localPos.z);
-            if (!currentType.isAir()) {
-                const BlockType& typeInfo = BlockRegistry::global().getType(currentType);
-                if (typeInfo.wantsGameTicks()) {
-                    subchunk->registerForGameTicks(localIndex);
-                }
-            }
-            break;
-        }
 
         case EventType::NeighborChanged:
             if (handler) {

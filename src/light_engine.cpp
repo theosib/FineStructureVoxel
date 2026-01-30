@@ -10,10 +10,79 @@
 namespace finevox {
 
 // ============================================================================
-// Construction
+// LightingQueue Implementation
+// ============================================================================
+
+void LightingQueue::enqueue(LightingUpdate update) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Consolidate by position - newer updates overwrite older
+        pending_[update.pos] = update;
+    }
+    cv_.notify_one();
+}
+
+std::vector<LightingUpdate> LightingQueue::dequeueBatch(size_t maxCount) {
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    // Wait until we have updates or are stopped
+    cv_.wait(lock, [this] {
+        return !pending_.empty() || stopped_.load(std::memory_order_acquire);
+    });
+
+    if (stopped_.load(std::memory_order_acquire) && pending_.empty()) {
+        return {};  // Stopped and no more work
+    }
+
+    return tryDequeueBatchUnlocked(maxCount);
+}
+
+std::vector<LightingUpdate> LightingQueue::tryDequeueBatch(size_t maxCount) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return tryDequeueBatchUnlocked(maxCount);
+}
+
+std::vector<LightingUpdate> LightingQueue::tryDequeueBatchUnlocked(size_t maxCount) {
+    std::vector<LightingUpdate> batch;
+    batch.reserve(std::min(maxCount, pending_.size()));
+
+    auto it = pending_.begin();
+    while (it != pending_.end() && batch.size() < maxCount) {
+        batch.push_back(it->second);
+        it = pending_.erase(it);
+    }
+
+    return batch;
+}
+
+bool LightingQueue::empty() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pending_.empty();
+}
+
+size_t LightingQueue::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pending_.size();
+}
+
+void LightingQueue::stop() {
+    stopped_.store(true, std::memory_order_release);
+    cv_.notify_all();
+}
+
+void LightingQueue::reset() {
+    stopped_.store(false, std::memory_order_release);
+}
+
+// ============================================================================
+// LightEngine Construction/Destruction
 // ============================================================================
 
 LightEngine::LightEngine(World& world) : world_(world) {}
+
+LightEngine::~LightEngine() {
+    stop();
+}
 
 // ============================================================================
 // Position Helpers
@@ -596,6 +665,78 @@ void LightEngine::setAttenuationCallback(BlockTypeId blockType, LightAttenuation
 
 void LightEngine::clearAttenuationCallback(BlockTypeId blockType) {
     attenuationCallbacks_.erase(blockType);
+}
+
+// ============================================================================
+// Async Lighting Thread
+// ============================================================================
+
+void LightEngine::enqueue(LightingUpdate update) {
+    queue_.enqueue(std::move(update));
+}
+
+void LightEngine::start() {
+    if (running_.load(std::memory_order_acquire)) {
+        return;  // Already running
+    }
+
+    running_.store(true, std::memory_order_release);
+    queue_.reset();
+    thread_ = std::thread(&LightEngine::lightingThreadLoop, this);
+}
+
+void LightEngine::stop() {
+    if (!running_.load(std::memory_order_acquire)) {
+        return;  // Not running
+    }
+
+    running_.store(false, std::memory_order_release);
+    queue_.stop();
+
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
+void LightEngine::lightingThreadLoop() {
+    while (running_.load(std::memory_order_acquire)) {
+        // Dequeue a batch of updates (blocks if queue is empty)
+        auto batch = queue_.dequeueBatch(batchSize_);
+
+        if (batch.empty()) {
+            // Queue was stopped
+            break;
+        }
+
+        // Process each update in the batch
+        for (const auto& update : batch) {
+            processLightingUpdate(update);
+        }
+    }
+}
+
+void LightEngine::processLightingUpdate(const LightingUpdate& update) {
+    // Quick check: opaque non-emitter → opaque non-emitter is no-op
+    uint8_t oldEmission = getLightEmission(update.oldType);
+    uint8_t newEmission = getLightEmission(update.newType);
+    uint8_t oldAttenuation = getAttenuation(update.oldType);
+    uint8_t newAttenuation = getAttenuation(update.newType);
+
+    if (oldAttenuation >= 15 && newAttenuation >= 15 &&
+        oldEmission == 0 && newEmission == 0) {
+        return;  // No light change possible
+    }
+
+    // Delegate to the existing lighting update method
+    onBlockPlaced(update.pos, update.oldType, update.newType);
+
+    // Increment light version for the affected subchunk
+    ChunkPos chunkPos = toChunkPos(update.pos);
+    SubChunk* subChunk = getSubChunkForLight(chunkPos);
+    if (subChunk) {
+        // Note: lightVersion is incremented by setSkyLight/setBlockLight calls
+        // within onBlockPlaced, so no additional increment needed here
+    }
 }
 
 }  // namespace finevox

@@ -3,6 +3,7 @@
 #include "finevox/event_queue.hpp"
 #include "finevox/block_event.hpp"
 #include "finevox/batch_builder.hpp"  // For BlockChange
+#include "finevox/mesh_rebuild_queue.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -315,6 +316,46 @@ void World::processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTy
         } else {
             lightEngine_->onBlockPlaced(pos, oldType, newType);
         }
+    }
+}
+
+void World::setMeshRebuildQueue(MeshRebuildQueue* queue) {
+    meshRebuildQueue_ = queue;
+}
+
+void World::enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+    if (!lightEngine_) {
+        return;
+    }
+
+    // Check if lighting queue is empty
+    bool queueEmpty = lightEngine_->queue().empty();
+
+    if (queueEmpty) {
+        // Queue is empty - defer mesh rebuild to lighting thread
+        // The lighting thread will push remesh requests after processing
+        LightingUpdate update{pos, oldType, newType};
+        update.triggerMeshRebuild = true;
+        lightEngine_->enqueue(update);
+    } else {
+        // Queue is not empty - push remesh immediately for the changed block's chunk
+        // Lighting thread may push additional remeshes if light actually changes
+        if (meshRebuildQueue_) {
+            ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+            SubChunk* subChunk = getSubChunk(chunkPos);
+            if (subChunk) {
+                meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(
+                    subChunk->blockVersion(),
+                    subChunk->lightVersion()
+                ));
+            }
+        }
+
+        // Enqueue lighting update without triggerMeshRebuild
+        // Lighting thread will handle its own remesh requests for affected chunks
+        LightingUpdate update{pos, oldType, newType};
+        update.triggerMeshRebuild = false;
+        lightEngine_->enqueue(update);
     }
 }
 

@@ -711,6 +711,10 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
     meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
     meshWorkerPool_->setLODMergeMode(lodMergeMode_);
 
+    // Attach upload queue to wake signal for deadline-based waiting
+    // When workers push completed meshes, the graphics thread will be woken
+    meshWorkerPool_->uploadQueue().attach(&wakeSignal_);
+
     // Start worker threads
     meshWorkerPool_->start();
 
@@ -720,6 +724,9 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
 
 void WorldRenderer::disableAsyncMeshing() {
     if (!meshWorkerPool_) return;  // Already disabled
+
+    // Detach upload queue from wake signal before stopping
+    meshWorkerPool_->uploadQueue().detach();
 
     // Stop worker threads
     meshWorkerPool_->stop();
@@ -749,6 +756,63 @@ void WorldRenderer::setLODMergeMode(LODMergeMode mode) {
 
 LODMergeMode WorldRenderer::lodMergeMode() const {
     return lodMergeMode_;
+}
+
+// ============================================================================
+// Frame Timing and Deadline-Based Waiting
+// ============================================================================
+
+bool WorldRenderer::waitForMeshUploads(std::chrono::steady_clock::time_point deadline) {
+    if (!meshWorkerPool_) {
+        return true;  // No async meshing, nothing to wait for
+    }
+
+    wakeSignal_.setDeadline(deadline);
+    return wakeSignal_.wait();
+}
+
+bool WorldRenderer::waitForMeshUploads(std::chrono::milliseconds timeout) {
+    return waitForMeshUploads(std::chrono::steady_clock::now() + timeout);
+}
+
+std::chrono::microseconds WorldRenderer::recordFrameStart() {
+    auto now = std::chrono::steady_clock::now();
+
+    if (lastFrameStart_.time_since_epoch().count() != 0) {
+        // Calculate actual frame time
+        auto actualFrameTime = std::chrono::duration_cast<std::chrono::microseconds>(
+            now - lastFrameStart_);
+
+        // Clamp to reasonable range (10Hz to 240Hz) before storing
+        auto clampedUs = std::clamp(actualFrameTime.count(), int64_t{4167}, int64_t{100000});
+
+        // Store in circular buffer
+        frameHistory_[frameHistoryIndex_] = std::chrono::microseconds(clampedUs);
+        frameHistoryIndex_ = (frameHistoryIndex_ + 1) % kFrameHistorySize;
+        if (frameHistoryCount_ < kFrameHistorySize) {
+            ++frameHistoryCount_;
+        }
+    }
+
+    lastFrameStart_ = now;
+    return estimatedFramePeriod();
+}
+
+std::chrono::microseconds WorldRenderer::estimatedFramePeriod() const {
+    // If no frames observed yet, use conservative default (60Hz)
+    if (frameHistoryCount_ == 0) {
+        return std::chrono::microseconds{16667};
+    }
+
+    // Use minimum of recent frames - conservative for deadline calculation
+    // This handles variable frame rates by using the shortest observed period
+    auto minPeriod = frameHistory_[0];
+    for (size_t i = 1; i < frameHistoryCount_; ++i) {
+        if (frameHistory_[i] < minPeriod) {
+            minPeriod = frameHistory_[i];
+        }
+    }
+    return minPeriod;
 }
 
 }  // namespace finevox

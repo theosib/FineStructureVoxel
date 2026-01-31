@@ -17,6 +17,9 @@
 #include "finevox/distances.hpp"
 #include "finevox/mesh_worker_pool.hpp"
 #include "finevox/mesh_rebuild_queue.hpp"
+#include "finevox/wake_signal.hpp"
+
+#include <chrono>
 
 // FineStructureVK types
 #include <finevk/engine/camera.hpp>
@@ -29,6 +32,7 @@
 #include <unordered_map>
 #include <memory>
 #include <vector>
+#include <array>
 #include <algorithm>
 
 namespace finevox {
@@ -205,6 +209,73 @@ public:
      * @return Pointer to worker pool, or nullptr if async meshing is disabled
      */
     [[nodiscard]] MeshWorkerPool* meshWorkerPool() { return meshWorkerPool_.get(); }
+
+    /**
+     * @brief Get the mesh rebuild queue (for connecting to LightEngine)
+     * @return Pointer to rebuild queue, or nullptr if async meshing is disabled
+     */
+    [[nodiscard]] MeshRebuildQueue* meshRebuildQueue() { return meshRebuildQueue_.get(); }
+
+    // ========================================================================
+    // Frame Timing and Deadline-Based Waiting
+    // ========================================================================
+
+    /**
+     * @brief Wait for mesh uploads with a deadline
+     *
+     * Blocks until either:
+     * 1. A mesh becomes available in the upload queue
+     * 2. The deadline is reached
+     * 3. Shutdown is signaled
+     *
+     * This enables the graphics thread to sleep efficiently instead of
+     * busy-polling, while ensuring it wakes in time to submit the frame.
+     *
+     * Requires async meshing to be enabled.
+     *
+     * @param deadline Time point at which to wake regardless of uploads
+     * @return true if woken normally, false if shutdown was signaled
+     */
+    bool waitForMeshUploads(std::chrono::steady_clock::time_point deadline);
+
+    /**
+     * @brief Wait for mesh uploads with a timeout
+     *
+     * Convenience overload that calculates deadline from current time.
+     *
+     * @param timeout Maximum time to wait
+     * @return true if woken normally, false if shutdown was signaled
+     */
+    bool waitForMeshUploads(std::chrono::milliseconds timeout);
+
+    /**
+     * @brief Record frame timing for adaptive deadline calculation
+     *
+     * Call at the start of each frame to track actual frame intervals.
+     * This data is used to estimate how much time is available for
+     * mesh processing before the next frame deadline.
+     *
+     * @return Estimated time until next frame deadline (based on vsync timing)
+     */
+    std::chrono::microseconds recordFrameStart();
+
+    /**
+     * @brief Get the estimated frame period based on vsync timing
+     *
+     * Returns a smoothed average of recent frame intervals.
+     * Useful for calculating deadlines.
+     *
+     * @return Estimated frame period, or 16.67ms if no data available
+     */
+    [[nodiscard]] std::chrono::microseconds estimatedFramePeriod() const;
+
+    /**
+     * @brief Get the WakeSignal for external coordination
+     *
+     * Allows other systems to signal the graphics thread wake.
+     * Returns nullptr if async meshing is disabled.
+     */
+    [[nodiscard]] WakeSignal* wakeSignal() { return asyncMeshingEnabled() ? &wakeSignal_ : nullptr; }
 
     // ========================================================================
     // Per-Frame Updates
@@ -607,6 +678,14 @@ private:
     // Async meshing (optional)
     std::unique_ptr<MeshRebuildQueue> meshRebuildQueue_;
     std::unique_ptr<MeshWorkerPool> meshWorkerPool_;
+
+    // Frame timing and wake signal for deadline-based waiting
+    WakeSignal wakeSignal_;
+    std::chrono::steady_clock::time_point lastFrameStart_;
+    static constexpr size_t kFrameHistorySize = 8;  // Track last N frames
+    std::array<std::chrono::microseconds, kFrameHistorySize> frameHistory_;
+    size_t frameHistoryIndex_ = 0;
+    size_t frameHistoryCount_ = 0;  // How many valid entries (0 until first frame)
 
     // State
     bool initialized_ = false;

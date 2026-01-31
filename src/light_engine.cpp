@@ -245,9 +245,11 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
         uint8_t currentSkyLight = getSkyLight(pos);
         if (currentSkyLight > 0) {
             // Remove sky light at this position and below
-            SubChunk* subChunk = getOrCreateSubChunkForLight(toChunkPos(pos));
+            ChunkPos chunkPos = toChunkPos(pos);
+            SubChunk* subChunk = getOrCreateSubChunkForLight(chunkPos);
             if (subChunk) {
                 subChunk->setSkyLight(toLocalIndex(pos), 0);
+                recordAffectedChunk(chunkPos);
             }
 
             // Propagate darkness down
@@ -259,9 +261,11 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
                 BlockTypeId belowBlock = world_.getBlock(belowPos);
                 if (blocksSkyLight(belowBlock)) break;
 
-                SubChunk* belowSubChunk = getOrCreateSubChunkForLight(toChunkPos(belowPos));
+                ChunkPos belowChunkPos = toChunkPos(belowPos);
+                SubChunk* belowSubChunk = getOrCreateSubChunkForLight(belowChunkPos);
                 if (belowSubChunk) {
                     belowSubChunk->setSkyLight(toLocalIndex(belowPos), 0);
+                    recordAffectedChunk(belowChunkPos);
                 }
             }
         }
@@ -323,6 +327,7 @@ void LightEngine::propagateBlockLight(const BlockPos& pos, uint8_t lightLevel) {
     }
 
     subChunk->setBlockLight(idx, lightLevel);
+    recordAffectedChunk(toChunkPos(pos));
     propagateLightBFS(pos, lightLevel, false);
 }
 
@@ -429,6 +434,7 @@ void LightEngine::propagateSkyLight(const BlockPos& pos, uint8_t lightLevel) {
     }
 
     subChunk->setSkyLight(idx, lightLevel);
+    recordAffectedChunk(toChunkPos(pos));
     propagateLightBFS(pos, lightLevel, true);
 }
 
@@ -510,6 +516,7 @@ void LightEngine::propagateLightBFS(const BlockPos& start, uint8_t startLevel, b
                 } else {
                     neighborSubChunk->setBlockLight(neighborIdx, newLightLevel);
                 }
+                recordAffectedChunk(neighborChunk);
                 queue.push({neighborPos, newLightLevel});
             }
         }
@@ -566,6 +573,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
                 } else {
                     neighborSubChunk->setBlockLight(neighborIdx, 0);
                 }
+                recordAffectedChunk(neighborChunk);
                 removalQueue.push({neighborPos, neighborLight});
             } else {
                 // This light is from another source - need to re-propagate
@@ -575,13 +583,15 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
     }
 
     // Clear light at the starting position
-    SubChunk* startSubChunk = getSubChunkForLight(toChunkPos(start));
+    ChunkPos startChunk = toChunkPos(start);
+    SubChunk* startSubChunk = getSubChunkForLight(startChunk);
     if (startSubChunk) {
         if (isSkyLight) {
             startSubChunk->setSkyLight(toLocalIndex(start), 0);
         } else {
             startSubChunk->setBlockLight(toLocalIndex(start), 0);
         }
+        recordAffectedChunk(startChunk);
     }
 
     // Re-propagate from boundary sources
@@ -720,11 +730,40 @@ void LightEngine::lightingThreadLoop() {
             break;
         }
 
+        // Clear affected chunks set before processing batch
+        batchAffectedChunks_.clear();
+
         // Process each update in the batch
         for (const auto& update : batch) {
             processLightingUpdate(update);
         }
+
+        // After processing entire batch, push mesh rebuild requests for all affected chunks
+        flushAffectedChunks();
     }
+}
+
+void LightEngine::recordAffectedChunk(const ChunkPos& pos) {
+    batchAffectedChunks_.insert(pos);
+}
+
+void LightEngine::flushAffectedChunks() {
+    if (!meshRebuildQueue_ || batchAffectedChunks_.empty()) {
+        return;
+    }
+
+    for (const auto& chunkPos : batchAffectedChunks_) {
+        SubChunk* subChunk = getSubChunkForLight(chunkPos);
+        if (subChunk) {
+            // Push rebuild request - MeshRebuildQueue will coalesce duplicates
+            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(
+                subChunk->blockVersion(),
+                subChunk->lightVersion()
+            ));
+        }
+    }
+
+    batchAffectedChunks_.clear();
 }
 
 void LightEngine::processLightingUpdate(const LightingUpdate& update) {
@@ -741,21 +780,26 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
     }
 
     if (lightingChanged) {
-        // Delegate to the existing lighting update method
-        onBlockPlaced(update.pos, update.oldType, update.newType);
-    }
-
-    // Trigger mesh rebuild if requested
-    // This is done after lighting completes to avoid double rebuilds
-    if (update.triggerMeshRebuild && meshRebuildQueue_) {
-        ChunkPos chunkPos = toChunkPos(update.pos);
-        SubChunk* subChunk = getSubChunkForLight(chunkPos);
-        if (subChunk) {
-            uint64_t blockVersion = subChunk->blockVersion();
-            uint64_t lightVersion = subChunk->lightVersion();
-            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(blockVersion, lightVersion));
+        // Check if an opaque block was replaced with a transparent one
+        // This requires re-propagation from neighbors (onBlockRemoved logic)
+        if (oldAttenuation >= 15 && newAttenuation < 15) {
+            // Opaque → transparent: use onBlockRemoved which re-propagates from neighbors
+            onBlockRemoved(update.pos, update.oldType);
+        } else {
+            // Other cases: use onBlockPlaced
+            // Light propagation will call recordAffectedChunk for each modified chunk
+            onBlockPlaced(update.pos, update.oldType, update.newType);
         }
     }
+
+    // If triggerMeshRebuild is set, ensure this chunk is in the affected set
+    // even if no lighting changed (e.g., block change that doesn't affect light)
+    if (update.triggerMeshRebuild) {
+        recordAffectedChunk(toChunkPos(update.pos));
+    }
+
+    // Note: Mesh rebuild requests are now batched and pushed by flushAffectedChunks()
+    // at the end of each batch, not per-update
 }
 
 }  // namespace finevox

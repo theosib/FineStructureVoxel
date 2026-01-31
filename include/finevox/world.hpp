@@ -11,6 +11,7 @@
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/subchunk.hpp"
+#include "finevox/mesh_rebuild_queue.hpp"
 #include <unordered_map>
 #include <memory>
 #include <shared_mutex>
@@ -189,6 +190,23 @@ public:
     /// No-op if light engine is not set
     void processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
 
+    /// Set the mesh rebuild queue for deferred mesh generation
+    /// World does not take ownership; caller must ensure lifetime
+    void setMeshRebuildQueue(MeshRebuildQueue* queue);
+
+    /// Get the mesh rebuild queue (may be null if not set)
+    [[nodiscard]] MeshRebuildQueue* meshRebuildQueue() { return meshRebuildQueue_; }
+
+    /// Enqueue a lighting update with automatic remesh deferral
+    ///
+    /// This implements the smart deferral logic:
+    /// - If lighting queue is empty: defer remesh to lighting thread (triggerMeshRebuild=true)
+    /// - If lighting queue not empty: push remesh immediately, lighting handles additional
+    ///
+    /// Use this for player-driven block changes in the event system.
+    /// No-op if light engine is not set.
+    void enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
+
     // ========================================================================
     // Event System Integration
     // ========================================================================
@@ -217,6 +235,9 @@ private:
 
     // Optional light engine (not owned)
     LightEngine* lightEngine_ = nullptr;
+
+    // Optional mesh rebuild queue for push-based meshing (not owned)
+    MeshRebuildQueue* meshRebuildQueue_ = nullptr;
 
     // Optional update scheduler for external API (not owned)
     UpdateScheduler* updateScheduler_ = nullptr;

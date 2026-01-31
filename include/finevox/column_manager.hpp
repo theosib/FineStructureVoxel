@@ -10,7 +10,7 @@
 #include "finevox/position.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/lru_cache.hpp"
-#include "finevox/blocking_queue.hpp"
+#include "finevox/deprecated/blocking_queue.hpp"
 #include <memory>
 #include <shared_mutex>
 #include <chrono>

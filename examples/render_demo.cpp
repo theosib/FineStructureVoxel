@@ -92,16 +92,17 @@ struct CameraInput {
 
     // Apply movement to camera using double-precision
     void applyMovement(finevk::Camera& camera, float dt) {
-        glm::dvec3 forward{
-            std::cos(pitch) * std::sin(yaw),
-            std::sin(pitch),
-            std::cos(pitch) * std::cos(yaw)
+        // Horizontal forward (XZ plane only, ignoring pitch)
+        glm::dvec3 horizontalForward{
+            std::sin(yaw),
+            0.0,
+            std::cos(yaw)
         };
-        glm::dvec3 right = glm::normalize(glm::cross(forward, glm::dvec3(0, 1, 0)));
+        glm::dvec3 right = glm::normalize(glm::cross(horizontalForward, glm::dvec3(0, 1, 0)));
 
         glm::dvec3 velocity{0.0};
-        if (moveForward) velocity += forward;
-        if (moveBack) velocity -= forward;
+        if (moveForward) velocity += horizontalForward;
+        if (moveBack) velocity -= horizontalForward;
         if (moveRight) velocity += right;
         if (moveLeft) velocity -= right;
         if (moveUp) velocity.y += 1.0;
@@ -380,6 +381,13 @@ int main(int argc, char* argv[]) {
             worldRenderer.enableAsyncMeshing();
             std::cout << "Async meshing enabled with "
                       << worldRenderer.meshWorkerPool()->threadCount() << " worker threads\n";
+
+            // Connect MeshRebuildQueue to LightEngine and World for push-based meshing
+            if (worldRenderer.meshRebuildQueue()) {
+                lightEngine.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
+                world.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
+                std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
+            }
         }
 
         // Mark all chunks as dirty to generate initial meshes
@@ -688,6 +696,9 @@ int main(int argc, char* argv[]) {
         while (window->isOpen()) {
             window->pollEvents();
 
+            // Record frame start and get estimated frame period (tracks vsync timing)
+            auto framePeriod = worldRenderer.recordFrameStart();
+
             // Calculate delta time
             auto now = std::chrono::high_resolution_clock::now();
             float dt = std::chrono::duration<float>(now - lastTime).count();
@@ -702,6 +713,7 @@ int main(int argc, char* argv[]) {
                           << "/" << worldRenderer.loadedChunkCount()
                           << " | Culled: " << worldRenderer.culledChunkCount()
                           << " | Tris: " << worldRenderer.renderedTriangleCount()
+                          << " | Frame: " << framePeriod.count() / 1000.0f << "ms"
                           << "\r" << std::flush;
                 frameCount = 0;
                 fpsTimer = 0.0f;
@@ -715,14 +727,40 @@ int main(int argc, char* argv[]) {
             // Process events from external API (block place/break)
             // This triggers handlers, lighting updates, neighbor notifications
             size_t eventsProcessed = scheduler.processEvents();
-            if (eventsProcessed > 0) {
-                // Mark affected chunks dirty for mesh rebuild
-                worldRenderer.markAllDirty();  // TODO: More targeted dirty marking
+            if (eventsProcessed > 0 && !worldRenderer.asyncMeshingEnabled()) {
+                // For sync meshing, mark chunks dirty for rebuild
+                // Async meshing uses push-based system (lighting thread handles remesh)
+                worldRenderer.markAllDirty();
             }
 
             // Update world renderer - camera.positionD() provides high-precision position
             worldRenderer.updateCamera(camera.state(), camera.positionD());
-            worldRenderer.updateMeshes(16);  // Max 16 mesh updates per frame
+
+            // For async meshing: wait for mesh uploads with deadline, processing as they arrive
+            // This allows the graphics thread to sleep efficiently instead of busy-polling.
+            // We use half the frame period as a safety margin for render/submit.
+            if (worldRenderer.asyncMeshingEnabled()) {
+                // Calculate deadline once - this is the fixed point we must render by
+                auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::microseconds(framePeriod.count() / 2);
+
+                // Loop: wait for meshes, process them, repeat until deadline
+                // When woken by a mesh arriving, we process and go back to waiting
+                // on the SAME deadline. Loop exits when deadline reached.
+                while (std::chrono::steady_clock::now() < deadline) {
+                    // Wait returns true if woken normally (mesh or deadline), false on shutdown
+                    if (!worldRenderer.waitForMeshUploads(deadline)) {
+                        break;  // Shutdown signaled
+                    }
+
+                    // Process whatever meshes are ready (non-blocking)
+                    // This drains the queue each time we wake
+                    worldRenderer.updateMeshes(0);  // 0 = unlimited, drain queue
+                }
+            } else {
+                // Sync meshing: just process directly
+                worldRenderer.updateMeshes(16);
+            }
 
             // Render
             if (auto frame = renderer->beginFrame()) {

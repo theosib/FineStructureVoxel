@@ -397,6 +397,16 @@ private:
 
     // Mesh rebuild queue for deferred mesh generation
     MeshRebuildQueue* meshRebuildQueue_ = nullptr;
+
+    // Tracks chunks affected during current batch processing
+    // Used to batch mesh rebuild requests at end of each lighting batch
+    std::unordered_set<ChunkPos> batchAffectedChunks_;
+
+    // Record a chunk as affected by light changes (for batch mesh rebuild)
+    void recordAffectedChunk(const ChunkPos& pos);
+
+    // Push mesh rebuild requests for all affected chunks and clear the set
+    void flushAffectedChunks();
 };
 
 }  // namespace finevox

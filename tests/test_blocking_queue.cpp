@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/blocking_queue.hpp"
+#include "finevox/deprecated/blocking_queue.hpp"
 #include "finevox/mesh_rebuild_queue.hpp"
 #include "finevox/position.hpp"
 #include <thread>

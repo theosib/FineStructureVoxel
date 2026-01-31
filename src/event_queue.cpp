@@ -285,8 +285,10 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         // Actually remove the block from the world
         world_.setBlock(event.pos, AIR_BLOCK_TYPE);
 
-        // Process lighting update synchronously for immediate visual feedback
-        world_.processLightingUpdateSync(event.pos, blockType, AIR_BLOCK_TYPE);
+        // Enqueue lighting update with smart remesh deferral
+        // If lighting queue is empty, lighting thread handles remesh
+        // Otherwise we push remesh immediately and lighting handles additional
+        world_.enqueueLightingUpdateWithRemesh(event.pos, blockType, AIR_BLOCK_TYPE);
         return true;
     }
 
@@ -317,8 +319,10 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
             }
         }
 
-        // Process lighting update synchronously for immediate visual feedback
-        world_.processLightingUpdateSync(event.pos, event.previousType, currentType);
+        // Enqueue lighting update with smart remesh deferral
+        // If lighting queue is empty, lighting thread handles remesh
+        // Otherwise we push remesh immediately and lighting handles additional
+        world_.enqueueLightingUpdateWithRemesh(event.pos, event.previousType, currentType);
         return true;
     }
 

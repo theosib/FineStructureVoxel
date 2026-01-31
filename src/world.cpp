@@ -309,7 +309,12 @@ void World::enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId
 
 void World::processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
     if (lightEngine_) {
-        lightEngine_->onBlockPlaced(pos, oldType, newType);
+        if (newType.isAir() && !oldType.isAir()) {
+            // Block was removed - use onBlockRemoved which has logic to restore light
+            lightEngine_->onBlockRemoved(pos, oldType);
+        } else {
+            lightEngine_->onBlockPlaced(pos, oldType, newType);
+        }
     }
 }
 

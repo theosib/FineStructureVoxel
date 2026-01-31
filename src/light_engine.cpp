@@ -249,7 +249,7 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
             SubChunk* subChunk = getOrCreateSubChunkForLight(chunkPos);
             if (subChunk) {
                 subChunk->setSkyLight(toLocalIndex(pos), 0);
-                recordAffectedChunk(chunkPos);
+                recordAffectedChunk(pos);
             }
 
             // Propagate darkness down
@@ -265,7 +265,7 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
                 SubChunk* belowSubChunk = getOrCreateSubChunkForLight(belowChunkPos);
                 if (belowSubChunk) {
                     belowSubChunk->setSkyLight(toLocalIndex(belowPos), 0);
-                    recordAffectedChunk(belowChunkPos);
+                    recordAffectedChunk(belowPos);
                 }
             }
         }
@@ -327,7 +327,7 @@ void LightEngine::propagateBlockLight(const BlockPos& pos, uint8_t lightLevel) {
     }
 
     subChunk->setBlockLight(idx, lightLevel);
-    recordAffectedChunk(toChunkPos(pos));
+    recordAffectedChunk(pos);
     propagateLightBFS(pos, lightLevel, false);
 }
 
@@ -434,7 +434,7 @@ void LightEngine::propagateSkyLight(const BlockPos& pos, uint8_t lightLevel) {
     }
 
     subChunk->setSkyLight(idx, lightLevel);
-    recordAffectedChunk(toChunkPos(pos));
+    recordAffectedChunk(pos);
     propagateLightBFS(pos, lightLevel, true);
 }
 
@@ -516,7 +516,7 @@ void LightEngine::propagateLightBFS(const BlockPos& start, uint8_t startLevel, b
                 } else {
                     neighborSubChunk->setBlockLight(neighborIdx, newLightLevel);
                 }
-                recordAffectedChunk(neighborChunk);
+                recordAffectedChunk(neighborPos);
                 queue.push({neighborPos, newLightLevel});
             }
         }
@@ -573,7 +573,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
                 } else {
                     neighborSubChunk->setBlockLight(neighborIdx, 0);
                 }
-                recordAffectedChunk(neighborChunk);
+                recordAffectedChunk(neighborPos);
                 removalQueue.push({neighborPos, neighborLight});
             } else {
                 // This light is from another source - need to re-propagate
@@ -591,7 +591,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
         } else {
             startSubChunk->setBlockLight(toLocalIndex(start), 0);
         }
-        recordAffectedChunk(startChunk);
+        recordAffectedChunk(start);
     }
 
     // Re-propagate from boundary sources
@@ -743,8 +743,34 @@ void LightEngine::lightingThreadLoop() {
     }
 }
 
-void LightEngine::recordAffectedChunk(const ChunkPos& pos) {
-    batchAffectedChunks_.insert(pos);
+void LightEngine::recordAffectedChunk(const BlockPos& pos) {
+    ChunkPos chunkPos = toChunkPos(pos);
+    batchAffectedChunks_.insert(chunkPos);
+
+    // Check if position is at subchunk boundary - if so, also mark adjacent chunk
+    // since faces in neighboring chunks may sample light from this position.
+    // Local coordinates within a 16x16x16 subchunk
+    int32_t localX = ((pos.x % 16) + 16) % 16;
+    int32_t localY = ((pos.y % 16) + 16) % 16;
+    int32_t localZ = ((pos.z % 16) + 16) % 16;
+
+    if (localX == 0) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x - 1, chunkPos.y, chunkPos.z});
+    } else if (localX == 15) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x + 1, chunkPos.y, chunkPos.z});
+    }
+
+    if (localY == 0) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y - 1, chunkPos.z});
+    } else if (localY == 15) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y + 1, chunkPos.z});
+    }
+
+    if (localZ == 0) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y, chunkPos.z - 1});
+    } else if (localZ == 15) {
+        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y, chunkPos.z + 1});
+    }
 }
 
 void LightEngine::flushAffectedChunks() {
@@ -795,7 +821,7 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
     // If triggerMeshRebuild is set, ensure this chunk is in the affected set
     // even if no lighting changed (e.g., block change that doesn't affect light)
     if (update.triggerMeshRebuild) {
-        recordAffectedChunk(toChunkPos(update.pos));
+        recordAffectedChunk(update.pos);
     }
 
     // Note: Mesh rebuild requests are now batched and pushed by flushAffectedChunks()

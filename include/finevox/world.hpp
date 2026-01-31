@@ -207,6 +207,12 @@ public:
     /// No-op if light engine is not set.
     void enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
 
+    /// Set whether to always defer mesh rebuilds to the lighting thread
+    /// When true, bypasses the "queue empty" check and always defers.
+    /// Useful for testing to avoid visual blinks from premature mesh rebuilds.
+    void setAlwaysDeferMeshRebuild(bool defer) { alwaysDeferMeshRebuild_ = defer; }
+    [[nodiscard]] bool alwaysDeferMeshRebuild() const { return alwaysDeferMeshRebuild_; }
+
     // ========================================================================
     // Event System Integration
     // ========================================================================
@@ -241,6 +247,9 @@ private:
 
     // Optional update scheduler for external API (not owned)
     UpdateScheduler* updateScheduler_ = nullptr;
+
+    // Config: always defer mesh rebuilds to lighting thread (for testing)
+    bool alwaysDeferMeshRebuild_ = false;
 };
 
 }  // namespace finevox

@@ -130,6 +130,21 @@ public:
     void setLODMergeMode(LODMergeMode mode) { lodMergeMode_ = mode; }
     [[nodiscard]] LODMergeMode lodMergeMode() const { return lodMergeMode_; }
 
+    // Set light provider for smooth/flat lighting calculations
+    // Thread-safe: can be called while workers are running
+    void setLightProvider(BlockLightProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        lightProvider_ = std::move(provider);
+    }
+
+    // Configure smooth lighting (interpolated vertex lighting)
+    void setSmoothLighting(bool enabled) { smoothLighting_ = enabled; }
+    [[nodiscard]] bool smoothLighting() const { return smoothLighting_; }
+
+    // Configure flat lighting (raw L1 ball, no smoothing)
+    void setFlatLighting(bool enabled) { flatLighting_ = enabled; }
+    [[nodiscard]] bool flatLighting() const { return flatLighting_; }
+
     // ========================================================================
     // Alarm-based Wake Support
     // ========================================================================
@@ -171,6 +186,11 @@ private:
     // Mesh settings
     bool greedyMeshing_ = true;
     LODMergeMode lodMergeMode_ = LODMergeMode::FullHeight;
+
+    // Lighting settings
+    BlockLightProvider lightProvider_;
+    bool smoothLighting_ = false;
+    bool flatLighting_ = false;
 
     // Statistics
     Stats stats_;

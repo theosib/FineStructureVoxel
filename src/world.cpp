@@ -328,11 +328,12 @@ void World::enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, B
         return;
     }
 
-    // Check if lighting queue is empty
-    bool queueEmpty = lightEngine_->queue().empty();
+    // Check if we should defer mesh rebuild to the lighting thread
+    // Defer if: forced defer is enabled, OR the lighting queue is empty (no backlog)
+    bool shouldDefer = alwaysDeferMeshRebuild_ || lightEngine_->queue().empty();
 
-    if (queueEmpty) {
-        // Queue is empty - defer mesh rebuild to lighting thread
+    if (shouldDefer) {
+        // Queue is empty (or forced defer) - defer mesh rebuild to lighting thread
         // The lighting thread will push remesh requests after processing
         LightingUpdate update{pos, oldType, newType};
         update.triggerMeshRebuild = true;

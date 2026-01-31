@@ -403,7 +403,9 @@ private:
     std::unordered_set<ChunkPos> batchAffectedChunks_;
 
     // Record a chunk as affected by light changes (for batch mesh rebuild)
-    void recordAffectedChunk(const ChunkPos& pos);
+    // Also marks adjacent chunks if position is at a subchunk boundary,
+    // since faces in neighboring chunks may sample light from this position.
+    void recordAffectedChunk(const BlockPos& pos);
 
     // Push mesh rebuild requests for all affected chunks and clear the set
     void flushAffectedChunks();

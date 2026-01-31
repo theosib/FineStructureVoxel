@@ -222,7 +222,7 @@ int main(int argc, char* argv[]) {
     // Parse command line
     bool startAtLargeCoords = false;
     bool singleBlockMode = false;
-    bool useAsyncMeshing = false;
+    bool useAsyncMeshing = true;  // Async is default (prevents lighting blink artifacts)
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
             startAtLargeCoords = true;
@@ -232,6 +232,9 @@ int main(int argc, char* argv[]) {
         }
         if (std::string(argv[i]) == "--async") {
             useAsyncMeshing = true;
+        }
+        if (std::string(argv[i]) == "--sync") {
+            useAsyncMeshing = false;
         }
     }
 
@@ -386,6 +389,9 @@ int main(int argc, char* argv[]) {
             if (worldRenderer.meshRebuildQueue()) {
                 lightEngine.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
                 world.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
+                // Conditional defer: only defer if lighting queue is empty
+                // Set to true to always defer (prevents visual blink but adds latency)
+                world.setAlwaysDeferMeshRebuild(false);
                 std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
             }
         }
@@ -685,7 +691,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  V: Print mesh statistics\n";
         std::cout << "  Click: Capture mouse\n";
         std::cout << "  Escape: Release mouse / Exit\n";
-        std::cout << "\nFlags: --single-block, --large-coords, --async\n\n";
+        std::cout << "\nFlags: --single-block, --large-coords, --sync (async is default)\n\n";
 
         // Timing
         auto lastTime = std::chrono::high_resolution_clock::now();

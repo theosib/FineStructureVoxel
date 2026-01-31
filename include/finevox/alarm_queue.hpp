@@ -322,22 +322,26 @@ public:
     // Push with data.
     // Returns true if key was newly added, false if merged with existing.
     bool push(const Key& key, const Data& data) {
+        bool isNew = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
 
             auto it = dataMap_.find(key);
             if (it != dataMap_.end()) {
                 it->second = merge_(it->second, data);
-                return false;
+                // Key already exists in queue, just merge data
+                // Still notify in case workers are waiting - the data was updated!
+            } else {
+                queue_.push_back(key);
+                present_.insert(key);
+                dataMap_[key] = data;
+                isNew = true;
             }
-
-            queue_.push_back(key);
-            present_.insert(key);
-            dataMap_[key] = data;
         }
 
+        // Always notify - either new work was added, or existing work was updated
         condition_.notify_all();
-        return true;
+        return isNew;
     }
 
     // Try to pop front with its data (non-blocking).

@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
+#include <cmath>
 #include "finevox/light_data.hpp"
 #include "finevox/light_engine.hpp"
 #include "finevox/block_type.hpp"
 #include "finevox/world.hpp"
 #include "finevox/chunk_column.hpp"
 #include "finevox/subchunk.hpp"
+#include "finevox/mesh.hpp"
 
 using namespace finevox;
 
@@ -898,4 +900,595 @@ TEST_F(LightingCorrectnessTest, SurroundThenRemoveOneBlock) {
         }
     }
     EXPECT_TRUE(mismatches.empty());
+}
+
+// ============================================================================
+// Cross-Subchunk Boundary Mesh Rebuild Tests
+// ============================================================================
+
+// Test that when light changes at a subchunk boundary, both adjacent subchunks
+// are marked for mesh rebuild (since faces in one subchunk may sample light
+// from the other subchunk).
+TEST(CrossSubchunkBoundaryTest, LightChangeAtYBoundaryMarksBothSubchunks) {
+    World world;
+    LightEngine engine(world);
+
+    // Create a mesh rebuild queue to capture which chunks get marked
+    MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+    engine.setMeshRebuildQueue(&meshQueue);
+
+    // Register a torch block type
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("boundary_test:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("boundary_test:torch");
+
+    // Register a stone block type
+    BlockType stone;
+    stone.setOpaque(true)
+         .setLightEmission(0)
+         .setLightAttenuation(15)
+         .setBlocksSkyLight(true);
+    BlockRegistry::global().registerType("boundary_test:stone", stone);
+    BlockTypeId stoneId = BlockTypeId::fromName("boundary_test:stone");
+
+    // Setup: Place a light source at y=18 (in subchunk y=1, local y=2)
+    // Use synchronous calls for initial setup (before starting thread)
+    BlockPos torchPos{8, 18, 8};
+    world.setBlock(torchPos, torchId);
+    engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
+
+    // Place a floor of stone blocks at y=15 (top of subchunk y=0)
+    // This blocks light from propagating further down
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            BlockPos floorPos{x, 15, z};
+            world.setBlock(floorPos, stoneId);
+        }
+    }
+
+    // Start the lighting thread
+    engine.start();
+
+    // Now break a block in the floor at y=15, exposing y=16
+    // Use enqueue() to go through the async path which calls flushAffectedChunks
+    BlockPos breakPos{8, 15, 8};  // At local y=15 in subchunk 0
+    world.setBlock(breakPos, AIR_BLOCK_TYPE);
+
+    // Enqueue via async path with triggerMeshRebuild=true
+    LightingUpdate update;
+    update.pos = breakPos;
+    update.oldType = stoneId;
+    update.newType = AIR_BLOCK_TYPE;
+    update.triggerMeshRebuild = true;
+    engine.enqueue(update);
+
+    // Wait for processing
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    engine.stop();
+
+    // Collect all chunks that were marked for rebuild
+    std::unordered_set<ChunkPos> rebuiltChunks;
+    while (auto req = meshQueue.tryPop()) {
+        rebuiltChunks.insert(req->first);
+        std::cout << "Chunk marked for rebuild: ("
+                  << req->first.x << ", " << req->first.y << ", " << req->first.z << ")\n";
+    }
+
+    // Check that subchunk at y=0 (containing the floor) is marked
+    ChunkPos subchunk0{0, 0, 0};  // y=0-15
+    ChunkPos subchunk1{0, 1, 0};  // y=16-31
+
+    bool has_subchunk0 = rebuiltChunks.count(subchunk0) > 0;
+    bool has_subchunk1 = rebuiltChunks.count(subchunk1) > 0;
+
+    std::cout << "Subchunk 0 (y=0-15) marked: " << (has_subchunk0 ? "YES" : "NO") << "\n";
+    std::cout << "Subchunk 1 (y=16-31) marked: " << (has_subchunk1 ? "YES" : "NO") << "\n";
+
+    // The critical assertion: when breaking a block at the boundary (y=15),
+    // the subchunk BELOW (y=0) needs to be rebuilt because its faces (the floor's
+    // top faces, which are now exposed) sample light from y=16.
+    // Similarly, subchunk 1 should be rebuilt because light propagates into it.
+    EXPECT_TRUE(has_subchunk0) << "Subchunk 0 should be marked for rebuild (floor faces sample light from y=16)";
+    EXPECT_TRUE(has_subchunk1) << "Subchunk 1 should be marked for rebuild (light propagates there)";
+}
+
+// Test light change at X boundary
+TEST(CrossSubchunkBoundaryTest, LightChangeAtXBoundaryMarksBothSubchunks) {
+    World world;
+    LightEngine engine(world);
+
+    MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+    engine.setMeshRebuildQueue(&meshQueue);
+
+    // Register torch
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("boundary_test_x:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("boundary_test_x:torch");
+
+    // Place torch at x=16, which is local x=0 in chunk (1, 0, 0)
+    // Light will propagate to x=15 (local x=15 in chunk (0, 0, 0))
+    BlockPos torchPos{16, 8, 8};
+    world.setBlock(torchPos, torchId);
+
+    // Use async path
+    engine.start();
+
+    LightingUpdate update;
+    update.pos = torchPos;
+    update.oldType = AIR_BLOCK_TYPE;
+    update.newType = torchId;
+    update.triggerMeshRebuild = true;
+    engine.enqueue(update);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    engine.stop();
+
+    // Collect marked chunks
+    std::unordered_set<ChunkPos> rebuiltChunks;
+    while (auto req = meshQueue.tryPop()) {
+        rebuiltChunks.insert(req->first);
+    }
+
+    ChunkPos chunk0{0, 0, 0};  // x=0-15
+    ChunkPos chunk1{1, 0, 0};  // x=16-31
+
+    bool has_chunk0 = rebuiltChunks.count(chunk0) > 0;
+    bool has_chunk1 = rebuiltChunks.count(chunk1) > 0;
+
+    std::cout << "X boundary test:\n";
+    std::cout << "  Chunk (0,0,0) marked: " << (has_chunk0 ? "YES" : "NO") << "\n";
+    std::cout << "  Chunk (1,0,0) marked: " << (has_chunk1 ? "YES" : "NO") << "\n";
+
+    // Chunk 1 should definitely be marked (torch is there)
+    EXPECT_TRUE(has_chunk1) << "Chunk (1,0,0) should be marked (contains torch)";
+
+    // Chunk 0 should be marked because light at x=16 affects faces at x=15
+    // which are in chunk 0 but sample light from x=16
+    EXPECT_TRUE(has_chunk0) << "Chunk (0,0,0) should be marked (faces at x=15 sample light from x=16)";
+}
+
+// Test the specific scenario: break block at y=16 (boundary), verify floor in subchunk 0 gets rebuilt
+TEST(CrossSubchunkBoundaryTest, BreakBlockAtSubchunkBoundary) {
+    World world;
+    LightEngine engine(world);
+
+    MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+    engine.setMeshRebuildQueue(&meshQueue);
+
+    // Register blocks
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("boundary_test_break:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("boundary_test_break:torch");
+
+    BlockType stone;
+    stone.setOpaque(true)
+         .setLightEmission(0)
+         .setLightAttenuation(15);
+    BlockRegistry::global().registerType("boundary_test_break:stone", stone);
+    BlockTypeId stoneId = BlockTypeId::fromName("boundary_test_break:stone");
+
+    // Place torch at y=20 (in subchunk 1)
+    BlockPos torchPos{8, 20, 8};
+    world.setBlock(torchPos, torchId);
+
+    // Place stone at y=16 (local y=0 in subchunk 1 - at the boundary)
+    // This is blocking light from reaching subchunk 0
+    BlockPos stonePos{8, 16, 8};
+    world.setBlock(stonePos, stoneId);
+
+    // Initial light propagation (synchronous, before thread starts)
+    engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
+    engine.onBlockPlaced(stonePos, AIR_BLOCK_TYPE, stoneId);
+
+    // Verify light doesn't reach y=15 (blocked by stone)
+    EXPECT_EQ(engine.getBlockLight({8, 15, 8}), 0) << "Light should be blocked at y=15";
+
+    // Start the lighting thread
+    engine.start();
+
+    // Now break the stone at y=16 - light should flood down
+    // Use async path via enqueue
+    world.setBlock(stonePos, AIR_BLOCK_TYPE);
+
+    LightingUpdate update;
+    update.pos = stonePos;
+    update.oldType = stoneId;
+    update.newType = AIR_BLOCK_TYPE;
+    update.triggerMeshRebuild = true;
+    engine.enqueue(update);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    engine.stop();
+
+    // Light should now reach y=15
+    uint8_t lightAtY15 = engine.getBlockLight({8, 15, 8});
+    std::cout << "Light at y=15 after breaking stone: " << (int)lightAtY15 << "\n";
+    EXPECT_GT(lightAtY15, 0) << "Light should propagate to y=15 after breaking stone";
+
+    // Check which subchunks were marked
+    std::unordered_set<ChunkPos> rebuiltChunks;
+    while (auto req = meshQueue.tryPop()) {
+        rebuiltChunks.insert(req->first);
+        std::cout << "Chunk marked: (" << req->first.x << ", " << req->first.y << ", " << req->first.z << ")\n";
+    }
+
+    ChunkPos subchunk0{0, 0, 0};  // y=0-15
+    ChunkPos subchunk1{0, 1, 0};  // y=16-31
+
+    // The key test: subchunk 0 must be marked even though we broke a block in subchunk 1
+    // because faces in subchunk 0 (e.g., top face of block at y=15) sample light from y=16
+    EXPECT_TRUE(rebuiltChunks.count(subchunk0) > 0)
+        << "Subchunk 0 MUST be marked when light changes at y=16 (faces at y=15 sample from y=16)";
+    EXPECT_TRUE(rebuiltChunks.count(subchunk1) > 0)
+        << "Subchunk 1 should be marked (stone was removed there)";
+}
+
+// Test the exact demo scenario: break block in floor (same subchunk, not at boundary)
+// This tests the case where the broken block and the floor below are in the SAME subchunk
+TEST(CrossSubchunkBoundaryTest, BreakBlockInFloorSameSubchunk) {
+    World world;
+    LightEngine engine(world);
+
+    MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+    engine.setMeshRebuildQueue(&meshQueue);
+
+    // Register a torch block type
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("floor_test:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("floor_test:torch");
+
+    BlockType stone;
+    stone.setOpaque(true)
+         .setLightEmission(0)
+         .setLightAttenuation(15);
+    BlockRegistry::global().registerType("floor_test:stone", stone);
+    BlockTypeId stoneId = BlockTypeId::fromName("floor_test:stone");
+
+    // Create a floor at y=4 and y=5 (both in subchunk 0)
+    // Place stone floor blocks
+    for (int x = 0; x < 10; ++x) {
+        for (int z = 0; z < 10; ++z) {
+            world.setBlock({x, 4, z}, stoneId);  // Bottom of floor
+            world.setBlock({x, 5, z}, stoneId);  // Top layer of floor (will break one)
+        }
+    }
+
+    // Place torch at y=6, near where we'll break the block
+    // This is in the air just above the floor
+    BlockPos torchPos{5, 6, 5};
+    world.setBlock(torchPos, torchId);
+
+    // Initial light propagation (synchronous)
+    engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
+
+    // Verify light is above the floor (y=6) but blocked by floor (y=5 is solid)
+    uint8_t lightAtY6 = engine.getBlockLight({5, 6, 5});  // Should be 14
+    uint8_t lightAtY5Block = engine.getBlockLight({4, 5, 4});  // Inside stone, should be 0
+    std::cout << "Light at y=6 (torch position): " << (int)lightAtY6 << "\n";
+    std::cout << "Light inside floor block (y=5): " << (int)lightAtY5Block << "\n";
+
+    EXPECT_EQ(lightAtY6, 14) << "Torch should emit light level 14";
+
+    // Start the lighting thread
+    engine.start();
+
+    // Now break a floor block at y=5 (NOT at a subchunk boundary)
+    // The block below at y=4 should have its top face (PosY) exposed
+    BlockPos breakPos{4, 5, 4};
+    world.setBlock(breakPos, AIR_BLOCK_TYPE);
+
+    LightingUpdate update;
+    update.pos = breakPos;
+    update.oldType = stoneId;
+    update.newType = AIR_BLOCK_TYPE;
+    // Match the demo's behavior: shouldDefer = false means triggerMeshRebuild = false
+    // The lighting thread should still mark chunks via recordAffectedChunk during propagation
+    update.triggerMeshRebuild = false;
+    engine.enqueue(update);
+
+    // Wait for lighting to process
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    engine.stop();
+
+    // Check light at the broken position - should have light from the torch
+    uint8_t lightAtBroken = engine.getBlockLight(breakPos);
+    std::cout << "Light at broken block (y=5): " << (int)lightAtBroken << "\n";
+    EXPECT_GT(lightAtBroken, 0) << "Light should propagate into the hole";
+
+    // The floor at y=4 below should sample light from y=5 (where we broke the block)
+    // When we rebuild the mesh, the face at y=4 looking up should use light from y=5
+
+    // Drain the mesh queue and check which chunks were marked
+    std::unordered_set<ChunkPos> rebuiltChunks;
+    std::vector<std::pair<ChunkPos, uint64_t>> rebuiltChunksWithLightVersion;
+    while (auto req = meshQueue.tryPop()) {
+        rebuiltChunks.insert(req->first);
+        rebuiltChunksWithLightVersion.push_back({req->first, req->second.targetLightVersion});
+        std::cout << "Chunk marked: (" << req->first.x << ", " << req->first.y << ", " << req->first.z
+                  << ") lightVersion=" << req->second.targetLightVersion << "\n";
+    }
+
+    ChunkPos subchunk0{0, 0, 0};  // y=0-15 (contains both floor at y=4 and broken block at y=5)
+
+    // The subchunk must be marked for rebuild (light changed inside it)
+    EXPECT_TRUE(rebuiltChunks.count(subchunk0) > 0)
+        << "Subchunk 0 should be marked (light changed at y=5 inside this subchunk)";
+
+    // Verify the light version in the request is AFTER lighting was updated
+    SubChunk* subchunk = world.getSubChunk(subchunk0);
+    if (subchunk) {
+        uint64_t currentLightVersion = subchunk->lightVersion();
+        std::cout << "Current light version of subchunk 0: " << currentLightVersion << "\n";
+
+        // Check that we got a rebuild request with the updated light version
+        bool hasUpdatedRequest = false;
+        for (const auto& [pos, lightVer] : rebuiltChunksWithLightVersion) {
+            if (pos == subchunk0 && lightVer >= currentLightVersion) {
+                hasUpdatedRequest = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(hasUpdatedRequest)
+            << "Should have a rebuild request with light version >= " << currentLightVersion;
+    }
+}
+
+// Test that mesh building actually uses the correct light values
+// This simulates the exact scenario where floor face should be lit after breaking a block
+TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
+    World world;
+    LightEngine engine(world);
+
+    // Register block types
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("mesh_light_test:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("mesh_light_test:torch");
+
+    BlockType stone;
+    stone.setOpaque(true)
+         .setLightEmission(0)
+         .setLightAttenuation(15);
+    BlockRegistry::global().registerType("mesh_light_test:stone", stone);
+    BlockTypeId stoneId = BlockTypeId::fromName("mesh_light_test:stone");
+
+    // Create a simple floor at y=4 and y=5
+    for (int x = 3; x <= 7; ++x) {
+        for (int z = 3; z <= 7; ++z) {
+            world.setBlock({x, 4, z}, stoneId);  // Bottom of floor
+            world.setBlock({x, 5, z}, stoneId);  // Top layer of floor (will break one)
+        }
+    }
+
+    // Place torch above floor
+    BlockPos torchPos{5, 6, 5};
+    world.setBlock(torchPos, torchId);
+
+    // Synchronous light propagation for torch
+    engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
+
+    // Break the floor block at (5, 5, 5)
+    BlockPos breakPos{5, 5, 5};
+    world.setBlock(breakPos, AIR_BLOCK_TYPE);
+
+    // Process light update synchronously (simulate what the lighting thread does)
+    engine.onBlockRemoved(breakPos, stoneId);
+
+    // Now check the light at the broken position
+    uint8_t lightAtBroken = engine.getBlockLight(breakPos);
+    std::cout << "Light at broken block (5, 5, 5): " << (int)lightAtBroken << "\n";
+    EXPECT_GT(lightAtBroken, 10) << "Light should propagate from torch into the hole";
+
+    // Create a light provider that uses the engine
+    BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
+        return engine.getCombinedLight(pos);
+    };
+
+    // Build the mesh for subchunk 0,0,0
+    ChunkPos chunkPos{0, 0, 0};
+    SubChunk* subchunk = world.getSubChunk(chunkPos);
+    ASSERT_NE(subchunk, nullptr);
+
+    // Build mesh with smooth lighting
+    MeshBuilder builder;
+    builder.setSmoothLighting(true);
+    builder.setLightProvider(lightProvider);
+
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+        BlockTypeId type = world.getBlock(pos);
+        return type != AIR_BLOCK_TYPE;
+    };
+    BlockTextureProvider textureProvider = [](BlockTypeId, Face) {
+        return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);  // Default UVs
+    };
+
+    MeshData mesh = builder.buildSubChunkMesh(*subchunk, chunkPos, opaqueProvider, textureProvider);
+
+    // Find the PosY face of the block at (5, 4, 5) - this is the floor face below the hole
+    // It should sample light from (5, 5, 5) which is now lit
+    //
+    // In mesh coordinates, the face is at local position (5, 4, 5) with +Y normal
+    // The vertex positions would be:
+    //   (5, 5, 5), (6, 5, 5), (6, 5, 6), (5, 5, 6) (corners of top face of block at y=4)
+    //
+    // Look for vertices with position.y = 5.0 (top face of block at y=4) and normal.y = 1.0
+
+    bool foundFloorFace = false;
+    float floorFaceLight = 0.0f;
+
+    for (const auto& vertex : mesh.vertices) {
+        // Check for PosY face at (5, 4, 5)
+        // Vertex positions for top face are at y = 4 + 1 = 5.0
+        if (std::abs(vertex.position.y - 5.0f) < 0.1f &&
+            std::abs(vertex.normal.y - 1.0f) < 0.1f &&
+            vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
+            vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
+            foundFloorFace = true;
+            floorFaceLight = std::max(floorFaceLight, vertex.light);
+            std::cout << "Floor face vertex at (" << vertex.position.x << ", "
+                      << vertex.position.y << ", " << vertex.position.z
+                      << ") light=" << vertex.light << "\n";
+        }
+    }
+
+    EXPECT_TRUE(foundFloorFace) << "Should find the floor face at (5, 4, 5)";
+    EXPECT_GT(floorFaceLight, 0.1f) << "Floor face should have light > 0.1 (was " << floorFaceLight << ")";
+
+    std::cout << "Floor face max light: " << floorFaceLight << "\n";
+}
+
+// Test that simulates the exact demo scenario: two mesh builds, one before and one after light propagation
+TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
+    World world;
+    LightEngine engine(world);
+
+    // Register block types
+    BlockType torch;
+    torch.setNoCollision()
+         .setOpaque(false)
+         .setLightEmission(14)
+         .setLightAttenuation(1)
+         .setBlocksSkyLight(false);
+    BlockRegistry::global().registerType("timing_test:torch", torch);
+    BlockTypeId torchId = BlockTypeId::fromName("timing_test:torch");
+
+    BlockType stone;
+    stone.setOpaque(true)
+         .setLightEmission(0)
+         .setLightAttenuation(15);
+    BlockRegistry::global().registerType("timing_test:stone", stone);
+    BlockTypeId stoneId = BlockTypeId::fromName("timing_test:stone");
+
+    // Create a floor
+    for (int x = 3; x <= 7; ++x) {
+        for (int z = 3; z <= 7; ++z) {
+            world.setBlock({x, 4, z}, stoneId);
+            world.setBlock({x, 5, z}, stoneId);
+        }
+    }
+
+    // Place torch above floor
+    BlockPos torchPos{5, 6, 5};
+    world.setBlock(torchPos, torchId);
+    engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
+
+    // Break the floor block at (5, 5, 5) - this removes the block from the world
+    BlockPos breakPos{5, 5, 5};
+    world.setBlock(breakPos, AIR_BLOCK_TYPE);
+
+    // FIRST MESH BUILD: Before onBlockRemoved is called (light not yet propagated)
+    // This simulates what happens when the world setBlock pushes a rebuild before lighting
+    BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
+        return engine.getCombinedLight(pos);
+    };
+
+    ChunkPos chunkPos{0, 0, 0};
+    SubChunk* subchunk = world.getSubChunk(chunkPos);
+    ASSERT_NE(subchunk, nullptr);
+
+    MeshBuilder builder;
+    builder.setSmoothLighting(true);
+    builder.setLightProvider(lightProvider);
+
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+        BlockTypeId type = world.getBlock(pos);
+        return type != AIR_BLOCK_TYPE;
+    };
+    BlockTextureProvider textureProvider = [](BlockTypeId, Face) {
+        return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    };
+
+    // Check light BEFORE onBlockRemoved
+    uint8_t lightBeforePropagation = engine.getBlockLight(breakPos);
+    std::cout << "Light at (5,5,5) BEFORE onBlockRemoved: " << (int)lightBeforePropagation << "\n";
+
+    MeshData mesh1 = builder.buildSubChunkMesh(*subchunk, chunkPos, opaqueProvider, textureProvider);
+
+    float mesh1FloorLight = 0.0f;
+    for (const auto& vertex : mesh1.vertices) {
+        if (std::abs(vertex.position.y - 5.0f) < 0.1f &&
+            std::abs(vertex.normal.y - 1.0f) < 0.1f &&
+            vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
+            vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
+            mesh1FloorLight = std::max(mesh1FloorLight, vertex.light);
+        }
+    }
+    std::cout << "FIRST mesh floor face light: " << mesh1FloorLight << "\n";
+
+    // NOW propagate light (simulate lighting thread processing)
+    engine.onBlockRemoved(breakPos, stoneId);
+
+    // Check light AFTER onBlockRemoved
+    uint8_t lightAfterPropagation = engine.getBlockLight(breakPos);
+    std::cout << "Light at (5,5,5) AFTER onBlockRemoved: " << (int)lightAfterPropagation << "\n";
+
+    // SECOND MESH BUILD: After light propagation
+    MeshData mesh2 = builder.buildSubChunkMesh(*subchunk, chunkPos, opaqueProvider, textureProvider);
+
+    float mesh2FloorLight = 0.0f;
+    for (const auto& vertex : mesh2.vertices) {
+        if (std::abs(vertex.position.y - 5.0f) < 0.1f &&
+            std::abs(vertex.normal.y - 1.0f) < 0.1f &&
+            vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
+            vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
+            mesh2FloorLight = std::max(mesh2FloorLight, vertex.light);
+        }
+    }
+    std::cout << "SECOND mesh floor face light: " << mesh2FloorLight << "\n";
+
+    // The first mesh should have light=0 (or very low) because light hasn't propagated
+    EXPECT_LT(mesh1FloorLight, 0.1f) << "First mesh should have low light (before propagation)";
+
+    // The second mesh should have light > 0.1
+    EXPECT_GT(mesh2FloorLight, 0.1f) << "Second mesh should have light (after propagation)";
+
+    // Verify the difference
+    EXPECT_GT(mesh2FloorLight, mesh1FloorLight + 0.1f)
+        << "Second mesh should be significantly brighter than first";
+
+    // Compare floor lighting to side face lighting
+    // Check the NegX face of block at (6, 5, 5) - this is a "side" face of the hole
+    // Vertex positions would have x=6.0, y=5-6, z=5-6, normal.x=-1
+
+    float sideFaceLight = 0.0f;
+    int sideFaceCount = 0;
+    for (const auto& vertex : mesh2.vertices) {
+        // NegX faces have normal.x = -1
+        if (std::abs(vertex.normal.x - (-1.0f)) < 0.1f &&
+            std::abs(vertex.position.x - 6.0f) < 0.1f &&
+            vertex.position.y >= 4.9f && vertex.position.y <= 6.1f &&
+            vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
+            sideFaceLight = std::max(sideFaceLight, vertex.light);
+            sideFaceCount++;
+        }
+    }
+
+    std::cout << "Side face (NegX of (6,5,5)) light: " << sideFaceLight
+              << " (vertices found: " << sideFaceCount << ")\n";
+    std::cout << "Floor face light: " << mesh2FloorLight << "\n";
+    std::cout << "Ratio (side/floor): " << (mesh2FloorLight > 0 ? sideFaceLight / mesh2FloorLight : 0) << "\n";
 }

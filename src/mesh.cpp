@@ -686,12 +686,11 @@ void MeshBuilder::addFace(
 }
 
 float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const {
-    // Classic Minecraft-style ambient occlusion
-    // Based on "0fps" AO algorithm
-    if (side1 && side2) {
-        // Both sides solid = maximum shadow (corner is irrelevant)
-        return 0.0f;
-    }
+    // Minecraft-style ambient occlusion
+    // Count solid neighbors and map to AO value
+    // Note: We don't use the "0fps" special case of returning 0.0 when both
+    // sides are solid - that's too aggressive and makes 1x1 holes pitch black.
+    // Instead, we let the solid count determine the AO (minimum 0.25).
 
     int solidCount = (side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0);
 
@@ -700,7 +699,7 @@ float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const 
         case 0: return 1.0f;     // Fully lit
         case 1: return 0.75f;    // Light shadow
         case 2: return 0.5f;     // Medium shadow
-        case 3: return 0.25f;    // Heavy shadow
+        case 3: return 0.25f;    // Heavy shadow (minimum - never pitch black)
         default: return 1.0f;
     }
 }

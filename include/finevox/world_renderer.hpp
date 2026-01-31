@@ -417,7 +417,7 @@ public:
      * @brief Enable/disable smooth lighting (per-vertex light interpolation)
      * Requires a light provider to be set via setLightProvider()
      */
-    void setSmoothLighting(bool enabled) { meshBuilder_.setSmoothLighting(enabled); }
+    void setSmoothLighting(bool enabled);
     [[nodiscard]] bool smoothLighting() const { return meshBuilder_.smoothLighting(); }
 
     /**
@@ -425,14 +425,14 @@ public:
      * Shows the raw L1 ball from light propagation. Requires a light provider.
      * Note: smooth lighting takes precedence if both are enabled.
      */
-    void setFlatLighting(bool enabled) { meshBuilder_.setFlatLighting(enabled); }
+    void setFlatLighting(bool enabled);
     [[nodiscard]] bool flatLighting() const { return meshBuilder_.flatLighting(); }
 
     /**
      * @brief Set the light provider for smooth/flat lighting
      * @param provider Function that returns combined light (0-15) for a world position
      */
-    void setLightProvider(BlockLightProvider provider) { meshBuilder_.setLightProvider(std::move(provider)); }
+    void setLightProvider(BlockLightProvider provider);
 
     // ========================================================================
     // Fog Configuration
@@ -652,6 +652,7 @@ private:
     // Block atlas
     finevk::Texture* blockAtlas_ = nullptr;
     BlockTextureProvider textureProvider_;
+    BlockLightProvider lightProvider_;  // Stored separately for worker pool
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

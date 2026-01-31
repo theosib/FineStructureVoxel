@@ -122,11 +122,13 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             return true;
         }
 
-        // Get texture provider (copy under lock to avoid holding lock during build)
+        // Get texture and light providers (copy under lock to avoid holding lock during build)
         BlockTextureProvider textureProvider;
+        BlockLightProvider lightProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
             textureProvider = textureProvider_;
+            lightProvider = lightProvider_;
         }
 
         // Use default texture provider if none set (returns (0,0,1,1) UVs)
@@ -136,9 +138,14 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             };
         }
 
-        // Create mesh builder
+        // Create mesh builder with all settings
         MeshBuilder builder;
         builder.setGreedyMeshing(greedyMeshing_);
+        builder.setSmoothLighting(smoothLighting_);
+        builder.setFlatLighting(flatLighting_);
+        if (lightProvider) {
+            builder.setLightProvider(lightProvider);
+        }
 
         // Build the mesh at the requested LOD level
         if (buildLOD == LODLevel::LOD0) {

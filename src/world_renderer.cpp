@@ -711,6 +711,13 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
     meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
     meshWorkerPool_->setLODMergeMode(lodMergeMode_);
 
+    // Copy lighting settings to worker pool
+    meshWorkerPool_->setSmoothLighting(meshBuilder_.smoothLighting());
+    meshWorkerPool_->setFlatLighting(meshBuilder_.flatLighting());
+    if (lightProvider_) {
+        meshWorkerPool_->setLightProvider(lightProvider_);
+    }
+
     // Attach upload queue to wake signal for deadline-based waiting
     // When workers push completed meshes, the graphics thread will be woken
     meshWorkerPool_->uploadQueue().attach(&wakeSignal_);
@@ -756,6 +763,41 @@ void WorldRenderer::setLODMergeMode(LODMergeMode mode) {
 
 LODMergeMode WorldRenderer::lodMergeMode() const {
     return lodMergeMode_;
+}
+
+// ============================================================================
+// Lighting Settings
+// ============================================================================
+
+void WorldRenderer::setSmoothLighting(bool enabled) {
+    meshBuilder_.setSmoothLighting(enabled);
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setSmoothLighting(enabled);
+    }
+}
+
+void WorldRenderer::setFlatLighting(bool enabled) {
+    meshBuilder_.setFlatLighting(enabled);
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setFlatLighting(enabled);
+    }
+}
+
+void WorldRenderer::setLightProvider(BlockLightProvider provider) {
+    // Store locally for worker pool access
+    lightProvider_ = provider;
+
+    // Set on mesh builder for sync path
+    meshBuilder_.setLightProvider(provider);
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setLightProvider(provider);
+    }
 }
 
 // ============================================================================

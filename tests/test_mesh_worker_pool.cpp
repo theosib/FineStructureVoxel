@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 #include "finevox/mesh_worker_pool.hpp"
 #include "finevox/world.hpp"
+#include "finevox/wake_signal.hpp"
 #include <thread>
 #include <chrono>
+#include <atomic>
 
 using namespace finevox;
 
@@ -35,27 +37,19 @@ protected:
         }
     }
 
-    // Helper to push a chunk with default request
-    void pushChunk(ChunkPos pos) {
-        queue_->push(pos, MeshRebuildRequest::normal(1, 1));  // block version 1, light version 1
+    // Helper to push a rebuild request to the input queue
+    void pushRebuildRequest(ChunkPos pos, uint64_t blockVersion = 1, uint64_t lightVersion = 1) {
+        queue_->push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion));
     }
 
-    // Helper to create a shared_ptr<SubChunk> for testing
-    // Note: This creates a separate SubChunk, not the one in the world
-    std::shared_ptr<SubChunk> createTestSubChunk(ChunkPos pos) {
-        auto subchunk = std::make_shared<SubChunk>();
-        // Copy data from world's subchunk if it exists
-        const SubChunk* worldSubChunk = world_->getSubChunk(pos);
-        if (worldSubChunk) {
-            for (int x = 0; x < 16; ++x) {
-                for (int y = 0; y < 16; ++y) {
-                    for (int z = 0; z < 16; ++z) {
-                        subchunk->setBlock(x, y, z, worldSubChunk->getBlock(x, y, z));
-                    }
-                }
-            }
+    // Wait for upload queue to have at least count items
+    bool waitForUploads(MeshWorkerPool& pool, size_t count, std::chrono::milliseconds timeout = std::chrono::milliseconds(2000)) {
+        auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (pool.uploadQueueSize() < count &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        return subchunk;
+        return pool.uploadQueueSize() >= count;
     }
 
     std::unique_ptr<World> world_;
@@ -70,7 +64,7 @@ protected:
 TEST_F(MeshWorkerPoolTest, Construction) {
     MeshWorkerPool pool(*world_, 2);
     EXPECT_FALSE(pool.isRunning());
-    EXPECT_EQ(pool.cacheSize(), 0);
+    EXPECT_EQ(pool.uploadQueueSize(), 0);
 }
 
 TEST_F(MeshWorkerPoolTest, StartAndStop) {
@@ -106,28 +100,8 @@ TEST_F(MeshWorkerPoolTest, StopIdempotent) {
 }
 
 // ============================================================================
-// Mesh Cache API
+// Push-based Mesh Building
 // ============================================================================
-
-TEST_F(MeshWorkerPoolTest, GetMeshCreatesEntry) {
-    MeshWorkerPool pool(*world_, 1);
-    pool.setInputQueue(queue_.get());
-    pool.start();
-
-    ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
-
-    auto result = pool.getMesh(pos, weakSubchunk, lodReq);
-
-    // Entry should be created
-    EXPECT_NE(result.entry, nullptr);
-    // First call should trigger rebuild
-    EXPECT_TRUE(result.rebuildTriggered);
-
-    pool.stop();
-}
 
 TEST_F(MeshWorkerPoolTest, BuildsSingleMesh) {
     MeshWorkerPool pool(*world_, 1);
@@ -137,88 +111,18 @@ TEST_F(MeshWorkerPoolTest, BuildsSingleMesh) {
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
+    pushRebuildRequest(pos);
 
-    // Request mesh - this will trigger rebuild
-    auto result = pool.getMesh(pos, weakSubchunk, lodReq);
-    EXPECT_TRUE(result.rebuildTriggered);
-
-    // Wait for the mesh to be built
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    // Wait for the mesh to be built (appears in upload queue)
+    ASSERT_TRUE(waitForUploads(pool, 1));
 
     pool.stop();
 
-    // Get mesh again - should have pending mesh
-    result = pool.getMesh(pos, weakSubchunk, lodReq);
-    ASSERT_NE(result.entry, nullptr);
-    EXPECT_TRUE(result.entry->hasPendingMesh());
-    EXPECT_FALSE(result.entry->pendingMesh->isEmpty());
-}
-
-TEST_F(MeshWorkerPoolTest, MarkUploadedClearsPending) {
-    MeshWorkerPool pool(*world_, 1);
-    pool.setInputQueue(queue_.get());
-
-    pool.start();
-
-    ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
-
-    // Request mesh
-    pool.getMesh(pos, weakSubchunk, lodReq);
-
-    // Wait for mesh to be built
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    pool.stop();
-
-    // Verify pending mesh exists
-    auto result = pool.getMesh(pos, weakSubchunk, lodReq);
-    ASSERT_NE(result.entry, nullptr);
-    ASSERT_TRUE(result.entry->hasPendingMesh());
-
-    // Mark as uploaded
-    pool.markUploaded(pos);
-
-    // Pending should be cleared, uploaded version updated
-    result = pool.getMesh(pos, weakSubchunk, lodReq);
-    ASSERT_NE(result.entry, nullptr);
-    EXPECT_FALSE(result.entry->hasPendingMesh());
-    EXPECT_GT(result.entry->uploadedVersion, 0u);
-}
-
-TEST_F(MeshWorkerPoolTest, RemoveMeshClearsEntry) {
-    MeshWorkerPool pool(*world_, 1);
-    pool.setInputQueue(queue_.get());
-
-    pool.start();
-
-    ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
-
-    // Create entry
-    pool.getMesh(pos, weakSubchunk, lodReq);
-    EXPECT_EQ(pool.cacheSize(), 1);
-
-    pool.stop();
-
-    // Remove mesh
-    pool.removeMesh(pos);
-    EXPECT_EQ(pool.cacheSize(), 0);
+    // Pop from upload queue - should have mesh data
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    EXPECT_EQ(uploadData->pos, pos);
+    EXPECT_FALSE(uploadData->mesh.isEmpty());
 }
 
 TEST_F(MeshWorkerPoolTest, BuildsMultipleMeshes) {
@@ -235,30 +139,20 @@ TEST_F(MeshWorkerPoolTest, BuildsMultipleMeshes) {
         ChunkPos(0, 0, 1)
     };
 
-    // Keep shared_ptrs alive during test
-    std::vector<std::shared_ptr<SubChunk>> subchunks;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
-
     for (const auto& pos : positions) {
-        auto subchunk = createTestSubChunk(pos);
-        subchunks.push_back(subchunk);
-        pool.getMesh(pos, std::weak_ptr<SubChunk>(subchunk), lodReq);
+        pushRebuildRequest(pos);
     }
 
-    // Wait for all meshes
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() < 4 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    // Wait for all meshes in upload queue
+    ASSERT_TRUE(waitForUploads(pool, 4));
 
     pool.stop();
 
-    EXPECT_EQ(pool.pendingMeshCount(), 4);
-    EXPECT_EQ(pool.cacheSize(), 4);
+    // Should have 4 meshes
+    EXPECT_EQ(pool.uploadQueueSize(), 4);
 }
 
-TEST_F(MeshWorkerPoolTest, EmptySubchunkReturnsEmptyMesh) {
+TEST_F(MeshWorkerPoolTest, EmptySubchunkProducesEmptyMesh) {
     MeshWorkerPool pool(*world_, 1);
     pool.setInputQueue(queue_.get());
 
@@ -266,27 +160,38 @@ TEST_F(MeshWorkerPoolTest, EmptySubchunkReturnsEmptyMesh) {
 
     // Request an empty subchunk (no blocks placed there)
     ChunkPos pos(10, 10, 10);
-    auto subchunk = std::make_shared<SubChunk>();  // Empty subchunk
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
+    pushRebuildRequest(pos);
 
-    pool.getMesh(pos, weakSubchunk, lodReq);
-
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    ASSERT_TRUE(waitForUploads(pool, 1));
 
     pool.stop();
 
-    auto result = pool.getMesh(pos, weakSubchunk, lodReq);
-    ASSERT_NE(result.entry, nullptr);
-    // Entry may or may not have pending mesh for empty subchunk
-    // If it does, it should be empty
-    if (result.entry->hasPendingMesh()) {
-        EXPECT_TRUE(result.entry->pendingMesh->isEmpty());
-    }
+    // Pop from upload queue - should have empty mesh
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    EXPECT_EQ(uploadData->pos, pos);
+    EXPECT_TRUE(uploadData->mesh.isEmpty());
+}
+
+TEST_F(MeshWorkerPoolTest, MeshIncludesVersionInfo) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    pool.start();
+
+    ChunkPos pos(0, 0, 0);
+    pushRebuildRequest(pos);
+
+    ASSERT_TRUE(waitForUploads(pool, 1));
+
+    pool.stop();
+
+    // The mesh versions come from the subchunk at build time, not the request
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    // Versions should be non-zero (from the actual subchunk)
+    // We can't predict exact values as they depend on subchunk state
+    EXPECT_GT(uploadData->blockVersion, 0);
 }
 
 // ============================================================================
@@ -300,11 +205,7 @@ TEST_F(MeshWorkerPoolTest, StatisticsTracked) {
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
-
-    pool.getMesh(pos, weakSubchunk, lodReq);
+    pushRebuildRequest(pos);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (pool.stats().meshesBuilt.load() == 0 &&
@@ -335,17 +236,9 @@ TEST_F(MeshWorkerPoolTest, TextureProviderUsed) {
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
+    pushRebuildRequest(pos);
 
-    pool.getMesh(pos, weakSubchunk, lodReq);
-
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    ASSERT_TRUE(waitForUploads(pool, 1));
 
     pool.stop();
 
@@ -371,71 +264,197 @@ TEST_F(MeshWorkerPoolTest, GreedyMeshingToggle) {
 }
 
 // ============================================================================
-// Rebuild trigger
+// Upload Queue (push-based mesh updates)
 // ============================================================================
 
-TEST_F(MeshWorkerPoolTest, RebuildNotTriggeredWhenUpToDate) {
+TEST_F(MeshWorkerPoolTest, UploadQueueReceivesCompletedMesh) {
     MeshWorkerPool pool(*world_, 1);
     pool.setInputQueue(queue_.get());
+    pool.setGreedyMeshing(false);
 
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
+    pushRebuildRequest(pos);
 
-    // First call triggers rebuild
-    auto result1 = pool.getMesh(pos, weakSubchunk, lodReq);
-    EXPECT_TRUE(result1.rebuildTriggered);
-
-    // Wait for mesh to be built
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    // Mark as uploaded
-    pool.markUploaded(pos);
+    // Wait for mesh to appear in upload queue
+    ASSERT_TRUE(waitForUploads(pool, 1));
 
     pool.stop();
 
-    // Second call should not trigger rebuild (version matches)
-    auto result2 = pool.getMesh(pos, weakSubchunk, lodReq);
-    EXPECT_FALSE(result2.rebuildTriggered);
+    // Should have mesh in upload queue
+    EXPECT_GE(pool.uploadQueueSize(), 1);
+
+    // Pop from upload queue
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    EXPECT_EQ(uploadData->pos, pos);
+    EXPECT_FALSE(uploadData->mesh.isEmpty());
 }
 
-TEST_F(MeshWorkerPoolTest, RebuildTriggeredOnVersionChange) {
+TEST_F(MeshWorkerPoolTest, UploadQueueWithWakeSignal) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    // Attach a WakeSignal to the upload queue
+    WakeSignal wakeSignal;
+    pool.uploadQueue().attach(&wakeSignal);
+
+    pool.start();
+
+    ChunkPos pos(0, 0, 0);
+    std::atomic<bool> woke{false};
+
+    // Start consumer thread that waits on the wake signal
+    std::thread consumer([&]() {
+        wakeSignal.waitFor(std::chrono::seconds(2));
+        woke = true;
+    });
+
+    // Small delay to ensure consumer is waiting
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_FALSE(woke);
+
+    // Push request - this will trigger rebuild, which pushes to upload queue
+    pushRebuildRequest(pos);
+
+    // Consumer should wake up when mesh is pushed to upload queue
+    consumer.join();
+
+    pool.stop();
+
+    EXPECT_TRUE(woke);
+    // Should have mesh available
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+}
+
+// ============================================================================
+// Request Coalescing via MeshRebuildQueue
+// ============================================================================
+
+TEST_F(MeshWorkerPoolTest, RequestCoalescingPreventsDuplicateBuilds) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    // Don't start pool yet - let requests coalesce in the queue
+
+    ChunkPos pos(0, 0, 0);
+
+    // Push multiple requests for the same position
+    pushRebuildRequest(pos, 1, 1);
+    pushRebuildRequest(pos, 2, 2);  // Should overwrite the first
+    pushRebuildRequest(pos, 3, 3);  // Should overwrite again
+
+    // Now start - only one item should be in queue due to coalescing
+    pool.start();
+
+    // Wait for one mesh
+    ASSERT_TRUE(waitForUploads(pool, 1));
+
+    pool.stop();
+
+    // Should have exactly one mesh (the coalesced result)
+    // The coalescing merged 3 requests into 1 build
+    EXPECT_EQ(pool.uploadQueueSize(), 1);
+
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    // Versions come from subchunk at build time, not from request
+    // The key test is that only ONE mesh was built despite 3 requests
+    EXPECT_GT(uploadData->blockVersion, 0);
+}
+
+// ============================================================================
+// LOD Support
+// ============================================================================
+
+TEST_F(MeshWorkerPoolTest, LODMergeModeConfigurable) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    pool.setLODMergeMode(LODMergeMode::FullHeight);
+    EXPECT_EQ(pool.lodMergeMode(), LODMergeMode::FullHeight);
+
+    pool.setLODMergeMode(LODMergeMode::HeightLimited);
+    EXPECT_EQ(pool.lodMergeMode(), LODMergeMode::HeightLimited);
+}
+
+TEST_F(MeshWorkerPoolTest, MeshIncludesLODLevel) {
     MeshWorkerPool pool(*world_, 1);
     pool.setInputQueue(queue_.get());
 
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    auto subchunk = createTestSubChunk(pos);
-    std::weak_ptr<SubChunk> weakSubchunk = subchunk;
-    LODRequest lodReq = LODRequest::exact(LODLevel::LOD0);
+    queue_->push(pos, MeshRebuildRequest::normal(1, 1, LODLevel::LOD2));
 
-    // First call triggers rebuild
-    pool.getMesh(pos, weakSubchunk, lodReq);
-
-    // Wait for mesh to be built
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.pendingMeshCount() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    // Mark as uploaded
-    pool.markUploaded(pos);
-
-    // Modify the subchunk (this increments blockVersion)
-    subchunk->setBlock(5, 5, 5, stone_);
+    ASSERT_TRUE(waitForUploads(pool, 1));
 
     pool.stop();
 
-    // Should trigger rebuild because version changed
-    auto result = pool.getMesh(pos, weakSubchunk, lodReq);
-    EXPECT_TRUE(result.rebuildTriggered);
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+    EXPECT_EQ(uploadData->lodLevel, LODLevel::LOD2);
+}
+
+// ============================================================================
+// Alarm-based Wake Support
+// ============================================================================
+
+TEST_F(MeshWorkerPoolTest, AlarmWakesWorkers) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    pool.start();
+
+    // Set an alarm for 50ms from now
+    auto alarmTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    pool.setAlarm(alarmTime);
+
+    // Push a request after a delay
+    std::thread delayedPush([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        pushRebuildRequest(ChunkPos(0, 0, 0));
+    });
+
+    // Wait for mesh
+    ASSERT_TRUE(waitForUploads(pool, 1));
+
+    delayedPush.join();
+    pool.stop();
+
+    auto uploadData = pool.tryPopUpload();
+    ASSERT_TRUE(uploadData.has_value());
+}
+
+TEST_F(MeshWorkerPoolTest, ClearAlarm) {
+    MeshWorkerPool pool(*world_, 1);
+    pool.setInputQueue(queue_.get());
+
+    // Should not throw
+    pool.clearAlarm();
+    pool.setAlarm(std::chrono::steady_clock::now() + std::chrono::hours(1));
+    pool.clearAlarm();
+}
+
+// ============================================================================
+// Thread Count
+// ============================================================================
+
+TEST_F(MeshWorkerPoolTest, ThreadCountReported) {
+    MeshWorkerPool pool2(*world_, 2);
+    pool2.setInputQueue(queue_.get());
+    // Threads are created when start() is called
+    EXPECT_EQ(pool2.threadCount(), 0);  // Not started yet
+    pool2.start();
+    EXPECT_EQ(pool2.threadCount(), 2);
+    pool2.stop();
+
+    MeshWorkerPool pool4(*world_, 4);
+    MeshRebuildQueue queue2(mergeMeshRebuildRequest);
+    pool4.setInputQueue(&queue2);
+    pool4.start();
+    EXPECT_EQ(pool4.threadCount(), 4);
+    pool4.stop();
 }

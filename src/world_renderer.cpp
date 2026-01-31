@@ -310,61 +310,52 @@ void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
             ? lodConfig_.getRequestForDistance(distBlocks)
             : LODRequest::exact(LODLevel::LOD0);
 
-        // Queue rebuild request - workers will build it
+        // Queue rebuild request - workers will build it and push to upload queue
         uint64_t blockVersion = subchunk->blockVersion();
         uint64_t lightVersion = subchunk->lightVersion();
         meshRebuildQueue_->push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion, lodRequest));
-
-        // Track this chunk for future stale scanning
-        if (views_.find(pos) == views_.end()) {
-            getOrCreateView(pos);  // Ensure view exists
-        }
-        auto* viewPtr = views_[pos].get();
-        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentBlockVersion, uint64_t currentLightVersion) {
-            return viewPtr->lastBuiltVersion() != currentBlockVersion ||
-                   viewPtr->lastBuiltLightVersion() != currentLightVersion;
-        });
     }
     dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
 
-    // Poll the mesh cache for pending meshes and upload them
-    // This is the "pull" model - we check what the workers have built
-    for (auto& [pos, view] : views_) {
-        if (maxUpdates > 0 && uploads >= maxUpdates) break;
+    // Pop completed meshes from the upload queue (push-based model)
+    // Workers push completed meshes here; we pop and upload to GPU
+    while (maxUpdates == 0 || uploads < maxUpdates) {
+        auto uploadData = meshWorkerPool_->tryPopUpload();
+        if (!uploadData) break;  // No more pending meshes
 
-        auto subchunk = world_.getSubChunkShared(pos);
-        if (!subchunk) continue;
+        const ChunkPos& pos = uploadData->pos;
 
-        // Calculate LOD request
-        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
-        LODRequest lodRequest = lodEnabled_
-            ? lodConfig_.getRequestForDistance(distBlocks)
-            : LODRequest::exact(LODLevel::LOD0);
+        // Get or create view for this position
+        SubChunkView* view = getOrCreateView(pos);
 
-        // Query mesh cache - this triggers rebuild if stale
-        auto result = meshWorkerPool_->getMesh(pos, subchunk, lodRequest);
-
-        if (result.entry && result.entry->hasPendingMesh()) {
-            // Upload the pending mesh to GPU
-            MeshData& meshData = *result.entry->pendingMesh;
-
-            if (view->canUpdateInPlace(meshData)) {
-                view->update(*renderer_->commandPool(), meshData);
-            } else {
-                view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
-            }
-
-            // Record the versions and LOD from the pending mesh
-            view->setLastBuiltVersion(result.entry->pendingVersion);
-            view->setLastBuiltLightVersion(result.entry->pendingLightVersion);
-            view->setLastBuiltLOD(result.entry->pendingLOD);
-
-            // Mark as uploaded in the cache
-            meshWorkerPool_->markUploaded(pos);
-
+        // Handle empty mesh (subchunk was unloaded or empty)
+        if (uploadData->mesh.isEmpty()) {
+            // Release GPU resources for empty subchunks
+            view->release();
+            view->setLastBuiltVersion(uploadData->blockVersion);
+            view->setLastBuiltLightVersion(uploadData->lightVersion);
+            view->setLastBuiltLOD(uploadData->lodLevel);
             ++uploads;
+            continue;
         }
+
+        // Upload mesh to GPU
+        if (view->canUpdateInPlace(uploadData->mesh)) {
+            view->update(*renderer_->commandPool(), uploadData->mesh);
+        } else {
+            view->upload(*device_, *renderer_->commandPool(), uploadData->mesh, config_.meshCapacityMultiplier);
+        }
+
+        // Record the versions and LOD from the uploaded mesh
+        view->setLastBuiltVersion(uploadData->blockVersion);
+        view->setLastBuiltLightVersion(uploadData->lightVersion);
+        view->setLastBuiltLOD(uploadData->lodLevel);
+
+        ++uploads;
     }
+
+    // Note: In pure push-based model, rebuilds are triggered by game logic
+    // and lighting threads pushing to meshRebuildQueue_, not by polling here.
 }
 
 void WorldRenderer::markDirty(ChunkPos pos) {
@@ -723,18 +714,8 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
     // Start worker threads
     meshWorkerPool_->start();
 
-    // Track all existing views so workers can scan for stale meshes
-    for (auto& [pos, view] : views_) {
-        auto subchunk = world_.getSubChunkShared(pos);
-        if (!subchunk) continue;
-
-        // Create staleness checker that captures the view
-        auto* viewPtr = view.get();
-        meshWorkerPool_->trackChunk(pos, subchunk, [viewPtr](uint64_t currentBlockVersion, uint64_t currentLightVersion) {
-            return viewPtr->lastBuiltVersion() != currentBlockVersion ||
-                   viewPtr->lastBuiltLightVersion() != currentLightVersion;
-        });
-    }
+    // In pure push-based model, existing views are rebuilt when game logic
+    // or lighting thread pushes requests to meshRebuildQueue_
 }
 
 void WorldRenderer::disableAsyncMeshing() {
@@ -743,10 +724,7 @@ void WorldRenderer::disableAsyncMeshing() {
     // Stop worker threads
     meshWorkerPool_->stop();
 
-    // Clear mesh cache (GPU meshes in views_ are preserved)
-    meshWorkerPool_->clearTrackedChunks();
-
-    // Destroy pool and queue
+    // Destroy pool and queue (GPU meshes in views_ are preserved)
     meshWorkerPool_.reset();
     meshRebuildQueue_.reset();
 }

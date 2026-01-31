@@ -10,6 +10,7 @@
 #include "finevox/position.hpp"
 #include "finevox/light_data.hpp"  // Keep for utility functions (packLightValue, etc.)
 #include "finevox/string_interner.hpp"
+#include "finevox/mesh_rebuild_queue.hpp"
 #include <functional>
 #include <queue>
 #include <vector>
@@ -36,6 +37,10 @@ struct LightingUpdate {
     BlockPos pos;
     BlockTypeId oldType;
     BlockTypeId newType;
+
+    /// If true, trigger a mesh rebuild for the affected subchunk after lighting completes.
+    /// Use this to defer mesh generation until lighting is calculated, avoiding double rebuilds.
+    bool triggerMeshRebuild = false;
 };
 
 // ============================================================================
@@ -298,6 +303,17 @@ public:
     [[nodiscard]] bool isRunning() const { return running_.load(std::memory_order_acquire); }
 
     /**
+     * @brief Set the mesh rebuild queue for deferred mesh generation
+     *
+     * When a LightingUpdate has triggerMeshRebuild=true, the lighting thread
+     * will push a mesh rebuild request to this queue after processing.
+     * This allows deferring mesh generation until lighting is calculated.
+     *
+     * @param queue Pointer to mesh rebuild queue (nullptr to disable)
+     */
+    void setMeshRebuildQueue(MeshRebuildQueue* queue) { meshRebuildQueue_ = queue; }
+
+    /**
      * @brief Get the lighting queue (for advanced use)
      */
     [[nodiscard]] LightingQueue& queue() { return queue_; }
@@ -378,6 +394,9 @@ private:
     std::thread thread_;
     std::atomic<bool> running_{false};
     size_t batchSize_ = 64;  // Updates per iteration
+
+    // Mesh rebuild queue for deferred mesh generation
+    MeshRebuildQueue* meshRebuildQueue_ = nullptr;
 };
 
 }  // namespace finevox

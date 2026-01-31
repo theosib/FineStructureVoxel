@@ -232,26 +232,10 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
         // Fully opaque - block all light passing through
         uint8_t currentLight = getBlockLight(pos);
         if (currentLight > 0 && newEmission == 0) {
-            // This block is blocking light but not emitting - set to 0
-            SubChunk* subChunk = getOrCreateSubChunkForLight(toChunkPos(pos));
-            if (subChunk) {
-                subChunk->setBlockLight(toLocalIndex(pos), 0);
-            }
-
-            // Light from neighbors may need to propagate around this block
-            // Re-propagate from neighbors
-            static const std::array<BlockPos, 6> offsets = {{
-                {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
-            }};
-
-            for (const auto& offset : offsets) {
-                BlockPos neighborPos{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
-                uint8_t neighborLight = getBlockLight(neighborPos);
-                if (neighborLight > 1) {
-                    // Re-propagate from this neighbor
-                    propagateBlockLight(neighborPos, neighborLight);
-                }
-            }
+            // Use BFS removal to properly clear light that propagated through this position
+            // This removes the light here AND all dependent light beyond, then re-propagates
+            // from any light sources found at the boundary
+            removeBlockLight(pos, currentLight);
         }
     }
 
@@ -286,6 +270,34 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
 
 void LightEngine::onBlockRemoved(const BlockPos& pos, BlockTypeId oldType) {
     onBlockPlaced(pos, oldType, AIR_BLOCK_TYPE);
+
+    // If this block was blocking light, light can now flow through
+    uint8_t oldAttenuation = getAttenuation(oldType);
+    if (oldAttenuation >= 15) {
+        // Was fully opaque - find the highest light from neighbors and propagate from here
+        static const std::array<BlockPos, 6> offsets = {{
+            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+        }};
+
+        // Find the maximum light from all neighbors (minus attenuation)
+        uint8_t maxNeighborLight = 0;
+        for (const auto& offset : offsets) {
+            BlockPos neighborPos{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+            uint8_t neighborLight = getBlockLight(neighborPos);
+            if (neighborLight > 1) {
+                // Light entering this position would be neighborLight - 1 (air attenuation)
+                uint8_t incomingLight = neighborLight - 1;
+                if (incomingLight > maxNeighborLight) {
+                    maxNeighborLight = incomingLight;
+                }
+            }
+        }
+
+        // If there's light that should now flow through, propagate from this position
+        if (maxNeighborLight > 0) {
+            propagateBlockLight(pos, maxNeighborLight);
+        }
+    }
 
     // If this block was blocking sky light, re-propagate from above
     if (blocksSkyLight(oldType)) {
@@ -722,20 +734,27 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
     uint8_t oldAttenuation = getAttenuation(update.oldType);
     uint8_t newAttenuation = getAttenuation(update.newType);
 
+    bool lightingChanged = true;
     if (oldAttenuation >= 15 && newAttenuation >= 15 &&
         oldEmission == 0 && newEmission == 0) {
-        return;  // No light change possible
+        lightingChanged = false;  // No light change possible
     }
 
-    // Delegate to the existing lighting update method
-    onBlockPlaced(update.pos, update.oldType, update.newType);
+    if (lightingChanged) {
+        // Delegate to the existing lighting update method
+        onBlockPlaced(update.pos, update.oldType, update.newType);
+    }
 
-    // Increment light version for the affected subchunk
-    ChunkPos chunkPos = toChunkPos(update.pos);
-    SubChunk* subChunk = getSubChunkForLight(chunkPos);
-    if (subChunk) {
-        // Note: lightVersion is incremented by setSkyLight/setBlockLight calls
-        // within onBlockPlaced, so no additional increment needed here
+    // Trigger mesh rebuild if requested
+    // This is done after lighting completes to avoid double rebuilds
+    if (update.triggerMeshRebuild && meshRebuildQueue_) {
+        ChunkPos chunkPos = toChunkPos(update.pos);
+        SubChunk* subChunk = getSubChunkForLight(chunkPos);
+        if (subChunk) {
+            uint64_t blockVersion = subChunk->blockVersion();
+            uint64_t lightVersion = subChunk->lightVersion();
+            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(blockVersion, lightVersion));
+        }
     }
 }
 

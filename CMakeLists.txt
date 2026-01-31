@@ -145,6 +145,8 @@ if(FINEVOX_BUILD_RENDER)
         set(SHADER_SOURCES
             ${SHADER_DIR}/chunk.vert
             ${SHADER_DIR}/chunk.frag
+            ${SHADER_DIR}/overlay.vert
+            ${SHADER_DIR}/overlay.frag
         )
 
         foreach(SHADER ${SHADER_SOURCES})
@@ -234,6 +236,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_module.cpp
         tests/test_lighting.cpp
         tests/test_event_system.cpp
+        tests/test_queue_primitives.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

@@ -40,6 +40,7 @@
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
 #include <finevk/engine/camera.hpp>
+#include <finevk/engine/overlay2d.hpp>
 
 #include <iostream>
 #include <cmath>
@@ -267,6 +268,11 @@ int main(int argc, char* argv[]) {
         renderConfig.enableDepthBuffer = true;
         renderConfig.msaa = finevk::MSAALevel::Medium;
         auto renderer = finevk::SimpleRenderer::create(window, renderConfig);
+
+        // Create 2D overlay for crosshair
+        auto overlay = finevk::Overlay2D::create(device.get(), renderer->renderPass())
+            .msaaSamples(renderer->msaaSamples())
+            .build();
 
         // Create finevox world
         World world;
@@ -719,12 +725,22 @@ int main(int argc, char* argv[]) {
             worldRenderer.updateMeshes(16);  // Max 16 mesh updates per frame
 
             // Render
-            auto result = renderer->beginFrame();
-            if (result.success) {
+            if (auto frame = renderer->beginFrame()) {
                 renderer->beginRenderPass({0.2f, 0.3f, 0.4f, 1.0f});  // Sky blue
 
                 // Render the world
-                worldRenderer.render(*result.commandBuffer);
+                worldRenderer.render(frame);
+
+                // Draw crosshair at screen center
+                auto extent = renderer->extent();
+                overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
+                overlay->drawCrosshair(
+                    extent.width / 2.0f, extent.height / 2.0f,
+                    20.0f,   // size
+                    2.0f,    // thickness
+                    {1.0f, 1.0f, 1.0f, 0.8f}  // white with slight transparency
+                );
+                overlay->render(frame);
 
                 renderer->endRenderPass();
                 renderer->endFrame();

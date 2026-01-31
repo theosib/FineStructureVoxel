@@ -779,10 +779,26 @@ std::array<float, 4> MeshBuilder::getFaceAO(
 
     // Calculate AO for each corner of the face
     // Corners are in CCW order: bottom-left, bottom-right, top-right, top-left
-    aoValues[0] = calculateCornerAO(b3, b1, b0);  // bottom-left
-    aoValues[1] = calculateCornerAO(b1, b5, b2);  // bottom-right
-    aoValues[2] = calculateCornerAO(b5, b7, b8);  // top-right
-    aoValues[3] = calculateCornerAO(b7, b3, b6);  // top-left
+    //
+    // The tangent1 negation for NegX/PosY/NegZ faces means the sampling grid
+    // is mirrored in the U direction for those faces. We need to account for this
+    // when mapping samples to vertex corners (same as getFaceLight).
+    bool mirroredU = (face == Face::NegX || face == Face::PosY || face == Face::NegZ);
+
+    if (mirroredU) {
+        // Grid is mirrored: what we sampled as "left" is actually "right" in vertex space
+        // Swap b3↔b5 (left↔right sides) and b0↔b2, b6↔b8 (corners)
+        aoValues[0] = calculateCornerAO(b5, b1, b2);  // vertex 0 (uv 0,0) from right side
+        aoValues[1] = calculateCornerAO(b1, b3, b0);  // vertex 1 (uv 1,0) from left side
+        aoValues[2] = calculateCornerAO(b3, b7, b6);  // vertex 2 (uv 1,1) from left side
+        aoValues[3] = calculateCornerAO(b7, b5, b8);  // vertex 3 (uv 0,1) from right side
+    } else {
+        // Normal mapping
+        aoValues[0] = calculateCornerAO(b3, b1, b0);  // bottom-left
+        aoValues[1] = calculateCornerAO(b1, b5, b2);  // bottom-right
+        aoValues[2] = calculateCornerAO(b5, b7, b8);  // top-right
+        aoValues[3] = calculateCornerAO(b7, b3, b6);  // top-left
+    }
 
     return aoValues;
 }

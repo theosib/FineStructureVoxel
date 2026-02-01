@@ -1149,10 +1149,528 @@ struct EntityConfig {
 - [ ] Rollback and replay
 - [ ] Block correction for world changes
 
-### Phase 6: Mob AI (Future)
+### Phase 6: Entity Rendering
+- [ ] EntityModel and ModelPart structures
+- [ ] Animation system (keyframes, tracks, blending)
+- [ ] AnimationController with state machine
+- [ ] EntityRenderer with instanced drawing
+- [ ] ModelCache with placeholder support
+- [ ] LOD selection and shadow rendering
+
+### Phase 7: Mob AI (Future)
 - [ ] Pathfinding integration
 - [ ] Basic AI behaviors
 - [ ] Mob types
+
+---
+
+## 25.13 Entity Rendering
+
+The graphics thread renders entities using model definitions, skeletal animation, and the interpolated state from `EntityInterpolator`.
+
+### 25.13.1 Entity Model Architecture
+
+Entity models are hierarchical, supporting:
+- **Skeletal animation** with bone hierarchies
+- **Part-based composition** (body, head, limbs as separate meshes)
+- **Texture atlasing** for efficient batching
+- **LOD variants** for distance-based detail reduction
+
+```cpp
+namespace finevox {
+
+/// Unique model identifier (maps to cached model definition)
+using ModelId = uint16_t;
+
+/// Bone in skeletal hierarchy
+struct Bone {
+    string name;                    // "head", "arm_left", etc.
+    int16_t parentIndex;            // -1 for root
+    Vec3 bindPosition;              // Position in bind pose
+    Quat bindRotation;              // Rotation in bind pose
+    Vec3 bindScale;                 // Scale in bind pose (usually 1,1,1)
+};
+
+/// A mesh part attached to a bone
+struct ModelPart {
+    string name;                    // "body", "head", etc.
+    uint16_t boneIndex;             // Which bone this part follows
+
+    // Geometry
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+
+    // Texture
+    uint16_t textureAtlasId;
+    UVRect textureUV;               // Region in atlas
+
+    // Rendering hints
+    bool doubleSided = false;       // Render both faces (for thin parts)
+    bool translucent = false;       // Needs alpha blending
+};
+
+/// Complete entity model definition
+struct EntityModel {
+    ModelId modelId;
+    string resourceId;              // "finevox:zombie", "mymod:custom_mob"
+
+    // Skeleton
+    std::vector<Bone> bones;
+
+    // Mesh parts (may have multiple parts per bone)
+    std::vector<ModelPart> parts;
+
+    // Physics (for game thread, but stored with model)
+    Vec3 boundingBoxHalfExtents;    // Collision box size
+    float eyeHeight;                // For first-person camera offset
+
+    // LOD variants (optional)
+    std::vector<ModelId> lodVariants;  // [0] = full, [1] = medium, [2] = low
+    float lodDistance[3];              // Distance thresholds
+
+    // Shadow casting
+    bool castsShadow = true;
+
+    // Default animation
+    uint8_t idleAnimationId = 0;
+};
+
+}  // namespace finevox
+```
+
+### 25.13.2 Animation System
+
+Animations are defined as keyframe sequences that transform bones over time.
+
+```cpp
+namespace finevox {
+
+/// Animation identifier within a model
+using AnimationId = uint8_t;
+
+/// Keyframe for a single bone
+struct BoneKeyframe {
+    float time;                     // Time in seconds
+    Vec3 position;                  // Offset from bind pose
+    Quat rotation;                  // Rotation from bind pose
+    Vec3 scale;                     // Scale multiplier
+};
+
+/// Animation track for one bone
+struct BoneTrack {
+    uint16_t boneIndex;
+    std::vector<BoneKeyframe> keyframes;
+
+    // Interpolation mode
+    enum class Interpolation : uint8_t {
+        Linear,
+        CubicSpline,
+        Step,
+    } interpolation = Interpolation::Linear;
+};
+
+/// Complete animation definition
+struct Animation {
+    AnimationId animationId;
+    string name;                    // "walk", "attack", "idle"
+
+    float duration;                 // Total animation length in seconds
+    bool looping = true;            // Does animation repeat?
+
+    std::vector<BoneTrack> tracks;
+
+    // Blending
+    float blendInTime = 0.1f;       // Crossfade from previous animation
+    float blendOutTime = 0.1f;      // Crossfade to next animation
+
+    // Events (for sounds, particles at specific times)
+    std::vector<AnimationEvent> events;
+};
+
+/// Event triggered during animation playback
+struct AnimationEvent {
+    float time;                     // When to trigger
+
+    enum class Type : uint8_t {
+        PlaySound,
+        SpawnParticle,
+        FootstepLeft,
+        FootstepRight,
+        AttackHit,                  // Damage window opens
+        AttackEnd,                  // Damage window closes
+    } type;
+
+    // Event-specific data
+    uint16_t soundId;               // For PlaySound
+    uint16_t particleTypeId;        // For SpawnParticle
+    Vec3 offset;                    // Position offset from entity
+};
+
+}  // namespace finevox
+```
+
+### 25.13.3 Animation State Machine
+
+Entities use a state machine to manage animation transitions:
+
+```cpp
+namespace finevox {
+
+/// Animation state for rendering
+struct AnimationState {
+    AnimationId currentAnimation = 0;
+    float currentTime = 0.0f;
+    float playbackSpeed = 1.0f;
+
+    // Blending from previous animation
+    AnimationId previousAnimation = 0;
+    float blendAlpha = 1.0f;        // 0 = all previous, 1 = all current
+    float previousTime = 0.0f;
+
+    // Layer animations (e.g., arm swing while walking)
+    struct AnimationLayer {
+        AnimationId animation;
+        float time;
+        float weight;               // How much this layer affects bones
+        uint32_t boneMask;          // Which bones this layer affects
+    };
+    std::vector<AnimationLayer> layers;
+};
+
+/// Standard animation IDs (by convention)
+enum class StandardAnimation : uint8_t {
+    Idle = 0,
+    Walk = 1,
+    Run = 2,
+    Jump = 3,
+    Fall = 4,
+    Attack = 5,
+    Hurt = 6,
+    Death = 7,
+
+    // Entity-specific animations start at 32
+    Custom = 32,
+};
+
+/// Animation controller (graphics thread)
+class AnimationController {
+public:
+    AnimationController(const EntityModel& model);
+
+    /**
+     * @brief Update animation state
+     * @param dt Delta time in seconds
+     * @param entityState Current entity state (for procedural animation)
+     */
+    void update(float dt, const EntityRenderState& entityState);
+
+    /**
+     * @brief Transition to a new animation
+     * @param animId Animation to play
+     * @param blendTime Crossfade duration (0 for instant)
+     */
+    void play(AnimationId animId, float blendTime = 0.1f);
+
+    /**
+     * @brief Add a layer animation (for upper body actions)
+     */
+    void addLayer(AnimationId animId, uint32_t boneMask, float weight = 1.0f);
+
+    /**
+     * @brief Compute final bone transforms for rendering
+     */
+    void computeBoneTransforms(std::vector<Mat4>& outTransforms) const;
+
+    /**
+     * @brief Get animation events that fired this frame
+     */
+    std::vector<AnimationEvent> consumeEvents();
+
+private:
+    const EntityModel& model_;
+    AnimationState state_;
+    std::vector<AnimationEvent> pendingEvents_;
+
+    void evaluateTrack(const BoneTrack& track, float time,
+                       Vec3& outPos, Quat& outRot, Vec3& outScale) const;
+};
+
+}  // namespace finevox
+```
+
+### 25.13.4 Entity Renderer
+
+The entity renderer draws all visible entities each frame:
+
+```cpp
+namespace finevox {
+
+/**
+ * @brief Renders all entities in the scene
+ *
+ * Uses instanced rendering where possible for efficiency.
+ * Handles LOD selection, animation, and transparency sorting.
+ */
+class EntityRenderer {
+public:
+    EntityRenderer(VulkanContext& vulkan, ModelCache& models);
+
+    /**
+     * @brief Prepare entity rendering for this frame
+     * @param interpolator Source of interpolated entity states
+     * @param camera Current camera for LOD and culling
+     * @param renderTime Current render time for interpolation
+     */
+    void prepareFrame(const EntityInterpolator& interpolator,
+                      const Camera& camera,
+                      double renderTime);
+
+    /**
+     * @brief Record draw commands
+     * @param cmd Vulkan command buffer
+     * @param passType Which render pass (opaque, transparent, shadow)
+     */
+    void recordDrawCommands(VkCommandBuffer cmd, RenderPassType passType);
+
+private:
+    struct EntityRenderData {
+        EntityId id;
+        ModelId modelId;
+        uint8_t lodLevel;
+        Mat4 worldTransform;
+        std::vector<Mat4> boneTransforms;
+        bool isTranslucent;
+        float distanceToCamera;
+    };
+
+    // Per-frame data
+    std::vector<EntityRenderData> opaqueEntities_;
+    std::vector<EntityRenderData> translucentEntities_;
+
+    // GPU buffers
+    VkBuffer boneTransformBuffer_;
+    VkBuffer instanceBuffer_;
+
+    // Animation controllers (per visible entity)
+    std::unordered_map<EntityId, AnimationController> animControllers_;
+
+    // Shader pipelines
+    VkPipeline entityPipeline_;
+    VkPipeline skinnedEntityPipeline_;
+
+    void frustumCull(const Camera& camera);
+    void selectLOD(const Camera& camera);
+    void sortTranslucent(const Camera& camera);
+    void uploadBoneTransforms();
+};
+
+}  // namespace finevox
+```
+
+### 25.13.5 Model Caching
+
+Entity models are cached and loaded on demand (integrates with network protocol §26.7):
+
+```cpp
+namespace finevox {
+
+/**
+ * @brief Cache for entity models and animations
+ *
+ * Models are loaded from server or disk cache.
+ * Placeholder models shown while loading.
+ */
+class ModelCache {
+public:
+    /**
+     * @brief Get model for rendering (may return placeholder)
+     */
+    const EntityModel* getModel(ModelId id) const;
+
+    /**
+     * @brief Get animation for a model
+     */
+    const Animation* getAnimation(ModelId modelId, AnimationId animId) const;
+
+    /**
+     * @brief Request model load (async)
+     */
+    void requestModel(ModelId id);
+
+    /**
+     * @brief Store model from network/disk
+     */
+    void storeModel(EntityModel model);
+    void storeAnimation(ModelId modelId, Animation animation);
+
+    /**
+     * @brief Check if model is fully loaded
+     */
+    bool isLoaded(ModelId id) const;
+
+    /**
+     * @brief Get placeholder model (simple box)
+     */
+    const EntityModel& placeholder() const { return placeholder_; }
+
+private:
+    std::unordered_map<ModelId, EntityModel> models_;
+    std::unordered_map<ModelId, std::vector<Animation>> animations_;
+    EntityModel placeholder_;  // Simple cube for missing models
+
+    std::unordered_set<ModelId> pendingRequests_;
+};
+
+}  // namespace finevox
+```
+
+### 25.13.6 Entity Visual Effects
+
+Entities can trigger visual effects through the client rules system (§26.14) or directly:
+
+```cpp
+namespace finevox {
+
+/**
+ * @brief Visual effects attached to entities
+ */
+struct EntityVisualEffects {
+    // Walking/running effects
+    uint16_t footstepParticleType;    // Dirt puffs, water splashes
+    uint16_t footstepSoundId;         // Footstep sound
+
+    // Damage effects
+    uint16_t hurtParticleType;        // Blood, sparks, etc.
+    uint16_t hurtSoundId;
+
+    // Death effects
+    uint16_t deathParticleType;       // Poof, dissolve, etc.
+    uint16_t deathSoundId;
+
+    // Ambient effects (continuous)
+    struct AmbientEffect {
+        uint16_t particleTypeId;
+        Vec3 offset;                  // Relative to entity
+        float rate;                   // Particles per second
+    };
+    std::vector<AmbientEffect> ambientEffects;  // Fire, smoke, etc.
+
+    // Status effect visuals
+    struct StatusOverlay {
+        uint16_t textureId;
+        float alpha;
+        Color tint;
+    };
+    std::vector<StatusOverlay> statusOverlays;  // Poison green, fire orange, etc.
+};
+
+}  // namespace finevox
+```
+
+### 25.13.7 Entity LOD Strategy
+
+Distance-based LOD reduces rendering cost for distant entities:
+
+| LOD Level | Distance | Description |
+|-----------|----------|-------------|
+| 0 (Full) | 0-16 blocks | Full model, full animation, all parts |
+| 1 (Medium) | 16-48 blocks | Simplified mesh, reduced bone count |
+| 2 (Low) | 48-96 blocks | Billboard or very simple mesh |
+| 3 (Icon) | 96+ blocks | Single colored quad or hidden |
+
+```cpp
+/// LOD selection for entities
+uint8_t selectEntityLOD(float distanceToCamera, const EntityModel& model) {
+    for (int i = 0; i < 3; ++i) {
+        if (distanceToCamera < model.lodDistance[i]) {
+            return i;
+        }
+    }
+    return 3;  // Icon/hidden level
+}
+```
+
+### 25.13.8 Shadow Rendering
+
+Entities cast shadows using the same skeletal transforms:
+
+```cpp
+/// Shadow pass uses simplified geometry
+void EntityRenderer::recordShadowPass(VkCommandBuffer cmd) {
+    for (const auto& entity : opaqueEntities_) {
+        const auto* model = modelCache_.getModel(entity.modelId);
+        if (!model || !model->castsShadow) continue;
+
+        // Use LOD 1 or 2 for shadow geometry (faster)
+        uint8_t shadowLOD = std::max(entity.lodLevel, uint8_t(1));
+
+        // Bind shadow pipeline (depth-only, no textures)
+        // Draw with bone transforms
+    }
+}
+```
+
+---
+
+## 25.14 Entity Type Definitions
+
+Entity types are defined in data files and loaded at runtime. The `EntityType` enum provides compile-time identifiers, but the actual properties come from definitions:
+
+```cpp
+namespace finevox {
+
+/// Complete entity type definition (loaded from data)
+struct EntityTypeDef {
+    EntityType typeId;
+    string resourceId;              // "finevox:zombie"
+
+    // Display
+    string displayName;             // "Zombie"
+
+    // Model reference
+    ModelId modelId;
+
+    // Physics
+    Vec3 boundingBoxHalfExtents;
+    float eyeHeight;
+    float maxStepHeight;
+    float walkSpeed;
+    float runSpeed;
+
+    // Behavior
+    enum class AIType : uint8_t {
+        None,                       // Player-controlled or scripted
+        Passive,                    // Wanders, flees from damage
+        Neutral,                    // Attacks when provoked
+        Hostile,                    // Attacks on sight
+        Utility,                    // Minecart, boat behavior
+    } aiType;
+
+    // Combat
+    float maxHealth;
+    float attackDamage;
+    float attackRange;
+    float attackCooldown;
+
+    // Visual effects
+    EntityVisualEffects effects;
+
+    // Drops
+    struct LootEntry {
+        uint16_t itemId;
+        uint8_t countMin, countMax;
+        float probability;
+    };
+    std::vector<LootEntry> lootTable;
+
+    // Spawning
+    float spawnWeight;              // Relative spawn frequency
+    std::vector<string> spawnBiomes;
+    int minLightLevel, maxLightLevel;
+};
+
+}  // namespace finevox
+```
 
 ---
 

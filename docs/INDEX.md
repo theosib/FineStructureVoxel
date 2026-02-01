@@ -74,7 +74,7 @@
 |----------|--------------|
 | [23 - Distance and Loading](23-distance-and-loading.md) | Distance zones, chunk loading policies, block updates, fog, force-loading |
 | [24 - Event System](24-event-system.md) | Inbox/outbox event processing, lighting thread, version tracking |
-| [25 - Entity System](25-entity-system.md) | Player prediction, entity interpolation, message-based sync, networking prep |
+| [25 - Entity System](25-entity-system.md) | Player prediction, entity interpolation, entity rendering, skeletal animation |
 | [26 - Network Protocol](26-network-protocol.md) | Thin client, semantic quantization, asset streaming, UI protocol |
 
 ### Planning & Analysis
@@ -160,6 +160,11 @@
 | Entity interpolation | [25](25-entity-system.md) §25.6 |
 | Graphics/game thread messages | [25](25-entity-system.md) §25.2-25.3 |
 | Network architecture mapping | [25](25-entity-system.md) §25.9 |
+| Entity model definitions | [25](25-entity-system.md) §25.13.1 |
+| Skeletal animation system | [25](25-entity-system.md) §25.13.2-25.13.3 |
+| Entity renderer | [25](25-entity-system.md) §25.13.4 |
+| Entity LOD strategy | [25](25-entity-system.md) §25.13.7 |
+| Entity type definitions | [25](25-entity-system.md) §25.14 |
 | Network protocol design | [26](26-network-protocol.md) §26.2 |
 | Thin client architecture | [26](26-network-protocol.md) §26.1, §26.12 |
 | Semantic quantization | [26](26-network-protocol.md) §26.3 |

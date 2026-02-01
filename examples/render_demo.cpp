@@ -41,6 +41,7 @@
 #include <finevk/high/simple_renderer.hpp>
 #include <finevk/engine/camera.hpp>
 #include <finevk/engine/overlay2d.hpp>
+#include <finevk/engine/input_manager.hpp>
 
 #include <iostream>
 #include <cmath>
@@ -67,13 +68,15 @@ struct CameraInput {
     float pitch = 0.0f;
     float moveSpeed = 10.0f;
     float lookSensitivity = 0.002f;
+    float jumpVelocity = 8.0f;  // Jump impulse (blocks/sec)
 
     bool moveForward = false;
     bool moveBack = false;
     bool moveLeft = false;
     bool moveRight = false;
-    bool moveUp = false;
-    bool moveDown = false;
+    bool moveUp = false;      // Used for fly mode up
+    bool moveDown = false;    // Used for fly mode down / crouch
+    bool jumpRequested = false;  // Jump in physics mode
 
     void look(float dx, float dy) {
         yaw -= dx * lookSensitivity;
@@ -90,8 +93,60 @@ struct CameraInput {
         };
     }
 
-    // Apply movement to camera using double-precision
-    void applyMovement(finevk::Camera& camera, float dt) {
+    // Get horizontal movement direction from input (XZ plane)
+    Vec3 getMoveDirection() const {
+        if (!moveForward && !moveBack && !moveLeft && !moveRight) {
+            return Vec3(0.0f);
+        }
+
+        // Use same approach as fly mode for consistency
+        Vec3 horizontalForward(std::sin(yaw), 0.0f, std::cos(yaw));
+        Vec3 right = glm::normalize(glm::cross(horizontalForward, Vec3(0, 1, 0)));
+
+        Vec3 dir(0.0f);
+        if (moveForward) dir += horizontalForward;
+        if (moveBack) dir -= horizontalForward;
+        if (moveRight) dir += right;
+        if (moveLeft) dir -= right;
+
+        if (glm::length(dir) > 0.0f) {
+            return glm::normalize(dir);
+        }
+        return Vec3(0.0f);
+    }
+
+    // Apply physics-based movement to player body
+    void applyPhysicsMovement(PhysicsBody& body, PhysicsSystem& physics, float dt) {
+        // Get horizontal movement direction
+        Vec3 moveDir = getMoveDirection();
+
+        // Set horizontal velocity from input
+        Vec3 vel = body.velocity();
+        if (glm::length(moveDir) > 0.0f) {
+            vel.x = moveDir.x * moveSpeed;
+            vel.z = moveDir.z * moveSpeed;
+        } else {
+            // Apply friction when not moving (quick stop)
+            vel.x *= 0.8f;
+            vel.z *= 0.8f;
+            if (std::abs(vel.x) < 0.1f) vel.x = 0.0f;
+            if (std::abs(vel.z) < 0.1f) vel.z = 0.0f;
+        }
+
+        // Handle jumping
+        if (jumpRequested && body.isOnGround()) {
+            vel.y = jumpVelocity;
+            jumpRequested = false;  // Consume jump request
+        }
+
+        body.setVelocity(vel);
+
+        // Apply gravity and move with collision
+        physics.update(body, dt);
+    }
+
+    // Apply free-fly movement to camera using double-precision (original behavior)
+    void applyFlyMovement(finevk::Camera& camera, float dt) {
         // Horizontal forward (XZ plane only, ignoring pitch)
         glm::dvec3 horizontalForward{
             std::sin(yaw),
@@ -116,6 +171,9 @@ struct CameraInput {
         camera.move(velocity * static_cast<double>(dt));
     }
 };
+
+// Eye height offset from player position (bottom of bounding box)
+constexpr float PLAYER_EYE_HEIGHT = 1.62f;  // Minecraft-style eye height
 
 void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = false) {
     // Get block type IDs (using string interner)
@@ -278,6 +336,19 @@ int main(int argc, char* argv[]) {
             .msaaSamples(renderer->msaaSamples())
             .build();
 
+        // Create input manager
+        auto inputManager = finevk::InputManager::create(window.get());
+
+        // Set up action mappings for movement controls
+        inputManager->mapAction("forward", GLFW_KEY_W);
+        inputManager->mapAction("back", GLFW_KEY_S);
+        inputManager->mapAction("left", GLFW_KEY_A);
+        inputManager->mapAction("right", GLFW_KEY_D);
+        inputManager->mapAction("up", GLFW_KEY_SPACE);
+        inputManager->mapAction("down", GLFW_KEY_LEFT_SHIFT);
+        inputManager->mapActionToMouse("break", GLFW_MOUSE_BUTTON_LEFT);
+        inputManager->mapActionToMouse("place", GLFW_MOUSE_BUTTON_RIGHT);
+
         // Create finevox world
         World world;
         buildTestWorld(world, singleBlockMode, startAtLargeCoords);
@@ -422,9 +493,7 @@ int main(int argc, char* argv[]) {
             camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
         }
 
-        // Input state
-        bool cursorCaptured = false;
-        double lastMouseX = 0, lastMouseY = 0;
+        // Input state (mouse capture is handled by InputManager)
 
         // Block placement state
         BlockTypeId selectedBlock = BlockTypeId::fromName("stone");
@@ -437,172 +506,8 @@ int main(int argc, char* argv[]) {
             BlockTypeId::fromName("glowstone")
         };
 
-        // Key callback
-        window->onKey([&](finevk::Key key, finevk::Action action, finevk::Modifier) {
-            bool pressed = (action == finevk::Action::Press || action == finevk::Action::Repeat);
-
-            if (key == GLFW_KEY_ESCAPE && action == finevk::Action::Press) {
-                if (cursorCaptured) {
-                    window->setMouseCaptured(false);
-                    cursorCaptured = false;
-                } else {
-                    window->close();
-                }
-            }
-
-            // Movement - only when mouse is captured
-            if (cursorCaptured) {
-                if (key == GLFW_KEY_W) input.moveForward = pressed;
-                if (key == GLFW_KEY_S) input.moveBack = pressed;
-                if (key == GLFW_KEY_A) input.moveLeft = pressed;
-                if (key == GLFW_KEY_D) input.moveRight = pressed;
-                if (key == GLFW_KEY_SPACE) input.moveUp = pressed;
-                if (key == GLFW_KEY_LEFT_SHIFT) input.moveDown = pressed;
-            } else {
-                // Clear movement when not captured
-                input.moveForward = false;
-                input.moveBack = false;
-                input.moveLeft = false;
-                input.moveRight = false;
-                input.moveUp = false;
-                input.moveDown = false;
-            }
-
-            // Debug controls
-            if (key == GLFW_KEY_F1 && action == finevk::Action::Press) {
-                bool enabled = !worldRenderer.debugCameraOffset();
-                worldRenderer.setDebugCameraOffset(enabled);
-                std::cout << "Debug camera offset: " << (enabled ? "ON" : "OFF") << "\n";
-            }
-
-            if (key == GLFW_KEY_F2 && action == finevk::Action::Press) {
-                // Teleport to large coordinates
-                camera.moveTo(glm::dvec3(1000000.0, 32.0, 1000000.0));
-                std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
-            }
-
-            if (key == GLFW_KEY_F3 && action == finevk::Action::Press) {
-                // Teleport back to origin
-                camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
-                std::cout << "Teleported to origin\n";
-            }
-
-            if ((key == GLFW_KEY_F4 || key == GLFW_KEY_4) && action == finevk::Action::Press) {
-                // Toggle hidden face culling (debug)
-                bool disabled = !worldRenderer.disableFaceCulling();
-                worldRenderer.setDisableFaceCulling(disabled);
-                worldRenderer.markAllDirty();  // Rebuild meshes
-                std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
-            }
-
-            if (key == GLFW_KEY_F5 && action == finevk::Action::Press) {
-                // Request screenshot on next frame
-                std::cout << "Screenshot requested (will save to screenshot.ppm)\n";
-            }
-
-            if (key == GLFW_KEY_F6 && action == finevk::Action::Press) {
-                // Toggle async meshing
-                if (worldRenderer.asyncMeshingEnabled()) {
-                    worldRenderer.disableAsyncMeshing();
-                    std::cout << "Async meshing: OFF (synchronous mode)\n";
-                } else {
-                    worldRenderer.enableAsyncMeshing();
-                    std::cout << "Async meshing: ON ("
-                              << worldRenderer.meshWorkerPool()->threadCount() << " worker threads)\n";
-                }
-            }
-
-            if (key == GLFW_KEY_G && action == finevk::Action::Press) {
-                // Toggle greedy meshing
-                bool enabled = !worldRenderer.greedyMeshing();
-                worldRenderer.setGreedyMeshing(enabled);
-                worldRenderer.markAllDirty();  // Rebuild meshes
-                std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
-            }
-
-            if (key == GLFW_KEY_V && action == finevk::Action::Press) {
-                // Print mesh stats
-                std::cout << "\n=== Mesh Stats ===\n";
-                std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
-                std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
-                std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
-                std::cout << "  Frustum culling: " << (worldRenderer.frustumCullingEnabled() ? "ON" : "OFF") << "\n";
-                std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
-                std::cout << "  LOD system: " << (worldRenderer.lodEnabled() ? "ON" : "OFF") << "\n";
-                if (worldRenderer.lodEnabled()) {
-                    const char* mergeModeName = "Unknown";
-                    switch (worldRenderer.lodMergeMode()) {
-                        case LODMergeMode::FullHeight: mergeModeName = "FullHeight"; break;
-                        case LODMergeMode::HeightLimited: mergeModeName = "HeightLimited"; break;
-                        case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
-                    }
-                    std::cout << "  LOD merge mode: " << mergeModeName << "\n";
-                }
-                std::cout << "==================\n\n";
-            }
-
-            if (key == GLFW_KEY_M && action == finevk::Action::Press) {
-                // Cycle LOD merge mode
-                auto currentMode = worldRenderer.lodMergeMode();
-                LODMergeMode nextMode;
-                const char* modeName;
-                switch (currentMode) {
-                    case LODMergeMode::FullHeight:
-                        nextMode = LODMergeMode::HeightLimited;
-                        modeName = "HeightLimited (smoother transitions)";
-                        break;
-                    case LODMergeMode::HeightLimited:
-                        nextMode = LODMergeMode::FullHeight;
-                        modeName = "FullHeight (best culling)";
-                        break;
-                    default:
-                        nextMode = LODMergeMode::FullHeight;
-                        modeName = "FullHeight (best culling)";
-                        break;
-                }
-                worldRenderer.setLODMergeMode(nextMode);
-                std::cout << "LOD merge mode: " << modeName << "\n";
-            }
-
-            if (key == GLFW_KEY_L && action == finevk::Action::Press) {
-                // Toggle LOD system (off = all chunks at LOD0, no merging)
-                bool enabled = !worldRenderer.lodEnabled();
-                worldRenderer.setLODEnabled(enabled);
-                worldRenderer.markAllDirty();
-                std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
-            }
-
-            if (key == GLFW_KEY_C && action == finevk::Action::Press) {
-                // Toggle frustum culling (for profiling)
-                bool enabled = !worldRenderer.frustumCullingEnabled();
-                worldRenderer.setFrustumCullingEnabled(enabled);
-                std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
-            }
-
-            if (key == GLFW_KEY_B && action == finevk::Action::Press) {
-                // Cycle lighting mode: OFF -> FLAT -> SMOOTH -> OFF
-                lightingMode = (lightingMode + 1) % 3;
-                applyLightingMode();
-                worldRenderer.markAllDirty();  // Rebuild meshes with new lighting
-            }
-
-            if (key == GLFW_KEY_TAB && action == finevk::Action::Press) {
-                // Cycle through block palette
-                selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
-                selectedBlock = blockPalette[selectedBlockIndex];
-                std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
-            }
-
-            if (key >= GLFW_KEY_1 && key <= GLFW_KEY_5 && action == finevk::Action::Press) {
-                // Number keys 1-5 select block directly
-                int index = key - GLFW_KEY_1;
-                if (index < static_cast<int>(blockPalette.size())) {
-                    selectedBlockIndex = index;
-                    selectedBlock = blockPalette[selectedBlockIndex];
-                    std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
-                }
-            }
-        });
+        // Physics state (declared early so callbacks can reference it)
+        bool physicsEnabled = false;  // Start in fly mode for familiarity
 
         // Block shape provider for raycasting - full block collision for non-air blocks
         BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode) -> const CollisionShape* {
@@ -613,56 +518,230 @@ int main(int argc, char* argv[]) {
             return &CollisionShape::FULL_BLOCK;
         };
 
-        // Mouse button callback
-        window->onMouseButton([&](finevk::MouseButton button, finevk::Action action, finevk::Modifier) {
-            if (button == GLFW_MOUSE_BUTTON_LEFT && action == finevk::Action::Press) {
-                if (!cursorCaptured) {
-                    // First click captures mouse
-                    window->setMouseCaptured(true);
-                    cursorCaptured = true;
-                    auto mousePos = window->mousePosition();
-                    lastMouseX = mousePos.x;
-                    lastMouseY = mousePos.y;
-                } else {
-                    // Left click while captured = break block
+        // Physics system and player body
+        PhysicsSystem physicsSystem(shapeProvider);
+        glm::dvec3 startPos = camera.positionD();
+        SimplePhysicsBody playerBody(
+            Vec3(static_cast<float>(startPos.x), static_cast<float>(startPos.y - PLAYER_EYE_HEIGHT), static_cast<float>(startPos.z)),
+            Vec3(0.3f, 0.9f, 0.3f)  // Player half-extents (0.6 x 1.8 x 0.6 full size)
+        );
+
+        // Input event callback - handles all discrete input events
+        inputManager->setEventCallback([&](const finevk::InputEvent& e) {
+            // Key press events for toggles and actions
+            if (e.type == finevk::InputEventType::KeyPress) {
+                if (e.key == GLFW_KEY_ESCAPE) {
+                    if (inputManager->isMouseCaptured()) {
+                        inputManager->setMouseCaptured(false);
+                    } else {
+                        window->close();
+                    }
+                }
+
+                // Jump in physics mode (space key)
+                if (e.key == GLFW_KEY_SPACE && physicsEnabled && inputManager->isMouseCaptured()) {
+                    input.jumpRequested = true;
+                }
+
+                // Debug controls
+                if (e.key == GLFW_KEY_F1) {
+                    bool enabled = !worldRenderer.debugCameraOffset();
+                    worldRenderer.setDebugCameraOffset(enabled);
+                    std::cout << "Debug camera offset: " << (enabled ? "ON" : "OFF") << "\n";
+                }
+
+                if (e.key == GLFW_KEY_F2) {
+                    // Teleport to large coordinates
+                    camera.moveTo(glm::dvec3(1000000.0, 32.0, 1000000.0));
+                    playerBody.setPosition(Vec3(1000000.0f, 32.0f - PLAYER_EYE_HEIGHT, 1000000.0f));
+                    playerBody.setVelocity(Vec3(0.0f));
+                    std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
+                }
+
+                if (e.key == GLFW_KEY_F3) {
+                    // Teleport back to origin
+                    camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
+                    playerBody.setPosition(Vec3(0.0f, 32.0f - PLAYER_EYE_HEIGHT, 0.0f));
+                    playerBody.setVelocity(Vec3(0.0f));
+                    std::cout << "Teleported to origin\n";
+                }
+
+                if (e.key == GLFW_KEY_F4 || e.key == GLFW_KEY_4) {
+                    // Toggle hidden face culling (debug)
+                    bool disabled = !worldRenderer.disableFaceCulling();
+                    worldRenderer.setDisableFaceCulling(disabled);
+                    worldRenderer.markAllDirty();  // Rebuild meshes
+                    std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
+                }
+
+                if (e.key == GLFW_KEY_F5) {
+                    // Toggle physics mode
+                    physicsEnabled = !physicsEnabled;
+                    if (physicsEnabled) {
+                        // Sync player body to current camera position
+                        glm::dvec3 camPos = camera.positionD();
+                        playerBody.setPosition(Vec3(
+                            static_cast<float>(camPos.x),
+                            static_cast<float>(camPos.y - PLAYER_EYE_HEIGHT),
+                            static_cast<float>(camPos.z)
+                        ));
+                        playerBody.setVelocity(Vec3(0.0f));
+                        std::cout << "Physics mode: ON (gravity, collision, step-climbing)\n";
+                    } else {
+                        std::cout << "Physics mode: OFF (free-fly camera)\n";
+                    }
+                }
+
+                if (e.key == GLFW_KEY_F6) {
+                    // Toggle async meshing
+                    if (worldRenderer.asyncMeshingEnabled()) {
+                        worldRenderer.disableAsyncMeshing();
+                        std::cout << "Async meshing: OFF (synchronous mode)\n";
+                    } else {
+                        worldRenderer.enableAsyncMeshing();
+                        std::cout << "Async meshing: ON ("
+                                  << worldRenderer.meshWorkerPool()->threadCount() << " worker threads)\n";
+                    }
+                }
+
+                if (e.key == GLFW_KEY_G) {
+                    // Toggle greedy meshing
+                    bool enabled = !worldRenderer.greedyMeshing();
+                    worldRenderer.setGreedyMeshing(enabled);
+                    worldRenderer.markAllDirty();  // Rebuild meshes
+                    std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
+                }
+
+                if (e.key == GLFW_KEY_V) {
+                    // Print mesh stats
+                    std::cout << "\n=== Mesh Stats ===\n";
+                    std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
+                    std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
+                    std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
+                    std::cout << "  Frustum culling: " << (worldRenderer.frustumCullingEnabled() ? "ON" : "OFF") << "\n";
+                    std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
+                    std::cout << "  LOD system: " << (worldRenderer.lodEnabled() ? "ON" : "OFF") << "\n";
+                    if (worldRenderer.lodEnabled()) {
+                        const char* mergeModeName = "Unknown";
+                        switch (worldRenderer.lodMergeMode()) {
+                            case LODMergeMode::FullHeight: mergeModeName = "FullHeight"; break;
+                            case LODMergeMode::HeightLimited: mergeModeName = "HeightLimited"; break;
+                            case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
+                        }
+                        std::cout << "  LOD merge mode: " << mergeModeName << "\n";
+
+                        // Show LOD distribution
+                        auto lodStats = worldRenderer.getLODStats();
+                        std::cout << "  LOD distribution:\n";
+                        for (int i = 0; i < 5; ++i) {
+                            if (lodStats.chunksPerLevel[i] > 0) {
+                                std::cout << "    LOD" << i << ": " << lodStats.chunksPerLevel[i] << " chunks\n";
+                            }
+                        }
+                    }
+                    std::cout << "==================\n\n";
+                }
+
+                if (e.key == GLFW_KEY_M) {
+                    // Cycle LOD merge mode
+                    auto currentMode = worldRenderer.lodMergeMode();
+                    LODMergeMode nextMode;
+                    const char* modeName;
+                    switch (currentMode) {
+                        case LODMergeMode::FullHeight:
+                            nextMode = LODMergeMode::HeightLimited;
+                            modeName = "HeightLimited (smoother transitions)";
+                            break;
+                        case LODMergeMode::HeightLimited:
+                            nextMode = LODMergeMode::FullHeight;
+                            modeName = "FullHeight (best culling)";
+                            break;
+                        default:
+                            nextMode = LODMergeMode::FullHeight;
+                            modeName = "FullHeight (best culling)";
+                            break;
+                    }
+                    worldRenderer.setLODMergeMode(nextMode);
+                    std::cout << "LOD merge mode: " << modeName << "\n";
+                }
+
+                if (e.key == GLFW_KEY_L) {
+                    // Toggle LOD system (off = all chunks at LOD0, no merging)
+                    bool enabled = !worldRenderer.lodEnabled();
+                    worldRenderer.setLODEnabled(enabled);
+                    worldRenderer.markAllDirty();
+                    std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
+                }
+
+                if (e.key == GLFW_KEY_C) {
+                    // Toggle frustum culling (for profiling)
+                    bool enabled = !worldRenderer.frustumCullingEnabled();
+                    worldRenderer.setFrustumCullingEnabled(enabled);
+                    std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
+                }
+
+                if (e.key == GLFW_KEY_B) {
+                    // Cycle lighting mode: OFF -> FLAT -> SMOOTH -> OFF
+                    lightingMode = (lightingMode + 1) % 3;
+                    applyLightingMode();
+                    worldRenderer.markAllDirty();  // Rebuild meshes with new lighting
+                }
+
+                if (e.key == GLFW_KEY_TAB) {
+                    // Cycle through block palette
+                    selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
+                    selectedBlock = blockPalette[selectedBlockIndex];
+                    std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+                }
+
+                if (e.key >= GLFW_KEY_1 && e.key <= GLFW_KEY_5) {
+                    // Number keys 1-5 select block directly
+                    int index = e.key - GLFW_KEY_1;
+                    if (index < static_cast<int>(blockPalette.size())) {
+                        selectedBlockIndex = index;
+                        selectedBlock = blockPalette[selectedBlockIndex];
+                        std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+                    }
+                }
+            }
+
+            // Mouse button events
+            if (e.type == finevk::InputEventType::MouseButtonPress) {
+                if (e.mouseButton == GLFW_MOUSE_BUTTON_LEFT) {
+                    if (!inputManager->isMouseCaptured()) {
+                        // First click captures mouse
+                        inputManager->setMouseCaptured(true);
+                    } else {
+                        // Left click while captured = break block
+                        glm::dvec3 camPos = camera.positionD();
+                        Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+                        Vec3 direction = input.forwardVec();
+
+                        RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+                        if (result.hit) {
+                            // Use external API - triggers events, lighting, etc.
+                            world.breakBlock(result.blockPos);
+                            std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
+                        }
+                    }
+                }
+
+                if (e.mouseButton == GLFW_MOUSE_BUTTON_RIGHT && inputManager->isMouseCaptured()) {
+                    // Right click = place block
                     glm::dvec3 camPos = camera.positionD();
                     Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
                     Vec3 direction = input.forwardVec();
 
                     RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                     if (result.hit) {
+                        BlockPos placePos = getPlacePosition(result.blockPos, result.face);
                         // Use external API - triggers events, lighting, etc.
-                        world.breakBlock(result.blockPos);
-                        std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
+                        world.placeBlock(placePos, selectedBlock);
+                        std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                                  << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                     }
                 }
             }
-            if (button == GLFW_MOUSE_BUTTON_RIGHT && action == finevk::Action::Press && cursorCaptured) {
-                // Right click = place block
-                glm::dvec3 camPos = camera.positionD();
-                Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                Vec3 direction = input.forwardVec();
-
-                RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
-                if (result.hit) {
-                    BlockPos placePos = getPlacePosition(result.blockPos, result.face);
-                    // Use external API - triggers events, lighting, etc.
-                    world.placeBlock(placePos, selectedBlock);
-                    std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
-                              << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
-                }
-            }
-        });
-
-        // Mouse move callback
-        window->onMouseMove([&](double x, double y) {
-            if (cursorCaptured) {
-                float dx = static_cast<float>(x - lastMouseX);
-                float dy = static_cast<float>(y - lastMouseY);
-                input.look(dx, dy);
-            }
-            lastMouseX = x;
-            lastMouseY = y;
         });
 
         // Resize callback
@@ -674,7 +753,8 @@ int main(int argc, char* argv[]) {
 
         std::cout << "\nControls:\n";
         std::cout << "  WASD + Mouse: Move and look\n";
-        std::cout << "  Space/Shift: Up/Down\n";
+        std::cout << "  Space: Jump (physics) / Up (fly)\n";
+        std::cout << "  Shift: Down (fly mode)\n";
         std::cout << "  Left Click: Break block (uses event system)\n";
         std::cout << "  Right Click: Place block (uses event system)\n";
         std::cout << "  1-5 / Tab: Select block type\n";
@@ -682,6 +762,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  F2: Teleport to large coords (1M)\n";
         std::cout << "  F3: Teleport to origin\n";
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
+        std::cout << "  F5: Toggle physics mode (gravity, collision)\n";
         std::cout << "  F6: Toggle async meshing\n";
         std::cout << "  B: Toggle smooth lighting\n";
         std::cout << "  C: Toggle frustum culling\n";
@@ -701,6 +782,40 @@ int main(int argc, char* argv[]) {
         // Main loop
         while (window->isOpen()) {
             window->pollEvents();
+
+            // Query mouse delta BEFORE update() clears it
+            // (update() clears per-frame state like mouseDelta after dispatching events)
+            glm::vec2 mouseDelta = inputManager->mouseDelta();
+
+            // Update input manager - dispatches queued events to callback, clears per-frame state
+            inputManager->update();
+
+            // Update movement state from action mappings (only when mouse captured)
+            if (inputManager->isMouseCaptured()) {
+                input.moveForward = inputManager->isActionActive("forward");
+                input.moveBack = inputManager->isActionActive("back");
+                input.moveLeft = inputManager->isActionActive("left");
+                input.moveRight = inputManager->isActionActive("right");
+                input.moveDown = inputManager->isActionActive("down");
+                // Space is handled specially: jump in physics mode, fly-up in fly mode
+                if (!physicsEnabled) {
+                    input.moveUp = inputManager->isActionActive("up");
+                }
+
+                // Handle mouse look (using delta captured before update())
+                if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
+                    input.look(mouseDelta.x, mouseDelta.y);
+                }
+            } else {
+                // Clear movement when not captured
+                input.moveForward = false;
+                input.moveBack = false;
+                input.moveLeft = false;
+                input.moveRight = false;
+                input.moveUp = false;
+                input.moveDown = false;
+                input.jumpRequested = false;
+            }
 
             // Record frame start and get estimated frame period (tracks vsync timing)
             auto framePeriod = worldRenderer.recordFrameStart();
@@ -725,8 +840,17 @@ int main(int argc, char* argv[]) {
                 fpsTimer = 0.0f;
             }
 
-            // Update camera position using input handler with double-precision
-            input.applyMovement(camera, dt);
+            // Update player/camera position
+            if (physicsEnabled) {
+                // Physics mode: apply physics-based movement
+                input.applyPhysicsMovement(playerBody, physicsSystem, dt);
+                // Set camera position from player position + eye height
+                Vec3 playerPos = playerBody.position();
+                camera.moveTo(glm::dvec3(playerPos.x, playerPos.y + PLAYER_EYE_HEIGHT, playerPos.z));
+            } else {
+                // Fly mode: direct camera movement (no collision)
+                input.applyFlyMovement(camera, dt);
+            }
             camera.setOrientation(input.forwardVec(), glm::vec3(0, 1, 0));
             camera.updateState();
 

@@ -420,11 +420,14 @@ private:
 
         bool operator==(const LODFaceMaskEntry& other) const {
             // For greedy meshing, faces can merge if same block type, height, and light
-            // Note: using exact float comparison for light - faces with different
-            // light levels shouldn't merge to preserve lighting gradients
+            // Light values are 4-bit integers (0-15) mapped to float, so exact comparison works
             return blockType == other.blockType &&
                    height == other.height &&
                    light == other.light;
+        }
+
+        bool operator!=(const LODFaceMaskEntry& other) const {
+            return !(*this == other);
         }
 
         bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }

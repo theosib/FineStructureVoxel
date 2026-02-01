@@ -292,7 +292,29 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
 void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
     uint32_t uploads = 0;
 
-    // Process explicitly dirty chunks first (for new chunks not yet tracked)
+    // First pass: check existing views for version mismatches or LOD changes
+    // This ensures LOD updates when camera moves, not just when blocks change
+    for (auto& [pos, view] : views_) {
+        const SubChunk* subchunk = world_.getSubChunk(pos);
+        if (!subchunk) continue;
+
+        // Calculate distance and LOD request
+        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+        LODRequest lodRequest = lodEnabled_
+            ? lodConfig_.getRequestForDistance(distBlocks)
+            : LODRequest::exact(LODLevel::LOD0);
+
+        // Check if rebuild needed: version mismatch OR LOD doesn't satisfy request
+        uint64_t currentBlockVersion = subchunk->blockVersion();
+        uint64_t currentLightVersion = subchunk->lightVersion();
+        if (view->needsRebuild(currentBlockVersion, currentLightVersion, lodRequest)) {
+            // Queue rebuild with appropriate priority
+            uint32_t priority = (distBlocks < 32.0f) ? 0 : 100;  // Immediate for close chunks
+            meshRebuildQueue_->push(pos, MeshRebuildRequest(currentBlockVersion, currentLightVersion, priority, lodRequest));
+        }
+    }
+
+    // Process explicitly dirty chunks (for new chunks not yet in views_)
     std::vector<ChunkPos> remainingDirty;
     for (const auto& pos : dirtyChunks_) {
         if (!isInViewDistance(pos)) {

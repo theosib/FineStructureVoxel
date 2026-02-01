@@ -889,4 +889,4 @@ struct PendingTicks {
 
 ---
 
-[Next: TBD]
+[Next: Entity System](25-entity-system.md)

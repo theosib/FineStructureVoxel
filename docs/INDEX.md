@@ -74,6 +74,8 @@
 |----------|--------------|
 | [23 - Distance and Loading](23-distance-and-loading.md) | Distance zones, chunk loading policies, block updates, fog, force-loading |
 | [24 - Event System](24-event-system.md) | Inbox/outbox event processing, lighting thread, version tracking |
+| [25 - Entity System](25-entity-system.md) | Player prediction, entity interpolation, message-based sync, networking prep |
+| [26 - Network Protocol](26-network-protocol.md) | Thin client, semantic quantization, asset streaming, UI protocol |
 
 ### Planning & Analysis
 
@@ -153,6 +155,17 @@
 | Handler semantics (place/break) | [24](24-event-system.md) §24.7 |
 | Lighting thread integration | [24](24-event-system.md) §24.8-24.11 |
 | Version tracking (block/light) | [24](24-event-system.md) §24.9 |
+| Entity system architecture | [25](25-entity-system.md) §25.1 |
+| Player prediction | [25](25-entity-system.md) §25.4 |
+| Entity interpolation | [25](25-entity-system.md) §25.6 |
+| Graphics/game thread messages | [25](25-entity-system.md) §25.2-25.3 |
+| Network architecture mapping | [25](25-entity-system.md) §25.9 |
+| Network protocol design | [26](26-network-protocol.md) §26.2 |
+| Thin client architecture | [26](26-network-protocol.md) §26.1, §26.12 |
+| Semantic quantization | [26](26-network-protocol.md) §26.3 |
+| Asset streaming | [26](26-network-protocol.md) §26.6 |
+| UI protocol | [26](26-network-protocol.md) §26.7 |
+| Player input protocol | [26](26-network-protocol.md) §26.5 |
 
 ---
 
@@ -182,4 +195,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-01-24*
+*Last Updated: 2026-02-01*

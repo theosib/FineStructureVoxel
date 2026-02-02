@@ -61,6 +61,9 @@ add_library(finevox STATIC
     src/light_data.cpp
     src/light_engine.cpp
     src/event_queue.cpp
+    src/entity.cpp
+    src/graphics_event_queue.cpp
+    src/entity_manager.cpp
 )
 
 target_include_directories(finevox PUBLIC

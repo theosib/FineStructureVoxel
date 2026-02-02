@@ -62,6 +62,55 @@ void SimpleQueue<T>::push(T&& item) {
 }
 
 template<typename T>
+void SimpleQueue<T>::pushBatch(std::vector<T> items) {
+    if (items.empty()) return;
+
+    WakeSignal* signalToNotify = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (shutdown_) {
+            return;
+        }
+
+        for (auto& item : items) {
+            items_.push_back(std::move(item));
+        }
+        signalToNotify = signal_;
+    }
+
+    if (signalToNotify) {
+        signalToNotify->signal();
+    }
+}
+
+template<typename T>
+template<typename Iterator>
+void SimpleQueue<T>::pushBatch(Iterator begin, Iterator end) {
+    if (begin == end) return;
+
+    WakeSignal* signalToNotify = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (shutdown_) {
+            return;
+        }
+
+        for (auto it = begin; it != end; ++it) {
+            items_.push_back(*it);
+        }
+        signalToNotify = signal_;
+    }
+
+    if (signalToNotify) {
+        signalToNotify->signal();
+    }
+}
+
+template<typename T>
 void SimpleQueue<T>::shutdown() {
     WakeSignal* signalToNotify = nullptr;
 

@@ -17,7 +17,7 @@
 #include "finevox/mesh_rebuild_queue.hpp"
 #include "finevox/mesh.hpp"
 #include "finevox/position.hpp"
-#include "finevox/simple_queue.hpp"
+#include "finevox/queue.hpp"
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -47,7 +47,8 @@ struct MeshUploadData {
 };
 
 /// Queue type for mesh uploads (workers push, graphics thread pops)
-using MeshUploadQueue = SimpleQueue<MeshUploadData>;
+/// Uses unified Queue<T> with CV, alarms, and WakeSignal support.
+using MeshUploadQueue = Queue<MeshUploadData>;
 
 // Mesh worker thread pool - pure push-based architecture
 //

@@ -92,6 +92,42 @@ bool CoalescingQueue<Key, Data, Hash>::push(Key&& key, Data&& data) {
 }
 
 template<typename Key, typename Data, typename Hash>
+size_t CoalescingQueue<Key, Data, Hash>::pushBatch(std::vector<std::pair<Key, Data>> items) {
+    if (items.empty()) return 0;
+
+    WakeSignal* signalToNotify = nullptr;
+    size_t newCount = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (shutdown_) {
+            return 0;
+        }
+
+        for (auto& [key, data] : items) {
+            auto it = items_.find(key);
+            if (it != items_.end()) {
+                it->second = merge_(it->second, std::move(data));
+            } else {
+                order_.push_back(key);
+                present_.insert(key);
+                items_.emplace(std::move(key), std::move(data));
+                ++newCount;
+            }
+        }
+
+        signalToNotify = signal_;
+    }
+
+    if (signalToNotify) {
+        signalToNotify->signal();
+    }
+
+    return newCount;
+}
+
+template<typename Key, typename Data, typename Hash>
 void CoalescingQueue<Key, Data, Hash>::shutdown() {
     WakeSignal* signalToNotify = nullptr;
 

@@ -17,6 +17,7 @@
 #include <optional>
 #include <functional>
 #include <mutex>
+#include <vector>
 
 namespace finevox {
 
@@ -123,6 +124,16 @@ public:
      */
     bool push(Key&& key, Data&& data);
 
+    /**
+     * @brief Push multiple key-data pairs atomically
+     *
+     * Items are merged if keys already exist.
+     *
+     * @param items Pairs of (key, data)
+     * @return Number of newly added keys (vs merged)
+     */
+    size_t pushBatch(std::vector<std::pair<Key, Data>> items);
+
     // ========================================================================
     // Pop operations
     // ========================================================================
@@ -148,6 +159,56 @@ public:
         items_.erase(it);
 
         return std::make_pair(std::move(key), std::move(data));
+    }
+
+    /**
+     * @brief Drain all items at once (non-blocking)
+     *
+     * @return Vector of (key, data) pairs in queue order
+     */
+    std::vector<std::pair<Key, Data>> drainAll() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::pair<Key, Data>> result;
+        result.reserve(order_.size());
+
+        while (!order_.empty()) {
+            Key key = std::move(order_.front());
+            order_.pop_front();
+            present_.erase(key);
+
+            auto it = items_.find(key);
+            Data data = std::move(it->second);
+            items_.erase(it);
+
+            result.emplace_back(std::move(key), std::move(data));
+        }
+        return result;
+    }
+
+    /**
+     * @brief Drain up to maxItems (non-blocking)
+     *
+     * @param maxItems Maximum number of items to drain
+     * @return Vector of (key, data) pairs in queue order
+     */
+    std::vector<std::pair<Key, Data>> drainUpTo(size_t maxItems) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::pair<Key, Data>> result;
+        size_t count = std::min(maxItems, order_.size());
+        result.reserve(count);
+
+        for (size_t i = 0; i < count; ++i) {
+            Key key = std::move(order_.front());
+            order_.pop_front();
+            present_.erase(key);
+
+            auto it = items_.find(key);
+            Data data = std::move(it->second);
+            items_.erase(it);
+
+            result.emplace_back(std::move(key), std::move(data));
+        }
+        return result;
     }
 
     // ========================================================================

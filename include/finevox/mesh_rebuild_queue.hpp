@@ -7,7 +7,7 @@
  * Design: [06-rendering.md] §6.3 Priority Queue
  */
 
-#include "finevox/alarm_queue.hpp"
+#include "finevox/keyed_queue.hpp"
 #include "finevox/position.hpp"
 #include "finevox/lod.hpp"
 #include <cstdint>
@@ -105,6 +105,7 @@ inline MeshRebuildRequest mergeMeshRebuildRequest(
 /// - Version tracking (builds against latest SubChunk version)
 /// - Alarm-based wakeup for frame-synchronized background scanning
 /// - Non-popping wait (waitForWork) for efficient worker loops
+/// - WakeSignal attachment for multi-queue coordination
 ///
 /// Usage:
 ///   MeshRebuildQueue queue;
@@ -125,7 +126,7 @@ inline MeshRebuildRequest mergeMeshRebuildRequest(
 ///
 ///   queue.shutdown();
 ///
-using MeshRebuildQueue = AlarmQueueWithData<ChunkPos, MeshRebuildRequest>;
+using MeshRebuildQueue = KeyedQueue<ChunkPos, MeshRebuildRequest>;
 
 /// Create a MeshRebuildQueue with proper merge semantics
 inline MeshRebuildQueue createMeshRebuildQueue() {

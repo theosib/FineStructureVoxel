@@ -470,9 +470,16 @@ TEST(UpdateSchedulerTest, AutoUnregisterOnBreak) {
     auto tickingId = BlockTypeId::fromName("autoregtest:ticking2");
     BlockRegistry::global().registerType(tickingId, tickingType);
 
-    // Create world with a ticking block
+    // Register a normal block type (doesn't want game ticks)
+    BlockType normalType;
+    auto normalId = BlockTypeId::fromName("autoregtest:normal");
+    BlockRegistry::global().registerType(normalId, normalType);
+
+    // Create world with a ticking block AND a normal block
+    // (We need the normal block to keep the subchunk alive after breaking the ticking block)
     World world;
     world.setBlock(BlockPos{7, 7, 7}, tickingId);
+    world.setBlock(BlockPos{8, 8, 8}, normalId);  // Keep subchunk alive
 
     // Create scheduler
     UpdateScheduler scheduler(world);
@@ -497,6 +504,10 @@ TEST(UpdateSchedulerTest, AutoUnregisterOnBreak) {
     BlockEvent breakEvent = BlockEvent::blockBroken(BlockPos{7, 7, 7}, tickingId);
     scheduler.pushExternalEvent(breakEvent);
     scheduler.processEvents();
+
+    // Re-get subchunk pointer (in case internal storage changed)
+    subchunk = world.getSubChunk(ChunkPos{0, 0, 0});
+    ASSERT_NE(subchunk, nullptr);  // Should still exist due to the normal block
 
     // Should be unregistered and scheduled ticks cancelled
     EXPECT_FALSE(subchunk->isRegisteredForGameTicks(localIndex));

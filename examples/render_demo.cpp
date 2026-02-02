@@ -36,6 +36,8 @@
 #include <finevox/light_engine.hpp>
 #include <finevox/event_queue.hpp>
 #include <finevox/physics.hpp>
+#include <finevox/entity_manager.hpp>
+#include <finevox/graphics_event_queue.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -408,6 +410,11 @@ int main(int argc, char* argv[]) {
         lightEngine.start();
         std::cout << "Lighting thread started (async lighting updates enabled)\n";
 
+        // Create entity system (game thread to graphics thread communication)
+        GraphicsEventQueue graphicsEventQueue;
+        EntityManager entityManager(world, graphicsEventQueue);
+        std::cout << "Entity system initialized\n";
+
         // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
         int lightingMode = 2;  // Start with smooth lighting
         auto applyLightingMode = [&]() {
@@ -525,6 +532,11 @@ int main(int argc, char* argv[]) {
             Vec3(static_cast<float>(startPos.x), static_cast<float>(startPos.y - PLAYER_EYE_HEIGHT), static_cast<float>(startPos.z)),
             Vec3(0.3f, 0.9f, 0.3f)  // Player half-extents (0.6 x 1.8 x 0.6 full size)
         );
+
+        // Spawn player entity in the entity system
+        EntityId playerId = entityManager.spawnPlayer(playerBody.position());
+        entityManager.setLocalPlayerId(playerId);
+        std::cout << "Player entity spawned with ID " << playerId << "\n";
 
         // Input event callback - handles all discrete input events
         inputManager->setEventCallback([&](const finevk::InputEvent& e) {
@@ -853,6 +865,21 @@ int main(int argc, char* argv[]) {
             }
             camera.setOrientation(input.forwardVec(), glm::vec3(0, 1, 0));
             camera.updateState();
+
+            // Sync player entity position with physics body
+            if (Entity* player = entityManager.getLocalPlayer()) {
+                player->setPosition(playerBody.position());
+                player->setVelocity(playerBody.velocity());
+                player->setOnGround(playerBody.isOnGround());
+                player->setLook(glm::degrees(input.yaw), glm::degrees(input.pitch));
+            }
+
+            // Tick the entity manager (publishes snapshots to graphics queue)
+            entityManager.tick(dt);
+
+            // Drain graphics event queue (for now, just discard the events)
+            // In a full implementation, we'd use these for entity interpolation
+            [[maybe_unused]] auto graphicsEvents = graphicsEventQueue.drainAll();
 
             // Process events from external API (block place/break)
             // This triggers handlers, lighting updates, neighbor notifications

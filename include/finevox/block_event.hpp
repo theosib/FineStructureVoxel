@@ -11,11 +11,21 @@
 #include "finevox/rotation.hpp"
 #include "finevox/string_interner.hpp"
 #include <cstdint>
+#include <glm/glm.hpp>
+
+// Use glm::vec3 for helper methods
+using Vec3 = glm::vec3;
 
 namespace finevox {
 
 // Forward declaration
 enum class TickType : uint8_t;
+
+/// Unique entity identifier
+using EntityId = uint64_t;
+
+/// Invalid entity ID constant
+constexpr EntityId INVALID_ENTITY_ID = 0;
 
 // ============================================================================
 // EventType - Types of block-related events
@@ -42,9 +52,18 @@ enum class EventType : uint8_t {
     NeighborChanged,    // Adjacent block changed
     BlockUpdate,        // Block should re-evaluate state (redstone-like propagation)
 
-    // Interaction events
-    PlayerUse,          // Player right-clicked
-    PlayerHit,          // Player left-clicked
+    // Interaction events (block-targeted)
+    PlayerUse,          // Player right-clicked a block
+    PlayerHit,          // Player left-clicked a block
+
+    // Player state events (from graphics thread)
+    PlayerPosition,     // Position/velocity update from prediction
+    PlayerLook,         // Yaw/pitch changed
+    PlayerJump,         // Jump action (discrete)
+    PlayerStartSprint,  // Sprint began
+    PlayerStopSprint,   // Sprint ended
+    PlayerStartSneak,   // Sneak began
+    PlayerStopSneak,    // Sneak ended
 
     // Chunk events
     ChunkLoaded,        // Chunk was loaded
@@ -52,6 +71,36 @@ enum class EventType : uint8_t {
 
     // Visual events
     RepaintRequested,   // Block needs visual update
+};
+
+// ============================================================================
+// PlayerEventData - Player-specific event data for entity events
+// ============================================================================
+
+/**
+ * @brief Player-specific event data
+ *
+ * Serialization-ready: all fixed-size POD fields.
+ * Used with PlayerPosition, PlayerLook, PlayerJump, etc. event types.
+ */
+struct PlayerEventData {
+    // Position/motion (for PlayerPosition events)
+    float posX = 0.0f, posY = 0.0f, posZ = 0.0f;
+    float velX = 0.0f, velY = 0.0f, velZ = 0.0f;
+    bool onGround = false;
+
+    // Look direction (for PlayerLook events)
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+
+    // Input sequence for reconciliation
+    uint64_t inputSequence = 0;
+
+    // Helpers
+    [[nodiscard]] Vec3 position() const { return Vec3(posX, posY, posZ); }
+    [[nodiscard]] Vec3 velocity() const { return Vec3(velX, velY, velZ); }
+    void setPosition(Vec3 p) { posX = p.x; posY = p.y; posZ = p.z; }
+    void setVelocity(Vec3 v) { velX = v.x; velY = v.y; velZ = v.z; }
 };
 
 // ============================================================================
@@ -94,6 +143,10 @@ struct BlockEvent {
 
     // Timestamp (for ordering and debugging)
     uint64_t timestamp = 0;
+
+    // Entity data (for player/entity events)
+    EntityId entityId = INVALID_ENTITY_ID;  // Which entity triggered this event
+    PlayerEventData playerData;              // Player-specific data (for player events)
 
     // ========================================================================
     // Factory Methods
@@ -163,6 +216,49 @@ struct BlockEvent {
     static BlockEvent blockUpdate(BlockPos pos);
 
     // ========================================================================
+    // Player Event Factory Methods
+    // ========================================================================
+
+    /**
+     * @brief Create a player position update event
+     * @param id Entity ID of the player
+     * @param position Current position
+     * @param velocity Current velocity
+     * @param onGround Whether player is on ground
+     * @param inputSequence Input sequence number for reconciliation
+     */
+    static BlockEvent playerPosition(EntityId id, Vec3 position, Vec3 velocity,
+                                      bool onGround, uint64_t inputSequence);
+
+    /**
+     * @brief Create a player look direction event
+     * @param id Entity ID of the player
+     * @param yaw Yaw angle in degrees
+     * @param pitch Pitch angle in degrees
+     */
+    static BlockEvent playerLook(EntityId id, float yaw, float pitch);
+
+    /**
+     * @brief Create a player jump event
+     * @param id Entity ID of the player
+     */
+    static BlockEvent playerJump(EntityId id);
+
+    /**
+     * @brief Create a player sprint start/stop event
+     * @param id Entity ID of the player
+     * @param starting True if starting sprint, false if stopping
+     */
+    static BlockEvent playerSprint(EntityId id, bool starting);
+
+    /**
+     * @brief Create a player sneak start/stop event
+     * @param id Entity ID of the player
+     * @param starting True if starting sneak, false if stopping
+     */
+    static BlockEvent playerSneak(EntityId id, bool starting);
+
+    // ========================================================================
     // Sentinel Checks
     // ========================================================================
 
@@ -186,10 +282,37 @@ struct BlockEvent {
     }
 
     /**
-     * @brief Check if this is a player interaction event
+     * @brief Check if this is a player block interaction event
      */
-    [[nodiscard]] bool isInteractionEvent() const {
+    [[nodiscard]] bool isBlockInteractionEvent() const {
         return type == EventType::PlayerUse || type == EventType::PlayerHit;
+    }
+
+    /**
+     * @brief Check if this is a player state event (from graphics thread)
+     */
+    [[nodiscard]] bool isPlayerStateEvent() const {
+        return type == EventType::PlayerPosition ||
+               type == EventType::PlayerLook ||
+               type == EventType::PlayerJump ||
+               type == EventType::PlayerStartSprint ||
+               type == EventType::PlayerStopSprint ||
+               type == EventType::PlayerStartSneak ||
+               type == EventType::PlayerStopSneak;
+    }
+
+    /**
+     * @brief Check if this is any player-related event
+     */
+    [[nodiscard]] bool isPlayerEvent() const {
+        return isBlockInteractionEvent() || isPlayerStateEvent();
+    }
+
+    /**
+     * @brief Check if this event has a valid entity ID
+     */
+    [[nodiscard]] bool hasEntityId() const {
+        return entityId != INVALID_ENTITY_ID;
     }
 
     /**

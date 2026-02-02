@@ -88,6 +88,36 @@ public:
     }
 
     // ========================================================================
+    // Batch Push operations
+    // ========================================================================
+
+    // Push multiple items atomically (one lock, one notify).
+    // More efficient than multiple push() calls for bulk operations.
+    void pushBatch(std::vector<T> items) {
+        if (items.empty()) return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& item : items) {
+                queue_.push_back(std::move(item));
+            }
+        }
+        condition_.notify_all();
+    }
+
+    // Push multiple items from iterators
+    template<typename Iterator>
+    void pushBatch(Iterator begin, Iterator end) {
+        if (begin == end) return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto it = begin; it != end; ++it) {
+                queue_.push_back(*it);
+            }
+        }
+        condition_.notify_all();
+    }
+
+    // ========================================================================
     // Pop operations
     // ========================================================================
 
@@ -103,6 +133,37 @@ public:
         T item = std::move(queue_.front());
         queue_.pop_front();
         return item;
+    }
+
+    // ========================================================================
+    // Batch Pop operations
+    // ========================================================================
+
+    // Drain all items at once (non-blocking).
+    // Returns all items for batch processing. Caller processes in bulk.
+    std::vector<T> drainAll() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<T> result;
+        result.reserve(queue_.size());
+        while (!queue_.empty()) {
+            result.push_back(std::move(queue_.front()));
+            queue_.pop_front();
+        }
+        return result;
+    }
+
+    // Drain up to maxItems (non-blocking).
+    // Useful for processing in bounded batches.
+    std::vector<T> drainUpTo(size_t maxItems) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<T> result;
+        size_t count = std::min(maxItems, queue_.size());
+        result.reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            result.push_back(std::move(queue_.front()));
+            queue_.pop_front();
+        }
+        return result;
     }
 
     // ========================================================================
@@ -344,6 +405,29 @@ public:
         return isNew;
     }
 
+    // Push multiple key-data pairs atomically (one lock, one notify).
+    // Returns number of newly added keys (vs merged).
+    size_t pushBatch(std::vector<std::pair<Key, Data>> items) {
+        if (items.empty()) return 0;
+        size_t newCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& [key, data] : items) {
+                auto it = dataMap_.find(key);
+                if (it != dataMap_.end()) {
+                    it->second = merge_(it->second, data);
+                } else {
+                    queue_.push_back(key);
+                    present_.insert(key);
+                    dataMap_[key] = std::move(data);
+                    ++newCount;
+                }
+            }
+        }
+        condition_.notify_all();
+        return newCount;
+    }
+
     // Try to pop front with its data (non-blocking).
     std::optional<std::pair<Key, Data>> tryPop() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -392,6 +476,46 @@ public:
         dataMap_.erase(it);
 
         return std::make_pair(std::move(key), std::move(data));
+    }
+
+    // Drain all items at once (non-blocking).
+    // Returns all key-data pairs for batch processing.
+    std::vector<std::pair<Key, Data>> drainAll() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::pair<Key, Data>> result;
+        result.reserve(queue_.size());
+        while (!queue_.empty()) {
+            Key key = std::move(queue_.front());
+            queue_.pop_front();
+            present_.erase(key);
+
+            auto it = dataMap_.find(key);
+            Data data = std::move(it->second);
+            dataMap_.erase(it);
+
+            result.emplace_back(std::move(key), std::move(data));
+        }
+        return result;
+    }
+
+    // Drain up to maxItems (non-blocking).
+    std::vector<std::pair<Key, Data>> drainUpTo(size_t maxItems) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<std::pair<Key, Data>> result;
+        size_t count = std::min(maxItems, queue_.size());
+        result.reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            Key key = std::move(queue_.front());
+            queue_.pop_front();
+            present_.erase(key);
+
+            auto it = dataMap_.find(key);
+            Data data = std::move(it->second);
+            dataMap_.erase(it);
+
+            result.emplace_back(std::move(key), std::move(data));
+        }
+        return result;
     }
 
     // Set alarm (same semantics as AlarmQueue)

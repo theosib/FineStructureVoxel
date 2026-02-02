@@ -15,6 +15,7 @@
 #include <optional>
 #include <mutex>
 #include <atomic>
+#include <vector>
 
 namespace finevox {
 
@@ -109,6 +110,21 @@ public:
      */
     void push(T&& item);
 
+    /**
+     * @brief Push multiple items atomically (one lock, one signal)
+     *
+     * More efficient than multiple push() calls for bulk operations.
+     *
+     * @param items Items to add
+     */
+    void pushBatch(std::vector<T> items);
+
+    /**
+     * @brief Push multiple items from iterators
+     */
+    template<typename Iterator>
+    void pushBatch(Iterator begin, Iterator end);
+
     // ========================================================================
     // Pop operations
     // ========================================================================
@@ -128,6 +144,44 @@ public:
         T item = std::move(items_.front());
         items_.pop_front();
         return item;
+    }
+
+    /**
+     * @brief Drain all items at once (non-blocking)
+     *
+     * Returns all items for batch processing.
+     *
+     * @return Vector of all items in queue order
+     */
+    std::vector<T> drainAll() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<T> result;
+        result.reserve(items_.size());
+        while (!items_.empty()) {
+            result.push_back(std::move(items_.front()));
+            items_.pop_front();
+        }
+        return result;
+    }
+
+    /**
+     * @brief Drain up to maxItems (non-blocking)
+     *
+     * Useful for processing in bounded batches.
+     *
+     * @param maxItems Maximum number of items to drain
+     * @return Vector of drained items
+     */
+    std::vector<T> drainUpTo(size_t maxItems) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<T> result;
+        size_t count = std::min(maxItems, items_.size());
+        result.reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            result.push_back(std::move(items_.front()));
+            items_.pop_front();
+        }
+        return result;
     }
 
     // ========================================================================

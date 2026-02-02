@@ -100,4 +100,50 @@ BlockEvent BlockEvent::blockUpdate(BlockPos pos) {
     return event;
 }
 
+// ============================================================================
+// Player Event Factory Methods
+// ============================================================================
+
+BlockEvent BlockEvent::playerPosition(EntityId id, Vec3 position, Vec3 velocity,
+                                       bool onGround, uint64_t inputSequence) {
+    BlockEvent event;
+    event.type = EventType::PlayerPosition;
+    event.entityId = id;
+    event.playerData.setPosition(position);
+    event.playerData.setVelocity(velocity);
+    event.playerData.onGround = onGround;
+    event.playerData.inputSequence = inputSequence;
+    return event;
+}
+
+BlockEvent BlockEvent::playerLook(EntityId id, float yaw, float pitch) {
+    BlockEvent event;
+    event.type = EventType::PlayerLook;
+    event.entityId = id;
+    event.playerData.yaw = yaw;
+    event.playerData.pitch = pitch;
+    return event;
+}
+
+BlockEvent BlockEvent::playerJump(EntityId id) {
+    BlockEvent event;
+    event.type = EventType::PlayerJump;
+    event.entityId = id;
+    return event;
+}
+
+BlockEvent BlockEvent::playerSprint(EntityId id, bool starting) {
+    BlockEvent event;
+    event.type = starting ? EventType::PlayerStartSprint : EventType::PlayerStopSprint;
+    event.entityId = id;
+    return event;
+}
+
+BlockEvent BlockEvent::playerSneak(EntityId id, bool starting) {
+    BlockEvent event;
+    event.type = starting ? EventType::PlayerStartSneak : EventType::PlayerStopSneak;
+    event.entityId = id;
+    return event;
+}
+
 }  // namespace finevox

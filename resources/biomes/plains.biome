@@ -1,0 +1,16 @@
+# Plains biome - flat grasslands
+name: Plains
+temperature_min: 0.3
+temperature_max: 0.7
+humidity_min: 0.2
+humidity_max: 0.6
+base_height: 64.0
+height_variation: 8.0
+height_scale: 1.0
+surface: grass
+filler: dirt
+filler_depth: 3
+stone: stone
+tree_density: 0.005
+ore_density: 1.0
+decoration_density: 0.5

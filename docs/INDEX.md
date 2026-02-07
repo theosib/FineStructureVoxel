@@ -34,7 +34,7 @@
 | [05 - World Management](05-world-management.md) | ChunkColumn, World, SubChunkManager, lifecycle states, LRU caching |
 | [13 - Batch Operations](13-batch-operations.md) | BatchBuilder, CoalescingQueue, collect-coalesce-execute pattern |
 
-### Rendering
+### Rendering & GUI
 
 | Document | Key Contents |
 |----------|--------------|
@@ -42,6 +42,7 @@
 | [07 - Level of Detail](07-lod.md) | LOD levels, lazy updates, buffer zones |
 | [22 - Phase 6 LOD Design](22-phase6-lod-design.md) | POP buffers, octree downsampling, boundary stitching |
 | [09 - Lighting System](09-lighting.md) | Block light, sky light, ambient occlusion |
+| [finegui Design](finegui-design.md) | GUI toolkit design (Dear ImGui + finevk backend) |
 
 ### Physics & Interaction
 
@@ -76,6 +77,7 @@
 | [24 - Event System](24-event-system.md) | Inbox/outbox event processing, lighting thread, version tracking |
 | [25 - Entity System](25-entity-system.md) | Player prediction, entity interpolation, entity rendering, skeletal animation |
 | [26 - Network Protocol](26-network-protocol.md) | Thin client, semantic quantization, asset streaming, UI protocol |
+| [27 - World Generation](27-world-generation.md) | Noise library, biome framework, generation pipeline, feature system |
 
 ### Planning & Analysis
 
@@ -85,11 +87,14 @@
 | [02 - Prior Art Analysis](02-prior-art.md) | Lessons from VoxelGame2 and EigenVoxel |
 | [17 - Implementation Phases](17-implementation-phases.md) | Bottom-up phases, VK-independent vs VK-dependent |
 | [18 - Open Questions](18-open-questions.md) | Resolved decisions and remaining questions |
+| [20r - FineStructureVK Recommendations](20-finestructurevk-recommendations.md) | Suggestions for FineVK changes |
+| [PLAN - Mesh Architecture](PLAN-mesh-architecture-improvements.md) | Push-based mesh/lighting data flow |
 
-### Appendices
+### Reference
 
 | Document | Key Contents |
 |----------|--------------|
+| [Style Guide](STYLE_GUIDE.md) | Coding conventions, naming, patterns, philosophy |
 | [Appendix A - File Structure](appendix-a-file-structure.md) | Project directory layout |
 | [Appendix B - Key Differences](appendix-b-differences.md) | Comparison with prior implementations |
 
@@ -171,22 +176,35 @@
 | Asset streaming | [26](26-network-protocol.md) §26.6 |
 | UI protocol | [26](26-network-protocol.md) §26.7 |
 | Player input protocol | [26](26-network-protocol.md) §26.5 |
+| GUI toolkit design | [finegui Design](finegui-design.md) |
+| Block model spec files | [19](19-block-models.md), `resources/blocks/`, `resources/shapes/` |
+| Non-cube block rendering | [19](19-block-models.md), `block_model.hpp`, `mesh.cpp:addCustomFace()` |
+| Queue primitives | `queue.hpp`, `simple_queue.hpp`, `coalescing_queue.hpp`, `keyed_queue.hpp` |
+| Coding style & philosophy | [STYLE_GUIDE.md](STYLE_GUIDE.md) |
+| Noise library | [27](27-world-generation.md) §27.2, `noise.hpp`, `noise_ops.hpp`, `noise_voronoi.hpp` |
+| Biome system | [27](27-world-generation.md) §27.3, `biome.hpp`, `biome_map.hpp` |
+| Generation pipeline | [27](27-world-generation.md) §27.4, `world_generator.hpp` |
+| Feature system | [27](27-world-generation.md) §27.5, `feature.hpp`, `feature_registry.hpp` |
+| Schematic/clipboard | [21](21-clipboard-schematic.md), `schematic.hpp`, `clipboard_manager.hpp` |
 
 ---
 
 ## Implementation Phase Summary
 
-| Phase | VK-Dependent? | Focus |
-|-------|---------------|-------|
-| 0 | No | Data structures (BlockPos, SubChunk, Palette, StringInterner) |
-| 1 | No | World management (World, SubChunkManager, BatchBuilder) |
-| 2 | No | Persistence (CBOR, region files, save/load threads) |
-| 3 | No | Physics (AABB, collision, raycasting, step-climbing) |
-| 4 | Yes | Basic rendering (mesh generation, view-relative, shaders) |
-| 5 | Yes | Mesh optimization (greedy meshing, async workers, priority) |
-| 6 | Yes | LOD system (generation, selection, GPU memory) |
-| 7 | Mixed | Module system (loader, registries, core module) |
-| 8 | Yes | Lighting (block light, sky light, AO) |
+| Phase | VK-Dependent? | Status | Focus |
+|-------|---------------|--------|-------|
+| 0 | No | Complete | Data structures (BlockPos, SubChunk, Palette, StringInterner) |
+| 1 | No | Complete | World management (World, ColumnManager, BatchBuilder) |
+| 2 | No | Complete | Persistence (CBOR, region files, save/load threads) |
+| 3 | No | Complete | Physics (AABB, collision, raycasting, step-climbing) |
+| 4 | Yes | Complete | Basic rendering (mesh generation, view-relative, shaders) |
+| 5 | Yes | Complete | Mesh optimization (greedy meshing, async workers, priority) |
+| 6 | Yes | Complete | LOD system (generation, selection, GPU memory) |
+| 7 | Mixed | Complete | Module system (loader, registries, core module) |
+| 8 | Yes | Complete | Lighting (block light, sky light, AO) |
+| 9 | Mixed | Mostly complete | Block update system (event queue, scheduled ticks) |
+| 10 | No | Not started | World generation (noise, biomes, pipeline, features, schematics) |
+| 11-20 | Mixed | Planned | Input, player, inventory, entities, sky, fluids, audio, UI, scripting, multiplayer |
 
 See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
@@ -194,10 +212,11 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ## Related Projects
 
-- **FineStructureVK** - Vulkan graphics library (provides device, pipelines, buffers, GameLoop, Camera)
+- **FineStructureVK** - Vulkan graphics library (provides device, pipelines, buffers, GameLoop, Camera, InputManager)
+- **finegui** - Standalone GUI toolkit (Dear ImGui + finevk Vulkan backend); see [finegui Design](finegui-design.md)
 - **VoxelGame2** - Prior C++/OpenGL implementation
 - **EigenVoxel** - Prior Scala/Java implementation (step-climbing algorithm borrowed from here)
 
 ---
 
-*Last Updated: 2026-02-01*
+*Last Updated: 2026-02-06*

@@ -10,6 +10,12 @@
  * - Greedy meshing optimization
  * - Smooth lighting with LightEngine (sky + block light)
  *
+ * Command line:
+ * - --worldgen: Use procedural world generation instead of test world
+ * - --single-block: Place only a single block for testing
+ * - --large-coords: Start at large coordinates (tests precision)
+ * - --async/--sync: Toggle async meshing mode
+ *
  * Controls:
  * - WASD: Move camera
  * - Mouse: Look around
@@ -41,6 +47,11 @@
 #include <finevox/entity_manager.hpp>
 #include <finevox/graphics_event_queue.hpp>
 #include <finevox/config.hpp>
+#include <finevox/world_generator.hpp>
+#include <finevox/generation_passes.hpp>
+#include <finevox/biome_loader.hpp>
+#include <finevox/feature_loader.hpp>
+#include <finevox/feature_registry.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -357,6 +368,77 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
     std::cout << "  Test read: block at (" << baseX << ",0," << baseZ << ") = " << testBlock.id << "\n";
 }
 
+void buildGeneratedWorld(World& world, const std::string& resourceDir) {
+    std::cout << "Building procedurally generated world...\n";
+
+    uint64_t worldSeed = 42;
+
+    // Load biomes from resource files
+    std::string biomesDir = resourceDir + "/biomes";
+    size_t biomeCount = BiomeLoader::loadDirectory(biomesDir, "demo");
+    std::cout << "  Loaded " << biomeCount << " biomes from " << biomesDir << "\n";
+
+    // Load features from resource files
+    std::string featuresDir = resourceDir + "/features";
+    size_t featureCount = FeatureLoader::loadDirectory(featuresDir, "demo");
+    std::cout << "  Loaded " << featureCount << " features from " << featuresDir << "\n";
+
+    // Add placement rules for loaded features
+    if (FeatureRegistry::global().getFeature("demo:oak_tree")) {
+        FeaturePlacement treePlacement;
+        treePlacement.featureName = "demo:oak_tree";
+        treePlacement.density = 0.02f;
+        treePlacement.requiresSurface = true;
+        FeatureRegistry::global().addPlacement(treePlacement);
+    }
+    if (FeatureRegistry::global().getFeature("demo:iron_ore")) {
+        FeaturePlacement orePlacement;
+        orePlacement.featureName = "demo:iron_ore";
+        orePlacement.density = 0.03f;
+        orePlacement.minHeight = 0;
+        orePlacement.maxHeight = 48;
+        FeatureRegistry::global().addPlacement(orePlacement);
+    }
+    if (FeatureRegistry::global().getFeature("demo:coal_ore")) {
+        FeaturePlacement orePlacement;
+        orePlacement.featureName = "demo:coal_ore";
+        orePlacement.density = 0.04f;
+        orePlacement.minHeight = 0;
+        orePlacement.maxHeight = 64;
+        FeatureRegistry::global().addPlacement(orePlacement);
+    }
+
+    // Build pipeline
+    GenerationPipeline pipeline;
+    pipeline.setWorldSeed(worldSeed);
+    pipeline.addPass(std::make_unique<TerrainPass>(worldSeed));
+    pipeline.addPass(std::make_unique<SurfacePass>());
+    pipeline.addPass(std::make_unique<CavePass>(worldSeed));
+    pipeline.addPass(std::make_unique<OrePass>());
+    pipeline.addPass(std::make_unique<StructurePass>());
+    pipeline.addPass(std::make_unique<DecorationPass>());
+
+    std::cout << "  Pipeline: " << pipeline.passCount() << " passes\n";
+
+    // Create biome map
+    BiomeMap biomeMap(worldSeed, BiomeRegistry::global());
+
+    // Generate a 6x6 area of columns (96x96 blocks)
+    int32_t genRadius = 3;
+    int32_t columnsGenerated = 0;
+    for (int32_t cx = -genRadius; cx < genRadius; ++cx) {
+        for (int32_t cz = -genRadius; cz < genRadius; ++cz) {
+            auto& col = world.getOrCreateColumn(ColumnPos(cx, cz));
+            pipeline.generateColumn(col, world, biomeMap);
+            ++columnsGenerated;
+        }
+    }
+
+    std::cout << "  Generated " << columnsGenerated << " columns\n";
+    std::cout << "  Total non-air blocks: " << world.totalNonAirBlocks() << "\n";
+    std::cout << "World generation complete.\n";
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "FineVox Render Demo\n";
     std::cout << "==================\n\n";
@@ -365,6 +447,7 @@ int main(int argc, char* argv[]) {
     bool startAtLargeCoords = false;
     bool singleBlockMode = false;
     bool useAsyncMeshing = true;  // Async is default (prevents lighting blink artifacts)
+    bool useWorldGen = false;
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
             startAtLargeCoords = true;
@@ -377,6 +460,9 @@ int main(int argc, char* argv[]) {
         }
         if (std::string(argv[i]) == "--sync") {
             useAsyncMeshing = false;
+        }
+        if (std::string(argv[i]) == "--worldgen") {
+            useWorldGen = true;
         }
     }
 
@@ -457,7 +543,11 @@ int main(int argc, char* argv[]) {
 
         // Create finevox world
         World world;
-        buildTestWorld(world, singleBlockMode, startAtLargeCoords);
+        if (useWorldGen) {
+            buildGeneratedWorld(world, resourcePath);
+        } else {
+            buildTestWorld(world, singleBlockMode, startAtLargeCoords);
+        }
 
         // Debug: Check world state
         std::cout << "World columns: " << world.columnCount() << std::endl;

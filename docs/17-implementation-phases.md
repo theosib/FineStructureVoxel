@@ -268,17 +268,16 @@
 - [ ] Handle off-grid displaced blocks (only elide faces with matching displacement) - deferred until `BlockDisplacement` implemented
 - [ ] Exclude blocks with custom/dynamic meshes from greedy merging - deferred until custom mesh system implemented
 
-**Custom Mesh Exclusion (Future):** Blocks with dynamic appearance (stairs, sloped terrain, rotating machinery) cannot be greedy-merged because their visual representation varies per-instance. When the custom mesh system is implemented, add a `BlockType::hasCustomMesh()` flag. The greedy algorithm will skip these blocks, rendering them individually via `buildSimpleMesh()`. The `FaceMaskEntry` comparison already prevents merging blocks with different AO values, which partially handles orientation-dependent lighting.
+**Custom Mesh Exclusion:** ✅ Implemented. Blocks with `hasCustomMesh()` flag are excluded from greedy merging and rendered individually via `addCustomFace()`. See `block_model.hpp`, `block_model_loader.hpp`.
 
-### 5.2 Mesh Update Pipeline (Pull-Based Architecture)
+### 5.2 Mesh Update Pipeline (Push-Based Architecture)
 
-**Implementation Note:** The original 4-stage push-based design was simplified to a pull-based model during implementation. This reduces complexity while maintaining good performance characteristics.
+**Implementation Note:** The architecture evolved from pull-based (version checking) to fully push-based. Push-based provides implicit ordering guarantees, making version tracking unnecessary for mesh rebuilds. See `PLAN-mesh-architecture-improvements.md` for the data flow design.
 
-**Version-Based Change Detection**
-- [x] `blockVersion_` atomic counter per SubChunk (incrementing version number)
-- [x] SubChunk.setBlock() increments version (O(1), lock-free)
-- [x] Render loop compares cached version vs current to detect staleness
-- [x] No push notifications needed - workers pull work based on version mismatch
+**Push-Based Mesh Rebuilds**
+- [x] Block changes push rebuild requests directly to mesh queue
+- [x] Lighting changes push affected subchunks to mesh queue
+- [x] No polling or version comparison needed for mesh staleness
 
 **FIFO Rebuild Queue with Deduplication**
 - [x] `MeshRebuildQueue` (AlarmQueueWithData) - thread-safe FIFO with alarm support
@@ -669,41 +668,149 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for detailed design.
 
 ---
 
+## Phase 10: World Generation & Schematics
+
+*Procedural terrain, biomes, and structure placement.*
+
+See [27 - World Generation](27-world-generation.md) for full design.
+
+### 10.1 Noise Library (VK-Independent)
+- [ ] `Noise2D` / `Noise3D` interfaces (virtual, composable)
+- [ ] `PerlinNoise2D/3D` - Classic Perlin gradient noise
+- [ ] `OpenSimplex2D/3D` - Patent-free simplex alternative
+- [ ] `VoronoiNoise2D` - Cell-based noise (biome regions)
+- [ ] Fractal noise: `FBMNoise2D/3D`, `RidgedNoise2D/3D`, `BillowNoise2D/3D`
+- [ ] `DomainWarp2D/3D` - Distorted noise for natural terrain
+- [ ] `NoiseFactory` - Common presets (perlinFBM, ridgedMountains, etc.)
+- [ ] Seed-based determinism via `NoiseHash::deriveSeed()`
+
+### 10.2 Schematic System (VK-Independent)
+- [ ] `BlockSnapshot` - Portable block state (typeName, rotation, extra data)
+- [ ] `Schematic` - 3D block array with metadata
+- [ ] `extractRegion()` / `placeSchematic()` free functions
+- [ ] `rotateSchematic()` / `mirrorSchematic()` / `cropSchematic()` transforms
+- [ ] CBOR serialization + LZ4-compressed file I/O
+- [ ] `ClipboardManager` singleton for runtime copy/paste
+- [ ] See [21 - Clipboard and Schematic System](21-clipboard-schematic.md) for full design
+
+### 10.3 Biome Framework (VK-Independent)
+- [ ] `BiomeId` interned identifier (like BlockTypeId)
+- [ ] `BiomeProperties` - Climate ranges, terrain params, surface blocks, feature densities
+- [ ] `BiomeRegistry` global singleton (thread-safe)
+- [ ] `BiomeMap` - Voronoi + climate noise for biome selection with border blending
+- [ ] `BiomeLoader` - Parse `.biome` ConfigParser files
+- [ ] `.biome` data file format for data-driven biome definition
+
+### 10.4 Generation Pipeline (VK-Independent)
+- [ ] `GenerationPass` interface (name, priority, generate)
+- [ ] `GenerationPipeline` - Ordered multi-pass execution
+- [ ] `GenerationContext` - Per-column cached data (heightmap, biome grid, RNG)
+- [ ] Built-in passes (games can insert/replace/remove):
+  - `TerrainPass` (1000) - Noise heightmap + 3D density
+  - `SurfacePass` (2000) - Biome-specific surface layers
+  - `CavePass` (3000) - 3D noise carving
+  - `OrePass` (4000) - Configurable ore blobs
+  - `StructurePass` (5000) - Trees, buildings via feature system
+  - `DecorationPass` (6000) - Flowers, grass, small features
+
+### 10.5 Feature System (VK-Independent)
+- [ ] `Feature` interface - Place multi-block structure at position
+- [ ] `TreeFeature` - Configurable tree generator (trunk/leaves/height)
+- [ ] `OreFeature` - Ore vein blob placement
+- [ ] `SchematicFeature` - Stamp a loaded Schematic template
+- [ ] `FeatureRegistry` global singleton (features + placement rules)
+- [ ] `FeatureLoader` - Parse `.feature` and `.ore` config files
+- [ ] Cross-column features via deterministic re-computation (no shared state)
+
+### 10.6 Demo World Generator
+- [ ] Demo biomes (plains, forest, desert, mountains) in `.biome` files
+- [ ] Demo features (oak tree, iron/coal ore) in `.feature`/`.ore` files
+- [ ] Update render_demo.cpp to use GenerationPipeline
+- [ ] Extend `ModuleRegistry` to expose BiomeRegistry/FeatureRegistry
+
+### Testing
+- [ ] Noise: determinism, range [-1,1], frequency control, FBM octave stacking
+- [ ] Schematics: create/access/transform, CBOR round-trip, file I/O
+- [ ] Biomes: BiomeId interning, registry CRUD, BiomeMap consistency, .biome parsing
+- [ ] Features: tree placement, ore veins, schematic features, registry lookup
+- [ ] Pipeline: pass ordering, terrain generation, full pipeline produces playable column
+- [ ] Determinism: same seed → identical world on multiple runs
+
+---
+
 ## Future Phases (Not Scheduled)
 
-These are documented for completeness but not in initial implementation scope:
+These are documented for roadmap planning. Each will be detailed when implementation begins.
 
-### Multiplayer
-- Client/server architecture
-- World state synchronization
-- Client-side prediction
+### Phase 11: Input System
+- `InputManager` with action mapping over finevk's InputManager
+- Key binding configuration (persist via ConfigManager)
+- Context switching (gameplay vs menu vs chat)
+- See [10 - Input and Player Control](10-input.md) for design
 
-### Advanced Graphics
-- Translucent block sorting
-- Water rendering with refraction
-- Sky rendering (sun, moon, clouds)
+### Phase 12: Player Controller
+- Health/hunger survival stats
+- Sprint, crouch/sneak, swimming mechanics
+- Fall damage (velocity-based)
+- Death/respawn with spawn points
 
-### World Generation
-- Noise generators
-- Biome system
-- Structure generation
+### Phase 13: Inventory & Items
+- `ItemStack` data model (type + count + metadata)
+- `Inventory` containers (player, chest blocks)
+- Item drops as entities (pickup on proximity)
+- Tool properties (mining speed, durability, damage)
+- Crafting system (recipe registry, 2x2 and 3x3 grids)
 
-### World Editing / Clipboard System
-- `BlockSnapshot` and `Schematic` structures
-- Region extraction and placement
-- CBOR serialization for schematic files
-- `ClipboardManager` for runtime copy/paste
-- Transformation utilities (rotate, mirror, crop)
-- See [21 - Clipboard and Schematic System](21-clipboard-schematic.md) for full design
+### Phase 14: Entity AI & Spawning
+- Pathfinding (A* on voxel grid)
+- Mob behavior (passive, hostile, ambient)
+- Spawn system (biome/light-level rules)
+- Loot tables (mob drops)
 
-### Fluid System
-Engine should provide helper infrastructure for fluid simulation:
-- **Fluid properties**: Spread rate, slope/viscosity, transparency, light absorption
-- **Source block mechanics**: Game-level mechanic where two adjacent source blocks flowing into a gap create a new source block (engine provides helper, game defines policy)
-- **Visual aspects**: Dynamic meshes for fluid surfaces, translucency sorting
-- **Light interaction**: Light levels through translucent fluids, caustics (optional)
-- **Physics**: Buoyancy, flow direction affecting entities
-- **Integration**: Game modules register fluid types with properties, engine handles propagation scheduling
+### Phase 15: Sky & Atmosphere
+- Sky renderer (gradient dome or skybox)
+- Sun/moon directional light tied to game time
+- Day/night cycle (affects mob spawning, sky light)
+- Cloud layer (simple scrolling texture)
+- Weather effects (rain, snow)
+- Fog integration (sky color blending)
+
+### Phase 16: Fluid System
+- Fluid blocks with level (0-7) and flow direction
+- BFS spread simulation via UpdateScheduler
+- Source block creation mechanics
+- Fluid rendering (animated translucent meshes)
+- Physics: buoyancy, current, fall damage cancellation
+- Light interaction (absorption, emission for lava)
+- Game modules register fluid types with properties
+
+### Phase 17: Audio
+- Audio backend (OpenAL Soft or miniaudio)
+- Spatial audio (3D positioned sounds)
+- Music system (ambient tracks, biome-specific)
+- Sound event triggers (footsteps, block breaking, entities)
+- Volume/mixing channels (master, music, effects, ambient)
+
+### Phase 18: UI Framework
+- Game screens via finegui (pause, inventory, crafting, settings)
+- Drag-and-drop inventory management
+- Chat/command bar (for scripting system)
+- Key binding settings screen
+
+### Phase 19: Scripting
+- Command parser (`{}` calls, `()` math, `[]` arrays)
+- Script runtime with compilation
+- Block event hooks (ScriptRegistry)
+- In-game debug console
+- See [12 - Scripting](12-scripting.md) for design
+
+### Phase 20: Multiplayer
+- Network protocol (thin client architecture)
+- Player prediction with server correction
+- Entity interpolation for remote entities
+- Chunk streaming to clients
+- Asset streaming and UI protocol
+- See [25 - Entity System](25-entity-system.md) and [26 - Network Protocol](26-network-protocol.md) for design
 
 ---
 
@@ -733,6 +840,24 @@ Phase 7 (Module System) ──────────────────�
 Phase 8 (Lighting)
     ↓
 Phase 9 (Block Updates) ← Engine + Game layer
+    ↓
+Phase 10 (World Generation) ← Uses noise, biomes, features, schematics
+    ↓
+Phase 11 (Input) → Phase 12 (Player) → Phase 13 (Inventory)
+                                            ↓
+Phase 14 (Entity AI) ← Needs player + items for combat/drops
+    ↓
+Phase 15 (Sky) ← Affects lighting, spawning
+    ↓
+Phase 16 (Fluids) ← Uses UpdateScheduler, affects physics
+    ↓
+Phase 17 (Audio) ← Triggered by all gameplay systems
+    ↓
+Phase 18 (UI) ← Needs inventory, crafting, settings
+    ↓
+Phase 19 (Scripting) ← Hooks into all systems
+    ↓
+Phase 20 (Multiplayer) ← Requires all systems stable
 ```
 
 ---

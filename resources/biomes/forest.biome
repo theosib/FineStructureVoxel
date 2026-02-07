@@ -1,0 +1,16 @@
+# Forest biome - dense trees, moderate hills
+name: Forest
+temperature_min: 0.3
+temperature_max: 0.7
+humidity_min: 0.5
+humidity_max: 0.9
+base_height: 66.0
+height_variation: 10.0
+height_scale: 1.0
+surface: grass
+filler: dirt
+filler_depth: 3
+stone: stone
+tree_density: 0.04
+ore_density: 1.0
+decoration_density: 0.8

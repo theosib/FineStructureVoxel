@@ -81,6 +81,42 @@ target_compile_options(finevox PRIVATE
 target_link_libraries(finevox PUBLIC lz4_static glm::glm)
 
 # ============================================================================
+# World Generation Module (optional, links finevox core)
+# ============================================================================
+
+add_library(finevox_worldgen STATIC
+    src/noise_perlin.cpp
+    src/noise_simplex.cpp
+    src/noise_voronoi.cpp
+    src/noise_ops.cpp
+    src/schematic.cpp
+    src/schematic_io.cpp
+    src/clipboard_manager.cpp
+    src/biome.cpp
+    src/biome_map.cpp
+    src/biome_loader.cpp
+    src/feature_tree.cpp
+    src/feature_ore.cpp
+    src/feature_schematic.cpp
+    src/feature_registry.cpp
+    src/feature_loader.cpp
+    src/world_generator.cpp
+    src/generation_passes.cpp
+)
+
+target_include_directories(finevox_worldgen PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_compile_options(finevox_worldgen PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
+
+target_link_libraries(finevox_worldgen PUBLIC finevox)
+
+# ============================================================================
 # Vulkan Render Module (optional)
 # ============================================================================
 
@@ -189,6 +225,7 @@ if(FINEVOX_BUILD_RENDER)
         # finevox_render already links FineStructureVK libraries transitively (PUBLIC)
         target_link_libraries(finevox_render_demo PRIVATE
             finevox_render
+            finevox_worldgen
         )
 
         # Link finegui if available
@@ -265,10 +302,15 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_lighting.cpp
         tests/test_event_system.cpp
         tests/test_queue_primitives.cpp
+        tests/test_noise.cpp
+        tests/test_schematic.cpp
+        tests/test_biome.cpp
+        tests/test_feature.cpp
+        tests/test_generation.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
-        finevox
+        finevox_worldgen
         GTest::gtest_main
     )
 

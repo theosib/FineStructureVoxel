@@ -1,0 +1,16 @@
+# Desert biome - flat sandy terrain
+name: Desert
+temperature_min: 0.7
+temperature_max: 1.0
+humidity_min: 0.0
+humidity_max: 0.2
+base_height: 62.0
+height_variation: 4.0
+height_scale: 1.0
+surface: cobble
+filler: cobble
+filler_depth: 5
+stone: stone
+tree_density: 0.0
+ore_density: 0.8
+decoration_density: 0.1

@@ -1,0 +1,16 @@
+# Mountains biome - tall peaks, stone surface
+name: Mountains
+temperature_min: 0.0
+temperature_max: 0.4
+humidity_min: 0.2
+humidity_max: 0.6
+base_height: 80.0
+height_variation: 24.0
+height_scale: 1.5
+surface: stone
+filler: stone
+filler_depth: 1
+stone: stone
+tree_density: 0.002
+ore_density: 1.5
+decoration_density: 0.2

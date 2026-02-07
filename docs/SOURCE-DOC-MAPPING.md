@@ -2,7 +2,7 @@
 
 **Purpose:** Cross-reference between implementation files and design documentation to maintain consistency and traceability.
 
-**Status:** Audited — all source files mapped, all design docs reviewed
+**Status:** Audited — all source files mapped, all design docs reviewed (last audit: 2026-02-06)
 
 ---
 
@@ -128,12 +128,39 @@
 | `include/finevox/item_registry.hpp` | §18.5 Registries | Item registration |
 | `src/item_registry.cpp` | §18.5 | Item management |
 
+## Block Model System (Doc 19)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/block_model.hpp` | [19] §19.1-19.4 | FaceGeometry, BlockGeometry, BlockModel, RotationSet |
+| `src/block_model.cpp` | [19] §19.1-19.4 | Model data structures |
+| `include/finevox/block_model_loader.hpp` | [19] §19.3, §19.8 | Parser for .model/.geom/.collision files |
+| `src/block_model_loader.cpp` | [19] §19.3, §19.8 | Uses ConfigParser (not YAML as doc originally described) |
+
+## Entity System (Doc 25)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/entity.hpp` | [25] §25.1 | Entity base class |
+| `src/entity.cpp` | [25] §25.1 | Entity implementation |
+| `include/finevox/entity_manager.hpp` | [25] §25.2 | Entity lifecycle management |
+| `src/entity_manager.cpp` | [25] §25.2 | Entity manager implementation |
+| `include/finevox/graphics_event_queue.hpp` | [25] §25.2-25.3 | Game↔graphics thread messaging |
+| `src/graphics_event_queue.cpp` | [25] §25.2-25.3 | Graphics event queue implementation |
+
 ## Utilities
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/blocking_queue.hpp` | [14] §14.2 | Thread-safe queue |
+| `include/finevox/blocking_queue.hpp` | [14] §14.2 | Thread-safe queue (legacy, superseded by queue primitives below) |
+| `include/finevox/queue.hpp` | [14] | Base queue interface |
+| `include/finevox/simple_queue.hpp` | [14] | Simple FIFO queue primitive |
+| `include/finevox/simple_queue_impl.hpp` | [14] | Simple queue template implementation |
+| `include/finevox/coalescing_queue.hpp` | [14], [13] | Queue with key-based deduplication |
+| `include/finevox/coalescing_queue_impl.hpp` | [14], [13] | Coalescing queue template implementation |
+| `include/finevox/keyed_queue.hpp` | [14] | Key-associated data queue |
 | `include/finevox/alarm_queue.hpp` | [24] §24.3 AlarmQueue | Timer-based events |
+| `include/finevox/wake_signal.hpp` | [14] | Thread wakeup signaling primitive |
 | `include/finevox/block_data_helpers.hpp` | [17] §9.1 | BlockTypeId storage helpers |
 
 ---
@@ -184,7 +211,6 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 | Feature | Notes |
 |---------|-------|
 | Off-grid displaced block face culling | Awaits BlockDisplacement |
-| Custom mesh exclusion from greedy meshing | Awaits custom mesh system |
 | Entity render distance | Awaits entity system |
 | Runtime LOD transition visual testing | Manual testing item |
 
@@ -208,7 +234,6 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 |-----|---------|-------|
 | 10 | Input System | `InputManager`, `PlayerController` |
 | 12 | Scripting | External dependency, not integrated |
-| 19 | Block Models | Model loader, YAML parsing |
 | 21 | Clipboard/Schematics | `BlockSnapshot`, `Schematic`, `ClipboardManager` |
 
 ---
@@ -264,14 +289,13 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 
 | Source File | Status | Notes |
 |-------------|--------|-------|
-| `include/finevox/blocking_queue.hpp` | Utility | Generic thread-safe queue (deprecated, use AlarmQueue) |
 | `include/finevox/lru_cache.hpp` | Utility | Generic LRU cache |
 
 ---
 
 ## Design Document Audit
 
-Full audit of all design docs against source code, completed Jan 2026.
+Full audit of all design docs against source code. Last updated Feb 2026.
 
 ### Docs With Full Source Coverage (Checked)
 
@@ -288,8 +312,10 @@ Full audit of all design docs against source code, completed Jan 2026.
 | 17 | Implementation Phases | ✅ Source matches (roadmap doc) |
 | 22 | Phase 6 LOD Design | ✅ Source matches |
 | 23 | Distance and Loading | ✅ Source matches |
+| 19 | Block Models | ✅ Implemented (uses ConfigParser format, not YAML as doc originally described) |
 | 24 | Event System | ✅ Updated to match UpdateScheduler, EventKey |
-| Appendix A | File Structure | ✅ Source matches |
+| 25 | Entity System | ⚠️ Partial - entity.hpp, entity_manager.hpp, graphics_event_queue.hpp exist |
+| Appendix A | File Structure | ⚠️ Outdated - needs rewrite to match actual flat layout |
 
 ### Docs Without Implementation (Future Work)
 
@@ -297,7 +323,6 @@ Full audit of all design docs against source code, completed Jan 2026.
 |-----|-------|--------|-------|
 | 10 | Input System | ❌ Not started | `InputManager`, `PlayerController` not implemented |
 | 12 | Scripting | ❌ Not started | Noted as external dependency; no integration yet |
-| 19 | Block Models | ❌ Design only | Model loader, YAML parsing, `hasCustomMesh()` not implemented |
 | 21 | Clipboard/Schematics | ❌ Not started | `BlockSnapshot`, `Schematic`, `ClipboardManager` not implemented |
 
 ### Docs With Partial Implementation

@@ -59,6 +59,8 @@ This means most blocks only need to specify what's different:
 
 ## 19.3 Hierarchical Model Format
 
+> **Implementation Note (2026-02):** The actual implementation uses ConfigParser format (not YAML). The ConfigParser supports `key:suffix:` format, indented data blocks, and `include:` directives natively. Files use `.model`, `.geom`, and `.collision` extensions. See `block_model_loader.hpp` and `resources/blocks/` for the implemented format. The design below describes the original concept; the ConfigParser-based format achieves the same goals with a simpler parser.
+
 Model files use a YAML-like format with `include:` directives for composition:
 
 ```yaml

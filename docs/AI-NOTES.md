@@ -39,11 +39,13 @@
 | Core types (BlockPos, Block, SubChunk) | [04-core-data-structures.md](04-core-data-structures.md) |
 | Subchunk lifecycle & caching | [05-world-management.md](05-world-management.md) Section 5.4 |
 | Collision/Hit box distinction | [08-physics.md](08-physics.md) Section 8.2 |
-| Batch operations pattern | [13-batch-operations.md](13-batch-operations.md) |
-| Command language syntax | [12-scripting.md](12-scripting.md) Section 12.3 |
-| Multiplayer architecture | [18-open-questions.md](18-open-questions.md) |
+| Block model spec format | [19-block-models.md](19-block-models.md) |
+| Event system / block handlers | [24-event-system.md](24-event-system.md) |
+| Entity system design | [25-entity-system.md](25-entity-system.md) |
+| Network protocol | [26-network-protocol.md](26-network-protocol.md) |
 | Implementation phases | [17-implementation-phases.md](17-implementation-phases.md) |
-| FineStructureVK critique | [16-finestructurevk-critique.md](16-finestructurevk-critique.md) |
+| GUI toolkit design | [finegui-design.md](finegui-design.md) |
+| Source ↔ Doc mapping | [SOURCE-DOC-MAPPING.md](SOURCE-DOC-MAPPING.md) |
 
 ---
 
@@ -58,13 +60,17 @@
 │  ├── Rendering (mesh gen, LOD, view-relative)           │
 │  ├── Physics (collision, raycasting)                    │
 │  ├── Persistence (CBOR, region files)                   │
+│  ├── Block Models (.model/.geom/.collision spec files)  │
 │  └── Module Loader                                      │
+├─────────────────────────────────────────────────────────┤
+│  finegui                                                │  <- GUI toolkit
+│  └── Dear ImGui + finevk Vulkan backend                 │
 ├─────────────────────────────────────────────────────────┤
 │  FineStructureVK                                        │  <- Vulkan wrapper
 │  ├── Device, Swapchain, Pipelines                       │
 │  ├── Buffer/Image management                            │
-│  ├── GameLoop, InputManager                             │
-│  └── (needs: InputEvent abstraction)                    │
+│  ├── GameLoop, InputManager, InputEvent                 │
+│  └── Camera (double-precision), Overlay2D               │
 ├─────────────────────────────────────────────────────────┤
 │  Vulkan / GLFW / GLM                                    │  <- System
 └─────────────────────────────────────────────────────────┘
@@ -82,20 +88,21 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - Buffer/image management
 - Command buffer recording
 - GameLoop with timing
-- Basic camera
+- Camera with double-precision support (`positionD()`, `viewRelative`)
+- InputManager and InputEvent abstraction
 - Texture atlas support
 - Frustum culling basics
-
-**Needs to be added to FineStructureVK (not finevox):**
-- InputEvent abstraction (generic input events)
-- Possibly: indirect draw support
+- Overlay2D for simple HUD elements
+- `frame.beginRenderPass()` / `frame.endRenderPass()` / `frame.extent` / `frame.frameIndex()`
 
 **finevox provides (not in FineStructureVK):**
 - World/chunk/block data model
-- Mesh generation algorithms
+- Mesh generation algorithms (greedy meshing, LOD, custom geometry)
+- Block model system (.model/.geom/.collision spec files)
 - Physics system
 - Persistence/serialization
 - Game module loading
+- Event system (UpdateScheduler, block handlers)
 
 ---
 
@@ -139,29 +146,27 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - Single draw per subchunk
 - **Test:** Render a static world
 
-### Phase 5: VK Integration - Mesh Optimization
-- Greedy meshing
-- Mesh worker thread pool
-- Priority-based mesh updates
-- **Test:** Performance benchmarks
+### Phase 5: VK Integration - Mesh Optimization ✓
+- Greedy meshing (subchunk-local)
+- Mesh worker thread pool (MeshWorkerPool)
+- Push-based mesh rebuild pipeline
+- Custom mesh exclusion for non-cube blocks
 
-### Phase 6: VK Integration - LOD System
-- LOD level generation
-- LOD selection by distance
-- GPU memory management (buffer zones)
-- **Test:** Distant rendering, LOD transitions
+### Phase 6: VK Integration - LOD System ✓
+- LOD levels 0-4 (1x to 16x block grouping)
+- Distance-based LOD selection with hysteresis
+- GPU memory budget enforcement
+- Fog system integration
 
-### Phase 7: Module System
-- ModuleLoader
-- GameModule interface
-- Registry exposure (blocks, entities, items)
-- **Test:** Load a simple test module
+### Phase 7: Module System ✓
+- ModuleLoader with dependency resolution
+- GameModule interface, BlockHandler system
+- BlockRegistry, EntityRegistry, ItemRegistry
 
-### Phase 8: Lighting (TBD architecture)
-- Block light propagation
-- Sky light
-- Ambient occlusion
-- **Test:** Light updates on block changes
+### Phase 8: Lighting System ✓
+- LightEngine with BFS propagation
+- Sky light and block light (0-15)
+- Smooth per-vertex lighting in mesh builder
 
 ---
 
@@ -181,13 +186,13 @@ items[0]                # Array indexing (brackets - future)
 
 **Persistence Dirty** (Phase 1, implemented):
 - Tracks columns needing save to disk
-- Managed by SubChunkManager lifecycle state machine
+- Managed by ColumnManager lifecycle state machine
 - Periodic saves (default 60s) prevent data loss for active columns
 
-**Mesh Dirty** (Phase 5):
-- Tracks subchunks needing mesh regeneration
-- 4-stage pipeline: Detection → Priority Queue → Worker Threads → GPU Upload
-- See [06-rendering.md](06-rendering.md) Section 6.5 for full pipeline diagram
+**Mesh Dirty** (Phase 5, implemented):
+- Push-based: block/light changes push rebuild requests to mesh queue
+- MeshWorkerPool processes rebuilds in parallel
+- See [PLAN-mesh-architecture-improvements.md](PLAN-mesh-architecture-improvements.md) for data flow
 
 ---
 
@@ -195,59 +200,25 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**Last completed:**
-- Phase 0: All data structures implemented and tested
-- Phase 1: World, SubChunkManager, LRUCache, BatchBuilder implemented and tested
-- Added BlockDisplacement for off-grid block placement (documented, not yet implemented)
-- Documented mesh update pipeline (4 stages)
-- Phase 2 (complete):
-  - DataContainer with interned keys and CBOR serialization
-  - SubChunk serialization (toCBOR/fromCBOR)
-  - ChunkColumn serialization (toCBOR/fromCBOR)
-  - RegionFile with journal-style ToC (crash-safe)
-  - Free space management for region files
-  - IOManager with async save/load threads
-  - ConfigManager for global settings, WorldConfig for per-world settings
-  - ResourceLocator for unified path resolution (engine/game/user/world scopes)
-  - ChunkFlags in region file header (compression flag infrastructure)
-  - LZ4 compression for region files (configurable via ConfigManager)
-  - IOManager/SubChunkManager integration (bindIOManager, requestLoad, processSaveQueue)
-  - Round-trip integration tests
-- Phase 3 (complete):
-  - Vec3 floating-point vector for physics
-  - AABB with intersection, containment, swept collision
-  - CollisionShape with 24-rotation precomputation
-  - Standard shapes: FULL_BLOCK, HALF_SLAB_BOTTOM/TOP, FENCE_POST, THIN_FLOOR
-  - RaycastMode and RaycastResult types
-  - Raycasting through world (DDA algorithm)
-  - PhysicsSystem with gravity, step-climbing, ground detection
-- Phase 4 (complete):
-  - ChunkVertex, MeshData, MeshBuilder with simple face culling
-  - Ambient occlusion (per-vertex, "0fps" algorithm)
-  - SubChunkView for GPU mesh storage (uses finevk::RawMesh)
-  - WorldRenderer with view-relative coordinates
-  - Frustum culling using finevk::AABB
-  - BlockAtlas for texture management
-  - Basic vertex/fragment shaders
-  - Debug camera offset mode for visualizing culling
-  - Large world support with double-precision camera position
-  - View-relative frustum culling with double-precision AABB
-  - Tested at 1,000,000 block coordinates - smooth rendering confirmed
-- Phase 9.1 (complete): Block extra data storage in SubChunk
-- Phase 9.2 (mostly complete):
-  - `UpdateScheduler` class with three-queue architecture
-  - `EventOutbox` with event consolidation by position
-  - `ScheduledTick` priority queue for scheduled ticks
-  - `BlockType::wantsGameTicks()` property
-  - `SubChunk::gameTickBlocks_` registry (unordered_set)
-  - Auto-register/unregister on block place/break
-  - `ChunkColumn::rebuildGameTickRegistries()` for chunk load
-  - `BlockContext::scheduleTick()` implementation
-  - `TickConfig` for game tick and random tick settings
-  - Game tick and random tick event generation
-  - Remaining: scheduled tick persistence across save/load
+**All core phases complete (0-8).** Phase 9 (block updates) mostly complete.
 
-**Next task:** Phase 9.2 persistence or Phase 9.3 force loading
+**Recent work (since Phase 9):**
+- Non-cube block model system (slabs, stairs, wedges) - complete
+  - BlockModel, BlockGeometry, BlockModelLoader using ConfigParser format
+  - .model/.geom/.collision spec files in `resources/`
+  - Custom mesh rendering via `addCustomFace()` in MeshBuilder
+  - `hasCustomMesh` flag for greedy mesh exclusion
+- Entity system foundation (entity.hpp, entity_manager.hpp, graphics_event_queue.hpp)
+- Queue primitives refactor (queue.hpp, simple_queue, coalescing_queue, keyed_queue)
+- finevk API migration (frame.beginRenderPass, frame.extent, frame.frameIndex)
+- finegui integration in render_demo (coordinates overlay + mock hotbar)
+
+**Remaining Phase 9 work:**
+- Scheduled tick persistence across save/load
+- `UpdatePropagationPolicy` for cross-chunk updates
+- Network quiescence protocol
+
+**Next task:** TBD
 **Blockers:** None
 
 ---
@@ -305,4 +276,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: Session creating comprehensive design review*
+*Last updated: 2026-02-06 — Documentation audit and update*

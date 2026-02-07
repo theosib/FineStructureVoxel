@@ -183,22 +183,9 @@ class SubChunkView {
 
 ---
 
-### 1.7 Code Needs Update: Greedy Meshing Not Implemented
+### 1.7 ~~Code Needs Update: Greedy Meshing Not Implemented~~ RESOLVED
 
-**Location:** `src/mesh.cpp`
-
-**Issue:** Doc (06-rendering.md Section 6.2) describes greedy meshing:
-> **Greedy Meshing** combines adjacent coplanar faces with the same texture to reduce vertex count
-
-**Reality:** Current `MeshBuilder` uses simple face culling, not greedy meshing. Each visible face is a separate quad.
-
-**Analysis:** This is correct - greedy meshing is Phase 5, current code is Phase 4.
-
-**Design Note:** Greedy meshing should be confined to subchunk boundaries. This keeps frustum culling simple - each subchunk is an independent unit with its own mesh, no cross-boundary considerations needed.
-
-**Action:** No code change needed, but verify Phase 5 scope
-- [ ] Verify greedy meshing is clearly documented as Phase 5 in 17-implementation-phases.md ✓ (already correct)
-- [ ] Add note to Phase 5 doc that greedy meshing is subchunk-local
+**Status:** ✅ Greedy meshing is now implemented (Phase 5 complete). Subchunk-local, with custom mesh exclusion for non-cube blocks via `hasCustomMesh` flag.
 
 ---
 
@@ -223,21 +210,9 @@ gl_Position = camera.projection * camera.view * vec4(viewRelativePos, 1.0);
 
 ---
 
-### 1.9 Doc Needs Update: Mesh Update Pipeline Not Implemented (06-rendering.md)
+### 1.9 ~~Doc Needs Update: Mesh Update Pipeline Not Implemented~~ RESOLVED
 
-**Location:** `docs/06-rendering.md` Section 6.5
-
-**Issue:** Doc describes a 4-stage mesh update pipeline with priority queues and worker threads.
-
-**Reality:** Current implementation is synchronous:
-- `WorldRenderer::updateMeshes()` rebuilds on main thread
-- Simple dirty list, no priority queue
-- No worker threads
-
-**Analysis:** This is Phase 5 scope, current code is Phase 4.
-
-**Action:** Add note to doc that full pipeline is Phase 5
-- [ ] Add "Phase 5" implementation note to 06-rendering.md Section 6.5
+**Status:** ✅ Mesh update pipeline is now implemented (Phases 5-6 complete). MeshWorkerPool with push-based rebuild pipeline, LOD integration, and GPU memory management.
 
 ---
 

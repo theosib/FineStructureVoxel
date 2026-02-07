@@ -6,9 +6,9 @@
  * CBOR serialization round-trip, file I/O, ClipboardManager.
  */
 
-#include "finevox/schematic.hpp"
-#include "finevox/schematic_io.hpp"
-#include "finevox/clipboard_manager.hpp"
+#include "finevox/worldgen/schematic.hpp"
+#include "finevox/worldgen/schematic_io.hpp"
+#include "finevox/worldgen/clipboard_manager.hpp"
 
 #include <gtest/gtest.h>
 
@@ -16,6 +16,7 @@
 #include <fstream>
 
 using namespace finevox;
+using namespace finevox::worldgen;
 
 // ============================================================================
 // BlockSnapshot tests

@@ -12,6 +12,7 @@ FineStructureVoxel/
 │   ├── INDEX.md                     # Master index
 │   ├── AI-NOTES.md                  # AI session context
 │   ├── SOURCE-DOC-MAPPING.md        # Source ↔ doc cross-reference
+│   ├── STYLE_GUIDE.md               # Coding conventions & philosophy
 │   ├── REVIEW-TODO.md               # Design review tracking
 │   ├── 01-executive-summary.md      # Goals, non-goals
 │   ├── 02-prior-art.md              # Lessons from prior implementations
@@ -40,169 +41,124 @@ FineStructureVoxel/
 │   ├── 24-event-system.md
 │   ├── 25-entity-system.md
 │   ├── 26-network-protocol.md
+│   ├── 27-world-generation.md       # World generation design
 │   ├── finegui-design.md            # GUI toolkit design
 │   ├── PLAN-mesh-architecture-improvements.md
 │   ├── appendix-a-file-structure.md # This file
 │   └── appendix-b-differences.md
-├── include/finevox/                 # Public headers (flat layout)
-│   ├── position.hpp                 # BlockPos, ChunkPos, ColumnPos, Face
-│   ├── subchunk.hpp                 # 16³ block storage with palette
-│   ├── palette.hpp                  # SubChunkPalette
-│   ├── string_interner.hpp          # String→ID interning
-│   ├── chunk_column.hpp             # Full-height column of subchunks
-│   ├── world.hpp                    # World container
-│   ├── column_manager.hpp           # Column lifecycle state machine
-│   ├── block_type.hpp               # BlockType, BlockTypeId, BlockRegistry
-│   ├── block_model.hpp              # FaceGeometry, BlockGeometry, BlockModel
-│   ├── block_model_loader.hpp       # .model/.geom/.collision parser
-│   ├── rotation.hpp                 # 24 cube rotations
-│   ├── mesh.hpp                     # MeshBuilder, MeshData, ChunkVertex
-│   ├── mesh_worker_pool.hpp         # Parallel mesh generation
-│   ├── mesh_rebuild_queue.hpp       # Mesh rebuild scheduling
-│   ├── world_renderer.hpp           # Render coordination (VK-dependent)
-│   ├── subchunk_view.hpp            # GPU mesh handle
-│   ├── lod.hpp                      # LOD generation and selection
-│   ├── physics.hpp                  # AABB, CollisionShape, PhysicsSystem
-│   ├── light_data.hpp               # Per-block light storage
-│   ├── light_engine.hpp             # BFS light propagation
-│   ├── block_event.hpp              # BlockEvent types
-│   ├── block_handler.hpp            # BlockContext, BlockHandler
-│   ├── event_queue.hpp              # UpdateScheduler, EventOutbox
-│   ├── entity.hpp                   # Entity base
-│   ├── entity_manager.hpp           # Entity lifecycle
-│   ├── entity_registry.hpp          # Entity type registration
-│   ├── item_registry.hpp            # Item registration
-│   ├── graphics_event_queue.hpp     # Game↔graphics messaging
-│   ├── module.hpp                   # ModuleLoader, GameModule
-│   ├── config.hpp                   # ConfigManager, WorldConfig
-│   ├── config_file.hpp              # Config file parsing
-│   ├── config_parser.hpp            # Key-value parser (used by model loader)
-│   ├── distances.hpp                # Distance zone calculations
-│   ├── resource_locator.hpp         # Asset path resolution
-│   ├── texture_manager.hpp          # Texture atlas management
-│   ├── block_atlas.hpp              # Block UV coordinate mapping
-│   ├── serialization.hpp            # SubChunk/Column CBOR serialization
-│   ├── cbor.hpp                     # CBOR encoder/decoder
-│   ├── region_file.hpp              # 32×32 region file I/O
-│   ├── io_manager.hpp               # Async save/load
-│   ├── data_container.hpp           # Key-value extra data storage
-│   ├── batch_builder.hpp            # Block operation batching
-│   ├── block_data_helpers.hpp       # BlockTypeId storage helpers
-│   ├── lru_cache.hpp                # Generic LRU cache
-│   ├── queue.hpp                    # Base queue interface
-│   ├── simple_queue.hpp             # Simple FIFO queue
-│   ├── coalescing_queue.hpp         # Key-deduplicating queue
-│   ├── keyed_queue.hpp              # Key-associated data queue
-│   ├── alarm_queue.hpp              # Timer-based queue
-│   ├── blocking_queue.hpp           # Legacy thread-safe queue
-│   └── wake_signal.hpp              # Thread wakeup primitive
-├── src/                             # Implementation files (mirrors headers)
-│   ├── position.cpp
-│   ├── subchunk.cpp
-│   ├── palette.cpp
-│   ├── string_interner.cpp
-│   ├── chunk_column.cpp
-│   ├── world.cpp
-│   ├── column_manager.cpp
-│   ├── block_type.cpp
-│   ├── block_model.cpp
-│   ├── block_model_loader.cpp
-│   ├── rotation.cpp
-│   ├── mesh.cpp
-│   ├── mesh_worker_pool.cpp
-│   ├── world_renderer.cpp           # VK-dependent
-│   ├── subchunk_view.cpp            # VK-dependent
-│   ├── lod.cpp
-│   ├── physics.cpp
-│   ├── light_data.cpp
-│   ├── light_engine.cpp
-│   ├── block_event.cpp
-│   ├── block_handler.cpp
-│   ├── event_queue.cpp
-│   ├── entity.cpp
-│   ├── entity_manager.cpp
-│   ├── entity_registry.cpp
-│   ├── item_registry.cpp
-│   ├── graphics_event_queue.cpp
-│   ├── module.cpp
-│   ├── config.cpp
-│   ├── config_file.cpp
-│   ├── config_parser.cpp
-│   ├── resource_locator.cpp
-│   ├── texture_manager.cpp          # VK-dependent
-│   ├── block_atlas.cpp              # VK-dependent
-│   ├── serialization.cpp
-│   ├── region_file.cpp
-│   ├── io_manager.cpp
-│   ├── data_container.cpp
-│   └── batch_builder.cpp
+├── include/finevox/
+│   ├── core/                        # Core engine (namespace finevox)
+│   │   ├── position.hpp             # BlockPos, ChunkPos, ColumnPos, Face
+│   │   ├── subchunk.hpp             # 16³ block storage with palette
+│   │   ├── palette.hpp              # SubChunkPalette
+│   │   ├── string_interner.hpp      # String→ID interning
+│   │   ├── chunk_column.hpp         # Full-height column of subchunks
+│   │   ├── world.hpp                # World container
+│   │   ├── column_manager.hpp       # Column lifecycle state machine
+│   │   ├── block_type.hpp           # BlockType, BlockTypeId, BlockRegistry
+│   │   ├── block_model.hpp          # FaceGeometry, BlockGeometry, BlockModel
+│   │   ├── block_model_loader.hpp   # .model/.geom/.collision parser
+│   │   ├── rotation.hpp             # 24 cube rotations
+│   │   ├── mesh.hpp                 # MeshBuilder, MeshData, ChunkVertex
+│   │   ├── mesh_worker_pool.hpp     # Parallel mesh generation
+│   │   ├── mesh_rebuild_queue.hpp   # Mesh rebuild scheduling
+│   │   ├── lod.hpp                  # LOD generation and selection
+│   │   ├── physics.hpp              # AABB, CollisionShape, PhysicsSystem
+│   │   ├── light_data.hpp           # Per-block light storage
+│   │   ├── light_engine.hpp         # BFS light propagation
+│   │   ├── block_event.hpp          # BlockEvent types
+│   │   ├── block_handler.hpp        # BlockContext, BlockHandler
+│   │   ├── event_queue.hpp          # UpdateScheduler, EventOutbox
+│   │   ├── entity.hpp               # Entity base
+│   │   ├── entity_manager.hpp       # Entity lifecycle
+│   │   ├── entity_registry.hpp      # Entity type registration
+│   │   ├── item_registry.hpp        # Item registration
+│   │   ├── graphics_event_queue.hpp # Game↔graphics messaging
+│   │   ├── module.hpp               # ModuleLoader, GameModule
+│   │   ├── config.hpp               # ConfigManager, WorldConfig
+│   │   ├── config_file.hpp          # Config file parsing
+│   │   ├── config_parser.hpp        # Key-value parser
+│   │   ├── distances.hpp            # Distance zone calculations
+│   │   ├── resource_locator.hpp     # Asset path resolution
+│   │   ├── serialization.hpp        # SubChunk/Column CBOR serialization
+│   │   ├── cbor.hpp                 # CBOR encoder/decoder
+│   │   ├── region_file.hpp          # 32×32 region file I/O
+│   │   ├── io_manager.hpp           # Async save/load
+│   │   ├── data_container.hpp       # Key-value extra data storage
+│   │   ├── batch_builder.hpp        # Block operation batching
+│   │   ├── block_data_helpers.hpp   # BlockTypeId storage helpers
+│   │   ├── lru_cache.hpp            # Generic LRU cache
+│   │   ├── queue.hpp                # Base queue interface
+│   │   ├── simple_queue.hpp         # Simple FIFO queue
+│   │   ├── coalescing_queue.hpp     # Key-deduplicating queue
+│   │   ├── keyed_queue.hpp          # Key-associated data queue
+│   │   ├── alarm_queue.hpp          # Timer-based queue
+│   │   ├── wake_signal.hpp          # Thread wakeup primitive
+│   │   └── deprecated/
+│   │       └── blocking_queue.hpp   # Legacy thread-safe queue
+│   ├── worldgen/                    # World generation (namespace finevox::worldgen)
+│   │   ├── noise.hpp                # Noise2D/3D interfaces, Perlin, OpenSimplex
+│   │   ├── noise_ops.hpp            # FBM, ridged, billow, domain warp, NoiseFactory
+│   │   ├── noise_voronoi.hpp        # Voronoi tessellation noise
+│   │   ├── biome.hpp                # BiomeId, BiomeProperties, BiomeRegistry
+│   │   ├── biome_map.hpp            # Spatial biome assignment
+│   │   ├── biome_loader.hpp         # .biome file loader
+│   │   ├── feature.hpp              # Feature interface, FeaturePlacementContext
+│   │   ├── feature_tree.hpp         # TreeFeature, TreeConfig
+│   │   ├── feature_ore.hpp          # OreFeature, OreConfig
+│   │   ├── feature_schematic.hpp    # SchematicFeature
+│   │   ├── feature_registry.hpp     # FeatureRegistry, FeaturePlacement
+│   │   ├── feature_loader.hpp       # .feature/.ore file loader
+│   │   ├── world_generator.hpp      # GenerationPipeline, GenerationContext
+│   │   ├── generation_passes.hpp    # TerrainPass, SurfacePass, CavePass, etc.
+│   │   ├── schematic.hpp            # BlockSnapshot, Schematic
+│   │   ├── schematic_io.hpp         # CBOR schematic serialization
+│   │   └── clipboard_manager.hpp    # Runtime copy/paste
+│   └── render/                      # Vulkan rendering (namespace finevox::render)
+│       ├── world_renderer.hpp       # Render coordination
+│       ├── subchunk_view.hpp        # GPU mesh handle
+│       ├── block_atlas.hpp          # Block UV coordinate mapping
+│       └── texture_manager.hpp      # Texture atlas management
+├── src/
+│   ├── core/                        # Core implementations
+│   │   ├── position.cpp             ... (mirrors core headers)
+│   │   └── ...
+│   ├── worldgen/                    # World generation implementations
+│   │   ├── noise_perlin.cpp         ... (mirrors worldgen headers)
+│   │   └── ...
+│   └── render/                      # Vulkan render implementations
+│       ├── world_renderer.cpp       ... (mirrors render headers)
+│       └── ...
 ├── tests/                           # GoogleTest unit tests
-│   ├── test_position.cpp
-│   ├── test_string_interner.cpp
-│   ├── test_palette.cpp
-│   ├── test_subchunk.cpp
-│   ├── test_chunk_column.cpp
-│   ├── test_rotation.cpp
-│   ├── test_world.cpp
-│   ├── test_column_manager.cpp
-│   ├── test_batch_builder.cpp
-│   ├── test_lru_cache.cpp
-│   ├── test_data_container.cpp
-│   ├── test_serialization.cpp
-│   ├── test_region_file.cpp
-│   ├── test_io_manager.cpp
-│   ├── test_config.cpp
-│   ├── test_config_parser.cpp
-│   ├── test_config_file.cpp
-│   ├── test_resource_locator.cpp
-│   ├── test_physics.cpp
-│   ├── test_mesh.cpp
-│   ├── test_block_type.cpp
-│   ├── test_block_model.cpp
-│   ├── test_lod.cpp
-│   ├── test_module.cpp
-│   ├── test_lighting.cpp
-│   ├── test_event_system.cpp
-│   ├── test_blocking_queue.cpp
-│   ├── test_queue_primitives.cpp
-│   └── test_mesh_worker_pool.cpp
+│   ├── test_position.cpp            # Core tests
+│   ├── ...
+│   ├── test_noise.cpp               # Worldgen tests
+│   ├── test_schematic.cpp
+│   ├── test_biome.cpp
+│   ├── test_feature.cpp
+│   └── test_generation.cpp
 ├── examples/
 │   └── render_demo.cpp              # Interactive demo (VK + finegui)
 ├── shaders/                         # GLSL shaders
-│   ├── chunk.vert                   # Block vertex shader
-│   ├── chunk.frag                   # Block fragment shader
-│   ├── overlay.vert                 # Overlay2D vertex shader
-│   └── overlay.frag                 # Overlay2D fragment shader
-└── resources/                       # Data-driven block definitions
-    ├── blocks/                      # Block model files
+│   ├── chunk.vert
+│   ├── chunk.frag
+│   ├── overlay.vert
+│   └── overlay.frag
+└── resources/                       # Data-driven definitions
+    ├── blocks/                      # Block model files (.model)
     │   ├── base/                    # Base models (inherited by variants)
-    │   │   ├── solid_cube.model
-    │   │   ├── slab.model
-    │   │   ├── stairs.model
-    │   │   └── wedge.model
-    │   ├── stone.model
-    │   ├── dirt.model
-    │   ├── grass.model
-    │   ├── cobble.model
-    │   ├── glowstone.model
-    │   ├── slab.model
-    │   ├── stone_slab.model
-    │   ├── stairs.model
-    │   └── wedge.model
-    ├── shapes/                      # Geometry and collision definitions
-    │   ├── solid_cube.geom
-    │   ├── slab_faces.geom
-    │   ├── slab_collision.collision
-    │   ├── stairs_faces.geom
-    │   ├── stairs_collision.collision
-    │   ├── wedge_faces.geom
-    │   └── wedge_collision.collision
-    └── textures/                    # Block textures
-        ├── stone.png
-        ├── cobble.png
-        ├── wood.png
-        ├── steel.png
-        └── junk.png
+    │   └── ...
+    ├── shapes/                      # Geometry (.geom) and collision (.collision)
+    ├── biomes/                      # Biome definitions (.biome)
+    │   ├── plains.biome
+    │   ├── forest.biome
+    │   ├── desert.biome
+    │   └── mountains.biome
+    ├── features/                    # Feature definitions (.feature, .ore)
+    │   ├── oak_tree.feature
+    │   ├── iron_ore.ore
+    │   └── coal_ore.ore
+    └── textures/                    # Block textures (.png)
 ```
 
 ---

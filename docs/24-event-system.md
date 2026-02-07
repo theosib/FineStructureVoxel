@@ -647,7 +647,7 @@ The full event processing uses three queues with distinct purposes:
 
 ### Outbox Consolidation
 
-**Implementation:** [event_queue.hpp](../include/finevox/event_queue.hpp), [event_queue.cpp](../src/event_queue.cpp)
+**Implementation:** [event_queue.hpp](../include/finevox/core/event_queue.hpp), [event_queue.cpp](../src/core/event_queue.cpp)
 
 The outbox consolidates events by **(position, event type)** to avoid redundant processing while keeping different event types separate:
 

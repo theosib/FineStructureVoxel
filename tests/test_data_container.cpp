@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/data_container.hpp"
-#include "finevox/block_data_helpers.hpp"
+#include "finevox/core/data_container.hpp"
+#include "finevox/core/block_data_helpers.hpp"
 #include <cmath>
 
 using namespace finevox;

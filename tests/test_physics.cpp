@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/physics.hpp"
+#include "finevox/core/physics.hpp"
 #include <cmath>
 #include <unordered_set>
 

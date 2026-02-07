@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "finevox/mesh.hpp"
-#include "finevox/subchunk.hpp"
-#include "finevox/world.hpp"
-#include "finevox/block_model.hpp"
+#include "finevox/core/mesh.hpp"
+#include "finevox/core/subchunk.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/block_model.hpp"
 #include <cmath>
 
 using namespace finevox;

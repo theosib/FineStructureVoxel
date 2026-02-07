@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/string_interner.hpp"
+#include "finevox/core/string_interner.hpp"
 #include <thread>
 #include <vector>
 #include <unordered_set>

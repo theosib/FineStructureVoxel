@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/lru_cache.hpp"
+#include "finevox/core/lru_cache.hpp"
 #include <string>
 
 using namespace finevox;

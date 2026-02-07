@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/subchunk.hpp"
+#include "finevox/core/subchunk.hpp"
 
 using namespace finevox;
 

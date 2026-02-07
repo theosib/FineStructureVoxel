@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "finevox/mesh_worker_pool.hpp"
-#include "finevox/world.hpp"
-#include "finevox/wake_signal.hpp"
+#include "finevox/core/mesh_worker_pool.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/wake_signal.hpp"
 #include <thread>
 #include <chrono>
 #include <atomic>

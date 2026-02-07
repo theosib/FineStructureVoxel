@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/region_file.hpp"
-#include "finevox/config.hpp"
+#include "finevox/core/region_file.hpp"
+#include "finevox/core/config.hpp"
 #include <filesystem>
 #include <cstdlib>
 

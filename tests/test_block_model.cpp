@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "finevox/block_model.hpp"
-#include "finevox/block_model_loader.hpp"
-#include "finevox/block_type.hpp"
+#include "finevox/core/block_model.hpp"
+#include "finevox/core/block_model_loader.hpp"
+#include "finevox/core/block_type.hpp"
 
 using namespace finevox;
 
@@ -654,7 +654,7 @@ solid-faces: bottom top north south west east
 }
 
 // Test loading from actual spec files
-#include "finevox/resource_locator.hpp"
+#include "finevox/core/resource_locator.hpp"
 #include <filesystem>
 
 class BlockModelFileLoadTest : public ::testing::Test {

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "finevox/deprecated/blocking_queue.hpp"
-#include "finevox/mesh_rebuild_queue.hpp"
-#include "finevox/position.hpp"
+#include "finevox/core/deprecated/blocking_queue.hpp"
+#include "finevox/core/mesh_rebuild_queue.hpp"
+#include "finevox/core/position.hpp"
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -408,7 +408,7 @@ TEST(MeshRebuildQueueTest, VersionUpdate) {
 // AlarmQueue tests
 // ============================================================================
 
-#include "finevox/alarm_queue.hpp"
+#include "finevox/core/alarm_queue.hpp"
 
 TEST(AlarmQueueTest, BasicPushTryPop) {
     AlarmQueue<int> queue;

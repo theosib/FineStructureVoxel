@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/position.hpp"
+#include "finevox/core/position.hpp"
 #include <unordered_set>
 
 using namespace finevox;

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/config_file.hpp"
+#include "finevox/core/config_file.hpp"
 #include <fstream>
 #include <filesystem>
 

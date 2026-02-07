@@ -5,15 +5,15 @@
 
 #include <gtest/gtest.h>
 
-#include "finevox/biome.hpp"
-#include "finevox/biome_map.hpp"
-#include "finevox/biome_loader.hpp"
-#include "finevox/config_parser.hpp"
+#include "finevox/worldgen/biome.hpp"
+#include "finevox/worldgen/biome_map.hpp"
+#include "finevox/worldgen/biome_loader.hpp"
+#include "finevox/core/config_parser.hpp"
 
 #include <filesystem>
 #include <fstream>
 
-namespace finevox {
+namespace finevox::worldgen {
 namespace {
 
 // ============================================================================
@@ -494,4 +494,4 @@ TEST_F(BiomeLoaderTest, LoadDirectoryNonExistent) {
 }
 
 }  // namespace
-}  // namespace finevox
+}  // namespace finevox::worldgen

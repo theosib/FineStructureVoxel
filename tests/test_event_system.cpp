@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include "finevox/event_queue.hpp"
-#include "finevox/subchunk.hpp"
-#include "finevox/block_type.hpp"
-#include "finevox/block_handler.hpp"  // For TickType
-#include "finevox/world.hpp"
+#include "finevox/core/event_queue.hpp"
+#include "finevox/core/subchunk.hpp"
+#include "finevox/core/block_type.hpp"
+#include "finevox/core/block_handler.hpp"  // For TickType
+#include "finevox/core/world.hpp"
 
 using namespace finevox;
 
@@ -518,7 +518,7 @@ TEST(UpdateSchedulerTest, AutoUnregisterOnBreak) {
 // ChunkColumn Game Tick Registry Tests
 // ============================================================================
 
-#include "finevox/chunk_column.hpp"
+#include "finevox/core/chunk_column.hpp"
 
 TEST(ChunkColumnGameTickTest, RebuildGameTickRegistries) {
     // Register block types

@@ -16,7 +16,7 @@
 
 | Decision | Choice |
 |----------|--------|
-| Namespace | `finevox` |
+| Namespaces | `finevox::` (core), `finevox::worldgen::`, `finevox::render::` |
 | Block IDs | Per-subchunk palette + global string interning (unlimited types, compressible) |
 | Loading unit | Full-height columns (16x16xHeight), but subchunk granularity for lifecycle |
 | Serialization | CBOR (RFC 8949) |
@@ -55,13 +55,18 @@
 ┌─────────────────────────────────────────────────────────┐
 │  Game Modules (loaded .so/.dll)                         │  <- Games built here
 ├─────────────────────────────────────────────────────────┤
-│  finevox Engine                                         │  <- This project
-│  ├── World (columns, subchunks, blocks)                 │
-│  ├── Rendering (mesh gen, LOD, view-relative)           │
-│  ├── Physics (collision, raycasting)                    │
-│  ├── Persistence (CBOR, region files)                   │
-│  ├── Block Models (.model/.geom/.collision spec files)  │
-│  └── Module Loader                                      │
+│  finevox Engine (three shared libraries)                │  <- This project
+│  ├── libfinevox (core) — finevox::                      │
+│  │   ├── World, SubChunk, BlockType, Physics            │
+│  │   ├── Persistence, Events, Mesh generation           │
+│  │   └── Block Models, Module Loader                    │
+│  ├── libfinevox_worldgen — finevox::worldgen::          │
+│  │   ├── Noise (Perlin, Simplex, Voronoi, FBM)         │
+│  │   ├── Biomes, Features, Schematics                   │
+│  │   └── Generation Pipeline (multi-pass)               │
+│  └── libfinevox_render — finevox::render::              │
+│      ├── WorldRenderer, SubChunkView                    │
+│      └── TextureManager, BlockAtlas                     │
 ├─────────────────────────────────────────────────────────┤
 │  finegui                                                │  <- GUI toolkit
 │  └── Dear ImGui + finevk Vulkan backend                 │
@@ -168,6 +173,19 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - Sky light and block light (0-15)
 - Smooth per-vertex lighting in mesh builder
 
+### Phase 9: Block Updates & Events ✓
+- UpdateScheduler, BlockHandler, BlockContext
+- Three-queue architecture (outbox, tick, alarm)
+- Block event propagation
+
+### Phase 10: World Generation ✓
+- Noise library (Perlin, Simplex, Voronoi, FBM, Ridged, DomainWarp)
+- Biome system (BiomeRegistry, BiomeMap with Voronoi + climate)
+- Feature system (trees, ores, schematics)
+- Generation pipeline (Terrain → Surface → Cave → Ore → Structure → Decoration)
+- Data-driven .biome/.feature/.ore config files
+- Schematic/clipboard system
+
 ---
 
 ## Command Language Syntax Quick Reference
@@ -200,20 +218,25 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**All core phases complete (0-8).** Phase 9 (block updates) mostly complete.
+**All phases complete (0-10).** Library refactored into three shared libraries with separate namespaces.
 
-**Recent work (since Phase 9):**
-- Non-cube block model system (slabs, stairs, wedges) - complete
-  - BlockModel, BlockGeometry, BlockModelLoader using ConfigParser format
-  - .model/.geom/.collision spec files in `resources/`
-  - Custom mesh rendering via `addCustomFace()` in MeshBuilder
-  - `hasCustomMesh` flag for greedy mesh exclusion
-- Entity system foundation (entity.hpp, entity_manager.hpp, graphics_event_queue.hpp)
-- Queue primitives refactor (queue.hpp, simple_queue, coalescing_queue, keyed_queue)
-- finevk API migration (frame.beginRenderPass, frame.extent, frame.frameIndex)
-- finegui integration in render_demo (coordinates overlay + mock hotbar)
+**Directory layout:**
+- `include/finevox/core/` — core headers (`finevox::`)
+- `include/finevox/worldgen/` — world generation headers (`finevox::worldgen::`)
+- `include/finevox/render/` — Vulkan render headers (`finevox::render::`)
+- `src/core/`, `src/worldgen/`, `src/render/` — source files mirror headers
 
-**Remaining Phase 9 work:**
+**Shared libraries:**
+- `libfinevox.dylib` — core (world, mesh, physics, persistence, events)
+- `libfinevox_worldgen.dylib` — world generation (links finevox PUBLIC)
+- `libfinevox_render.dylib` — Vulkan rendering (links finevox PUBLIC)
+
+**Recent work:**
+- Phase 10 (world generation) complete — 966 tests passing
+- Library refactoring — namespaces, directories, shared objects
+- Documentation updated to match new structure
+
+**Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load
 - `UpdatePropagationPolicy` for cross-chunk updates
 - Network quiescence protocol
@@ -228,9 +251,9 @@ items[0]                # Array indexing (brackets - future)
 **Complete implementation for slabs, stairs, wedges, etc.**
 
 ### Core Files
-- `include/finevox/block_model.hpp` - FaceGeometry, BlockGeometry, BlockModel, RotationSet
-- `include/finevox/block_model_loader.hpp` - Parser for .model/.geom/.collision files
-- `src/mesh.cpp` - addCustomFace(), geometry provider integration
+- `include/finevox/core/block_model.hpp` - FaceGeometry, BlockGeometry, BlockModel, RotationSet
+- `include/finevox/core/block_model_loader.hpp` - Parser for .model/.geom/.collision files
+- `src/core/mesh.cpp` - addCustomFace(), geometry provider integration
 
 ### Key Concepts
 - **RotationSet**: Constrains which of 24 rotations are valid (None/Vertical/Horizontal/HorizontalFlip/All/Custom)
@@ -276,4 +299,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-06 — Documentation audit and update*
+*Last updated: 2026-02-07 — Library refactoring (namespaces, directories, shared objects)*

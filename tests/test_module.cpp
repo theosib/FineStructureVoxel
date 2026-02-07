@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
-#include "finevox/module.hpp"
-#include "finevox/block_type.hpp"
-#include "finevox/block_handler.hpp"
-#include "finevox/entity_registry.hpp"
-#include "finevox/item_registry.hpp"
+#include "finevox/core/module.hpp"
+#include "finevox/core/block_type.hpp"
+#include "finevox/core/block_handler.hpp"
+#include "finevox/core/entity_registry.hpp"
+#include "finevox/core/item_registry.hpp"
 
 using namespace finevox;
 

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/palette.hpp"
+#include "finevox/core/palette.hpp"
 
 using namespace finevox;
 

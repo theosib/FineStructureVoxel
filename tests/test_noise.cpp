@@ -6,9 +6,9 @@
  * octave stacking, and composable operations.
  */
 
-#include "finevox/noise.hpp"
-#include "finevox/noise_ops.hpp"
-#include "finevox/noise_voronoi.hpp"
+#include "finevox/worldgen/noise.hpp"
+#include "finevox/worldgen/noise_ops.hpp"
+#include "finevox/worldgen/noise_voronoi.hpp"
 
 #include <gtest/gtest.h>
 
@@ -18,6 +18,7 @@
 #include <vector>
 
 using namespace finevox;
+using namespace finevox::worldgen;
 
 // ============================================================================
 // NoiseHash tests

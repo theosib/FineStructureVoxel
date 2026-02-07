@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/block_type.hpp"
-#include "finevox/world.hpp"
+#include "finevox/core/block_type.hpp"
+#include "finevox/core/world.hpp"
 
 using namespace finevox;
 

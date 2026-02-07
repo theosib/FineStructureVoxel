@@ -5,20 +5,20 @@
 
 #include <gtest/gtest.h>
 
-#include "finevox/world_generator.hpp"
-#include "finevox/generation_passes.hpp"
-#include "finevox/biome.hpp"
-#include "finevox/biome_map.hpp"
-#include "finevox/feature_registry.hpp"
-#include "finevox/feature_tree.hpp"
-#include "finevox/feature_ore.hpp"
-#include "finevox/world.hpp"
-#include "finevox/chunk_column.hpp"
-#include "finevox/block_type.hpp"
+#include "finevox/worldgen/world_generator.hpp"
+#include "finevox/worldgen/generation_passes.hpp"
+#include "finevox/worldgen/biome.hpp"
+#include "finevox/worldgen/biome_map.hpp"
+#include "finevox/worldgen/feature_registry.hpp"
+#include "finevox/worldgen/feature_tree.hpp"
+#include "finevox/worldgen/feature_ore.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/chunk_column.hpp"
+#include "finevox/core/block_type.hpp"
 
 #include <memory>
 
-namespace finevox {
+namespace finevox::worldgen {
 namespace {
 
 // ============================================================================
@@ -483,4 +483,4 @@ TEST_F(GenerationTest, FullPipelineDeterministic) {
 }
 
 }  // namespace
-}  // namespace finevox
+}  // namespace finevox::worldgen

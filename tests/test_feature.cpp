@@ -5,21 +5,21 @@
 
 #include <gtest/gtest.h>
 
-#include "finevox/feature.hpp"
-#include "finevox/feature_tree.hpp"
-#include "finevox/feature_ore.hpp"
-#include "finevox/feature_schematic.hpp"
-#include "finevox/feature_registry.hpp"
-#include "finevox/feature_loader.hpp"
-#include "finevox/config_parser.hpp"
-#include "finevox/world.hpp"
-#include "finevox/block_type.hpp"
+#include "finevox/worldgen/feature.hpp"
+#include "finevox/worldgen/feature_tree.hpp"
+#include "finevox/worldgen/feature_ore.hpp"
+#include "finevox/worldgen/feature_schematic.hpp"
+#include "finevox/worldgen/feature_registry.hpp"
+#include "finevox/worldgen/feature_loader.hpp"
+#include "finevox/core/config_parser.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/block_type.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <memory>
 
-namespace finevox {
+namespace finevox::worldgen {
 namespace {
 
 // ============================================================================
@@ -580,4 +580,4 @@ TEST_F(FeatureLoaderTest, LoadDirectoryNonExistent) {
 }
 
 }  // namespace
-}  // namespace finevox
+}  // namespace finevox::worldgen

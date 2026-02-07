@@ -2,7 +2,7 @@
 
 **Purpose:** Cross-reference between implementation files and design documentation to maintain consistency and traceability.
 
-**Status:** Audited — all source files mapped, all design docs reviewed (last audit: 2026-02-06)
+**Status:** Audited — all source files mapped, all design docs reviewed (last audit: 2026-02-07)
 
 ---
 
@@ -10,158 +10,194 @@
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/position.hpp` | §4.1 BlockPos, ChunkPos, ColumnPos | Position types and conversions |
-| `src/position.cpp` | §4.1 | Position method implementations |
-| `include/finevox/subchunk.hpp` | §4.2 SubChunk | 16³ block storage, palette refs |
-| `src/subchunk.cpp` | §4.2, §4.4 | SubChunk + palette operations |
-| `include/finevox/palette.hpp` | §4.4 SubChunkPalette | Per-subchunk block type mapping |
-| `src/palette.cpp` | §4.4 | Palette management |
-| `include/finevox/string_interner.hpp` | §4.3 StringInterner | Global string→ID mapping |
-| `src/string_interner.cpp` | §4.3 | Interner implementation |
-| `include/finevox/block_type.hpp` | §4.5 BlockTypeId, BlockType | Block type definitions |
-| `src/block_type.cpp` | §4.5 | BlockRegistry, BlockType |
-| `include/finevox/rotation.hpp` | §4.6 Rotation | 24 cube rotations |
-| `src/rotation.cpp` | §4.6 | Rotation lookup tables |
+| `include/finevox/core/position.hpp` | §4.1 BlockPos, ChunkPos, ColumnPos | Position types and conversions |
+| `src/core/position.cpp` | §4.1 | Position method implementations |
+| `include/finevox/core/subchunk.hpp` | §4.2 SubChunk | 16³ block storage, palette refs |
+| `src/core/subchunk.cpp` | §4.2, §4.4 | SubChunk + palette operations |
+| `include/finevox/core/palette.hpp` | §4.4 SubChunkPalette | Per-subchunk block type mapping |
+| `src/core/palette.cpp` | §4.4 | Palette management |
+| `include/finevox/core/string_interner.hpp` | §4.3 StringInterner | Global string→ID mapping |
+| `src/core/string_interner.cpp` | §4.3 | Interner implementation |
+| `include/finevox/core/block_type.hpp` | §4.5 BlockTypeId, BlockType | Block type definitions |
+| `src/core/block_type.cpp` | §4.5 | BlockRegistry, BlockType |
+| `include/finevox/core/rotation.hpp` | §4.6 Rotation | 24 cube rotations |
+| `src/core/rotation.cpp` | §4.6 | Rotation lookup tables |
 
 ## World Management (Doc 05)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/world.hpp` | §5.1 World | Main world interface |
-| `src/world.cpp` | §5.1, §5.5 Force-loading | World + force-loader |
-| `include/finevox/chunk_column.hpp` | §5.2 ChunkColumn | Vertical column of subchunks |
-| `src/chunk_column.cpp` | §5.2 | Column implementation |
-| `include/finevox/column_manager.hpp` | §5.4 ColumnManager | Column lifecycle state machine |
-| `src/column_manager.cpp` | §5.4.1-5.4.6 | State transitions, LRU cache |
-| `include/finevox/lru_cache.hpp` | §5.4.2 LRU Cache | Generic LRU cache |
+| `include/finevox/core/world.hpp` | §5.1 World | Main world interface |
+| `src/core/world.cpp` | §5.1, §5.5 Force-loading | World + force-loader |
+| `include/finevox/core/chunk_column.hpp` | §5.2 ChunkColumn | Vertical column of subchunks |
+| `src/core/chunk_column.cpp` | §5.2 | Column implementation |
+| `include/finevox/core/column_manager.hpp` | §5.4 ColumnManager | Column lifecycle state machine |
+| `src/core/column_manager.cpp` | §5.4.1-5.4.6 | State transitions, LRU cache |
+| `include/finevox/core/lru_cache.hpp` | §5.4.2 LRU Cache | Generic LRU cache |
 
 ## Rendering (Docs 06, 07, 22)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/mesh.hpp` | [06] §6.2 Mesh Generation | SubChunkMesh, vertex data |
-| `src/mesh.cpp` | [06] §6.2 | Greedy meshing |
-| `include/finevox/mesh_worker_pool.hpp` | [06] §6.4 Async Workers | Parallel mesh generation |
-| `src/mesh_worker_pool.cpp` | [06] §6.4 | Worker thread pool |
-| `include/finevox/mesh_rebuild_queue.hpp` | [06] §6.3 Priority Queue | Mesh rebuild scheduling |
-| `include/finevox/world_renderer.hpp` | [06] §6.1 WorldRenderer | Render coordination |
-| `src/world_renderer.cpp` | [06] §6.1 | View-relative rendering |
-| `include/finevox/batch_builder.hpp` | [13] §13.1 BatchBuilder | Block operation batching |
-| `src/batch_builder.cpp` | [13] §13.1 | Coalescing pattern |
-| `include/finevox/lod.hpp` | [07], [22] LOD System | Level of detail |
-| `src/lod.cpp` | [07], [22] | LOD generation |
-| `include/finevox/subchunk_view.hpp` | [06] §6.5 SubChunkView | Read-only neighbor access |
-| `src/subchunk_view.cpp` | [06] §6.5 | Boundary queries |
+| `include/finevox/core/mesh.hpp` | [06] §6.2 Mesh Generation | SubChunkMesh, vertex data |
+| `src/core/mesh.cpp` | [06] §6.2 | Greedy meshing |
+| `include/finevox/core/mesh_worker_pool.hpp` | [06] §6.4 Async Workers | Parallel mesh generation |
+| `src/core/mesh_worker_pool.cpp` | [06] §6.4 | Worker thread pool |
+| `include/finevox/core/mesh_rebuild_queue.hpp` | [06] §6.3 Priority Queue | Mesh rebuild scheduling |
+| `include/finevox/render/world_renderer.hpp` | [06] §6.1 WorldRenderer | Render coordination |
+| `src/render/world_renderer.cpp` | [06] §6.1 | View-relative rendering |
+| `include/finevox/core/batch_builder.hpp` | [13] §13.1 BatchBuilder | Block operation batching |
+| `src/core/batch_builder.cpp` | [13] §13.1 | Coalescing pattern |
+| `include/finevox/core/lod.hpp` | [07], [22] LOD System | Level of detail |
+| `src/core/lod.cpp` | [07], [22] | LOD generation |
+| `include/finevox/render/subchunk_view.hpp` | [06] §6.5 SubChunkView | Read-only neighbor access |
+| `src/render/subchunk_view.cpp` | [06] §6.5 | Boundary queries |
 
 ## Lighting (Docs 09, 24)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/light_data.hpp` | [09] §9.1 Light Data | Per-block light storage |
-| `src/light_data.cpp` | [09] §9.1 | Light accessors |
-| `include/finevox/light_engine.hpp` | [24] §24.8-24.11 | Lighting propagation |
-| `src/light_engine.cpp` | [24] §24.8-24.11 | BFS light spread |
+| `include/finevox/core/light_data.hpp` | [09] §9.1 Light Data | Per-block light storage |
+| `src/core/light_data.cpp` | [09] §9.1 | Light accessors |
+| `include/finevox/core/light_engine.hpp` | [24] §24.8-24.11 | Lighting propagation |
+| `src/core/light_engine.cpp` | [24] §24.8-24.11 | BFS light spread |
 
 ## Physics (Doc 08)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/physics.hpp` | §8.1-8.7 | AABB, collision, raycasting |
-| `src/physics.cpp` | §8.1-8.7 | Step-climbing, wall glitch |
+| `include/finevox/core/physics.hpp` | §8.1-8.7 | AABB, collision, raycasting |
+| `src/core/physics.cpp` | §8.1-8.7 | Step-climbing, wall glitch |
 
 ## Persistence (Doc 11)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/cbor.hpp` | §11.2 CBOR Format | CBOR encoding/decoding |
-| `include/finevox/serialization.hpp` | §11.3 Serialization | SubChunk/Column serialize |
-| `src/serialization.cpp` | §11.3 | CBOR serialization |
-| `include/finevox/region_file.hpp` | §11.4 Region Files | 32×32 chunk regions |
-| `src/region_file.cpp` | §11.4 | Region file I/O |
-| `include/finevox/io_manager.hpp` | §11.5 IOManager | Async persistence |
-| `src/io_manager.cpp` | §11.5 | Save/load threading |
+| `include/finevox/core/cbor.hpp` | §11.2 CBOR Format | CBOR encoding/decoding |
+| `include/finevox/core/serialization.hpp` | §11.3 Serialization | SubChunk/Column serialize |
+| `src/core/serialization.cpp` | §11.3 | CBOR serialization |
+| `include/finevox/core/region_file.hpp` | §11.4 Region Files | 32×32 chunk regions |
+| `src/core/region_file.cpp` | §11.4 | Region file I/O |
+| `include/finevox/core/io_manager.hpp` | §11.5 IOManager | Async persistence |
+| `src/core/io_manager.cpp` | §11.5 | Save/load threading |
 
 ## Event System (Doc 24)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/block_event.hpp` | §24.2 BlockEvent | Event types and data |
-| `src/block_event.cpp` | §24.2 | Event factory methods |
-| `include/finevox/event_queue.hpp` | §24.6 Three-Queue, §24.13 | Outbox, UpdateScheduler |
-| `src/event_queue.cpp` | §24.6, §24.13 | Event processing loop |
-| `include/finevox/block_handler.hpp` | §24.7 Handlers | BlockContext, BlockHandler |
-| `src/block_handler.cpp` | §24.7 | Handler callbacks |
-| `include/finevox/data_container.hpp` | [17] §9.1 Extra Data | Key-value storage |
-| `src/data_container.cpp` | [17] §9.1 | DataContainer methods |
+| `include/finevox/core/block_event.hpp` | §24.2 BlockEvent | Event types and data |
+| `src/core/block_event.cpp` | §24.2 | Event factory methods |
+| `include/finevox/core/event_queue.hpp` | §24.6 Three-Queue, §24.13 | Outbox, UpdateScheduler |
+| `src/core/event_queue.cpp` | §24.6, §24.13 | Event processing loop |
+| `include/finevox/core/block_handler.hpp` | §24.7 Handlers | BlockContext, BlockHandler |
+| `src/core/block_handler.cpp` | §24.7 | Handler callbacks |
+| `include/finevox/core/data_container.hpp` | [17] §9.1 Extra Data | Key-value storage |
+| `src/core/data_container.cpp` | [17] §9.1 | DataContainer methods |
 
 ## Distance & Loading (Doc 23)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/distances.hpp` | §23.1 Distance Zones | Zone calculations |
-| `include/finevox/config.hpp` | §23.2 Configuration | Loading policies |
-| `src/config.cpp` | §23.2 | Config implementation |
+| `include/finevox/core/distances.hpp` | §23.1 Distance Zones | Zone calculations |
+| `include/finevox/core/config.hpp` | §23.2 Configuration | Loading policies |
+| `src/core/config.cpp` | §23.2 | Config implementation |
 
 ## Configuration & Resources
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/config_file.hpp` | [Appendix A] | Config file parsing |
-| `src/config_file.cpp` | [Appendix A] | Config loading |
-| `include/finevox/config_parser.hpp` | [Appendix A] | Parser utilities |
-| `src/config_parser.cpp` | [Appendix A] | Parsing implementation |
-| `include/finevox/resource_locator.hpp` | [Appendix A] | Asset path resolution |
-| `src/resource_locator.cpp` | [Appendix A] | Resource lookup |
-| `include/finevox/texture_manager.hpp` | [06] §6.6 Textures | Texture atlas |
-| `src/texture_manager.cpp` | [06] §6.6 | Texture loading |
-| `include/finevox/block_atlas.hpp` | [06] §6.6 Block Atlas | UV coordinate mapping |
-| `src/block_atlas.cpp` | [06] §6.6 | Atlas generation |
+| `include/finevox/core/config_file.hpp` | [Appendix A] | Config file parsing |
+| `src/core/config_file.cpp` | [Appendix A] | Config loading |
+| `include/finevox/core/config_parser.hpp` | [Appendix A] | Parser utilities |
+| `src/core/config_parser.cpp` | [Appendix A] | Parsing implementation |
+| `include/finevox/core/resource_locator.hpp` | [Appendix A] | Asset path resolution |
+| `src/core/resource_locator.cpp` | [Appendix A] | Resource lookup |
+| `include/finevox/render/texture_manager.hpp` | [06] §6.6 Textures | Texture atlas |
+| `src/render/texture_manager.cpp` | [06] §6.6 | Texture loading |
+| `include/finevox/render/block_atlas.hpp` | [06] §6.6 Block Atlas | UV coordinate mapping |
+| `src/render/block_atlas.cpp` | [06] §6.6 | Atlas generation |
 
 ## Module System (Doc 18)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/module.hpp` | §18.4 ModuleLoader | Module loading API |
-| `src/module.cpp` | §18.4 | Module implementation |
-| `include/finevox/entity_registry.hpp` | §18.5 Registries | Entity registration |
-| `src/entity_registry.cpp` | §18.5 | Entity management |
-| `include/finevox/item_registry.hpp` | §18.5 Registries | Item registration |
-| `src/item_registry.cpp` | §18.5 | Item management |
+| `include/finevox/core/module.hpp` | §18.4 ModuleLoader | Module loading API |
+| `src/core/module.cpp` | §18.4 | Module implementation |
+| `include/finevox/core/entity_registry.hpp` | §18.5 Registries | Entity registration |
+| `src/core/entity_registry.cpp` | §18.5 | Entity management |
+| `include/finevox/core/item_registry.hpp` | §18.5 Registries | Item registration |
+| `src/core/item_registry.cpp` | §18.5 | Item management |
 
 ## Block Model System (Doc 19)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/block_model.hpp` | [19] §19.1-19.4 | FaceGeometry, BlockGeometry, BlockModel, RotationSet |
-| `src/block_model.cpp` | [19] §19.1-19.4 | Model data structures |
-| `include/finevox/block_model_loader.hpp` | [19] §19.3, §19.8 | Parser for .model/.geom/.collision files |
-| `src/block_model_loader.cpp` | [19] §19.3, §19.8 | Uses ConfigParser (not YAML as doc originally described) |
+| `include/finevox/core/block_model.hpp` | [19] §19.1-19.4 | FaceGeometry, BlockGeometry, BlockModel, RotationSet |
+| `src/core/block_model.cpp` | [19] §19.1-19.4 | Model data structures |
+| `include/finevox/core/block_model_loader.hpp` | [19] §19.3, §19.8 | Parser for .model/.geom/.collision files |
+| `src/core/block_model_loader.cpp` | [19] §19.3, §19.8 | Uses ConfigParser (not YAML as doc originally described) |
 
 ## Entity System (Doc 25)
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/entity.hpp` | [25] §25.1 | Entity base class |
-| `src/entity.cpp` | [25] §25.1 | Entity implementation |
-| `include/finevox/entity_manager.hpp` | [25] §25.2 | Entity lifecycle management |
-| `src/entity_manager.cpp` | [25] §25.2 | Entity manager implementation |
-| `include/finevox/graphics_event_queue.hpp` | [25] §25.2-25.3 | Game↔graphics thread messaging |
-| `src/graphics_event_queue.cpp` | [25] §25.2-25.3 | Graphics event queue implementation |
+| `include/finevox/core/entity.hpp` | [25] §25.1 | Entity base class |
+| `src/core/entity.cpp` | [25] §25.1 | Entity implementation |
+| `include/finevox/core/entity_manager.hpp` | [25] §25.2 | Entity lifecycle management |
+| `src/core/entity_manager.cpp` | [25] §25.2 | Entity manager implementation |
+| `include/finevox/core/graphics_event_queue.hpp` | [25] §25.2-25.3 | Game↔graphics thread messaging |
+| `src/core/graphics_event_queue.cpp` | [25] §25.2-25.3 | Graphics event queue implementation |
+
+## World Generation (Doc 27)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/worldgen/noise.hpp` | §27.2 Noise Library | Noise2D/3D base, Perlin, OpenSimplex, FBM, Ridged, Billow |
+| `src/worldgen/noise_perlin.cpp` | §27.2.3 | Perlin gradient noise |
+| `src/worldgen/noise_simplex.cpp` | §27.2.3 | OpenSimplex2 noise |
+| `src/worldgen/noise_voronoi.cpp` | §27.2.6 | Voronoi cell noise |
+| `include/finevox/worldgen/noise_ops.hpp` | §27.2.4 Noise Ops | ScaledNoise, DomainWarp, Combined, Clamped |
+| `src/worldgen/noise_ops.cpp` | §27.2.4 | Noise operation implementations |
+| `include/finevox/worldgen/noise_voronoi.hpp` | §27.2.6 | VoronoiNoise2D, VoronoiResult |
+| `include/finevox/worldgen/biome.hpp` | §27.3 Biome System | BiomeId, BiomeProperties, BiomeRegistry |
+| `src/worldgen/biome.cpp` | §27.3 | Biome registration |
+| `include/finevox/worldgen/biome_map.hpp` | §27.3.4 BiomeMap | Voronoi + climate biome selection |
+| `src/worldgen/biome_map.cpp` | §27.3.4 | BiomeMap implementation |
+| `include/finevox/worldgen/biome_loader.hpp` | §27.3.5 .biome files | Data-driven biome loading |
+| `src/worldgen/biome_loader.cpp` | §27.3.5 | ConfigParser-based biome file parsing |
+| `include/finevox/worldgen/feature.hpp` | §27.5 Feature System | Feature base, TreeFeature, OreFeature, SchematicFeature |
+| `src/worldgen/feature_tree.cpp` | §27.5.2 TreeFeature | Tree generation |
+| `src/worldgen/feature_ore.cpp` | §27.5.2 OreFeature | Ore vein placement |
+| `src/worldgen/feature_schematic.cpp` | §27.5.2 SchematicFeature | Schematic stamping |
+| `include/finevox/worldgen/feature_registry.hpp` | §27.5.4 FeatureRegistry | Feature + placement rule registry |
+| `src/worldgen/feature_registry.cpp` | §27.5.4 | Feature registration |
+| `include/finevox/worldgen/feature_loader.hpp` | §27.5.5 Data files | .feature/.ore file loading |
+| `src/worldgen/feature_loader.cpp` | §27.5.5 | ConfigParser-based feature file parsing |
+| `include/finevox/worldgen/world_generator.hpp` | §27.4 Generation Pipeline | WorldGenerator, GenerationPipeline |
+| `src/worldgen/world_generator.cpp` | §27.4 | Pipeline execution |
+| `include/finevox/worldgen/generation_passes.hpp` | §27.4.4 Standard Passes | TerrainPass, SurfacePass, CavePass, OrePass, etc. |
+| `src/worldgen/generation_passes.cpp` | §27.4.4 | Pass implementations |
+| `include/finevox/worldgen/schematic.hpp` | §27.9 Schematic Integration | BlockSnapshot, Schematic |
+| `src/worldgen/schematic.cpp` | §27.9 | Schematic storage/manipulation |
+| `include/finevox/worldgen/schematic_io.hpp` | §27.9 | Schematic file I/O |
+| `src/worldgen/schematic_io.cpp` | §27.9 | Schematic serialization |
+| `include/finevox/worldgen/clipboard_manager.hpp` | [21] ClipboardManager | In-game copy/paste |
+| `src/worldgen/clipboard_manager.cpp` | [21] | ClipboardManager implementation |
 
 ## Utilities
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/blocking_queue.hpp` | [14] §14.2 | Thread-safe queue (legacy, superseded by queue primitives below) |
-| `include/finevox/queue.hpp` | [14] | Base queue interface |
-| `include/finevox/simple_queue.hpp` | [14] | Simple FIFO queue primitive |
-| `include/finevox/simple_queue_impl.hpp` | [14] | Simple queue template implementation |
-| `include/finevox/coalescing_queue.hpp` | [14], [13] | Queue with key-based deduplication |
-| `include/finevox/coalescing_queue_impl.hpp` | [14], [13] | Coalescing queue template implementation |
-| `include/finevox/keyed_queue.hpp` | [14] | Key-associated data queue |
-| `include/finevox/alarm_queue.hpp` | [24] §24.3 AlarmQueue | Timer-based events |
-| `include/finevox/wake_signal.hpp` | [14] | Thread wakeup signaling primitive |
-| `include/finevox/block_data_helpers.hpp` | [17] §9.1 | BlockTypeId storage helpers |
+| `include/finevox/core/blocking_queue.hpp` | [14] §14.2 | Thread-safe queue (legacy, superseded by queue primitives below) |
+| `include/finevox/core/queue.hpp` | [14] | Base queue interface |
+| `include/finevox/core/simple_queue.hpp` | [14] | Simple FIFO queue primitive |
+| `include/finevox/core/simple_queue_impl.hpp` | [14] | Simple queue template implementation |
+| `include/finevox/core/coalescing_queue.hpp` | [14], [13] | Queue with key-based deduplication |
+| `include/finevox/core/coalescing_queue_impl.hpp` | [14], [13] | Coalescing queue template implementation |
+| `include/finevox/core/keyed_queue.hpp` | [14] | Key-associated data queue |
+| `include/finevox/core/alarm_queue.hpp` | [24] §24.3 AlarmQueue | Timer-based events |
+| `include/finevox/core/wake_signal.hpp` | [14] | Thread wakeup signaling primitive |
+| `include/finevox/core/block_data_helpers.hpp` | [17] §9.1 | BlockTypeId storage helpers |
 
 ---
 
@@ -234,7 +270,7 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 |-----|---------|-------|
 | 10 | Input System | `InputManager`, `PlayerController` |
 | 12 | Scripting | External dependency, not integrated |
-| 21 | Clipboard/Schematics | `BlockSnapshot`, `Schematic`, `ClipboardManager` |
+| ~~21~~ | ~~Clipboard/Schematics~~ | Implemented in Phase 10 (see World Generation section above) |
 
 ---
 
@@ -289,13 +325,13 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 
 | Source File | Status | Notes |
 |-------------|--------|-------|
-| `include/finevox/lru_cache.hpp` | Utility | Generic LRU cache |
+| `include/finevox/core/lru_cache.hpp` | Utility | Generic LRU cache |
 
 ---
 
 ## Design Document Audit
 
-Full audit of all design docs against source code. Last updated Feb 2026.
+Full audit of all design docs against source code. Last updated 2026-02-07.
 
 ### Docs With Full Source Coverage (Checked)
 
@@ -315,7 +351,8 @@ Full audit of all design docs against source code. Last updated Feb 2026.
 | 19 | Block Models | ✅ Implemented (uses ConfigParser format, not YAML as doc originally described) |
 | 24 | Event System | ✅ Updated to match UpdateScheduler, EventKey |
 | 25 | Entity System | ⚠️ Partial - entity.hpp, entity_manager.hpp, graphics_event_queue.hpp exist |
-| Appendix A | File Structure | ⚠️ Outdated - needs rewrite to match actual flat layout |
+| 27 | World Generation | ✅ Implemented — noise, biomes, features, generation pipeline in `finevox::worldgen` |
+| Appendix A | File Structure | ✅ Updated to match `include/finevox/{core,worldgen,render}/` layout |
 
 ### Docs Without Implementation (Future Work)
 
@@ -323,7 +360,7 @@ Full audit of all design docs against source code. Last updated Feb 2026.
 |-----|-------|--------|-------|
 | 10 | Input System | ❌ Not started | `InputManager`, `PlayerController` not implemented |
 | 12 | Scripting | ❌ Not started | Noted as external dependency; no integration yet |
-| 21 | Clipboard/Schematics | ❌ Not started | `BlockSnapshot`, `Schematic`, `ClipboardManager` not implemented |
+| 21 | Clipboard/Schematics | ✅ Implemented | Phase 10 — `BlockSnapshot`, `Schematic`, `ClipboardManager` in `finevox::worldgen` |
 
 ### Docs With Partial Implementation
 
@@ -339,7 +376,7 @@ Full audit of all design docs against source code. Last updated Feb 2026.
 |-----|-------|-------|
 | 01 | Executive Summary | High-level overview |
 | 02 | Prior Art | Design references |
-| 03 | Architecture | Module overview; uses `finevox::` namespace (doc says `voxel::`) |
+| 03 | Architecture | Module overview; uses `finevox::`/`worldgen::`/`render::` namespaces (doc says `voxel::`) |
 | 16 | FineVK Critique | Review document |
 | 18 | Open Questions | Design decisions (modules section has source mapping above) |
 | 20-rec | FineVK Recommendations | Suggestions for FineVK changes |
@@ -349,7 +386,7 @@ Full audit of all design docs against source code. Last updated Feb 2026.
 
 | Location | Doc Says | Code Does | Severity |
 |----------|----------|-----------|----------|
-| Doc 03 | `voxel::` namespace | `finevox::` | Low — doc 03 is early architecture sketch |
+| Doc 03 | `voxel::` namespace | `finevox::`, `finevox::worldgen::`, `finevox::render::` | Low — doc 03 is early architecture sketch |
 | §5.1 | `Chunk* getSubchunk()` | `SubChunk* getSubChunk()` | Low — naming |
 | §24.14 | `std::chrono::milliseconds gameTickInterval` | `uint32_t gameTickIntervalMs` | Low — type choice |
 | §24.14 | `std::optional<uint64_t> randomTickSeed` | `uint64_t randomSeed = 0` | Low — sentinel vs optional |

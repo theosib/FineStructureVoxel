@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/serialization.hpp"
-#include "finevox/string_interner.hpp"
+#include "finevox/core/serialization.hpp"
+#include "finevox/core/string_interner.hpp"
 
 using namespace finevox;
 

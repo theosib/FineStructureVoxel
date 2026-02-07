@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/resource_locator.hpp"
+#include "finevox/core/resource_locator.hpp"
 #include <filesystem>
 #include <fstream>
 #include <thread>

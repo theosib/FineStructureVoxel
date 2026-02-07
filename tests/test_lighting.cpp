@@ -2,13 +2,13 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
-#include "finevox/light_data.hpp"
-#include "finevox/light_engine.hpp"
-#include "finevox/block_type.hpp"
-#include "finevox/world.hpp"
-#include "finevox/chunk_column.hpp"
-#include "finevox/subchunk.hpp"
-#include "finevox/mesh.hpp"
+#include "finevox/core/light_data.hpp"
+#include "finevox/core/light_engine.hpp"
+#include "finevox/core/block_type.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/chunk_column.hpp"
+#include "finevox/core/subchunk.hpp"
+#include "finevox/core/mesh.hpp"
 
 using namespace finevox;
 

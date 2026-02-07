@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/config_parser.hpp"
+#include "finevox/core/config_parser.hpp"
 
 using namespace finevox;
 

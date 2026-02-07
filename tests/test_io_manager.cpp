@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/io_manager.hpp"
+#include "finevox/core/io_manager.hpp"
 #include <filesystem>
 #include <atomic>
 #include <latch>

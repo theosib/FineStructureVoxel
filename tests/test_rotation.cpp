@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/rotation.hpp"
+#include "finevox/core/rotation.hpp"
 #include <set>
 
 using namespace finevox;

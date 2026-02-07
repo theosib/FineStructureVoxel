@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "finevox/wake_signal.hpp"
-#include "finevox/simple_queue.hpp"
-#include "finevox/coalescing_queue.hpp"
-#include "finevox/position.hpp"
+#include "finevox/core/wake_signal.hpp"
+#include "finevox/core/simple_queue.hpp"
+#include "finevox/core/coalescing_queue.hpp"
+#include "finevox/core/position.hpp"
 #include <thread>
 #include <chrono>
 #include <atomic>

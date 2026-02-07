@@ -192,7 +192,7 @@ private:
 
 ## 5.4 Column Lifecycle and Caching
 
-**Implementation:** [column_manager.hpp](../include/finevox/column_manager.hpp), [column_manager.cpp](../src/column_manager.cpp)
+**Implementation:** [column_manager.hpp](../include/finevox/core/column_manager.hpp), [column_manager.cpp](../src/core/column_manager.cpp)
 
 ChunkColumns go through multiple lifecycle stages managed by the `ColumnManager`. The key insight is that **saving doesn't mean unloading** - a saved column can remain in memory for fast access.
 

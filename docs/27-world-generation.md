@@ -8,6 +8,12 @@
 
 The world generation system provides engine-level infrastructure for procedural terrain creation. Following finevox's design philosophy, the engine provides tools and a pipeline framework while game modules define specific terrain, biomes, and features.
 
+**Namespace:** `finevox::worldgen` (nested inside `finevox`, so core types like `BlockPos`, `World`, `BlockTypeId` are accessible without qualification).
+
+**Headers:** `include/finevox/worldgen/`
+**Sources:** `src/worldgen/`
+**Library:** `libfinevox_worldgen` (shared, links `finevox` PUBLIC)
+
 **Engine provides:**
 - Noise library (Perlin, OpenSimplex2, Voronoi, fractal, domain warp)
 - Biome framework (registration, selection, blending)
@@ -28,7 +34,7 @@ The world generation system provides engine-level infrastructure for procedural 
 
 ## 27.2 Noise Library
 
-All noise lives in `finevox` core (VK-independent). Noise functions are deterministic: same seed and coordinates always produce the same value.
+All noise lives in `finevox::worldgen` (VK-independent). Noise functions are deterministic: same seed and coordinates always produce the same value.
 
 ### 27.2.1 Base Interfaces
 
@@ -474,13 +480,15 @@ Modules register biomes and features during `onRegister()`:
 
 ```cpp
 void MyGameModule::onRegister(ModuleRegistry& registry) {
-    // Register block types
+    using namespace finevox::worldgen;
+
+    // Register block types (core namespace)
     registry.blocks().registerType("mymod:red_sand", BlockType().setOpaque(true));
 
-    // Register biomes
+    // Register biomes (worldgen namespace)
     BiomeRegistry::global().registerBiome("mymod:red_desert", BiomeProperties{...});
 
-    // Register features
+    // Register features (worldgen namespace)
     FeatureRegistry::global().registerFeature(
         std::make_unique<TreeFeature>("mymod:cactus", TreeConfig{...}));
 }

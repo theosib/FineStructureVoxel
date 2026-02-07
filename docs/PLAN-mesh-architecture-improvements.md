@@ -132,21 +132,21 @@ while (running) {
 ## Files to Change
 
 ### Phase 1
-- `include/finevox/mesh_worker_pool.hpp` - Add upload queue
-- `src/mesh_worker_pool.cpp` - Workers push to upload queue
-- `src/world_renderer.cpp` - Poll upload queue instead of cache
+- `include/finevox/core/mesh_worker_pool.hpp` - Add upload queue
+- `src/core/mesh_worker_pool.cpp` - Workers push to upload queue
+- `src/render/world_renderer.cpp` - Poll upload queue instead of cache
 
 ### Phase 2
-- `include/finevox/light_engine.hpp` - Track affected subchunks
-- `src/light_engine.cpp` - Push mesh requests after lighting
+- `include/finevox/core/light_engine.hpp` - Track affected subchunks
+- `src/core/light_engine.cpp` - Push mesh requests after lighting
 - May need reference to mesh request queue
 
 ### Phase 3
-- `src/world.cpp` or game logic - Conditional deferral to lighting thread
-- `include/finevox/lighting_queue.hpp` - Query for empty state
+- `src/core/world.cpp` or game logic - Conditional deferral to lighting thread
+- `include/finevox/core/lighting_queue.hpp` - Query for empty state
 
 ### Phase 4
-- `src/world_renderer.cpp` - Deadline-based sleep loop
+- `src/render/world_renderer.cpp` - Deadline-based sleep loop
 - May need new queue primitive for multi-queue wait
 
 ---
@@ -354,22 +354,22 @@ Graphics Thread
 ## Files to Change
 
 ### Phase 0
-- `include/finevox/wake_signal.hpp` - NEW: WakeSignal class
-- `include/finevox/simple_queue.hpp` - NEW: SimpleQueue template
-- `include/finevox/coalescing_queue.hpp` - NEW: CoalescingQueue template
+- `include/finevox/core/wake_signal.hpp` - NEW: WakeSignal class
+- `include/finevox/core/simple_queue.hpp` - NEW: SimpleQueue template
+- `include/finevox/core/coalescing_queue.hpp` - NEW: CoalescingQueue template
 - `tests/test_queue_primitives.cpp` - NEW: Unit tests
 
 ### Phase 1
-- `include/finevox/mesh_worker_pool.hpp` - Add upload queue
-- `src/mesh_worker_pool.cpp` - Workers push to upload queue
+- `include/finevox/core/mesh_worker_pool.hpp` - Add upload queue
+- `src/core/mesh_worker_pool.cpp` - Workers push to upload queue
 
 ### Phase 2
-- `include/finevox/lighting_queue.hpp` - Add deferred flag
-- `src/light_engine.cpp` - Track affected chunks, send mesh requests
+- `include/finevox/core/lighting_queue.hpp` - Add deferred flag
+- `src/core/light_engine.cpp` - Track affected chunks, send mesh requests
 - Game logic (World or similar) - Conditional deferral
 
 ### Phase 3
-- `src/world_renderer.cpp` - WakeSignal-based wait loop
+- `src/render/world_renderer.cpp` - WakeSignal-based wait loop
 
 ### Phase 4
 - Various files - Remove version tracking code

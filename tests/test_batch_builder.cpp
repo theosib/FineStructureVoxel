@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/batch_builder.hpp"
-#include "finevox/world.hpp"
+#include "finevox/core/batch_builder.hpp"
+#include "finevox/core/world.hpp"
 
 using namespace finevox;
 

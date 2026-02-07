@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/world.hpp"
+#include "finevox/core/world.hpp"
 
 using namespace finevox;
 

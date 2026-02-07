@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "finevox/column_manager.hpp"
-#include "finevox/io_manager.hpp"
+#include "finevox/core/column_manager.hpp"
+#include "finevox/core/io_manager.hpp"
 #include <filesystem>
 #include <thread>
 #include <atomic>

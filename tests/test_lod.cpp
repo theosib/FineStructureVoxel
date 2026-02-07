@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "finevox/lod.hpp"
-#include "finevox/subchunk.hpp"
-#include "finevox/mesh.hpp"
+#include "finevox/core/lod.hpp"
+#include "finevox/core/subchunk.hpp"
+#include "finevox/core/mesh.hpp"
 
 using namespace finevox;
 

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "finevox/chunk_column.hpp"
+#include "finevox/core/chunk_column.hpp"
 
 using namespace finevox;
 

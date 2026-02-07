@@ -4,6 +4,7 @@ project(finevox VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Options
 option(FINEVOX_BUILD_TESTS "Build unit tests" ON)
@@ -29,43 +30,46 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# Main library
-add_library(finevox STATIC
-    src/position.cpp
-    src/string_interner.cpp
-    src/palette.cpp
-    src/subchunk.cpp
-    src/chunk_column.cpp
-    src/rotation.cpp
-    src/world.cpp
-    src/column_manager.cpp
-    src/batch_builder.cpp
-    src/data_container.cpp
-    src/serialization.cpp
-    src/region_file.cpp
-    src/io_manager.cpp
-    src/config.cpp
-    src/resource_locator.cpp
-    src/physics.cpp
-    src/mesh.cpp
-    src/block_type.cpp
-    src/block_model.cpp
-    src/block_model_loader.cpp
-    src/block_handler.cpp
-    src/block_event.cpp
-    src/module.cpp
-    src/entity_registry.cpp
-    src/item_registry.cpp
-    src/config_parser.cpp
-    src/config_file.cpp
-    src/mesh_worker_pool.cpp
-    src/lod.cpp
-    src/light_data.cpp
-    src/light_engine.cpp
-    src/event_queue.cpp
-    src/entity.cpp
-    src/graphics_event_queue.cpp
-    src/entity_manager.cpp
+# ============================================================================
+# Core library (namespace: finevox)
+# ============================================================================
+
+add_library(finevox SHARED
+    src/core/position.cpp
+    src/core/string_interner.cpp
+    src/core/palette.cpp
+    src/core/subchunk.cpp
+    src/core/chunk_column.cpp
+    src/core/rotation.cpp
+    src/core/world.cpp
+    src/core/column_manager.cpp
+    src/core/batch_builder.cpp
+    src/core/data_container.cpp
+    src/core/serialization.cpp
+    src/core/region_file.cpp
+    src/core/io_manager.cpp
+    src/core/config.cpp
+    src/core/resource_locator.cpp
+    src/core/physics.cpp
+    src/core/mesh.cpp
+    src/core/block_type.cpp
+    src/core/block_model.cpp
+    src/core/block_model_loader.cpp
+    src/core/block_handler.cpp
+    src/core/block_event.cpp
+    src/core/module.cpp
+    src/core/entity_registry.cpp
+    src/core/item_registry.cpp
+    src/core/config_parser.cpp
+    src/core/config_file.cpp
+    src/core/mesh_worker_pool.cpp
+    src/core/lod.cpp
+    src/core/light_data.cpp
+    src/core/light_engine.cpp
+    src/core/event_queue.cpp
+    src/core/entity.cpp
+    src/core/graphics_event_queue.cpp
+    src/core/entity_manager.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -81,27 +85,27 @@ target_compile_options(finevox PRIVATE
 target_link_libraries(finevox PUBLIC lz4_static glm::glm)
 
 # ============================================================================
-# World Generation Module (optional, links finevox core)
+# World Generation Module (namespace: finevox::worldgen)
 # ============================================================================
 
-add_library(finevox_worldgen STATIC
-    src/noise_perlin.cpp
-    src/noise_simplex.cpp
-    src/noise_voronoi.cpp
-    src/noise_ops.cpp
-    src/schematic.cpp
-    src/schematic_io.cpp
-    src/clipboard_manager.cpp
-    src/biome.cpp
-    src/biome_map.cpp
-    src/biome_loader.cpp
-    src/feature_tree.cpp
-    src/feature_ore.cpp
-    src/feature_schematic.cpp
-    src/feature_registry.cpp
-    src/feature_loader.cpp
-    src/world_generator.cpp
-    src/generation_passes.cpp
+add_library(finevox_worldgen SHARED
+    src/worldgen/noise_perlin.cpp
+    src/worldgen/noise_simplex.cpp
+    src/worldgen/noise_voronoi.cpp
+    src/worldgen/noise_ops.cpp
+    src/worldgen/schematic.cpp
+    src/worldgen/schematic_io.cpp
+    src/worldgen/clipboard_manager.cpp
+    src/worldgen/biome.cpp
+    src/worldgen/biome_map.cpp
+    src/worldgen/biome_loader.cpp
+    src/worldgen/feature_tree.cpp
+    src/worldgen/feature_ore.cpp
+    src/worldgen/feature_schematic.cpp
+    src/worldgen/feature_registry.cpp
+    src/worldgen/feature_loader.cpp
+    src/worldgen/world_generator.cpp
+    src/worldgen/generation_passes.cpp
 )
 
 target_include_directories(finevox_worldgen PUBLIC
@@ -117,7 +121,7 @@ target_compile_options(finevox_worldgen PRIVATE
 target_link_libraries(finevox_worldgen PUBLIC finevox)
 
 # ============================================================================
-# Vulkan Render Module (optional)
+# Vulkan Render Module (namespace: finevox::render)
 # ============================================================================
 
 if(FINEVOX_BUILD_RENDER)
@@ -140,11 +144,11 @@ if(FINEVOX_BUILD_RENDER)
     endif()
 
     # Add the render module library
-    add_library(finevox_render STATIC
-        src/subchunk_view.cpp
-        src/world_renderer.cpp
-        src/block_atlas.cpp
-        src/texture_manager.cpp
+    add_library(finevox_render SHARED
+        src/render/subchunk_view.cpp
+        src/render/world_renderer.cpp
+        src/render/block_atlas.cpp
+        src/render/texture_manager.cpp
     )
 
     target_include_directories(finevox_render PUBLIC

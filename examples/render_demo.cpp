@@ -33,25 +33,25 @@
  * - Escape: Exit
  */
 
-#include <finevox/world.hpp>
-#include <finevox/world_renderer.hpp>
-#include <finevox/block_atlas.hpp>
-#include <finevox/block_type.hpp>
-#include <finevox/block_model.hpp>
-#include <finevox/block_model_loader.hpp>
-#include <finevox/string_interner.hpp>
-#include <finevox/resource_locator.hpp>
-#include <finevox/light_engine.hpp>
-#include <finevox/event_queue.hpp>
-#include <finevox/physics.hpp>
-#include <finevox/entity_manager.hpp>
-#include <finevox/graphics_event_queue.hpp>
-#include <finevox/config.hpp>
-#include <finevox/world_generator.hpp>
-#include <finevox/generation_passes.hpp>
-#include <finevox/biome_loader.hpp>
-#include <finevox/feature_loader.hpp>
-#include <finevox/feature_registry.hpp>
+#include <finevox/core/world.hpp>
+#include <finevox/render/world_renderer.hpp>
+#include <finevox/render/block_atlas.hpp>
+#include <finevox/core/block_type.hpp>
+#include <finevox/core/block_model.hpp>
+#include <finevox/core/block_model_loader.hpp>
+#include <finevox/core/string_interner.hpp>
+#include <finevox/core/resource_locator.hpp>
+#include <finevox/core/light_engine.hpp>
+#include <finevox/core/event_queue.hpp>
+#include <finevox/core/physics.hpp>
+#include <finevox/core/entity_manager.hpp>
+#include <finevox/core/graphics_event_queue.hpp>
+#include <finevox/core/config.hpp>
+#include <finevox/worldgen/world_generator.hpp>
+#include <finevox/worldgen/generation_passes.hpp>
+#include <finevox/worldgen/biome_loader.hpp>
+#include <finevox/worldgen/feature_loader.hpp>
+#include <finevox/worldgen/feature_registry.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -71,6 +71,8 @@
 #include <sstream>
 
 using namespace finevox;
+using namespace finevox::worldgen;
+using namespace finevox::render;
 
 // Get the block position to place a block adjacent to the hit face
 BlockPos getPlacePosition(const BlockPos& hitPos, Face face) {

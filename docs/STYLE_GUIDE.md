@@ -78,9 +78,10 @@ Always `#pragma once`, never `#ifndef` guards.
 ### Include ordering
 
 1. Corresponding header (in `.cpp` files)
-2. Project headers (`"finevox/..."`)
-3. Standard library (`<vector>`, `<memory>`)
-4. Third-party (`<glm/glm.hpp>`)
+2. Same-library headers (`"finevox/worldgen/..."`)
+3. Cross-library headers (`"finevox/core/..."`)
+4. Standard library (`<vector>`, `<memory>`)
+5. Third-party (`<glm/glm.hpp>`)
 
 ### File header
 
@@ -94,13 +95,48 @@ Every header includes a Doxygen file comment with a design document reference:
  */
 ```
 
-### Namespace
+### Namespaces
 
-Single namespace, no nesting:
+The project uses three namespaces corresponding to the three shared libraries:
+
 ```cpp
+// Core library (include/finevox/core/, src/core/)
 namespace finevox {
-// ...
+// BlockPos, World, BlockType, MeshBuilder, etc.
 }  // namespace finevox
+
+// World generation library (include/finevox/worldgen/, src/worldgen/)
+namespace finevox::worldgen {
+// Noise2D, BiomeRegistry, GenerationPipeline, Feature, Schematic, etc.
+}  // namespace finevox::worldgen
+
+// Vulkan render library (include/finevox/render/, src/render/)
+namespace finevox::render {
+// WorldRenderer, BlockAtlas, TextureManager, SubChunkView
+}  // namespace finevox::render
+```
+
+Since `finevox::worldgen` and `finevox::render` are nested inside `finevox`, unqualified name lookup automatically finds core types from within worldgen/render code — no `using` declarations needed in library code.
+
+**Forward declarations of core types in worldgen/render headers** must be in a separate `namespace finevox { }` block, not inside the nested namespace (which would create the wrong type):
+
+```cpp
+// CORRECT: forward-declare in parent namespace
+namespace finevox {
+class World;
+}
+
+namespace finevox::worldgen {
+struct FeaturePlacementContext {
+    World& world;  // Found via parent namespace lookup
+};
+}  // namespace finevox::worldgen
+```
+
+**`std::hash<>` specializations** must use fully qualified types:
+```cpp
+template<>
+struct std::hash<finevox::worldgen::BiomeId> { ... };
 ```
 
 ### Section markers
@@ -112,9 +148,28 @@ Major sections within a class or file use visual separators:
 // ============================================================================
 ```
 
-### Flat header layout
+### Directory layout
 
-All public headers live in `include/finevox/` with no subdirectories. There is no `core/`, `render/`, `physics/` subdirectory structure.
+Headers and sources are organized into subdirectories by library:
+
+```
+include/finevox/
+├── core/          # Core engine (namespace finevox)
+├── worldgen/      # World generation (namespace finevox::worldgen)
+└── render/        # Vulkan rendering (namespace finevox::render)
+
+src/
+├── core/          # Core implementations
+├── worldgen/      # Worldgen implementations
+└── render/        # Render implementations
+```
+
+Include paths reflect the subdirectory:
+```cpp
+#include "finevox/core/world.hpp"
+#include "finevox/worldgen/biome.hpp"
+#include "finevox/render/world_renderer.hpp"
+```
 
 ---
 
@@ -465,11 +520,17 @@ VK-dependent code lives in `finevox_render` (separate CMake target). VK-independ
 
 ### Library split
 
-```cmake
-finevox          # Core library (no Vulkan dependency)
-finevox_render   # Render module (links finevk, Vulkan)
-finevox_tests    # Unit tests (links finevox only)
+Three shared libraries with clear dependency direction:
+
 ```
+finevox              # Core (namespace finevox::)
+  └─ finevox_worldgen  # World gen (namespace finevox::worldgen::), links finevox
+  └─ finevox_render    # Vulkan render (namespace finevox::render::), links finevox
+```
+
+- `finevox_worldgen` does NOT depend on `finevox_render` (and vice versa)
+- Tests link `finevox_worldgen` (gets core transitively)
+- `render_demo` links both `finevox_render` and `finevox_worldgen`
 
 ### External dependencies
 
@@ -500,4 +561,4 @@ The authoritative phase checklist is [17-implementation-phases.md](17-implementa
 
 ---
 
-*Last Updated: 2026-02-06*
+*Last Updated: 2026-02-07*

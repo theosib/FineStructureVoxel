@@ -3,13 +3,17 @@
 **Version:** 0.3 (Draft)
 **Target Platform:** Vulkan via FineStructureVK
 **Language:** C++17/20
-**Namespace:** `finevox`
+**Namespaces:** `finevox::` (core), `finevox::worldgen::`, `finevox::render::`
 
 ---
 
-## For AI Assistants
+## User Guides
 
-**Start here:** [AI-NOTES.md](AI-NOTES.md) - Session memory with settled decisions, layer architecture, and current work state.
+| Audience | Document |
+|----------|----------|
+| **Game developers** | [User Guide](USER_GUIDE.md) -- Tutorial-style walkthrough of all engine features |
+| **AI assistants** | [LLM Reference](LLM_REFERENCE.md) -- Dense API reference optimized for token efficiency |
+| **AI session context** | [AI-NOTES.md](AI-NOTES.md) -- Session memory with settled decisions and current work state |
 
 ---
 
@@ -17,6 +21,7 @@
 
 | Goal | Document |
 |------|----------|
+| Build a game with finevox | [User Guide](USER_GUIDE.md) |
 | High-level overview | [01 - Executive Summary](01-executive-summary.md) |
 | Architecture diagram | [03 - Architecture Overview](03-architecture.md) |
 | Implementation plan | [17 - Implementation Phases](17-implementation-phases.md) |
@@ -94,7 +99,10 @@
 
 | Document | Key Contents |
 |----------|--------------|
+| [User Guide](USER_GUIDE.md) | Tutorial-style guide for game developers |
+| [LLM Reference](LLM_REFERENCE.md) | Dense API reference for AI assistants |
 | [Style Guide](STYLE_GUIDE.md) | Coding conventions, naming, patterns, philosophy |
+| [Source-Doc Mapping](SOURCE-DOC-MAPPING.md) | Which source file implements which design doc section |
 | [Appendix A - File Structure](appendix-a-file-structure.md) | Project directory layout |
 | [Appendix B - Key Differences](appendix-b-differences.md) | Comparison with prior implementations |
 
@@ -104,7 +112,7 @@
 
 | Decision | Choice | Document |
 |----------|--------|----------|
-| Namespace | `finevox` | All docs |
+| Namespaces | `finevox::`, `finevox::worldgen::`, `finevox::render::` | [Style Guide](STYLE_GUIDE.md) |
 | Block Registry | Per-subchunk palette + global string interning | [04](04-core-data-structures.md) §4.3-4.4 |
 | Loading Unit | Full-height columns, subchunk granularity for lifecycle | [05](05-world-management.md) |
 | Serialization | CBOR (RFC 8949) | [11](11-persistence.md) |
@@ -203,7 +211,7 @@
 | 7 | Mixed | Complete | Module system (loader, registries, core module) |
 | 8 | Yes | Complete | Lighting (block light, sky light, AO) |
 | 9 | Mixed | Mostly complete | Block update system (event queue, scheduled ticks) |
-| 10 | No | Not started | World generation (noise, biomes, pipeline, features, schematics) |
+| 10 | No | Complete | World generation (noise, biomes, pipeline, features, schematics) |
 | 11-20 | Mixed | Planned | Input, player, inventory, entities, sky, fluids, audio, UI, scripting, multiplayer |
 
 See [17 - Implementation Phases](17-implementation-phases.md) for full details.
@@ -219,4 +227,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-02-06*
+*Last Updated: 2026-02-07*

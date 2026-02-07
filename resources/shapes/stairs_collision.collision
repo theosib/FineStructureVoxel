@@ -1,0 +1,12 @@
+# Stairs collision shape
+# Two boxes: front step and full back portion
+
+# Front step (lower)
+box:
+    0 0 0.5
+    1 0.5 1
+
+# Back portion (full height)
+box:
+    0 0 0
+    1 1 0.5

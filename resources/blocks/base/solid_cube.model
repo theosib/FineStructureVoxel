@@ -1,0 +1,7 @@
+# Base model for solid cube blocks
+# Other solid blocks include this and override texture/sounds
+# Note: No geometry specified - standard cubes use the built-in cube renderer
+
+collision: full
+rotations: none
+hardness: 1.0

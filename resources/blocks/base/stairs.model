@@ -1,0 +1,7 @@
+# Base stairs model
+# Include this in specific block models
+
+geometry: shapes/stairs_faces
+collision: shapes/stairs_collision
+rotations: horizontal-flip
+hardness: 1.0

@@ -740,6 +740,16 @@ void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
         meshWorkerPool_->setLightProvider(lightProvider_);
     }
 
+    // Copy geometry provider for custom block shapes
+    if (geometryProvider_) {
+        meshWorkerPool_->setGeometryProvider(geometryProvider_);
+    }
+
+    // Copy face occludes provider for directional face culling
+    if (faceOccludesProvider_) {
+        meshWorkerPool_->setFaceOccludesProvider(faceOccludesProvider_);
+    }
+
     // Attach upload queue to wake signal for deadline-based waiting
     // When workers push completed meshes, the graphics thread will be woken
     meshWorkerPool_->uploadQueue().attach(&wakeSignal_);
@@ -819,6 +829,32 @@ void WorldRenderer::setLightProvider(BlockLightProvider provider) {
     // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setLightProvider(provider);
+    }
+}
+
+void WorldRenderer::setGeometryProvider(BlockGeometryProvider provider) {
+    // Store locally for worker pool access
+    geometryProvider_ = provider;
+
+    // Set on mesh builder for sync path
+    meshBuilder_.setGeometryProvider(provider);
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setGeometryProvider(provider);
+    }
+}
+
+void WorldRenderer::setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
+    // Store locally for worker pool access
+    faceOccludesProvider_ = provider;
+
+    // Set on mesh builder for sync path
+    meshBuilder_.setFaceOccludesProvider(provider);
+
+    // Propagate to worker pool if active
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setFaceOccludesProvider(provider);
     }
 }
 

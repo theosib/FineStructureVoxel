@@ -146,6 +146,20 @@ public:
     void setFlatLighting(bool enabled) { flatLighting_ = enabled; }
     [[nodiscard]] bool flatLighting() const { return flatLighting_; }
 
+    // Set geometry provider for custom mesh blocks (slabs, stairs, etc.)
+    // Thread-safe: can be called while workers are running
+    void setGeometryProvider(BlockGeometryProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        geometryProvider_ = std::move(provider);
+    }
+
+    // Set face occludes provider for directional face culling (slabs, stairs, etc.)
+    // Thread-safe: can be called while workers are running
+    void setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        faceOccludesProvider_ = std::move(provider);
+    }
+
     // ========================================================================
     // Alarm-based Wake Support
     // ========================================================================
@@ -192,6 +206,10 @@ private:
     BlockLightProvider lightProvider_;
     bool smoothLighting_ = false;
     bool flatLighting_ = false;
+
+    // Custom geometry for non-cube blocks
+    BlockGeometryProvider geometryProvider_;
+    BlockFaceOccludesProvider faceOccludesProvider_;
 
     // Statistics
     Stats stats_;

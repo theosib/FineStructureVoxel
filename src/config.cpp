@@ -23,6 +23,9 @@ ConfigManager::~ConfigManager() {
 void ConfigManager::init(const std::filesystem::path& configPath) {
     std::unique_lock lock(mutex_);
 
+    // Pre-intern all known config keys (done once)
+    initKeys();
+
     configPath_ = configPath;
     configFile_ = std::make_unique<ConfigFile>();
     configFile_->setHeader("# FineVox Engine Configuration\n# Edit with care\n");
@@ -36,6 +39,15 @@ void ConfigManager::init(const std::filesystem::path& configPath) {
     }
 
     initialized_ = true;
+}
+
+void ConfigManager::initKeys() {
+    keyCompressionEnabled_ = internKey("compression.enabled");
+    keyDebugLogging_ = internKey("debug.logging");
+    keyIoThreadCount_ = internKey("io.thread_count");
+    keyMaxOpenRegions_ = internKey("io.max_open_regions");
+    keyColumnCacheSize_ = internKey("cache.column_size");
+    keyBlockPlacementMode_ = internKey("physics.block_placement_mode");
 }
 
 void ConfigManager::initFromLocator() {
@@ -95,100 +107,120 @@ std::filesystem::path ConfigManager::configPath() const {
 
 void ConfigManager::setDefaults() {
     data_.clear();
-    data_.set("compression.enabled", true);
-    data_.set("debug.logging", false);
-    data_.set("io.thread_count", 2);
-    data_.set("io.max_open_regions", 16);
-    data_.set("cache.column_size", 64);
+    data_.set(keyCompressionEnabled_, true);
+    data_.set(keyDebugLogging_, false);
+    data_.set(keyIoThreadCount_, 2);
+    data_.set(keyMaxOpenRegions_, 16);
+    data_.set(keyColumnCacheSize_, 64);
+    data_.set(keyBlockPlacementMode_, std::string("block"));
 }
 
 void ConfigManager::syncFromFile() {
     if (!configFile_) return;
 
-    // Copy values from ConfigFile to DataContainer
+    // Copy values from ConfigFile to DataContainer (using pre-interned keys)
     if (configFile_->has("compression.enabled")) {
-        data_.set("compression.enabled", configFile_->getBool("compression.enabled", true));
+        data_.set(keyCompressionEnabled_, configFile_->getBool("compression.enabled", true));
     }
     if (configFile_->has("debug.logging")) {
-        data_.set("debug.logging", configFile_->getBool("debug.logging", false));
+        data_.set(keyDebugLogging_, configFile_->getBool("debug.logging", false));
     }
     if (configFile_->has("io.thread_count")) {
-        data_.set("io.thread_count", configFile_->getInt("io.thread_count", 2));
+        data_.set(keyIoThreadCount_, configFile_->getInt("io.thread_count", 2));
     }
     if (configFile_->has("io.max_open_regions")) {
-        data_.set("io.max_open_regions", configFile_->getInt("io.max_open_regions", 16));
+        data_.set(keyMaxOpenRegions_, configFile_->getInt("io.max_open_regions", 16));
     }
     if (configFile_->has("cache.column_size")) {
-        data_.set("cache.column_size", configFile_->getInt("cache.column_size", 64));
+        data_.set(keyColumnCacheSize_, configFile_->getInt("cache.column_size", 64));
+    }
+    if (configFile_->has("physics.block_placement_mode")) {
+        data_.set(keyBlockPlacementMode_, configFile_->getString("physics.block_placement_mode", "block"));
     }
 }
 
 void ConfigManager::syncToFile() {
     if (!configFile_) return;
 
-    // Copy values from DataContainer to ConfigFile
-    configFile_->set("compression.enabled", data_.get<bool>("compression.enabled", true));
-    configFile_->set("debug.logging", data_.get<bool>("debug.logging", false));
-    configFile_->set("io.thread_count", data_.get<int64_t>("io.thread_count", 2));
-    configFile_->set("io.max_open_regions", data_.get<int64_t>("io.max_open_regions", 16));
-    configFile_->set("cache.column_size", data_.get<int64_t>("cache.column_size", 64));
+    // Copy values from DataContainer to ConfigFile (using pre-interned keys for reads)
+    configFile_->set("compression.enabled", data_.get<bool>(keyCompressionEnabled_, true));
+    configFile_->set("debug.logging", data_.get<bool>(keyDebugLogging_, false));
+    configFile_->set("io.thread_count", data_.get<int64_t>(keyIoThreadCount_, 2));
+    configFile_->set("io.max_open_regions", data_.get<int64_t>(keyMaxOpenRegions_, 16));
+    configFile_->set("cache.column_size", data_.get<int64_t>(keyColumnCacheSize_, 64));
+    configFile_->set("physics.block_placement_mode",
+        std::string_view(data_.get<std::string>(keyBlockPlacementMode_, "block")));
 }
 
-// Typed accessors
+// Typed accessors (use pre-interned keys for fast lookups)
 
 bool ConfigManager::compressionEnabled() const {
     std::shared_lock lock(mutex_);
-    return data_.get<bool>("compression.enabled", true);
+    return data_.get<bool>(keyCompressionEnabled_, true);
 }
 
 void ConfigManager::setCompressionEnabled(bool enabled) {
     std::unique_lock lock(mutex_);
-    data_.set("compression.enabled", enabled);
+    data_.set(keyCompressionEnabled_, enabled);
     dirty_ = true;
 }
 
 bool ConfigManager::debugLogging() const {
     std::shared_lock lock(mutex_);
-    return data_.get<bool>("debug.logging", false);
+    return data_.get<bool>(keyDebugLogging_, false);
 }
 
 void ConfigManager::setDebugLogging(bool enabled) {
     std::unique_lock lock(mutex_);
-    data_.set("debug.logging", enabled);
+    data_.set(keyDebugLogging_, enabled);
     dirty_ = true;
 }
 
 int ConfigManager::ioThreadCount() const {
     std::shared_lock lock(mutex_);
-    return static_cast<int>(data_.get<int64_t>("io.thread_count", 2));
+    return static_cast<int>(data_.get<int64_t>(keyIoThreadCount_, 2));
 }
 
 void ConfigManager::setIOThreadCount(int count) {
     std::unique_lock lock(mutex_);
-    data_.set("io.thread_count", static_cast<int64_t>(count));
+    data_.set(keyIoThreadCount_, static_cast<int64_t>(count));
     dirty_ = true;
 }
 
 size_t ConfigManager::maxOpenRegions() const {
     std::shared_lock lock(mutex_);
-    return static_cast<size_t>(data_.get<int64_t>("io.max_open_regions", 16));
+    return static_cast<size_t>(data_.get<int64_t>(keyMaxOpenRegions_, 16));
 }
 
 void ConfigManager::setMaxOpenRegions(size_t count) {
     std::unique_lock lock(mutex_);
-    data_.set("io.max_open_regions", static_cast<int64_t>(count));
+    data_.set(keyMaxOpenRegions_, static_cast<int64_t>(count));
     dirty_ = true;
 }
 
 size_t ConfigManager::columnCacheSize() const {
     std::shared_lock lock(mutex_);
-    return static_cast<size_t>(data_.get<int64_t>("cache.column_size", 64));
+    return static_cast<size_t>(data_.get<int64_t>(keyColumnCacheSize_, 64));
 }
 
 void ConfigManager::setColumnCacheSize(size_t count) {
     std::unique_lock lock(mutex_);
-    data_.set("cache.column_size", static_cast<int64_t>(count));
+    data_.set(keyColumnCacheSize_, static_cast<int64_t>(count));
     dirty_ = true;
+}
+
+std::string ConfigManager::blockPlacementMode() const {
+    std::shared_lock lock(mutex_);
+    return data_.get<std::string>(keyBlockPlacementMode_, "block");
+}
+
+void ConfigManager::setBlockPlacementMode(const std::string& mode) {
+    std::unique_lock lock(mutex_);
+    // Validate: only "block" or "push" are valid
+    if (mode == "block" || mode == "push") {
+        data_.set(keyBlockPlacementMode_, mode);
+        dirty_ = true;
+    }
 }
 
 bool ConfigManager::has(const std::string& key) const {
@@ -211,6 +243,9 @@ WorldConfig::WorldConfig(const std::filesystem::path& worldDir)
     , configPath_(worldDir / "world.conf")
     , configFile_(std::make_unique<ConfigFile>()) {
 
+    // Pre-intern all known config keys (done once per instance)
+    initKeys();
+
     configFile_->setHeader("# World Configuration\n");
 
     setDefaults();
@@ -219,6 +254,14 @@ WorldConfig::WorldConfig(const std::filesystem::path& worldDir)
         configFile_->load(configPath_);
         syncFromFile();
     }
+}
+
+void WorldConfig::initKeys() {
+    keyName_ = internKey("name");
+    keySeed_ = internKey("seed");
+    keyCreated_ = internKey("created");
+    keyLastPlayed_ = internKey("last_played");
+    keyCompressionEnabled_ = internKey("compression.enabled");
 }
 
 WorldConfig::~WorldConfig() = default;
@@ -235,55 +278,54 @@ std::optional<WorldConfig> WorldConfig::fromWorld(const std::string& worldName) 
 
 void WorldConfig::setDefaults() {
     data_.clear();
-    data_.set("name", std::string("New World"));
-    data_.set("seed", static_cast<int64_t>(0));
+    data_.set(keyName_, std::string("New World"));
+    data_.set(keySeed_, static_cast<int64_t>(0));
 
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
         now.time_since_epoch()
     ).count();
 
-    data_.set("created", timestamp);
-    data_.set("last_played", timestamp);
+    data_.set(keyCreated_, timestamp);
+    data_.set(keyLastPlayed_, timestamp);
 }
 
 void WorldConfig::syncFromFile() {
     if (!configFile_) return;
 
-    // Sync known keys from file to data_
+    // Sync known keys from file to data_ (using pre-interned keys for writes)
     if (configFile_->has("name")) {
-        data_.set("name", configFile_->getString("name", "New World"));
+        data_.set(keyName_, configFile_->getString("name", "New World"));
     }
     if (configFile_->has("seed")) {
-        data_.set("seed", configFile_->getInt("seed", 0));
+        data_.set(keySeed_, configFile_->getInt("seed", 0));
     }
     if (configFile_->has("created")) {
-        data_.set("created", configFile_->getInt("created", 0));
+        data_.set(keyCreated_, configFile_->getInt("created", 0));
     }
     if (configFile_->has("last_played")) {
-        data_.set("last_played", configFile_->getInt("last_played", 0));
+        data_.set(keyLastPlayed_, configFile_->getInt("last_played", 0));
     }
     if (configFile_->has("compression.enabled")) {
-        data_.set("compression.enabled", configFile_->getBool("compression.enabled", true));
+        data_.set(keyCompressionEnabled_, configFile_->getBool("compression.enabled", true));
     }
 
     // Also sync any custom keys from file's DataContainer
     configFile_->data().forEach([this](DataKey key, const DataValue& value) {
-        auto keyStr = lookupKey(key);
-        // Skip keys we've already handled
-        if (keyStr == "name" || keyStr == "seed" || keyStr == "created" ||
-            keyStr == "last_played" || keyStr == "compression.enabled") {
+        // Skip keys we've already handled (compare by interned key)
+        if (key == keyName_ || key == keySeed_ || key == keyCreated_ ||
+            key == keyLastPlayed_ || key == keyCompressionEnabled_) {
             return;
         }
 
-        std::visit([this, &keyStr](auto&& val) {
+        std::visit([this, key](auto&& val) {
             using T = std::decay_t<decltype(val)>;
             if constexpr (std::is_same_v<T, int64_t>) {
-                data_.set(keyStr, val);
+                data_.set(key, val);
             } else if constexpr (std::is_same_v<T, double>) {
-                data_.set(keyStr, val);
+                data_.set(key, val);
             } else if constexpr (std::is_same_v<T, std::string>) {
-                data_.set(keyStr, val);
+                data_.set(key, val);
             }
         }, value);
     });
@@ -293,17 +335,17 @@ void WorldConfig::syncToFile() {
     if (!configFile_) return;
 
     // Sync all data_ entries to ConfigFile
+    // Note: ConfigFile API still uses strings, so we lookup key names here
     data_.forEach([this](DataKey key, const DataValue& value) {
         auto keyStr = lookupKey(key);
 
-        std::visit([this, &keyStr](auto&& val) {
+        std::visit([this, key, &keyStr](auto&& val) {
             using T = std::decay_t<decltype(val)>;
             if constexpr (std::is_same_v<T, std::monostate>) {
                 // Skip null values
             } else if constexpr (std::is_same_v<T, int64_t>) {
-                // Check if this looks like a boolean
-                std::string k(keyStr);
-                if (k.find("enabled") != std::string::npos && (val == 0 || val == 1)) {
+                // Check if this is a known boolean key
+                if (key == keyCompressionEnabled_ && (val == 0 || val == 1)) {
                     configFile_->set(keyStr, val != 0);
                 } else {
                     configFile_->set(keyStr, val);
@@ -338,29 +380,29 @@ bool WorldConfig::reload() {
 }
 
 std::string WorldConfig::worldName() const {
-    return data_.get<std::string>("name", "New World");
+    return data_.get<std::string>(keyName_, "New World");
 }
 
 void WorldConfig::setWorldName(const std::string& name) {
-    data_.set("name", name);
+    data_.set(keyName_, name);
     dirty_ = true;
 }
 
 int64_t WorldConfig::seed() const {
-    return data_.get<int64_t>("seed", 0);
+    return data_.get<int64_t>(keySeed_, 0);
 }
 
 void WorldConfig::setSeed(int64_t seed) {
-    data_.set("seed", seed);
+    data_.set(keySeed_, seed);
     dirty_ = true;
 }
 
 int64_t WorldConfig::createdTimestamp() const {
-    return data_.get<int64_t>("created", 0);
+    return data_.get<int64_t>(keyCreated_, 0);
 }
 
 int64_t WorldConfig::lastPlayedTimestamp() const {
-    return data_.get<int64_t>("last_played", 0);
+    return data_.get<int64_t>(keyLastPlayed_, 0);
 }
 
 void WorldConfig::updateLastPlayed() {
@@ -368,26 +410,26 @@ void WorldConfig::updateLastPlayed() {
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
         now.time_since_epoch()
     ).count();
-    data_.set("last_played", timestamp);
+    data_.set(keyLastPlayed_, timestamp);
     dirty_ = true;
 }
 
 bool WorldConfig::compressionEnabled() const {
-    // Check for world-specific override
-    if (data_.has("compression.enabled")) {
-        return data_.get<bool>("compression.enabled", true);
+    // Check for world-specific override (using pre-interned key)
+    if (data_.has(keyCompressionEnabled_)) {
+        return data_.get<bool>(keyCompressionEnabled_, true);
     }
     // Fall back to global config
     return ConfigManager::instance().compressionEnabled();
 }
 
 void WorldConfig::setCompressionEnabled(bool enabled) {
-    data_.set("compression.enabled", enabled);
+    data_.set(keyCompressionEnabled_, enabled);
     dirty_ = true;
 }
 
 void WorldConfig::clearCompressionOverride() {
-    data_.remove("compression.enabled");
+    data_.remove(keyCompressionEnabled_);
     dirty_ = true;
 }
 

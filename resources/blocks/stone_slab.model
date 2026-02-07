@@ -1,0 +1,4 @@
+# Stone slab block
+include: base/slab
+texture: blocks/stone
+sounds: stone

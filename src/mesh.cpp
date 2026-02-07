@@ -248,48 +248,112 @@ void MeshBuilder::buildSimpleMesh(
                     static_cast<float>(z)
                 );
 
-                // Check each face
-                for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
-                    Face face = static_cast<Face>(faceIdx);
+                // Check if this block has custom geometry
+                const BlockGeometry* customGeom = nullptr;
+                if (geometryProvider_) {
+                    customGeom = geometryProvider_(blockType);
+                }
 
-                    // Get neighbor position
-                    BlockPos neighborPos = blockWorldPos.neighbor(face);
-
-                    // Check if neighbor is opaque (if so, this face is hidden)
-                    // Skip this check if face culling is disabled (debug mode)
-                    // For transparent blocks, only cull against opaque neighbors
-                    if (!disableFaceCulling_ && opaqueProvider(neighborPos)) {
-                        continue;  // Face is hidden, don't render
+                if (customGeom && !customGeom->isEmpty()) {
+                    // Render custom geometry faces
+                    // Get base light level for the block (sample from center)
+                    float baseLightLevel = 1.0f;
+                    if ((smoothLighting_ || flatLighting_) && lightProvider_) {
+                        // Sample light from the block's position (center approximation)
+                        uint8_t lightLevel = lightProvider_(blockWorldPos);
+                        baseLightLevel = static_cast<float>(lightLevel) / 15.0f;
                     }
 
-                    // Get texture UVs for this face
-                    glm::vec4 uvBounds = textureProvider(blockType, face);
+                    // Render each face in the custom geometry
+                    for (const auto& faceGeom : customGeom->faces()) {
+                        if (!faceGeom.isValid()) {
+                            continue;
+                        }
 
-                    // Calculate AO for this face
-                    std::array<float, 4> aoValues;
-                    if (calculateAO_) {
-                        aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
-                    } else {
-                        aoValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                        // For standard faces (0-5), check if neighbor occludes this face
+                        if (faceGeom.isStandardFace() && !disableFaceCulling_) {
+                            Face face = static_cast<Face>(faceGeom.faceIndex);
+                            BlockPos neighborPos = blockWorldPos.neighbor(face);
+                            if (faceOccludesProvider_) {
+                                Face oppFace = oppositeFace(face);
+                                if (faceOccludesProvider_(neighborPos, oppFace)) {
+                                    continue;  // Neighbor's face toward us is solid
+                                }
+                            } else if (opaqueProvider(neighborPos)) {
+                                continue;  // Standard face hidden by opaque neighbor
+                            }
+                        }
+
+                        // Get texture UVs - use the standard face if available, else Face::PosY as default
+                        Face texFace = faceGeom.isStandardFace()
+                            ? static_cast<Face>(faceGeom.faceIndex)
+                            : Face::PosY;
+                        glm::vec4 uvBounds = textureProvider(blockType, texFace);
+
+                        // Calculate lighting for this face
+                        float faceLight = baseLightLevel;
+                        if (faceGeom.isStandardFace() && lightProvider_) {
+                            Face face = static_cast<Face>(faceGeom.faceIndex);
+                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            uint8_t lightLevel = lightProvider_(faceAirPos);
+                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                        }
+
+                        // Add the custom face
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceLight);
                     }
+                } else {
+                    // Standard cube rendering
+                    for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
+                        Face face = static_cast<Face>(faceIdx);
 
-                    // Calculate lighting for this face
-                    std::array<float, 4> lightValues;
-                    if (smoothLighting_ && lightProvider_) {
-                        // Smooth lighting: sample 9 points, average to 4 corners
-                        lightValues = getFaceLight(blockWorldPos, face);
-                    } else if (flatLighting_ && lightProvider_) {
-                        // Flat lighting: sample 1 point, apply to all corners (shows raw L1 ball)
-                        BlockPos faceAirPos = blockWorldPos.neighbor(face);
-                        uint8_t lightLevel = lightProvider_(faceAirPos);
-                        float light = static_cast<float>(lightLevel) / 15.0f;
-                        lightValues = {light, light, light, light};
-                    } else {
-                        lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                        // Get neighbor position
+                        BlockPos neighborPos = blockWorldPos.neighbor(face);
+
+                        // Check if neighbor occludes this face
+                        // Skip this check if face culling is disabled (debug mode)
+                        if (!disableFaceCulling_) {
+                            if (faceOccludesProvider_) {
+                                // Use directional occlusion check (handles partial blocks)
+                                Face oppFace = oppositeFace(face);
+                                if (faceOccludesProvider_(neighborPos, oppFace)) {
+                                    continue;  // Neighbor's face toward us is solid
+                                }
+                            } else if (opaqueProvider(neighborPos)) {
+                                // Legacy: any opaque neighbor hides this face
+                                continue;
+                            }
+                        }
+
+                        // Get texture UVs for this face
+                        glm::vec4 uvBounds = textureProvider(blockType, face);
+
+                        // Calculate AO for this face
+                        std::array<float, 4> aoValues;
+                        if (calculateAO_) {
+                            aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
+                        } else {
+                            aoValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                        }
+
+                        // Calculate lighting for this face
+                        std::array<float, 4> lightValues;
+                        if (smoothLighting_ && lightProvider_) {
+                            // Smooth lighting: sample 9 points, average to 4 corners
+                            lightValues = getFaceLight(blockWorldPos, face);
+                        } else if (flatLighting_ && lightProvider_) {
+                            // Flat lighting: sample 1 point, apply to all corners (shows raw L1 ball)
+                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            uint8_t lightLevel = lightProvider_(faceAirPos);
+                            float light = static_cast<float>(lightLevel) / 15.0f;
+                            lightValues = {light, light, light, light};
+                        } else {
+                            lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                        }
+
+                        // Add the face to the mesh
+                        addFace(mesh, localPos, face, uvBounds, aoValues, lightValues);
                     }
-
-                    // Add the face to the mesh
-                    addFace(mesh, localPos, face, uvBounds, aoValues, lightValues);
                 }
             }
         }
@@ -305,11 +369,105 @@ void MeshBuilder::buildGreedyMesh(
     const BlockTransparentProvider* transparentProvider,
     bool buildTransparent
 ) {
-    // Process each face direction separately
+    // Process each face direction separately (greedy meshing for standard cube blocks)
     for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
         Face face = static_cast<Face>(faceIdx);
         greedyMeshFace(mesh, face, subChunk, chunkPos, opaqueProvider, textureProvider,
                        transparentProvider, buildTransparent);
+    }
+
+    // Second pass: render custom geometry blocks (can't be greedy-merged)
+    if (geometryProvider_) {
+        BlockPos subChunkWorldOrigin(
+            chunkPos.x * SubChunk::SIZE,
+            chunkPos.y * SubChunk::SIZE,
+            chunkPos.z * SubChunk::SIZE
+        );
+
+        for (int32_t y = 0; y < SubChunk::SIZE; ++y) {
+            for (int32_t z = 0; z < SubChunk::SIZE; ++z) {
+                for (int32_t x = 0; x < SubChunk::SIZE; ++x) {
+                    BlockTypeId blockType = subChunk.getBlock(x, y, z);
+
+                    if (blockType == AIR_BLOCK_TYPE) {
+                        continue;
+                    }
+
+                    // Filter by transparency if provider is given
+                    if (transparentProvider) {
+                        bool isTransparent = (*transparentProvider)(blockType);
+                        if (isTransparent != buildTransparent) {
+                            continue;
+                        }
+                    }
+
+                    // Check if this block has custom geometry
+                    const BlockGeometry* customGeom = geometryProvider_(blockType);
+                    if (!customGeom || customGeom->isEmpty()) {
+                        continue;  // Standard cube, already handled by greedy mesh
+                    }
+
+                    // World position of this block
+                    BlockPos blockWorldPos(
+                        subChunkWorldOrigin.x + x,
+                        subChunkWorldOrigin.y + y,
+                        subChunkWorldOrigin.z + z
+                    );
+
+                    // Local position within subchunk
+                    glm::vec3 localPos(
+                        static_cast<float>(x),
+                        static_cast<float>(y),
+                        static_cast<float>(z)
+                    );
+
+                    // Get base light level for the block
+                    float baseLightLevel = 1.0f;
+                    if ((smoothLighting_ || flatLighting_) && lightProvider_) {
+                        uint8_t lightLevel = lightProvider_(blockWorldPos);
+                        baseLightLevel = static_cast<float>(lightLevel) / 15.0f;
+                    }
+
+                    // Render each face in the custom geometry
+                    for (const auto& faceGeom : customGeom->faces()) {
+                        if (!faceGeom.isValid()) {
+                            continue;
+                        }
+
+                        // For standard faces (0-5), check if neighbor occludes this face
+                        if (faceGeom.isStandardFace() && !disableFaceCulling_) {
+                            Face face = static_cast<Face>(faceGeom.faceIndex);
+                            BlockPos neighborPos = blockWorldPos.neighbor(face);
+                            if (faceOccludesProvider_) {
+                                Face oppFace = oppositeFace(face);
+                                if (faceOccludesProvider_(neighborPos, oppFace)) {
+                                    continue;
+                                }
+                            } else if (opaqueProvider(neighborPos)) {
+                                continue;
+                            }
+                        }
+
+                        // Get texture UVs
+                        Face texFace = faceGeom.isStandardFace()
+                            ? static_cast<Face>(faceGeom.faceIndex)
+                            : Face::PosY;
+                        glm::vec4 uvBounds = textureProvider(blockType, texFace);
+
+                        // Calculate lighting for this face
+                        float faceLight = baseLightLevel;
+                        if (faceGeom.isStandardFace() && lightProvider_) {
+                            Face face = static_cast<Face>(faceGeom.faceIndex);
+                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            uint8_t lightLevel = lightProvider_(faceAirPos);
+                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                        }
+
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceLight);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -377,6 +535,14 @@ void MeshBuilder::greedyMeshFace(
                     continue;
                 }
 
+                // Skip blocks with custom geometry (they can't be greedy-merged)
+                if (geometryProvider_) {
+                    const BlockGeometry* customGeom = geometryProvider_(blockType);
+                    if (customGeom && !customGeom->isEmpty()) {
+                        continue;  // Custom geometry handled in separate pass
+                    }
+                }
+
                 // Filter by transparency if provider is given
                 if (transparentProvider) {
                     bool isTransparent = (*transparentProvider)(blockType);
@@ -392,10 +558,17 @@ void MeshBuilder::greedyMeshFace(
                     subChunkWorldOrigin.z + z
                 );
 
-                // Check if neighbor (in face direction) is opaque
+                // Check if neighbor (in face direction) occludes this face
                 BlockPos neighborPos = blockWorldPos.neighbor(face);
-                if (!disableFaceCulling_ && opaqueProvider(neighborPos)) {
-                    continue;  // Face is hidden
+                if (!disableFaceCulling_) {
+                    if (faceOccludesProvider_) {
+                        Face oppFace = oppositeFace(face);
+                        if (faceOccludesProvider_(neighborPos, oppFace)) {
+                            continue;  // Neighbor's face toward us is solid
+                        }
+                    } else if (opaqueProvider(neighborPos)) {
+                        continue;  // Face is hidden
+                    }
                 }
 
                 // This face is visible - add to mask
@@ -683,6 +856,63 @@ void MeshBuilder::addFace(
     mesh.indices.push_back(baseVertex + 0);
     mesh.indices.push_back(baseVertex + 2);
     mesh.indices.push_back(baseVertex + 3);
+}
+
+void MeshBuilder::addCustomFace(
+    MeshData& mesh,
+    const glm::vec3& blockPos,
+    const FaceGeometry& face,
+    const glm::vec4& uvBounds,
+    float ao,
+    float light
+) {
+    if (face.vertices.size() < 3) {
+        return;  // Invalid face
+    }
+
+    uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+
+    // Compute face normal from first 3 vertices (cross product)
+    const glm::vec3& v0 = face.vertices[0].position;
+    const glm::vec3& v1 = face.vertices[1].position;
+    const glm::vec3& v2 = face.vertices[2].position;
+    glm::vec3 edge1 = v1 - v0;
+    glm::vec3 edge2 = v2 - v0;
+    glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+
+    // Extract UV bounds for atlas wrapping
+    float minU = uvBounds.x;
+    float minV = uvBounds.y;
+    float maxU = uvBounds.z;
+    float maxV = uvBounds.w;
+    float tileWidth = maxU - minU;
+    float tileHeight = maxV - minV;
+
+    // Add vertices
+    for (const auto& modelVert : face.vertices) {
+        ChunkVertex vertex;
+        vertex.position = blockPos + modelVert.position;
+        vertex.normal = normal;
+
+        // Map model UVs (0-1) to atlas tile coordinates
+        vertex.texCoord = glm::vec2(
+            minU + modelVert.uv.x * tileWidth,
+            minV + modelVert.uv.y * tileHeight
+        );
+        vertex.tileBounds = uvBounds;
+        vertex.ao = ao;
+        vertex.light = light;
+        mesh.vertices.push_back(vertex);
+    }
+
+    // Triangulate the polygon (fan triangulation for convex polygons)
+    // For N vertices: N-2 triangles
+    size_t vertexCount = face.vertices.size();
+    for (size_t i = 1; i + 1 < vertexCount; ++i) {
+        mesh.indices.push_back(baseVertex + 0);
+        mesh.indices.push_back(baseVertex + static_cast<uint32_t>(i));
+        mesh.indices.push_back(baseVertex + static_cast<uint32_t>(i + 1));
+    }
 }
 
 float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const {

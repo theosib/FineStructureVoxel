@@ -31,6 +31,8 @@
 #include <finevox/world_renderer.hpp>
 #include <finevox/block_atlas.hpp>
 #include <finevox/block_type.hpp>
+#include <finevox/block_model.hpp>
+#include <finevox/block_model_loader.hpp>
 #include <finevox/string_interner.hpp>
 #include <finevox/resource_locator.hpp>
 #include <finevox/light_engine.hpp>
@@ -38,6 +40,7 @@
 #include <finevox/physics.hpp>
 #include <finevox/entity_manager.hpp>
 #include <finevox/graphics_event_queue.hpp>
+#include <finevox/config.hpp>
 
 #include <finevk/finevk.hpp>
 #include <finevk/high/simple_renderer.hpp>
@@ -45,8 +48,16 @@
 #include <finevk/engine/overlay2d.hpp>
 #include <finevk/engine/input_manager.hpp>
 
+#ifdef FINEVOX_HAS_GUI
+#include <finegui/finegui.hpp>
+#include <imgui.h>
+#endif
+
 #include <iostream>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using namespace finevox;
 
@@ -177,6 +188,86 @@ struct CameraInput {
 // Eye height offset from player position (bottom of bounding box)
 constexpr float PLAYER_EYE_HEIGHT = 1.62f;  // Minecraft-style eye height
 
+// Load all block definitions from spec files
+// Returns a map of block geometries for blocks with custom meshes
+std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
+    std::unordered_map<uint32_t, BlockGeometry> blockGeometries;
+    auto& registry = BlockRegistry::global();
+
+    // Set up model loader with file resolver (returns paths, not content)
+    // Try multiple search paths: blocks/ first (for includes), then root
+    BlockModelLoader modelLoader;
+    modelLoader.setFileResolver([](const std::string& path) -> std::string {
+        // Try blocks/ directory first (for includes like "base/solid_cube")
+        auto resolved = ResourceLocator::instance().resolve("game/blocks/" + path);
+        if (std::filesystem::exists(resolved)) {
+            return resolved.string();
+        }
+        // Fall back to game root (for shapes/ etc.)
+        resolved = ResourceLocator::instance().resolve("game/" + path);
+        if (std::filesystem::exists(resolved)) {
+            return resolved.string();
+        }
+        // Return empty to trigger relative path fallback in loader
+        return "";
+    });
+
+    // List of blocks to load
+    std::vector<std::string> blockNames = {
+        "stone", "dirt", "grass", "cobble", "glowstone",
+        "slab", "stairs", "wedge"
+    };
+
+    for (const auto& name : blockNames) {
+        // Resolve the model file path
+        auto modelPath = ResourceLocator::instance().resolve("game/blocks/" + name + ".model");
+        std::cout << "Loading block '" << name << "' from: " << modelPath.string() << "\n";
+
+        auto model = modelLoader.loadModel(modelPath.string());
+        if (!model) {
+            std::cout << "  Warning: Failed to load model: " << modelLoader.lastError() << "\n";
+            continue;
+        }
+
+        // Create BlockType from model properties
+        BlockTypeId blockId = BlockTypeId::fromName(name);
+        if (!registry.hasType(blockId)) {
+            BlockType blockType;
+
+            // Set collision shape
+            if (model->hasExplicitCollision() || model->hasCustomGeometry()) {
+                blockType.setCollisionShape(model->resolvedCollision());
+            }
+
+            // Set light properties
+            if (model->lightEmission() > 0) {
+                blockType.setLightEmission(model->lightEmission());
+            }
+            blockType.setLightAttenuation(model->lightAttenuation());
+
+            // Mark as custom mesh if it has non-cube geometry
+            if (model->hasCustomGeometry()) {
+                blockType.setHasCustomMesh(true);
+            }
+
+            registry.registerType(blockId, blockType);
+            std::cout << "  Registered block type with "
+                      << (model->hasCustomGeometry() ? "custom" : "standard") << " geometry\n";
+        }
+
+        // Store geometry for custom mesh blocks
+        if (model->hasCustomGeometry()) {
+            blockGeometries[blockId.id] = model->geometry();
+            std::cout << "  Stored geometry with " << model->geometry().faces().size() << " faces\n";
+        }
+    }
+
+    std::cout << "Loaded " << blockNames.size() << " block definitions, "
+              << blockGeometries.size() << " with custom geometry\n";
+
+    return blockGeometries;
+}
+
 void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = false) {
     // Get block type IDs (using string interner)
     auto stone = BlockTypeId::fromName("stone");
@@ -184,15 +275,6 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
     auto grass = BlockTypeId::fromName("grass");
     auto cobble = BlockTypeId::fromName("cobble");
     auto glowstone = BlockTypeId::fromName("glowstone");
-
-    // Register glowstone as a light-emitting block
-    auto& registry = BlockRegistry::global();
-    if (!registry.hasType(glowstone)) {
-        BlockType glowstoneType;
-        glowstoneType.setLightEmission(15);  // Maximum brightness
-        glowstoneType.setLightAttenuation(0);  // Doesn't block light
-        registry.registerType(glowstone, glowstoneType);
-    }
 
     std::cout << "Building test world...\n";
     std::cout << "  Block IDs: stone=" << stone.id << " dirt=" << dirt.id
@@ -299,8 +381,13 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        // Setup resource locator
-        ResourceLocator::instance().setGameRoot("resources");
+        // Setup resource locator - handle running from build directory
+        std::string resourcePath = "resources";
+        if (!std::filesystem::exists(resourcePath) && std::filesystem::exists("../resources")) {
+            resourcePath = "../resources";
+            std::cout << "Running from build directory, using " << resourcePath << "\n";
+        }
+        ResourceLocator::instance().setGameRoot(resourcePath);
 
         // Create Vulkan instance
         auto instance = finevk::Instance::create()
@@ -338,6 +425,19 @@ int main(int argc, char* argv[]) {
             .msaaSamples(renderer->msaaSamples())
             .build();
 
+        // Create GUI system
+#ifdef FINEVOX_HAS_GUI
+        finegui::GuiConfig guiConfig;
+        guiConfig.fontSize = 16.0f;
+        guiConfig.msaaSamples = renderer->msaaSamples();
+        if (window->isHighDPI()) {
+            guiConfig.dpiScale = window->contentScale().x;
+        }
+        finegui::GuiSystem gui(device.get(), guiConfig);
+        gui.initialize(renderer.get());
+        std::cout << "GUI system initialized\n";
+#endif
+
         // Create input manager
         auto inputManager = finevk::InputManager::create(window.get());
 
@@ -350,6 +450,10 @@ int main(int argc, char* argv[]) {
         inputManager->mapAction("down", GLFW_KEY_LEFT_SHIFT);
         inputManager->mapActionToMouse("break", GLFW_MOUSE_BUTTON_LEFT);
         inputManager->mapActionToMouse("place", GLFW_MOUSE_BUTTON_RIGHT);
+
+        // Load all block definitions from spec files
+        // This registers block types and loads custom geometries
+        std::unordered_map<uint32_t, BlockGeometry> blockGeometries = loadBlockDefinitions();
 
         // Create finevox world
         World world;
@@ -389,9 +493,42 @@ int main(int argc, char* argv[]) {
         atlas.setBlockTexture(BlockTypeId::fromName("grass"), 2, 0);    // Green (top)
         atlas.setBlockTexture(BlockTypeId::fromName("cobble"), 3, 0);   // Dark gray
         atlas.setBlockTexture(BlockTypeId::fromName("glowstone"), 4, 0); // Yellow (light source)
+        atlas.setBlockTexture(BlockTypeId::fromName("slab"), 5, 0);     // Slab (use distinct color)
+        atlas.setBlockTexture(BlockTypeId::fromName("stairs"), 6, 0);   // Stairs
+        atlas.setBlockTexture(BlockTypeId::fromName("wedge"), 7, 0);    // Wedge
 
         worldRenderer.setBlockAtlas(atlas.texture());
         worldRenderer.setTextureProvider(atlas.createProvider());
+
+        // Set geometry provider for custom mesh blocks (geometries loaded earlier)
+        worldRenderer.setGeometryProvider([&blockGeometries](BlockTypeId type) -> const BlockGeometry* {
+            auto it = blockGeometries.find(type.id);
+            if (it != blockGeometries.end()) {
+                return &it->second;
+            }
+            return nullptr;
+        });
+
+        // Set face occludes provider for directional face culling
+        // This handles slabs/stairs where only some faces are solid
+        worldRenderer.setFaceOccludesProvider([&world, &blockGeometries](const BlockPos& pos, Face face) -> bool {
+            BlockTypeId blockType = world.getBlock(pos);
+            if (blockType.isAir()) {
+                return false;  // Air doesn't occlude anything
+            }
+
+            // Check if this block has custom geometry
+            auto it = blockGeometries.find(blockType.id);
+            if (it != blockGeometries.end()) {
+                // Custom geometry - check if this specific face is solid
+                uint8_t solidMask = it->second.solidFacesMask();
+                return (solidMask & (1 << static_cast<int>(face))) != 0;
+            }
+
+            // Standard opaque block - all faces occlude
+            return true;
+        });
+
         worldRenderer.initialize();
 
         // Create UpdateScheduler for event-driven block changes
@@ -510,19 +647,27 @@ int main(int argc, char* argv[]) {
             BlockTypeId::fromName("dirt"),
             BlockTypeId::fromName("grass"),
             BlockTypeId::fromName("cobble"),
-            BlockTypeId::fromName("glowstone")
+            BlockTypeId::fromName("glowstone"),
+            BlockTypeId::fromName("slab"),
+            BlockTypeId::fromName("stairs"),
+            BlockTypeId::fromName("wedge")
         };
 
         // Physics state (declared early so callbacks can reference it)
         bool physicsEnabled = false;  // Start in fly mode for familiarity
 
-        // Block shape provider for raycasting - full block collision for non-air blocks
-        BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode) -> const CollisionShape* {
+        // Block shape provider for raycasting - uses BlockRegistry for collision shapes
+        BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
             BlockTypeId blockType = world.getBlock(pos);
             if (blockType.isAir()) {
                 return nullptr;  // No collision
             }
-            return &CollisionShape::FULL_BLOCK;
+            const BlockType& type = BlockRegistry::global().getType(blockType);
+            if (mode == RaycastMode::Collision) {
+                return type.hasCollision() ? &type.collisionShape() : nullptr;
+            } else {
+                return type.hasHitShape() ? &type.hitShape() : nullptr;
+            }
         };
 
         // Physics system and player body
@@ -540,6 +685,9 @@ int main(int argc, char* argv[]) {
 
         // Input event callback - handles all discrete input events
         inputManager->setEventCallback([&](const finevk::InputEvent& e) {
+#ifdef FINEVOX_HAS_GUI
+            gui.processInput(finegui::InputAdapter::fromFineVK(e));
+#endif
             // Key press events for toggles and actions
             if (e.type == finevk::InputEventType::KeyPress) {
                 if (e.key == GLFW_KEY_ESCAPE) {
@@ -706,8 +854,8 @@ int main(int argc, char* argv[]) {
                     std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
                 }
 
-                if (e.key >= GLFW_KEY_1 && e.key <= GLFW_KEY_5) {
-                    // Number keys 1-5 select block directly
+                if (e.key >= GLFW_KEY_1 && e.key <= GLFW_KEY_9) {
+                    // Number keys 1-9 select block directly
                     int index = e.key - GLFW_KEY_1;
                     if (index < static_cast<int>(blockPalette.size())) {
                         selectedBlockIndex = index;
@@ -747,10 +895,29 @@ int main(int argc, char* argv[]) {
                     RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                     if (result.hit) {
                         BlockPos placePos = getPlacePosition(result.blockPos, result.face);
-                        // Use external API - triggers events, lighting, etc.
-                        world.placeBlock(placePos, selectedBlock);
-                        std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
-                                  << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
+
+                        // Check if block would intersect player (uses COLLISION_MARGIN for precision)
+                        // Config: physics.block_placement_mode = "block" (default) or "push"
+                        if (wouldBlockIntersectBody(placePos, playerBody)) {
+                            auto mode = ConfigManager::instance().blockPlacementMode();
+                            if (mode == "block") {
+                                // Default: prevent placement
+                                std::cout << "Cannot place block at (" << placePos.x << "," << placePos.y << "," << placePos.z
+                                          << ") - would intersect player\n";
+                            } else {
+                                // "push" mode: place block and push player
+                                // TODO: Implement push logic (requires finding safe position)
+                                world.placeBlock(placePos, selectedBlock);
+                                std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                                          << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
+                                          << ") - pushing player\n";
+                            }
+                        } else {
+                            // No intersection, place normally
+                            world.placeBlock(placePos, selectedBlock);
+                            std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                                      << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
+                        }
                     }
                 }
             }
@@ -769,7 +936,9 @@ int main(int argc, char* argv[]) {
         std::cout << "  Shift: Down (fly mode)\n";
         std::cout << "  Left Click: Break block (uses event system)\n";
         std::cout << "  Right Click: Place block (uses event system)\n";
-        std::cout << "  1-5 / Tab: Select block type\n";
+        std::cout << "  1-8 / Tab: Select block type\n";
+        std::cout << "    1=stone 2=dirt 3=grass 4=cobble 5=glowstone\n";
+        std::cout << "    6=slab 7=stairs 8=wedge (non-cube blocks)\n";
         std::cout << "  F1: Toggle debug camera offset\n";
         std::cout << "  F2: Teleport to large coords (1M)\n";
         std::cout << "  F3: Teleport to origin\n";
@@ -856,9 +1025,20 @@ int main(int argc, char* argv[]) {
             if (physicsEnabled) {
                 // Physics mode: apply physics-based movement
                 input.applyPhysicsMovement(playerBody, physicsSystem, dt);
-                // Set camera position from player position + eye height
+
+                // Calculate desired camera position (player feet + eye height)
                 Vec3 playerPos = playerBody.position();
-                camera.moveTo(glm::dvec3(playerPos.x, playerPos.y + PLAYER_EYE_HEIGHT, playerPos.z));
+                Vec3 desiredCameraPos(playerPos.x, playerPos.y + PLAYER_EYE_HEIGHT, playerPos.z);
+
+                // Safe origin is body center (inside the collision volume)
+                // Body extends from feet (playerPos.y) to feet + 1.8 (2 * halfExtents.y)
+                Vec3 safeOrigin(playerPos.x, playerPos.y + 0.9f, playerPos.z);
+
+                // Adjust camera to prevent near-plane clipping through walls
+                Vec3 adjustedCameraPos = adjustCameraForWallCollision(
+                    safeOrigin, desiredCameraPos, shapeProvider);
+
+                camera.moveTo(glm::dvec3(adjustedCameraPos.x, adjustedCameraPos.y, adjustedCameraPos.z));
             } else {
                 // Fly mode: direct camera movement (no collision)
                 input.applyFlyMovement(camera, dt);
@@ -921,23 +1101,84 @@ int main(int argc, char* argv[]) {
 
             // Render
             if (auto frame = renderer->beginFrame()) {
-                renderer->beginRenderPass({0.2f, 0.3f, 0.4f, 1.0f});  // Sky blue
+                frame.beginRenderPass({0.2f, 0.3f, 0.4f, 1.0f});  // Sky blue
 
                 // Render the world
                 worldRenderer.render(frame);
 
                 // Draw crosshair at screen center
-                auto extent = renderer->extent();
-                overlay->beginFrame(renderer->currentFrame(), extent.width, extent.height);
+                overlay->beginFrame(frame.frameIndex(), frame.extent.width, frame.extent.height);
                 overlay->drawCrosshair(
-                    extent.width / 2.0f, extent.height / 2.0f,
+                    frame.extent.width / 2.0f, frame.extent.height / 2.0f,
                     20.0f,   // size
                     2.0f,    // thickness
                     {1.0f, 1.0f, 1.0f, 0.8f}  // white with slight transparency
                 );
                 overlay->render(frame);
 
-                renderer->endRenderPass();
+                // GUI overlays
+#ifdef FINEVOX_HAS_GUI
+                gui.beginFrame();
+
+                // Coordinates overlay (upper left)
+                {
+                    glm::dvec3 pos = camera.positionD();
+                    ImGui::SetNextWindowPos(ImVec2(10, 10));
+                    ImGui::Begin("##coords", nullptr,
+                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground |
+                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
+                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "X: %.1f", pos.x);
+                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "Y: %.1f", pos.y);
+                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "Z: %.1f", pos.z);
+                    ImGui::End();
+                }
+
+                // Mock hotbar (bottom center)
+                {
+                    const char* slotNames[] = {
+                        "Stone", "Dirt", "Grass", "Cobble",
+                        "Glow", "Slab", "Stair", "Wedge", ""
+                    };
+                    const int slotCount = 8;
+                    const float slotSize = 48.0f;
+                    const float slotPad = 4.0f;
+                    const float barWidth = slotCount * (slotSize + slotPad) + slotPad;
+
+                    ImGuiIO& io = ImGui::GetIO();
+                    ImGui::SetNextWindowPos(
+                        ImVec2((io.DisplaySize.x - barWidth) / 2.0f, io.DisplaySize.y - slotSize - slotPad * 4));
+                    ImGui::Begin("##hotbar", nullptr,
+                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
+
+                    for (int i = 0; i < slotCount; i++) {
+                        if (i > 0) ImGui::SameLine(0, slotPad);
+
+                        bool selected = (i == selectedBlockIndex);
+                        if (selected) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
+                        }
+
+                        char label[32];
+                        snprintf(label, sizeof(label), "%s\n[%d]", slotNames[i], i + 1);
+                        ImGui::Button(label, ImVec2(slotSize, slotSize));
+
+                        ImGui::PopStyleColor(2);
+                    }
+                    ImGui::End();
+                }
+
+                gui.endFrame();
+                gui.render(frame);
+#endif
+
+                frame.endRenderPass();
                 renderer->endFrame();
             }
         }

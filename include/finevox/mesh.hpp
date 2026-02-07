@@ -11,6 +11,7 @@
 #include "finevox/string_interner.hpp"  // For BlockTypeId
 #include "finevox/physics.hpp"
 #include "finevox/lod.hpp"
+#include "finevox/block_model.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
@@ -151,6 +152,22 @@ using BlockTextureProvider = std::function<glm::vec4(BlockTypeId type, Face face
 // If null, mesh builder will use default lighting (full brightness)
 using BlockLightProvider = std::function<uint8_t(const BlockPos& pos)>;
 
+// Callback to check if a block type has custom geometry (non-cube)
+// Returns true if the block should use custom mesh instead of standard cube faces
+using BlockCustomMeshCheck = std::function<bool(BlockTypeId type)>;
+
+// Callback to get custom geometry for a block type
+// Returns pointer to BlockGeometry if the block has custom mesh, nullptr otherwise
+// The returned pointer must remain valid for the duration of mesh building
+using BlockGeometryProvider = std::function<const BlockGeometry*(BlockTypeId type)>;
+
+// Callback to check if a specific face of a block at a position occludes neighbors
+// Returns true if the face at (pos, face) is solid and would hide the opposite face of adjacent block
+// For standard opaque blocks, all faces occlude
+// For custom geometry blocks, only faces in solidFacesMask occlude
+// For air/transparent blocks, no faces occlude
+using BlockFaceOccludesProvider = std::function<bool(const BlockPos& pos, Face face)>;
+
 // ============================================================================
 // MeshBuilder - Generates mesh data from subchunk blocks
 // ============================================================================
@@ -226,6 +243,15 @@ public:
     void setLightProvider(BlockLightProvider provider) { lightProvider_ = std::move(provider); }
     void clearLightProvider() { lightProvider_ = nullptr; }
 
+    // Set custom geometry provider for non-cube blocks
+    void setGeometryProvider(BlockGeometryProvider provider) { geometryProvider_ = std::move(provider); }
+    void clearGeometryProvider() { geometryProvider_ = nullptr; }
+
+    // Set face occludes provider for directional face culling (used with custom geometry blocks)
+    // When set, this replaces the simple opaqueProvider check with per-face occlusion testing
+    void setFaceOccludesProvider(BlockFaceOccludesProvider provider) { faceOccludesProvider_ = std::move(provider); }
+    void clearFaceOccludesProvider() { faceOccludesProvider_ = nullptr; }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -277,6 +303,8 @@ private:
     bool smoothLighting_ = false;  // Disabled by default (use when LightEngine is available)
     bool flatLighting_ = false;   // Single light sample per face (shows raw L1 ball)
     BlockLightProvider lightProvider_;  // Optional provider for smooth/flat lighting
+    BlockGeometryProvider geometryProvider_;  // Optional provider for custom block geometry
+    BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
 
     // Add a single face to the mesh data
     void addFace(
@@ -286,6 +314,17 @@ private:
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues,  // AO for each corner (CCW from bottom-left)
         const std::array<float, 4>& lightValues = {1.0f, 1.0f, 1.0f, 1.0f}  // Light for each corner
+    );
+
+    // Add a custom face from BlockGeometry (for non-cube blocks)
+    // Handles arbitrary vertex counts (3-6 vertices per face)
+    void addCustomFace(
+        MeshData& mesh,
+        const glm::vec3& blockPos,   // Local block position within subchunk
+        const FaceGeometry& face,    // Face geometry with vertices and UVs
+        const glm::vec4& uvBounds,   // Texture tile bounds for atlas wrapping
+        float ao = 1.0f,             // Ambient occlusion (uniform for custom faces)
+        float light = 1.0f           // Light level (uniform for custom faces)
     );
 
     // Add a scaled face to the mesh data (for LOD blocks)

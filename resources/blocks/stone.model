@@ -1,0 +1,5 @@
+# Stone block
+include: base/solid_cube
+texture: blocks/stone
+sounds: stone
+hardness: 1.5

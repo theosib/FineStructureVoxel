@@ -1,0 +1,6 @@
+# Slab collision shape
+# Single box covering the bottom half
+
+box:
+    0 0 0
+    1 0.5 1

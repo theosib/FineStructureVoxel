@@ -1,0 +1,7 @@
+# Base wedge model
+# Include this in specific block models
+
+geometry: shapes/wedge_faces
+collision: shapes/wedge_collision
+rotations: horizontal
+hardness: 1.0

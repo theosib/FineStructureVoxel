@@ -122,13 +122,17 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             return true;
         }
 
-        // Get texture and light providers (copy under lock to avoid holding lock during build)
+        // Get texture, light, and geometry providers (copy under lock to avoid holding lock during build)
         BlockTextureProvider textureProvider;
         BlockLightProvider lightProvider;
+        BlockGeometryProvider geometryProvider;
+        BlockFaceOccludesProvider faceOccludesProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
             textureProvider = textureProvider_;
             lightProvider = lightProvider_;
+            geometryProvider = geometryProvider_;
+            faceOccludesProvider = faceOccludesProvider_;
         }
 
         // Use default texture provider if none set (returns (0,0,1,1) UVs)
@@ -145,6 +149,12 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         builder.setFlatLighting(flatLighting_);
         if (lightProvider) {
             builder.setLightProvider(lightProvider);
+        }
+        if (geometryProvider) {
+            builder.setGeometryProvider(geometryProvider);
+        }
+        if (faceOccludesProvider) {
+            builder.setFaceOccludesProvider(faceOccludesProvider);
         }
 
         // Build the mesh at the requested LOD level

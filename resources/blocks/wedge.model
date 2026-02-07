@@ -1,0 +1,5 @@
+# Wedge/ramp block
+include: base/wedge
+texture: blocks/wedge
+sounds: stone
+hardness: 1.0

@@ -434,6 +434,21 @@ public:
      */
     void setLightProvider(BlockLightProvider provider);
 
+    /**
+     * @brief Set the geometry provider for custom mesh blocks (slabs, stairs, etc.)
+     * @param provider Function that returns BlockGeometry* for block types with custom meshes
+     */
+    void setGeometryProvider(BlockGeometryProvider provider);
+
+    /**
+     * @brief Set the face occludes provider for directional face culling
+     * @param provider Function that checks if a specific face of a block occludes neighbors
+     *
+     * This is used to properly cull faces when adjacent to non-cube blocks like slabs.
+     * Standard opaque blocks occlude all faces, but slabs only occlude some directions.
+     */
+    void setFaceOccludesProvider(BlockFaceOccludesProvider provider);
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================
@@ -653,6 +668,8 @@ private:
     finevk::Texture* blockAtlas_ = nullptr;
     BlockTextureProvider textureProvider_;
     BlockLightProvider lightProvider_;  // Stored separately for worker pool
+    BlockGeometryProvider geometryProvider_;  // For custom mesh blocks
+    BlockFaceOccludesProvider faceOccludesProvider_;  // For directional face culling
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

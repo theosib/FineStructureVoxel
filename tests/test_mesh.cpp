@@ -2,6 +2,7 @@
 #include "finevox/mesh.hpp"
 #include "finevox/subchunk.hpp"
 #include "finevox/world.hpp"
+#include "finevox/block_model.hpp"
 #include <cmath>
 
 using namespace finevox;
@@ -1029,4 +1030,260 @@ TEST_F(TransparentMeshTest, TotalCounts) {
     // Both blocks have 6 faces * 4 vertices = 24 each
     EXPECT_EQ(mesh.totalVertexCount(), 48);
     EXPECT_EQ(mesh.totalIndexCount(), 72);  // 2 blocks * 36 indices
+}
+
+// ============================================================================
+// Custom Geometry tests (non-cube blocks like slabs)
+// ============================================================================
+
+class CustomGeometryMeshTest : public ::testing::Test {
+protected:
+    MeshBuilder builder;
+
+    void SetUp() override {
+        builder.setGreedyMeshing(false);  // Disable for simpler vertex counting
+    }
+
+    // Simple texture provider that returns unit UVs
+    BlockTextureProvider simpleTextureProvider = [](BlockTypeId, Face) {
+        return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    };
+
+    // Opaque provider that always returns false (nothing is opaque = all faces visible)
+    BlockOpaqueProvider nothingOpaque = [](const BlockPos&) {
+        return false;
+    };
+
+    // Create a slab geometry (bottom half of a block, y from 0 to 0.5)
+    BlockGeometry createSlabGeometry() {
+        BlockGeometry geom;
+
+        // Bottom face (y=0)
+        FaceGeometry bottom;
+        bottom.name = "bottom";
+        bottom.faceIndex = 2;  // NegY
+        bottom.isSolid = true;
+        bottom.vertices = {
+            ModelVertex(glm::vec3(0, 0, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(0, 0, 0), glm::vec2(0, 0)),
+            ModelVertex(glm::vec3(1, 0, 0), glm::vec2(1, 0)),
+            ModelVertex(glm::vec3(1, 0, 1), glm::vec2(1, 1))
+        };
+        geom.addFace(std::move(bottom));
+
+        // Top face (y=0.5)
+        FaceGeometry top;
+        top.name = "top";
+        top.faceIndex = 3;  // PosY
+        top.isSolid = false;
+        top.vertices = {
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(0, 0)),
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1)),
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(1, 0))
+        };
+        geom.addFace(std::move(top));
+
+        // West face (-X) - half height
+        FaceGeometry west;
+        west.name = "west";
+        west.faceIndex = 0;  // NegX
+        west.vertices = {
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0,    0), glm::vec2(1, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1))
+        };
+        geom.addFace(std::move(west));
+
+        // East face (+X) - half height
+        FaceGeometry east;
+        east.name = "east";
+        east.faceIndex = 1;  // PosX
+        east.vertices = {
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0,    1), glm::vec2(1, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1))
+        };
+        geom.addFace(std::move(east));
+
+        // North face (-Z) - half height
+        FaceGeometry north;
+        north.name = "north";
+        north.faceIndex = 4;  // NegZ
+        north.vertices = {
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0,    0), glm::vec2(1, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1))
+        };
+        geom.addFace(std::move(north));
+
+        // South face (+Z) - half height
+        FaceGeometry south;
+        south.name = "south";
+        south.faceIndex = 5;  // PosZ
+        south.vertices = {
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0,    1), glm::vec2(1, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1))
+        };
+        geom.addFace(std::move(south));
+
+        return geom;
+    }
+};
+
+TEST_F(CustomGeometryMeshTest, SlabGeometryIsValid) {
+    BlockGeometry slabGeom = createSlabGeometry();
+
+    EXPECT_FALSE(slabGeom.isEmpty());
+    EXPECT_EQ(slabGeom.faces().size(), 6);
+
+    // Top face should be at y=0.5
+    const FaceGeometry* top = slabGeom.getFace(3);  // PosY
+    ASSERT_NE(top, nullptr);
+    EXPECT_EQ(top->vertices.size(), 4);
+    for (const auto& v : top->vertices) {
+        EXPECT_FLOAT_EQ(v.position.y, 0.5f);
+    }
+}
+
+TEST_F(CustomGeometryMeshTest, CustomGeometryProviderIsUsed) {
+    BlockTypeId slab = BlockTypeId::fromName("test:slab");
+    BlockGeometry slabGeom = createSlabGeometry();
+
+    // Create geometry provider
+    std::unordered_map<uint32_t, BlockGeometry> geometries;
+    geometries[slab.id] = std::move(slabGeom);
+
+    builder.setGeometryProvider([&geometries](BlockTypeId type) -> const BlockGeometry* {
+        auto it = geometries.find(type.id);
+        if (it != geometries.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    });
+
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, slab);
+
+    ChunkPos pos{0, 0, 0};
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+
+    // 6 faces * 4 vertices = 24 vertices (same count as cube, but different positions)
+    EXPECT_EQ(mesh.vertexCount(), 24);
+    EXPECT_EQ(mesh.indexCount(), 36);
+
+    // For the slab, the top face should have a +Y normal and all vertices at y=8.5
+    // Look for a face with +Y normal (top face) - check its y position
+    float expectedTopY = 8.0f + 0.5f;
+    bool foundTopFaceWithYNormal = false;
+
+    for (const auto& vertex : mesh.vertices) {
+        // Check for vertices with +Y normal (top face)
+        if (vertex.normal.y > 0.9f) {
+            // This is the top face - verify it's at the slab height
+            EXPECT_NEAR(vertex.position.y, expectedTopY, 0.01f)
+                << "Top face (normal +Y) should be at y=" << expectedTopY << " for slab";
+            foundTopFaceWithYNormal = true;
+        }
+    }
+
+    EXPECT_TRUE(foundTopFaceWithYNormal)
+        << "Expected to find top face with +Y normal in custom geometry mesh";
+
+    // Also verify NO vertices at y=9 with +Y normal (full block top would be there)
+    for (const auto& vertex : mesh.vertices) {
+        if (vertex.normal.y > 0.9f) {
+            EXPECT_LT(vertex.position.y, 8.9f)
+                << "Should NOT find top face at y=9 (that would be a full cube)";
+        }
+    }
+}
+
+TEST_F(CustomGeometryMeshTest, WithoutGeometryProviderRendersAsCube) {
+    // When no geometry provider is set, blocks should render as cubes
+    BlockTypeId customBlock = BlockTypeId::fromName("test:custom_no_provider");
+
+    // Do NOT set a geometry provider
+
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, customBlock);
+
+    ChunkPos pos{0, 0, 0};
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+
+    // Should render as a full cube: 6 faces * 4 vertices = 24 vertices
+    EXPECT_EQ(mesh.vertexCount(), 24);
+
+    // Top face should be at y=9 (full block)
+    bool foundTopAt9 = false;
+    for (const auto& vertex : mesh.vertices) {
+        if (std::abs(vertex.position.y - 9.0f) < 0.001f && vertex.normal.y > 0.5f) {
+            foundTopAt9 = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundTopAt9) << "Without geometry provider, should have full cube top at y=9";
+}
+
+TEST_F(CustomGeometryMeshTest, GreedyMeshingSkipsCustomBlocks) {
+    BlockTypeId slab = BlockTypeId::fromName("test:slab_greedy");
+    BlockTypeId stone = BlockTypeId::fromName("test:stone_greedy");
+    BlockGeometry slabGeom = createSlabGeometry();
+
+    // Create geometry provider that only returns geometry for slab
+    std::unordered_map<uint32_t, BlockGeometry> geometries;
+    geometries[slab.id] = std::move(slabGeom);
+
+    builder.setGeometryProvider([&geometries](BlockTypeId type) -> const BlockGeometry* {
+        auto it = geometries.find(type.id);
+        if (it != geometries.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    });
+
+    // Enable greedy meshing
+    builder.setGreedyMeshing(true);
+
+    SubChunk subChunk;
+    // Place a slab at (8,8,8)
+    subChunk.setBlock(8, 8, 8, slab);
+    // Place stone blocks adjacent (these should be greedy-merged if possible)
+    subChunk.setBlock(9, 8, 8, stone);
+    subChunk.setBlock(10, 8, 8, stone);
+
+    ChunkPos pos{0, 0, 0};
+
+    BlockOpaqueProvider checkBlocks = [&subChunk, &pos](const BlockPos& bpos) {
+        int lx = bpos.x - pos.x * 16;
+        int ly = bpos.y - pos.y * 16;
+        int lz = bpos.z - pos.z * 16;
+
+        if (lx < 0 || lx >= 16 || ly < 0 || ly >= 16 || lz < 0 || lz >= 16) {
+            return false;
+        }
+
+        return subChunk.getBlock(lx, ly, lz) != AIR_BLOCK_TYPE;
+    };
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, checkBlocks, simpleTextureProvider);
+
+    // Slab should still have its custom geometry (top at y=8.5)
+    float slabTopY = 8.0f + 0.5f;
+    bool foundSlabTop = false;
+    for (const auto& vertex : mesh.vertices) {
+        if (std::abs(vertex.position.y - slabTopY) < 0.001f && vertex.normal.y > 0.5f) {
+            foundSlabTop = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(foundSlabTop) << "Custom geometry slab should still render correctly with greedy meshing";
 }

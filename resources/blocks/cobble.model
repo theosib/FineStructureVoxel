@@ -1,0 +1,5 @@
+# Cobblestone block
+include: base/solid_cube
+texture: blocks/cobble
+sounds: stone
+hardness: 2.0

@@ -80,6 +80,11 @@ BlockType& BlockType::setWantsGameTicks(bool wants) {
     return *this;
 }
 
+BlockType& BlockType::setHasCustomMesh(bool hasMesh) {
+    hasCustomMesh_ = hasMesh;
+    return *this;
+}
+
 const CollisionShape& BlockType::collisionShape(const Rotation& rotation) const {
     return collisionShapes_[rotation.index()];
 }

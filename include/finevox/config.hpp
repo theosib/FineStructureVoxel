@@ -86,6 +86,13 @@ public:
     [[nodiscard]] size_t columnCacheSize() const;
     void setColumnCacheSize(size_t count);
 
+    // Physics/Gameplay settings
+    // Block placement mode when block would intersect player:
+    // - "block" (default): prevent placement
+    // - "push": allow placement and push player out
+    [[nodiscard]] std::string blockPlacementMode() const;
+    void setBlockPlacementMode(const std::string& mode);
+
     // ========================================================================
     // Generic accessors (for custom settings)
     // ========================================================================
@@ -106,6 +113,7 @@ private:
     ConfigManager(const ConfigManager&) = delete;
     ConfigManager& operator=(const ConfigManager&) = delete;
 
+    void initKeys();  // Pre-intern all known config keys
     void setDefaults();
     void syncFromFile();
     void syncToFile();
@@ -116,6 +124,14 @@ private:
     DataContainer data_;
     bool initialized_ = false;
     bool dirty_ = false;
+
+    // Pre-interned config keys for fast access
+    DataKey keyCompressionEnabled_ = 0;
+    DataKey keyDebugLogging_ = 0;
+    DataKey keyIoThreadCount_ = 0;
+    DataKey keyMaxOpenRegions_ = 0;
+    DataKey keyColumnCacheSize_ = 0;
+    DataKey keyBlockPlacementMode_ = 0;
 };
 
 // ============================================================================
@@ -189,6 +205,7 @@ public:
     [[nodiscard]] const DataContainer& data() const { return data_; }
 
 private:
+    void initKeys();  // Pre-intern all known config keys
     void setDefaults();
     void syncFromFile();
     void syncToFile();
@@ -198,6 +215,13 @@ private:
     std::unique_ptr<ConfigFile> configFile_;
     DataContainer data_;
     bool dirty_ = false;
+
+    // Pre-interned config keys for fast access
+    DataKey keyName_ = 0;
+    DataKey keySeed_ = 0;
+    DataKey keyCreated_ = 0;
+    DataKey keyLastPlayed_ = 0;
+    DataKey keyCompressionEnabled_ = 0;
 };
 
 // ============================================================================

@@ -1,0 +1,5 @@
+# Dirt block
+include: base/solid_cube
+texture: blocks/dirt
+sounds: gravel
+hardness: 0.5

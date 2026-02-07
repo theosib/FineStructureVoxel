@@ -83,6 +83,10 @@ public:
     /// Blocks with this enabled are auto-registered in per-subchunk registry
     BlockType& setWantsGameTicks(bool wants);
 
+    /// Set whether this block has custom mesh geometry (non-cube)
+    /// Blocks with custom meshes are excluded from greedy meshing
+    BlockType& setHasCustomMesh(bool hasMesh);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -122,6 +126,10 @@ public:
     /// Check if block wants game tick events
     [[nodiscard]] bool wantsGameTicks() const { return wantsGameTicks_; }
 
+    /// Check if block has custom mesh geometry (non-cube)
+    /// Custom mesh blocks are excluded from greedy meshing
+    [[nodiscard]] bool hasCustomMesh() const { return hasCustomMesh_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -137,6 +145,7 @@ private:
     uint8_t lightAttenuation_ = 15;  // Full attenuation by default (opaque)
     float hardness_ = 1.0f;          // Default mining difficulty
     bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
+    bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
 };
 
 /**

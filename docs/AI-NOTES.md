@@ -252,6 +252,40 @@ items[0]                # Array indexing (brackets - future)
 
 ---
 
+## Non-Cube Block System (Implemented)
+
+**Complete implementation for slabs, stairs, wedges, etc.**
+
+### Core Files
+- `include/finevox/block_model.hpp` - FaceGeometry, BlockGeometry, BlockModel, RotationSet
+- `include/finevox/block_model_loader.hpp` - Parser for .model/.geom/.collision files
+- `src/mesh.cpp` - addCustomFace(), geometry provider integration
+
+### Key Concepts
+- **RotationSet**: Constrains which of 24 rotations are valid (None/Vertical/Horizontal/HorizontalFlip/All/Custom)
+- **Fallback chain**: hit → collision → geometry faces → full block
+- **Face naming**: Supports aliases (west/w/-x → 0, top/up/posy → 3) and numbers
+- **Greedy mesh exclusion**: Custom geometry blocks skip greedy merging
+
+### Spec Files (resources/)
+- `shapes/slab_faces.geom`, `shapes/slab_collision.collision`
+- `shapes/stairs_faces.geom`, `shapes/stairs_collision.collision`
+- `shapes/wedge_faces.geom`, `shapes/wedge_collision.collision`
+- `blocks/base/slab.model`, `blocks/base/stairs.model`, `blocks/base/wedge.model`
+
+### Future: Smart Block Placement (Design Notes)
+
+Context-aware placement like Hytale/Minecraft:
+1. **Player facing** + **target surface** → suggested rotation
+2. Constrain to block's `allowedRotations()`
+3. **R-key cycling** through valid rotations with ghost preview
+4. **Side placement** for vertical slabs (Hytale-style)
+5. **Fine rotation** (16+ directions) - lower priority
+
+See plan file: `.claude/plans/abundant-pondering-hollerith.md`
+
+---
+
 ## API Summary (Built Components)
 
 *Update this section as phases complete*

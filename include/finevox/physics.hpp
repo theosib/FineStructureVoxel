@@ -418,6 +418,51 @@ private:
 };
 
 // ============================================================================
+// Block placement collision utilities
+// ============================================================================
+
+/**
+ * @brief Policy for block placement when it would intersect an entity
+ */
+enum class BlockPlacementMode {
+    BlockIfIntersects,  // Default: prevent placement if it would intersect
+    PushEntity          // Allow placement and push entity out of the way
+};
+
+/**
+ * @brief Check if placing a block would intersect an entity's bounding box
+ *
+ * Uses COLLISION_MARGIN to account for floating point precision.
+ * The block AABB is shrunk by COLLISION_MARGIN so entities can stand
+ * exactly at block boundaries without triggering false intersections.
+ *
+ * @param blockPos Position where block would be placed
+ * @param entityBox Entity's current bounding box
+ * @return true if the block would intersect the entity
+ */
+[[nodiscard]] inline bool wouldBlockIntersectEntity(const BlockPos& blockPos, const AABB& entityBox) {
+    // Block AABB shrunk by margin to allow entities at exact boundaries
+    AABB blockBox(
+        static_cast<float>(blockPos.x) + COLLISION_MARGIN,
+        static_cast<float>(blockPos.y) + COLLISION_MARGIN,
+        static_cast<float>(blockPos.z) + COLLISION_MARGIN,
+        static_cast<float>(blockPos.x + 1) - COLLISION_MARGIN,
+        static_cast<float>(blockPos.y + 1) - COLLISION_MARGIN,
+        static_cast<float>(blockPos.z + 1) - COLLISION_MARGIN
+    );
+    return blockBox.intersects(entityBox);
+}
+
+/**
+ * @brief Check if placing a block would intersect a physics body
+ *
+ * Convenience overload that extracts the bounding box from a PhysicsBody.
+ */
+[[nodiscard]] inline bool wouldBlockIntersectBody(const BlockPos& blockPos, const PhysicsBody& body) {
+    return wouldBlockIntersectEntity(blockPos, body.boundingBox());
+}
+
+// ============================================================================
 // Raycasting utilities
 // ============================================================================
 
@@ -431,5 +476,113 @@ private:
     RaycastMode mode,
     const BlockShapeProvider& shapeProvider
 );
+
+// ============================================================================
+// Camera collision utilities
+// ============================================================================
+
+// Minimum distance camera should maintain from walls to avoid near-plane clipping.
+// This should be larger than the camera's near plane (typically 0.1) plus the
+// half-width of the near plane at grazing angles. With 70° FOV and 16:9 aspect,
+// the corner of the near plane is ~0.14 from center. At 45° to a wall, we need
+// extra margin because the frustum edge extends further toward the wall.
+// Using 0.4 to ensure the entire near plane stays outside walls at all angles.
+constexpr float CAMERA_COLLISION_RADIUS = 0.4f;
+
+/**
+ * @brief Adjust camera position to prevent clipping through walls
+ *
+ * Uses a two-phase approach:
+ * 1. Raycast from safe origin to desired camera to handle walls between body and camera
+ * 2. Probe outward from the camera position in 6 directions to ensure minimum clearance
+ *
+ * This prevents the camera's near plane from clipping through walls when
+ * the player is pressed against surfaces or in tight corners.
+ *
+ * @param safeOrigin A point known to be in open space (e.g., body center)
+ * @param desiredCameraPos Where the camera would ideally be positioned
+ * @param cameraRadius Minimum distance from walls (default: CAMERA_COLLISION_RADIUS)
+ * @param shapeProvider Function to get collision shapes for blocks
+ * @return Adjusted camera position that maintains minimum wall distance
+ */
+[[nodiscard]] inline Vec3 adjustCameraForWallCollision(
+    const Vec3& safeOrigin,
+    const Vec3& desiredCameraPos,
+    float cameraRadius,
+    const BlockShapeProvider& shapeProvider
+) {
+    Vec3 toCamera = desiredCameraPos - safeOrigin;
+    float distance = toCamera.length();
+
+    Vec3 adjustedPos = desiredCameraPos;
+
+    // Phase 1: Check path from safe origin to camera
+    if (distance > 0.001f) {
+        Vec3 direction = toCamera / distance;
+        RaycastResult hit = raycastBlocks(safeOrigin, direction, distance, RaycastMode::Collision, shapeProvider);
+
+        if (hit.hit) {
+            // Hit a wall - position camera at hit point pulled back by radius
+            float adjustedDistance = hit.distance - cameraRadius;
+            if (adjustedDistance < 0.0f) {
+                adjustedDistance = 0.0f;
+            }
+            adjustedPos = safeOrigin + direction * adjustedDistance;
+        }
+    }
+
+    // Phase 2: Probe in 26 directions (6 cardinal + 12 edge + 8 corner) to ensure clearance
+    // This catches walls at any angle, including diagonals when looking along a wall
+    static const float d = 0.577350269f;  // 1/sqrt(3) for normalized diagonals
+    static const float e = 0.707106781f;  // 1/sqrt(2) for edge diagonals
+    static const Vec3 probeDirections[26] = {
+        // 6 cardinal (faces)
+        Vec3(1, 0, 0), Vec3(-1, 0, 0),
+        Vec3(0, 1, 0), Vec3(0, -1, 0),
+        Vec3(0, 0, 1), Vec3(0, 0, -1),
+        // 12 edge diagonals
+        Vec3(e, e, 0), Vec3(e, -e, 0), Vec3(-e, e, 0), Vec3(-e, -e, 0),
+        Vec3(e, 0, e), Vec3(e, 0, -e), Vec3(-e, 0, e), Vec3(-e, 0, -e),
+        Vec3(0, e, e), Vec3(0, e, -e), Vec3(0, -e, e), Vec3(0, -e, -e),
+        // 8 corner diagonals
+        Vec3(d, d, d), Vec3(d, d, -d), Vec3(d, -d, d), Vec3(d, -d, -d),
+        Vec3(-d, d, d), Vec3(-d, d, -d), Vec3(-d, -d, d), Vec3(-d, -d, -d)
+    };
+
+    Vec3 pushback(0, 0, 0);
+    for (const Vec3& dir : probeDirections) {
+        RaycastResult hit = raycastBlocks(adjustedPos, dir, cameraRadius, RaycastMode::Collision, shapeProvider);
+        if (hit.hit) {
+            // Wall is closer than cameraRadius - need to push back
+            float penetration = cameraRadius - hit.distance;
+            if (penetration > 0.0f) {
+                pushback = pushback - dir * penetration;
+            }
+        }
+    }
+
+    // Apply pushback, but don't push past safe origin
+    adjustedPos = adjustedPos + pushback;
+
+    // Ensure we don't end up behind the safe origin (inside body)
+    Vec3 toAdjusted = adjustedPos - safeOrigin;
+    if (glm::dot(toAdjusted, toCamera) < 0.0f && distance > 0.001f) {
+        // Pushed behind origin, clamp to origin
+        adjustedPos = safeOrigin;
+    }
+
+    return adjustedPos;
+}
+
+/**
+ * @brief Convenience overload using default camera radius
+ */
+[[nodiscard]] inline Vec3 adjustCameraForWallCollision(
+    const Vec3& safeOrigin,
+    const Vec3& desiredCameraPos,
+    const BlockShapeProvider& shapeProvider
+) {
+    return adjustCameraForWallCollision(safeOrigin, desiredCameraPos, CAMERA_COLLISION_RADIUS, shapeProvider);
+}
 
 }  // namespace finevox

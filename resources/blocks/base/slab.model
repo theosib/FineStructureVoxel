@@ -1,0 +1,7 @@
+# Base slab model
+# Include this in specific block models
+
+geometry: shapes/slab_faces
+collision: shapes/slab_collision
+rotations: vertical
+hardness: 1.0

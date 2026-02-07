@@ -1,0 +1,7 @@
+# Glowstone - light-emitting block
+include: base/solid_cube
+texture: blocks/glowstone
+sounds: glass
+hardness: 0.3
+light-emission: 15
+light-attenuation: 0

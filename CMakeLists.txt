@@ -49,6 +49,8 @@ add_library(finevox STATIC
     src/physics.cpp
     src/mesh.cpp
     src/block_type.cpp
+    src/block_model.cpp
+    src/block_model_loader.cpp
     src/block_handler.cpp
     src/block_event.cpp
     src/module.cpp
@@ -94,6 +96,11 @@ if(FINEVOX_BUILD_RENDER)
 
     if(NOT EXISTS "${FINEVK_DIR}/include/finevk/finevk.hpp")
         message(FATAL_ERROR "FineStructureVK not found at ${FINEVK_DIR}. Set FINEVK_DIR to the correct path.")
+    endif()
+
+    # Find finegui
+    if(NOT DEFINED FINEGUI_DIR)
+        set(FINEGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../finegui" CACHE PATH "Path to finegui")
     endif()
 
     # Add the render module library
@@ -184,6 +191,23 @@ if(FINEVOX_BUILD_RENDER)
             finevox_render
         )
 
+        # Link finegui if available
+        if(EXISTS "${FINEGUI_DIR}/include/finegui/finegui.hpp")
+            target_include_directories(finevox_render_demo PRIVATE
+                ${FINEGUI_DIR}/include
+                ${FINEGUI_DIR}/third_party/imgui
+            )
+            if(EXISTS "${FINEGUI_DIR}/build/libfinegui.a")
+                target_link_libraries(finevox_render_demo PRIVATE
+                    "${FINEGUI_DIR}/build/libfinegui.a"
+                )
+            endif()
+            target_compile_definitions(finevox_render_demo PRIVATE FINEVOX_HAS_GUI=1)
+            message(STATUS "FineStructureVoxel: finegui found at ${FINEGUI_DIR}")
+        else()
+            message(STATUS "FineStructureVoxel: finegui not found, GUI disabled")
+        endif()
+
         # Copy shaders to build directory
         add_dependencies(finevox_render_demo finevox_shaders)
 
@@ -231,6 +255,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_physics.cpp
         tests/test_mesh.cpp
         tests/test_block_type.cpp
+        tests/test_block_model.cpp
         tests/test_config_parser.cpp
         tests/test_config_file.cpp
         tests/test_blocking_queue.cpp

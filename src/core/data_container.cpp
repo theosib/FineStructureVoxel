@@ -18,6 +18,37 @@ const DataValue* DataContainer::getRaw(DataKey key) const {
     return &it->second;
 }
 
+DataContainer* DataContainer::getChild(DataKey key) {
+    auto it = data_.find(key);
+    if (it == data_.end()) return nullptr;
+    auto* ptr = std::get_if<std::unique_ptr<DataContainer>>(&it->second);
+    if (!ptr || !*ptr) return nullptr;
+    return ptr->get();
+}
+
+const DataContainer* DataContainer::getChild(DataKey key) const {
+    auto it = data_.find(key);
+    if (it == data_.end()) return nullptr;
+    auto* ptr = std::get_if<std::unique_ptr<DataContainer>>(&it->second);
+    if (!ptr || !*ptr) return nullptr;
+    return ptr->get();
+}
+
+DataContainer& DataContainer::getOrCreateChild(DataKey key) {
+    auto it = data_.find(key);
+    if (it != data_.end()) {
+        auto* ptr = std::get_if<std::unique_ptr<DataContainer>>(&it->second);
+        if (ptr && *ptr) {
+            return **ptr;
+        }
+    }
+    // Create new nested DataContainer
+    auto child = std::make_unique<DataContainer>();
+    auto& ref = *child;
+    data_[key] = std::move(child);
+    return ref;
+}
+
 DataValue DataContainer::cloneValue(const DataValue& value) {
     return std::visit([](const auto& v) -> DataValue {
         using T = std::decay_t<decltype(v)>;

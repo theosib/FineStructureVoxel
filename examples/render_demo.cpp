@@ -47,6 +47,9 @@
 #include <finevox/core/entity_manager.hpp>
 #include <finevox/core/graphics_event_queue.hpp>
 #include <finevox/core/config.hpp>
+#include <finevox/core/player_controller.hpp>
+#include <finevox/core/input_context.hpp>
+#include <finevox/core/key_bindings.hpp>
 #include <finevox/worldgen/world_generator.hpp>
 #include <finevox/worldgen/generation_passes.hpp>
 #include <finevox/worldgen/biome_loader.hpp>
@@ -86,120 +89,6 @@ BlockPos getPlacePosition(const BlockPos& hitPos, Face face) {
         default: return hitPos;
     }
 }
-
-// Simple first-person camera input handler
-// Uses FineVK's Camera with double-precision position support
-struct CameraInput {
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-    float moveSpeed = 10.0f;
-    float lookSensitivity = 0.002f;
-    float jumpVelocity = 8.0f;  // Jump impulse (blocks/sec)
-
-    bool moveForward = false;
-    bool moveBack = false;
-    bool moveLeft = false;
-    bool moveRight = false;
-    bool moveUp = false;      // Used for fly mode up
-    bool moveDown = false;    // Used for fly mode down / crouch
-    bool jumpRequested = false;  // Jump in physics mode
-
-    void look(float dx, float dy) {
-        yaw -= dx * lookSensitivity;
-        pitch -= dy * lookSensitivity;
-        pitch = glm::clamp(pitch, -1.5f, 1.5f);
-    }
-
-    // Get forward vector from yaw/pitch
-    glm::vec3 forwardVec() const {
-        return glm::vec3{
-            std::cos(pitch) * std::sin(yaw),
-            std::sin(pitch),
-            std::cos(pitch) * std::cos(yaw)
-        };
-    }
-
-    // Get horizontal movement direction from input (XZ plane)
-    Vec3 getMoveDirection() const {
-        if (!moveForward && !moveBack && !moveLeft && !moveRight) {
-            return Vec3(0.0f);
-        }
-
-        // Use same approach as fly mode for consistency
-        Vec3 horizontalForward(std::sin(yaw), 0.0f, std::cos(yaw));
-        Vec3 right = glm::normalize(glm::cross(horizontalForward, Vec3(0, 1, 0)));
-
-        Vec3 dir(0.0f);
-        if (moveForward) dir += horizontalForward;
-        if (moveBack) dir -= horizontalForward;
-        if (moveRight) dir += right;
-        if (moveLeft) dir -= right;
-
-        if (glm::length(dir) > 0.0f) {
-            return glm::normalize(dir);
-        }
-        return Vec3(0.0f);
-    }
-
-    // Apply physics-based movement to player body
-    void applyPhysicsMovement(PhysicsBody& body, PhysicsSystem& physics, float dt) {
-        // Get horizontal movement direction
-        Vec3 moveDir = getMoveDirection();
-
-        // Set horizontal velocity from input
-        Vec3 vel = body.velocity();
-        if (glm::length(moveDir) > 0.0f) {
-            vel.x = moveDir.x * moveSpeed;
-            vel.z = moveDir.z * moveSpeed;
-        } else {
-            // Apply friction when not moving (quick stop)
-            vel.x *= 0.8f;
-            vel.z *= 0.8f;
-            if (std::abs(vel.x) < 0.1f) vel.x = 0.0f;
-            if (std::abs(vel.z) < 0.1f) vel.z = 0.0f;
-        }
-
-        // Handle jumping
-        if (jumpRequested && body.isOnGround()) {
-            vel.y = jumpVelocity;
-            jumpRequested = false;  // Consume jump request
-        }
-
-        body.setVelocity(vel);
-
-        // Apply gravity and move with collision
-        physics.update(body, dt);
-    }
-
-    // Apply free-fly movement to camera using double-precision (original behavior)
-    void applyFlyMovement(finevk::Camera& camera, float dt) {
-        // Horizontal forward (XZ plane only, ignoring pitch)
-        glm::dvec3 horizontalForward{
-            std::sin(yaw),
-            0.0,
-            std::cos(yaw)
-        };
-        glm::dvec3 right = glm::normalize(glm::cross(horizontalForward, glm::dvec3(0, 1, 0)));
-
-        glm::dvec3 velocity{0.0};
-        if (moveForward) velocity += horizontalForward;
-        if (moveBack) velocity -= horizontalForward;
-        if (moveRight) velocity += right;
-        if (moveLeft) velocity -= right;
-        if (moveUp) velocity.y += 1.0;
-        if (moveDown) velocity.y -= 1.0;
-
-        if (glm::length(velocity) > 0.0) {
-            velocity = glm::normalize(velocity) * static_cast<double>(moveSpeed);
-        }
-
-        // Use FineVK's double-precision move
-        camera.move(velocity * static_cast<double>(dt));
-    }
-};
-
-// Eye height offset from player position (bottom of bounding box)
-constexpr float PLAYER_EYE_HEIGHT = 1.62f;  // Minecraft-style eye height
 
 // Load all block definitions from spec files
 // Returns a map of block geometries for blocks with custom meshes
@@ -529,15 +418,15 @@ int main(int argc, char* argv[]) {
         // Create input manager
         auto inputManager = finevk::InputManager::create(window.get());
 
-        // Set up action mappings for movement controls
-        inputManager->mapAction("forward", GLFW_KEY_W);
-        inputManager->mapAction("back", GLFW_KEY_S);
-        inputManager->mapAction("left", GLFW_KEY_A);
-        inputManager->mapAction("right", GLFW_KEY_D);
-        inputManager->mapAction("up", GLFW_KEY_SPACE);
-        inputManager->mapAction("down", GLFW_KEY_LEFT_SHIFT);
-        inputManager->mapActionToMouse("break", GLFW_MOUSE_BUTTON_LEFT);
-        inputManager->mapActionToMouse("place", GLFW_MOUSE_BUTTON_RIGHT);
+        // Load key bindings from config (falls back to defaults if not configured)
+        auto keyBindings = loadKeyBindings();
+        for (const auto& binding : keyBindings) {
+            if (binding.isMouse) {
+                inputManager->mapActionToMouse(binding.action, binding.keyCode);
+            } else {
+                inputManager->mapAction(binding.action, binding.keyCode);
+            }
+        }
 
         // Load all block definitions from spec files
         // This registers block types and loads custom geometries
@@ -707,7 +596,7 @@ int main(int argc, char* argv[]) {
         worldRenderer.markAllDirty();
 
         // Camera setup - use FineVK's Camera with double-precision support
-        CameraInput input;
+        PlayerController playerController;
         finevk::Camera camera;
         camera.setPerspective(70.0f, float(window->width()) / float(window->height()), 0.1f, 500.0f);
 
@@ -717,8 +606,8 @@ int main(int argc, char* argv[]) {
             camera.moveTo(glm::dvec3(3.0, 2.0, 3.0));
             // Look at block center
             glm::dvec3 toBlock = glm::dvec3(0.5, 0.5, 0.5) - camera.positionD();
-            input.yaw = std::atan2(toBlock.x, toBlock.z);
-            input.pitch = std::atan2(toBlock.y, glm::length(glm::dvec2(toBlock.x, toBlock.z)));
+            playerController.setYaw(static_cast<float>(std::atan2(toBlock.x, toBlock.z)));
+            playerController.setPitch(static_cast<float>(std::atan2(toBlock.y, glm::length(glm::dvec2(toBlock.x, toBlock.z)))));
             std::cout << "Single block mode: camera at (3,2,3) looking at block\n";
         } else if (startAtLargeCoords) {
             // Start at large coordinates to test precision
@@ -745,8 +634,11 @@ int main(int argc, char* argv[]) {
             BlockTypeId::fromName("wedge")
         };
 
-        // Physics state (declared early so callbacks can reference it)
-        bool physicsEnabled = false;  // Start in fly mode for familiarity
+        // Input context for routing (gameplay vs menu vs chat)
+        InputContext inputContext = InputContext::Gameplay;
+
+        // Sync player controller fly position with initial camera position
+        playerController.setFlyPosition(camera.positionD());
 
         // Block shape provider for raycasting - uses BlockRegistry for collision shapes
         BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
@@ -766,9 +658,12 @@ int main(int argc, char* argv[]) {
         PhysicsSystem physicsSystem(shapeProvider);
         glm::dvec3 startPos = camera.positionD();
         SimplePhysicsBody playerBody(
-            Vec3(static_cast<float>(startPos.x), static_cast<float>(startPos.y - PLAYER_EYE_HEIGHT), static_cast<float>(startPos.z)),
+            Vec3(static_cast<float>(startPos.x), static_cast<float>(startPos.y - playerController.eyeHeight()), static_cast<float>(startPos.z)),
             Vec3(0.3f, 0.9f, 0.3f)  // Player half-extents (0.6 x 1.8 x 0.6 full size)
         );
+
+        // Connect player controller to physics
+        playerController.setPhysics(&playerBody, &physicsSystem);
 
         // Spawn player entity in the entity system
         EntityId playerId = entityManager.spawnPlayer(playerBody.position());
@@ -791,8 +686,8 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Jump in physics mode (space key)
-                if (e.key == GLFW_KEY_SPACE && physicsEnabled && inputManager->isMouseCaptured()) {
-                    input.jumpRequested = true;
+                if (e.key == GLFW_KEY_SPACE && !playerController.flyMode() && inputManager->isMouseCaptured()) {
+                    playerController.requestJump();
                 }
 
                 // Debug controls
@@ -804,16 +699,20 @@ int main(int argc, char* argv[]) {
 
                 if (e.key == GLFW_KEY_F2) {
                     // Teleport to large coordinates
-                    camera.moveTo(glm::dvec3(1000000.0, 32.0, 1000000.0));
-                    playerBody.setPosition(Vec3(1000000.0f, 32.0f - PLAYER_EYE_HEIGHT, 1000000.0f));
+                    glm::dvec3 teleportPos(1000000.0, 32.0, 1000000.0);
+                    camera.moveTo(teleportPos);
+                    playerController.setFlyPosition(teleportPos);
+                    playerBody.setPosition(Vec3(1000000.0f, 32.0f - playerController.eyeHeight(), 1000000.0f));
                     playerBody.setVelocity(Vec3(0.0f));
                     std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
                 }
 
                 if (e.key == GLFW_KEY_F3) {
                     // Teleport back to origin
-                    camera.moveTo(glm::dvec3(0.0, 32.0, 0.0));
-                    playerBody.setPosition(Vec3(0.0f, 32.0f - PLAYER_EYE_HEIGHT, 0.0f));
+                    glm::dvec3 teleportPos(0.0, 32.0, 0.0);
+                    camera.moveTo(teleportPos);
+                    playerController.setFlyPosition(teleportPos);
+                    playerBody.setPosition(Vec3(0.0f, 32.0f - playerController.eyeHeight(), 0.0f));
                     playerBody.setVelocity(Vec3(0.0f));
                     std::cout << "Teleported to origin\n";
                 }
@@ -828,16 +727,11 @@ int main(int argc, char* argv[]) {
 
                 if (e.key == GLFW_KEY_F5) {
                     // Toggle physics mode
-                    physicsEnabled = !physicsEnabled;
-                    if (physicsEnabled) {
-                        // Sync player body to current camera position
-                        glm::dvec3 camPos = camera.positionD();
-                        playerBody.setPosition(Vec3(
-                            static_cast<float>(camPos.x),
-                            static_cast<float>(camPos.y - PLAYER_EYE_HEIGHT),
-                            static_cast<float>(camPos.z)
-                        ));
-                        playerBody.setVelocity(Vec3(0.0f));
+                    bool wasFlying = playerController.flyMode();
+                    playerController.setFlyMode(!wasFlying);
+                    if (!playerController.flyMode()) {
+                        // Sync camera to body position after mode switch
+                        camera.moveTo(playerController.eyePosition());
                         std::cout << "Physics mode: ON (gravity, collision, step-climbing)\n";
                     } else {
                         std::cout << "Physics mode: OFF (free-fly camera)\n";
@@ -967,7 +861,7 @@ int main(int argc, char* argv[]) {
                         // Left click while captured = break block
                         glm::dvec3 camPos = camera.positionD();
                         Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                        Vec3 direction = input.forwardVec();
+                        Vec3 direction = playerController.forwardVector();
 
                         RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                         if (result.hit) {
@@ -982,7 +876,7 @@ int main(int argc, char* argv[]) {
                     // Right click = place block
                     glm::dvec3 camPos = camera.positionD();
                     Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                    Vec3 direction = input.forwardVec();
+                    Vec3 direction = playerController.forwardVector();
 
                     RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                     if (result.hit) {
@@ -1063,31 +957,24 @@ int main(int argc, char* argv[]) {
             // Update input manager - dispatches queued events to callback, clears per-frame state
             inputManager->update();
 
-            // Update movement state from action mappings (only when mouse captured)
-            if (inputManager->isMouseCaptured()) {
-                input.moveForward = inputManager->isActionActive("forward");
-                input.moveBack = inputManager->isActionActive("back");
-                input.moveLeft = inputManager->isActionActive("left");
-                input.moveRight = inputManager->isActionActive("right");
-                input.moveDown = inputManager->isActionActive("down");
+            // Update movement state from action mappings (only when mouse captured in gameplay)
+            if (inputManager->isMouseCaptured() && inputContext == InputContext::Gameplay) {
+                playerController.setMoveForward(inputManager->isActionActive("forward"));
+                playerController.setMoveBack(inputManager->isActionActive("back"));
+                playerController.setMoveLeft(inputManager->isActionActive("left"));
+                playerController.setMoveRight(inputManager->isActionActive("right"));
+                playerController.setMoveDown(inputManager->isActionActive("down"));
                 // Space is handled specially: jump in physics mode, fly-up in fly mode
-                if (!physicsEnabled) {
-                    input.moveUp = inputManager->isActionActive("up");
+                if (playerController.flyMode()) {
+                    playerController.setMoveUp(inputManager->isActionActive("up"));
                 }
 
                 // Handle mouse look (using delta captured before update())
                 if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
-                    input.look(mouseDelta.x, mouseDelta.y);
+                    playerController.look(mouseDelta.x, mouseDelta.y);
                 }
             } else {
-                // Clear movement when not captured
-                input.moveForward = false;
-                input.moveBack = false;
-                input.moveLeft = false;
-                input.moveRight = false;
-                input.moveUp = false;
-                input.moveDown = false;
-                input.jumpRequested = false;
+                playerController.clearInput();
             }
 
             // Record frame start and get estimated frame period (tracks vsync timing)
@@ -1114,16 +1001,17 @@ int main(int argc, char* argv[]) {
             }
 
             // Update player/camera position
-            if (physicsEnabled) {
-                // Physics mode: apply physics-based movement
-                input.applyPhysicsMovement(playerBody, physicsSystem, dt);
+            playerController.update(dt);
 
-                // Calculate desired camera position (player feet + eye height)
+            if (playerController.flyMode()) {
+                // Fly mode: apply position delta to camera
+                camera.move(playerController.flyPositionDelta());
+            } else {
+                // Physics mode: camera follows body
                 Vec3 playerPos = playerBody.position();
-                Vec3 desiredCameraPos(playerPos.x, playerPos.y + PLAYER_EYE_HEIGHT, playerPos.z);
+                Vec3 desiredCameraPos(playerPos.x, playerPos.y + playerController.eyeHeight(), playerPos.z);
 
                 // Safe origin is body center (inside the collision volume)
-                // Body extends from feet (playerPos.y) to feet + 1.8 (2 * halfExtents.y)
                 Vec3 safeOrigin(playerPos.x, playerPos.y + 0.9f, playerPos.z);
 
                 // Adjust camera to prevent near-plane clipping through walls
@@ -1131,11 +1019,8 @@ int main(int argc, char* argv[]) {
                     safeOrigin, desiredCameraPos, shapeProvider);
 
                 camera.moveTo(glm::dvec3(adjustedCameraPos.x, adjustedCameraPos.y, adjustedCameraPos.z));
-            } else {
-                // Fly mode: direct camera movement (no collision)
-                input.applyFlyMovement(camera, dt);
             }
-            camera.setOrientation(input.forwardVec(), glm::vec3(0, 1, 0));
+            camera.setOrientation(playerController.forwardVector(), glm::vec3(0, 1, 0));
             camera.updateState();
 
             // Sync player entity position with physics body
@@ -1143,7 +1028,7 @@ int main(int argc, char* argv[]) {
                 player->setPosition(playerBody.position());
                 player->setVelocity(playerBody.velocity());
                 player->setOnGround(playerBody.isOnGround());
-                player->setLook(glm::degrees(input.yaw), glm::degrees(input.pitch));
+                player->setLook(glm::degrees(playerController.yaw()), glm::degrees(playerController.pitch()));
             }
 
             // Tick the entity manager (publishes snapshots to graphics queue)

@@ -1,5 +1,6 @@
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/event_queue.hpp"
 
@@ -280,6 +281,12 @@ void EntityManager::handlePlayerSneak(const BlockEvent& event, bool starting) {
 // ============================================================================
 
 std::unique_ptr<Entity> EntityManager::createEntity(EntityType type, EntityId id) {
+    // ItemDrop uses a specialized subclass — callers with an actual item
+    // should use spawnEntity(unique_ptr<Entity>) with a pre-built ItemDropEntity
+    if (type == EntityType::ItemDrop) {
+        return std::make_unique<ItemDropEntity>(id, ItemStack{});
+    }
+
     auto entity = std::make_unique<Entity>(id, type);
 
     // Configure based on type
@@ -316,12 +323,6 @@ std::unique_ptr<Entity> EntityManager::createEntity(EntityType type, EntityId id
         case EntityType::Spider:
             entity->setHalfExtents(Vec3(0.7f, 0.45f, 0.7f));  // Wide and flat
             entity->setEyeHeight(0.65f);
-            break;
-
-        case EntityType::ItemDrop:
-            entity->setHalfExtents(Vec3(0.125f, 0.125f, 0.125f));  // Tiny
-            entity->setEyeHeight(0.125f);
-            entity->setMaxStepHeight(0.0f);  // Items don't step
             break;
 
         case EntityType::Arrow:

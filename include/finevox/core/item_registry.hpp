@@ -2,61 +2,49 @@
 
 /**
  * @file item_registry.hpp
- * @brief Item type registration (stub)
+ * @brief Item type registration and lookup
  *
- * Design: [18-modules.md] §18.5 Registries
+ * Design: Phase 13 Inventory & Items
+ *
+ * Stores ItemType structs keyed by ItemTypeId (interned name).
+ * Thread-safe singleton registry, analogous to BlockRegistry.
  */
 
-#include <string>
-#include <string_view>
-#include <unordered_map>
+#include "finevox/core/item_type.hpp"
 #include <shared_mutex>
-#include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace finevox {
 
-// ============================================================================
-// ItemRegistry - Stub for item type registration
-// ============================================================================
-
-/**
- * @brief Registry for item types (STUB - Phase 7)
- *
- * This is a placeholder for the item registration system.
- * Full implementation will come when the inventory system is developed.
- *
- * Items are things that can be in inventories: tools, materials, food, etc.
- * Many blocks have corresponding items (for placement), but items and blocks
- * are registered separately.
- */
 class ItemRegistry {
 public:
-    /**
-     * @brief Get the global item registry instance
-     */
+    /// Get the global item registry instance
     static ItemRegistry& global();
 
-    /**
-     * @brief Register an item type (stub)
-     *
-     * Currently just tracks the name for validation purposes.
-     *
-     * @param name Fully-qualified item name (e.g., "blockgame:diamond_sword")
-     * @return true if registered, false if name already exists
-     */
+    /// Register an item type. ID comes from the ItemType's id field.
+    /// @return true if registered, false if name already exists
+    bool registerType(const ItemType& type);
+
+    /// Convenience: register with just a name (creates default ItemType)
     bool registerType(std::string_view name);
 
-    /**
-     * @brief Check if an item type is registered
-     * @param name Item type name
-     * @return true if registered
-     */
+    /// Look up by ItemTypeId
+    [[nodiscard]] const ItemType* getType(ItemTypeId id) const;
+
+    /// Look up by name (interns first)
+    [[nodiscard]] const ItemType* getType(std::string_view name) const;
+
+    /// Check existence
+    [[nodiscard]] bool hasType(ItemTypeId id) const;
     [[nodiscard]] bool hasType(std::string_view name) const;
 
-    /**
-     * @brief Get number of registered item types
-     */
+    /// Get number of registered item types
     [[nodiscard]] size_t size() const;
+
+    /// Auto-register block items: for every block in BlockRegistry,
+    /// create a corresponding item with placesBlock set.
+    void registerBlockItems();
 
     // Non-copyable singleton
     ItemRegistry(const ItemRegistry&) = delete;
@@ -66,7 +54,7 @@ private:
     ItemRegistry() = default;
 
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, bool> types_;  // Just names for now
+    std::unordered_map<ItemTypeId, ItemType> types_;
 };
 
 }  // namespace finevox

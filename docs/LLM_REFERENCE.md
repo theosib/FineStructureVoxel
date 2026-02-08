@@ -586,6 +586,242 @@ Read-only accessor for neighbor subchunk data during mesh generation.
 
 ---
 
+## Player Controller (`core/player_controller.hpp`)
+
+First-person controller with fly and physics modes. finevk-independent — caller bridges input events.
+
+| Method | Notes |
+|--------|-------|
+| `setMoveForward/Back/Left/Right(bool)` | WASD input state |
+| `setMoveUp/Down(bool)` | Fly mode vertical, or jump/crouch |
+| `requestJump()` | Consumed next update if on ground |
+| `look(dx, dy)` | Raw pixel delta (mouse movement) |
+| `clearInput()` | Reset all movement input |
+| `setFlyMode(bool)` | Toggle fly/physics; handles position sync |
+| `setPhysics(PhysicsBody*, PhysicsSystem*)` | Enable physics mode (both non-null, or both null) |
+| `update(float dt)` | Process one frame of movement |
+| `eyePosition() -> dvec3` | World-space eye position (double-precision) |
+| `forwardVector() -> vec3` | Look direction unit vector |
+| `yaw()`, `pitch()` | Current look angles |
+| `isOnGround()` | Physics ground state |
+| `flyPositionDelta() -> dvec3` | Fly mode: frame delta for camera |
+
+**Config:** `setMoveSpeed(10.0f)`, `setLookSensitivity(0.002f)`, `setJumpVelocity(8.0f)`, `setEyeHeight(1.62f)`
+
+### Key Bindings (`core/key_bindings.hpp`)
+
+```cpp
+std::vector<KeyBinding> bindings = loadKeyBindings();  // From ConfigManager, defaults for missing
+saveKeyBindings(bindings);                              // Persist to ConfigManager
+std::vector<KeyBinding> defaults = getDefaultKeyBindings();
+```
+
+`KeyBinding { string action; int keyCode; bool isMouse; }` — key codes are GLFW key codes as raw ints (core doesn't include GLFW).
+
+---
+
+## Items & Inventory
+
+### ItemTypeId (`core/item_type.hpp`)
+
+Same pattern as `BlockTypeId`: `InternedId` wrapper, interned via `StringInterner::global()`.
+
+```cpp
+ItemTypeId iron = ItemTypeId::fromName("iron_ingot");
+std::string_view name = iron.name();
+bool empty = iron.isEmpty();
+```
+
+### ItemType (`core/item_type.hpp`)
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `id` | `ItemTypeId` | | Interned name |
+| `maxStackSize` | `int32_t` | `64` | Max items per stack |
+| `placesBlock` | `BlockTypeId` | empty | Block placed when used |
+| `miningSpeedMultiplier` | `float` | `1.0` | Tool mining speed |
+| `maxDurability` | `int32_t` | `0` | 0 = infinite |
+| `attackDamage` | `float` | `1.0` | Melee damage |
+
+### ItemStack (`core/item_stack.hpp`)
+
+```cpp
+ItemStack stack;
+stack.type = ItemTypeId::fromName("iron_ingot");
+stack.count = 16;
+stack.isEmpty();              // false
+stack.canStackWith(other);    // Same type, no durability/metadata
+auto half = stack.split(8);   // Split off 8 items
+auto copy = stack.clone();    // Deep copy (clones metadata DC)
+```
+
+Fields: `ItemTypeId type`, `int32_t count`, `int32_t durability`, `unique_ptr<DataContainer> metadata`
+
+### ItemRegistry (`core/item_registry.hpp`)
+
+Singleton: `ItemRegistry::global()`
+
+| Method | Signature |
+|--------|-----------|
+| `registerType` | `bool (const ItemType&)` |
+| `registerType` | `bool (string_view name)` |
+| `getType` | `const ItemType* (ItemTypeId)` — nullptr if missing |
+| `hasType` | `bool (ItemTypeId)` |
+| `size` | `size_t` |
+
+### InventoryView (`core/inventory.hpp`)
+
+Ephemeral, lock-free adapter over `DataContainer`. Create when needed; just holds references.
+
+```cpp
+DataContainer dc;
+NameRegistry registry;
+InventoryView inv(dc, registry);
+inv.setSlotCount(27);
+inv.addItem(ironId, 64);           // Returns overflow count
+ItemStack taken = inv.takeItem(0, 32);
+inv.swapSlots(0, 1);
+bool has = inv.hasItem(ironId, 10);
+int32_t total = inv.countItem(ironId);
+inv.removeItem(ironId, 5);
+```
+
+Works identically for block inventories (`SubChunk::blockData()`) and entity inventories (`Entity::entityData()`).
+
+**DC storage format:** `"size"` = slot count, `"0"`, `"1"`, ... = nested DC per non-empty slot (`"t"` = PersistentId, `"c"` = count, `"d"` = durability, `"m"` = metadata).
+
+### NameRegistry (`core/name_registry.hpp`)
+
+Per-world stable name/ID mapping for persistence. Each world owns one via `World::nameRegistry()`.
+
+```cpp
+NameRegistry registry;
+auto pid = registry.getOrAssign("iron_ingot");  // PersistentId (uint32_t)
+std::string_view name = registry.getName(pid);
+registry.saveTo(dc, "names");                    // Serialize to DataContainer
+auto loaded = NameRegistry::loadFrom(dc, "names");
+```
+
+Translation: `ItemTypeId` (session-local, fast) <-> `PersistentId` (stable, saved to disk).
+
+### ItemDropEntity (`core/item_drop_entity.hpp`)
+
+Entity subclass for dropped items in the world.
+
+| Method | Notes |
+|--------|-------|
+| `item()` | `const ItemStack&` / `ItemStack&` |
+| `takeItem()` | Moves item out (mark for removal after) |
+| `isPickupable()` | True after pickup delay elapsed |
+| `age()` | Seconds since creation |
+| `setPickupDelay(0.5f)` | Default: 0.5s |
+| `setMaxAge(300.0f)` | Default: 5 min before despawn |
+
+---
+
+## Tags, Unification & Item Matching
+
+### TagId (`core/tag.hpp`)
+
+Same pattern as `ItemTypeId`: interned wrapper over `InternedId`.
+
+```cpp
+TagId tag = TagId::fromName("c:ingots/iron");
+std::string_view name = tag.name();
+bool empty = tag.isEmpty();
+```
+
+Tag naming: `c:ingots/iron` (community), `finevox:fuel` (engine), `mymod:magic_metals` (mod).
+
+### TagRegistry (`core/tag_registry.hpp`)
+
+Singleton: `TagRegistry::global()`
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `addMember` | `void (TagId, InternedId)` | Pre-resolution |
+| `addMember` | `void (TagId, ItemTypeId)` | Convenience |
+| `addMember` | `void (TagId, BlockTypeId)` | Convenience |
+| `addInclude` | `void (TagId, TagId)` | Tag composition |
+| `rebuild()` | `bool` | Compute transitive closure; false = cycles |
+| `isResolved()` | `bool` | |
+| `hasTag` | `bool (InternedId, TagId)` | Post-resolution query |
+| `getTagsFor` | `vector<TagId> (InternedId)` | All tags for a member |
+| `getMembersOf` | `vector<InternedId> (TagId)` | All members (resolved) |
+| `tagCount()` | `size_t` | |
+| `allTags()` | `vector<TagId>` | |
+
+Tag composition: a tag can include other tags. `rebuild()` computes transitive closure with DFS cycle detection.
+
+### UnificationRegistry (`core/unification.hpp`)
+
+Singleton: `UnificationRegistry::global()`
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `declareGroup` | `void (ItemTypeId canonical, vector<ItemTypeId>, bool autoConvert=true)` | Explicit |
+| `declareSeparate` | `void (vector<ItemTypeId>)` | Prevent auto-unification |
+| `autoResolve` | `void (const TagRegistry&)` | Detect equivalences |
+| `propagateTags` | `void (TagRegistry&)` | Option A: share all tags |
+| `resolve` | `ItemTypeId (ItemTypeId)` | Canonical or self |
+| `areEquivalent` | `bool (ItemTypeId, ItemTypeId)` | Same group? |
+| `getGroup` | `vector<ItemTypeId> (ItemTypeId)` | All members |
+| `getCanonical` | `ItemTypeId (ItemTypeId)` | |
+| `isAutoConvert` | `bool (ItemTypeId)` | |
+
+**Auto-resolution:** Phase 1 groups by shared `c:` tags across namespaces. Phase 2 groups by base name. Canonical: unnamespaced/`finevox:` > most tags > lowest InternedId.
+
+**Initialization sequence:**
+```cpp
+TagRegistry::global().rebuild();
+UnificationRegistry::global().autoResolve(TagRegistry::global());
+UnificationRegistry::global().propagateTags(TagRegistry::global());
+TagRegistry::global().rebuild();  // Re-resolve with propagated tags
+```
+
+### ItemMatch (`core/item_match.hpp`)
+
+Header-only recipe ingredient predicate.
+
+```cpp
+auto m1 = ItemMatch::empty();                     // Matches empty slots
+auto m2 = ItemMatch::exact(ironId);               // Matches iron_ingot (through unification)
+auto m3 = ItemMatch::tagged(TagId::fromName("c:ingots"));  // Matches any ingot
+
+m1.matches(ItemTypeId{});         // true
+m2.matches(modA_ironId);          // true (unified with iron_ingot)
+m3.matches(copperIngotId);        // true (tagged c:ingots)
+```
+
+### .tag File Format
+
+```
+tag c:ingots/iron {
+    iron_ingot
+    modA:iron_ingot
+}
+
+tag c:ingots {
+    include c:ingots/iron
+    include c:ingots/copper
+}
+
+unify nickel {
+    canonical: nickel_ingot
+    members: nickel_ingot, modA:nickel_ingot, modB:nickel_ingot
+    auto_convert: true
+}
+
+separate modA:redstone, modB:redstone
+```
+
+```cpp
+int count = loadTagFile("resources/tags/metals.tag", tags, unify);
+int count = loadTagFileFromString(content, tags, unify);  // For testing
+```
+
+---
+
 ## Module System (`core/module.hpp`)
 
 ### GameModule Interface
@@ -680,7 +916,7 @@ auto doc2 = parser.parseString("key: value");
 
 | Pattern | Example |
 |---------|---------|
-| Global singletons | `BlockRegistry::global()`, `BiomeRegistry::global()`, `FeatureRegistry::global()`, `StringInterner::global()` |
+| Global singletons | `BlockRegistry::global()`, `ItemRegistry::global()`, `TagRegistry::global()`, `UnificationRegistry::global()`, `BiomeRegistry::global()`, `FeatureRegistry::global()`, `StringInterner::global()` |
 | Builder pattern | `BlockType().setOpaque(true).setHardness(1.5f).setLightEmission(12)` |
 | Data-driven loading | `BiomeLoader::loadDirectory(dir, prefix)`, `FeatureLoader::loadDirectory(dir, prefix)` |
 | Namespaced names | `"namespace:localname"` everywhere (blocks, biomes, features, modules) |

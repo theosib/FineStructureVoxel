@@ -2,7 +2,7 @@
 
 **Purpose:** Cross-reference between implementation files and design documentation to maintain consistency and traceability.
 
-**Status:** Audited — all source files mapped, all design docs reviewed (last audit: 2026-02-07)
+**Status:** Audited — all source files mapped, all design docs reviewed (last audit: 2026-02-08)
 
 ---
 
@@ -225,6 +225,39 @@
 
 **Resolution:** The `Block` wrapper from doc 04 was merged into `BlockContext` rather than implemented as a separate type. Both served similar purposes (ephemeral block access with convenience methods). `BlockContext` already had `World&` access for neighbor queries and tick scheduling, so Block's unique features (`isAir()`, `isOpaque()`, `isTransparent()`, `skyLight()`, `blockLight()`, `combinedLight()`, `type()`, `chunkPos()`, `localIndex()`, `rotationIndex()`) were added to BlockContext.
 
+## Player Controller & Input (Phase 11/12)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/core/player_controller.hpp` | [10] §10.2 | First-person controller with fly/physics modes |
+| `src/core/player_controller.cpp` | [10] §10.2 | Movement, look, jump, mode switching |
+| `include/finevox/core/key_bindings.hpp` | [10] §10.3 | Key binding persistence via ConfigManager |
+| `src/core/key_bindings.cpp` | [10] §10.3 | Default bindings, load/save |
+
+## Inventory & Items (Phase 13)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/core/item_type.hpp` | Phase 13 | ItemTypeId (interned wrapper), ItemType properties |
+| `include/finevox/core/item_stack.hpp` | Phase 13 | ItemStack (type + count + durability + metadata) |
+| `include/finevox/core/inventory.hpp` | Phase 13 | InventoryView ephemeral adapter over DataContainer |
+| `src/core/inventory.cpp` | Phase 13 | Slot read/write, add/take/swap/count operations |
+| `include/finevox/core/name_registry.hpp` | Phase 13 | Per-world stable name↔PersistentId mapping |
+| `src/core/name_registry.cpp` | Phase 13 | NameRegistry with DataContainer serialization |
+| `include/finevox/core/item_drop_entity.hpp` | Phase 13 | ItemDropEntity (dropped items in world) |
+| `src/core/item_drop_entity.cpp` | Phase 13 | Pickup delay, despawn timer, aging |
+
+## Tags, Unification & Item Matching (Phase 14)
+
+| Source File | Design Section | Notes |
+|-------------|----------------|-------|
+| `include/finevox/core/tag.hpp` | Phase 14 | TagId (interned wrapper, same pattern as ItemTypeId) |
+| `include/finevox/core/tag_registry.hpp` | Phase 14 | TagRegistry with composition and cycle detection |
+| `src/core/tag_registry.cpp` | Phase 14 | Tag resolution, .tag file parser, loadTagFile() |
+| `include/finevox/core/unification.hpp` | Phase 14 | UnificationRegistry for cross-mod item equivalence |
+| `src/core/unification.cpp` | Phase 14 | Auto-resolution, tag propagation, canonical selection |
+| `include/finevox/core/item_match.hpp` | Phase 14 | ItemMatch predicate (empty/exact/tagged), header-only |
+
 ---
 
 ## Documented but Not Implemented (Future Work)
@@ -268,8 +301,8 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 ### Unimplemented Design Docs
 | Doc | Feature | Notes |
 |-----|---------|-------|
-| 10 | Input System | `InputManager`, `PlayerController` |
 | 12 | Scripting | External dependency, not integrated |
+| ~~10~~ | ~~Input System~~ | Implemented in Phase 11/12 (see Player Controller section above) |
 | ~~21~~ | ~~Clipboard/Schematics~~ | Implemented in Phase 10 (see World Generation section above) |
 
 ---
@@ -331,7 +364,7 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 
 ## Design Document Audit
 
-Full audit of all design docs against source code. Last updated 2026-02-07.
+Full audit of all design docs against source code. Last updated 2026-02-08.
 
 ### Docs With Full Source Coverage (Checked)
 
@@ -358,7 +391,7 @@ Full audit of all design docs against source code. Last updated 2026-02-07.
 
 | Doc | Topic | Status | Notes |
 |-----|-------|--------|-------|
-| 10 | Input System | ❌ Not started | `InputManager`, `PlayerController` not implemented |
+| 10 | Input System | ✅ Implemented | Phase 11/12 — `PlayerController`, `KeyBindings` in `finevox::` |
 | 12 | Scripting | ❌ Not started | Noted as external dependency; no integration yet |
 | 21 | Clipboard/Schematics | ✅ Implemented | Phase 10 — `BlockSnapshot`, `Schematic`, `ClipboardManager` in `finevox::worldgen` |
 

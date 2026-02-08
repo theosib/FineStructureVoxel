@@ -1163,16 +1163,110 @@ Client cache is per-server, validated by content hash.
 
 ---
 
-## 26.16 Open Questions
+## 26.16 Inventory Data Ownership & Threading
+
+### 26.16.1 Current Architecture (Single-Player)
+
+`InventoryView` is an ephemeral, lock-free adapter over `DataContainer`. It holds bare
+references (`DataContainer&`, `NameRegistry&`) and provides no synchronization. All
+inventory access currently happens on the game thread:
+
+- **Block inventories**: `SubChunk::blockData()` → `InventoryView` on game thread
+- **Entity inventories**: `Entity::getOrCreateEntityData()` → `InventoryView` on game thread
+- **Render thread**: receives entity snapshots via `GraphicsEventQueue`, never touches
+  inventory DataContainers directly
+
+This is correct — `InventoryView` intentionally has no locks. Synchronization belongs
+at the data-ownership boundary (like `World`'s `shared_mutex`), not inside the adapter.
+
+### 26.16.2 Networked Architecture (Future)
+
+In a client-server model, the inventory data path changes fundamentally:
+
+**Server side:**
+- Server is authoritative for all inventory state
+- `InventoryView` wraps the server's world DataContainers (same as single-player)
+- Server sends inventory diffs to clients via `UIUpdate` messages (§26.8.4)
+- Server validates all client inventory actions (`UIAction`) before applying
+
+**Client side:**
+- Client does **not** wrap server-side DataContainers
+- Client maintains a **local inventory DataContainer** populated from network messages
+- The render/UI thread reads this local DC; the network thread writes to it
+- This read/write boundary needs synchronization (external to `InventoryView`)
+
+**Synchronization strategies for the client's local inventory DC:**
+
+| Strategy | Pros | Cons |
+|----------|------|------|
+| Copy-on-receive (swap pointer) | Lock-free reads, simple | Allocates per update |
+| Shared mutex on DC | Simple, familiar | Contention under frequent updates |
+| Double-buffer (render reads A, network writes B, swap) | Zero contention | Complexity, memory |
+| Event queue (like `GraphicsEventQueue`) | Consistent with entity system | Already proven pattern |
+
+The event queue approach is most consistent with the existing entity snapshot pattern:
+network thread pushes `InventoryUpdate` events, render thread applies them to its local
+copy before rendering the frame.
+
+### 26.16.3 NameRegistry Sync
+
+The per-world `NameRegistry` maps item/block names to stable `PersistentId` values used
+in serialized inventory data. In a networked context:
+
+- Server sends the full `NameRegistry` mapping at connect time (as part of `ServerHello`
+  or a dedicated `NameMappings` message)
+- Client uses server's PersistentIds when decoding `SlotContents` in `OpenUI`/`UIUpdate`
+- New names assigned server-side are pushed to clients as they appear
+- Client reconstructs `ItemTypeId` (session-local intern ID) from `NameRegistry` names:
+  `registry.getName(persistentId)` → `ItemTypeId::fromName(name)`
+
+### 26.16.4 Inventory Diffs vs Full State
+
+For bandwidth efficiency, inventory updates should be **slot-level diffs**, not full
+inventory snapshots:
+
+```cpp
+struct InventorySlotUpdate {
+    uint16_t instance_id;    // UI instance
+    uint8_t slot_index;      // Which slot changed
+    uint16_t item_persistent_id;  // NameRegistry PersistentId (0 = empty)
+    uint8_t count;
+    optional<uint16_t> durability;
+    optional<bytes> metadata;  // CBOR-encoded DataContainer (rare)
+};
+```
+
+Most interactions change 1-2 slots. Full inventory state is only sent on `OpenUI`.
+
+### 26.16.5 Client-Side Prediction for Inventory
+
+For responsive feel, the client can optimistically apply inventory actions:
+
+1. Player clicks slot → client immediately shows visual result
+2. Client sends `UIAction` to server
+3. Server validates, sends back `UIUpdate` (confirm or correct)
+4. If server disagrees, client snaps to server state
+
+This mirrors the block break/place prediction pattern (§26.5.1). The prediction is
+purely visual — the client's local inventory DC is the "optimistic" state. Server
+corrections overwrite it.
+
+## 26.17 Open Questions
 
 1. **Entity rendering data** - Enough in model defs, or need more?
 2. **Weather/sky** - Server state or client rendering?
 3. **Chat/commands** - String protocol details
 4. **Command blocks** - How to handle server-side scripting display
+5. **Inventory prediction rollback** - When server rejects an inventory action, should the
+   client replay subsequent local actions on the corrected state (like movement reconciliation),
+   or just snap to server state? For inventory, snapping is probably fine since inventory
+   actions are discrete and infrequent.
+6. **NameRegistry growth** - If the server assigns new PersistentIds mid-session (new mod items
+   loaded), how to push incremental updates to connected clients efficiently?
 
 ---
 
-## 26.17 Future Considerations
+## 26.18 Future Considerations
 
 - **UDP channel** - Unreliable for position updates
 - **WebSocket/WebRTC** - Browser client

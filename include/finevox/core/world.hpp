@@ -12,6 +12,7 @@
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
+#include "finevox/core/name_registry.hpp"
 #include <unordered_map>
 #include <memory>
 #include <shared_mutex>
@@ -227,6 +228,14 @@ public:
     [[nodiscard]] UpdateScheduler* updateScheduler() { return updateScheduler_; }
     [[nodiscard]] const UpdateScheduler* updateScheduler() const { return updateScheduler_; }
 
+    // ========================================================================
+    // Name Registry (Per-World Stable ID Mapping)
+    // ========================================================================
+
+    /// Get the per-world name registry for persistent name↔ID mapping
+    [[nodiscard]] NameRegistry& nameRegistry() { return nameRegistry_; }
+    [[nodiscard]] const NameRegistry& nameRegistry() const { return nameRegistry_; }
+
 private:
     mutable std::shared_mutex columnMutex_;
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> columns_;
@@ -250,6 +259,9 @@ private:
 
     // Config: always defer mesh rebuilds to lighting thread (for testing)
     bool alwaysDeferMeshRebuild_ = false;
+
+    // Per-world stable name↔ID mapping (for inventory serialization, networking)
+    NameRegistry nameRegistry_;
 };
 
 }  // namespace finevox

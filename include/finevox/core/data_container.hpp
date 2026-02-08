@@ -140,6 +140,30 @@ public:
     [[nodiscard]] const DataValue* getRaw(DataKey key) const;
 
     // ========================================================================
+    // Nested DataContainer access (mutable)
+    // ========================================================================
+
+    /// Get a mutable pointer to a nested DataContainer.
+    /// Returns nullptr if key doesn't exist or value isn't a DataContainer.
+    [[nodiscard]] DataContainer* getChild(DataKey key);
+    [[nodiscard]] const DataContainer* getChild(DataKey key) const;
+
+    /// Get or create a nested DataContainer at key.
+    /// If key exists but isn't a DataContainer, it is overwritten.
+    DataContainer& getOrCreateChild(DataKey key);
+
+    /// String-key convenience overloads
+    [[nodiscard]] DataContainer* getChild(std::string_view key) {
+        return getChild(internKey(key));
+    }
+    [[nodiscard]] const DataContainer* getChild(std::string_view key) const {
+        return getChild(internKey(key));
+    }
+    DataContainer& getOrCreateChild(std::string_view key) {
+        return getOrCreateChild(internKey(key));
+    }
+
+    // ========================================================================
     // Access by string key (convenience, auto-interns)
     // ========================================================================
 

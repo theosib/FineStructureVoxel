@@ -186,6 +186,32 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - Data-driven .biome/.feature/.ore config files
 - Schematic/clipboard system
 
+### Phase 11/12: Player Controller & Input ✓
+- PlayerController with fly mode and physics mode
+- Mouse look, WASD movement, jump, mode switching
+- KeyBindings persistence via ConfigManager
+- finevk-independent (caller bridges input events)
+
+### Phase 13: Inventory & Items ✓
+- ItemTypeId (interned wrapper, same pattern as BlockTypeId)
+- ItemStack (type + count + durability + metadata)
+- InventoryView (ephemeral lock-free adapter over DataContainer)
+- NameRegistry (per-world stable name↔PersistentId for persistence)
+- ItemRegistry expanded with ItemType properties
+- ItemDropEntity (pickup delay, despawn timer)
+- Entity DataContainer for per-entity extra data
+
+### Phase 14: Tags, Unification & Item Matching ✓
+- TagId (interned wrapper)
+- TagRegistry with tag composition (transitive closure, cycle detection)
+- UnificationRegistry for cross-mod item equivalence
+  - Auto-resolution from shared `c:` tags and base name matching
+  - Tag propagation: all unified members inherit all tags (Option A)
+  - Canonical selection: unnamespaced > most tags > first registered
+  - Logs warnings for inferred equivalences
+- ItemMatch predicate (empty/exact/tagged) for recipe ingredients
+- .tag file format (tag/unify/separate directives)
+
 ---
 
 ## Command Language Syntax Quick Reference
@@ -218,7 +244,7 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**All phases complete (0-10).** Library refactored into three shared libraries with separate namespaces.
+**Phases 0-14 complete.** 1120 tests passing. Library refactored into three shared libraries with separate namespaces.
 
 **Directory layout:**
 - `include/finevox/core/` — core headers (`finevox::`)
@@ -227,21 +253,21 @@ items[0]                # Array indexing (brackets - future)
 - `src/core/`, `src/worldgen/`, `src/render/` — source files mirror headers
 
 **Shared libraries:**
-- `libfinevox.dylib` — core (world, mesh, physics, persistence, events)
+- `libfinevox.dylib` — core (world, mesh, physics, persistence, events, items, tags)
 - `libfinevox_worldgen.dylib` — world generation (links finevox PUBLIC)
 - `libfinevox_render.dylib` — Vulkan rendering (links finevox PUBLIC)
 
-**Recent work:**
-- Phase 10 (world generation) complete — 966 tests passing
-- Library refactoring — namespaces, directories, shared objects
-- Documentation updated to match new structure
+**Recent work (Phases 11-14):**
+- Phase 11/12: PlayerController (fly + physics modes), KeyBindings persistence
+- Phase 13: ItemTypeId, ItemStack, InventoryView (ephemeral DC adapter), NameRegistry (per-world persistence), ItemDropEntity
+- Phase 14: TagRegistry (composable tags with cycle detection), UnificationRegistry (cross-mod item equivalence with auto-resolution), ItemMatch predicate, .tag file format
 
 **Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load
 - `UpdatePropagationPolicy` for cross-chunk updates
 - Network quiescence protocol
 
-**Next task:** TBD
+**Next task:** TBD (crafting recipes, or next system)
 **Blockers:** None
 
 ---
@@ -299,4 +325,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-07 — Library refactoring (namespaces, directories, shared objects)*
+*Last updated: 2026-02-08 — Phase 14 (Tags, Unification & Item Matching) complete*

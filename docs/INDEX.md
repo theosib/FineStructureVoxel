@@ -212,7 +212,10 @@
 | 8 | Yes | Complete | Lighting (block light, sky light, AO) |
 | 9 | Mixed | Mostly complete | Block update system (event queue, scheduled ticks) |
 | 10 | No | Complete | World generation (noise, biomes, pipeline, features, schematics) |
-| 11-20 | Mixed | Planned | Input, player, inventory, entities, sky, fluids, audio, UI, scripting, multiplayer |
+| 11/12 | Mixed | Complete | Player controller, key bindings, fly/physics movement modes |
+| 13 | No | Complete | Items & inventory (ItemTypeId, ItemStack, InventoryView, NameRegistry, ItemDropEntity) |
+| 14 | No | Complete | Tags, unification & item matching (TagRegistry, UnificationRegistry, ItemMatch) |
+| 15-20 | Mixed | Planned | Sky, fluids, audio, UI, scripting, multiplayer |
 
 See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
@@ -227,4 +230,4 @@ See [17 - Implementation Phases](17-implementation-phases.md) for full details.
 
 ---
 
-*Last Updated: 2026-02-07*
+*Last Updated: 2026-02-08*

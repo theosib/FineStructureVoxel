@@ -8,6 +8,7 @@
  */
 
 #include "finevox/core/block_event.hpp"
+#include "finevox/core/data_container.hpp"
 #include "finevox/core/physics.hpp"
 #include <string>
 
@@ -186,6 +187,20 @@ public:
     virtual void tick(float /*dt*/, World& /*world*/) {}
 
     // ========================================================================
+    // Extra Data (per-entity DataContainer for inventory, custom state, etc.)
+    // ========================================================================
+
+    /// Get extra data for this entity (may be nullptr)
+    [[nodiscard]] DataContainer* entityData() { return entityData_.get(); }
+    [[nodiscard]] const DataContainer* entityData() const { return entityData_.get(); }
+
+    /// Get or create extra data for this entity
+    DataContainer& getOrCreateEntityData() {
+        if (!entityData_) entityData_ = std::make_unique<DataContainer>();
+        return *entityData_;
+    }
+
+    // ========================================================================
     // Subchunk Tracking
     // ========================================================================
 
@@ -220,6 +235,9 @@ protected:
 
     // Subchunk tracking (for EntityManager)
     ChunkPos currentChunk_{0, 0, 0};
+
+    // Per-entity extra data (inventory, custom state, etc.)
+    std::unique_ptr<DataContainer> entityData_;
 };
 
 // ============================================================================

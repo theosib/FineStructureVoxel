@@ -689,6 +689,214 @@ std::string path = locator.findResource("engine", "resources");
 
 ---
 
+## 13. Items & Inventory
+
+finevox provides a type-safe item system that parallels block types, plus an inventory system built on top of `DataContainer`.
+
+### Item Types
+
+Register items similarly to blocks:
+
+```cpp
+#include "finevox/core/item_type.hpp"
+#include "finevox/core/item_registry.hpp"
+
+// Create item type IDs (interned strings, like BlockTypeId)
+auto ironIngot = ItemTypeId::fromName("iron_ingot");
+auto stick     = ItemTypeId::fromName("stick");
+
+// Register with metadata
+auto& items = ItemRegistry::global();
+items.registerItem(ironIngot, ItemType{
+    .displayName = "Iron Ingot",
+    .maxStackSize = 64
+});
+```
+
+### Item Stacks
+
+`ItemStack` is a value type holding an item type and count:
+
+```cpp
+#include "finevox/core/item_stack.hpp"
+
+ItemStack stack(ironIngot, 32);   // 32 iron ingots
+stack.grow(10);                    // Now 42
+stack.shrink(5);                   // Now 37
+bool empty = stack.isEmpty();      // false
+bool full  = stack.isFull();       // false (max 64)
+
+// Merge stacks
+ItemStack other(ironIngot, 30);
+int leftover = stack.mergeFrom(other);  // stack=64, leftover=3
+```
+
+### Inventory
+
+`InventoryView` is a lightweight adapter over `DataContainer`, providing slot-based access on the game thread:
+
+```cpp
+#include "finevox/core/inventory.hpp"
+
+// Create a 36-slot inventory
+DataContainer container;
+InventoryView inv(container, 36);
+
+// Add items — returns leftover count
+int leftover = inv.addItem(ItemStack(ironIngot, 50));
+
+// Query slots
+ItemStack contents = inv.getSlot(0);
+bool has = inv.contains(ironIngot, 10);  // Do we have at least 10?
+
+// Remove items
+inv.removeItem(ironIngot, 5);
+inv.clearSlot(0);
+```
+
+### Name Registry
+
+For persistence, `NameRegistry` provides stable name-to-ID mappings that survive save/load (unlike session-local `StringInterner` IDs):
+
+```cpp
+#include "finevox/core/name_registry.hpp"
+
+NameRegistry names;
+PersistentId pid = names.getOrAssign("iron_ingot");
+// pid is stable across save/load cycles
+std::string_view name = names.getName(pid);
+```
+
+---
+
+## 14. Tags, Unification & Item Matching
+
+Tags provide flexible category membership (e.g., "any wood plank"), while unification handles cross-mod item equivalence (e.g., multiple mods adding "nickel ingot").
+
+### Tags
+
+Tags group items or blocks into categories:
+
+```cpp
+#include "finevox/core/tag.hpp"
+#include "finevox/core/tag_registry.hpp"
+
+auto& tags = TagRegistry::global();
+
+// Define tags
+auto ironIngots = TagId::fromName("c:ingots/iron");
+auto allIngots  = TagId::fromName("c:ingots");
+
+// Add members (uses raw InternedId — works for both items and blocks)
+tags.addMember(ironIngots, ItemTypeId::fromName("iron_ingot").id);
+tags.addMember(ironIngots, ItemTypeId::fromName("modA:iron_ingot").id);
+
+// Tag composition — "all ingots" includes iron, copper, etc.
+tags.addInclude(allIngots, ironIngots);
+tags.addInclude(allIngots, TagId::fromName("c:ingots/copper"));
+
+// Resolve transitive closure (detects cycles)
+bool noCycles = tags.rebuild();
+
+// Query
+bool isIngot = tags.hasTag(ironIngot.id, allIngots);  // true
+std::vector<InternedId> members = tags.getMembersOf(allIngots);
+```
+
+### Unification
+
+When multiple mods add the same logical resource, unification declares them interchangeable:
+
+```cpp
+#include "finevox/core/unification.hpp"
+
+auto& unify = UnificationRegistry::global();
+
+// Explicit group declaration
+auto nickel   = ItemTypeId::fromName("nickel_ingot");
+auto nickelA  = ItemTypeId::fromName("modA:nickel_ingot");
+auto nickelB  = ItemTypeId::fromName("modB:nickel_ingot");
+unify.declareGroup(nickel, {nickel, nickelA, nickelB});
+
+// Auto-resolution detects equivalences from shared c: tags and name matching
+unify.autoResolve(TagRegistry::global());
+
+// Tag propagation — all unified members inherit all tags from any member
+unify.propagateTags(TagRegistry::global());
+TagRegistry::global().rebuild();  // Re-resolve after propagation
+
+// Queries
+ItemTypeId canonical = unify.resolve(nickelA);  // → nickel
+bool same = unify.areEquivalent(nickelA, nickelB);  // true
+```
+
+### ItemMatch
+
+Recipes use `ItemMatch` as a flexible predicate for ingredient matching:
+
+```cpp
+#include "finevox/core/item_match.hpp"
+
+// Match a specific item (resolves through unification)
+auto exact = ItemMatch::exact(nickelA);
+exact.matches(nickelB);  // true — same unification group
+
+// Match any item with a tag
+auto tagged = ItemMatch::tagged(allIngots);
+tagged.matches(ItemTypeId::fromName("iron_ingot"));  // true
+
+// Match empty slots
+auto empty = ItemMatch::empty();
+empty.matches(ItemTypeId{});  // true
+```
+
+### .tag File Format
+
+Tags and unification rules are loaded from `.tag` files:
+
+```
+# Tag definitions
+tag c:ingots/iron {
+    iron_ingot
+    modA:iron_ingot
+}
+
+# Tag composition
+tag c:ingots {
+    include c:ingots/iron
+    include c:ingots/copper
+}
+
+# Explicit unification
+unify nickel_ingot {
+    canonical: nickel_ingot
+    members: modA:nickel_ingot, modB:nickel_ingot
+    auto_convert: true
+}
+
+# Prevent auto-unification for specific items
+separate modA:redstone, modB:redstone
+```
+
+Load with:
+
+```cpp
+loadTagFile("path/to/items.tag", TagRegistry::global(), UnificationRegistry::global());
+```
+
+### Initialization Sequence
+
+After all mods are loaded, call in this order:
+
+```cpp
+TagRegistry::global().rebuild();
+UnificationRegistry::global().autoResolve(TagRegistry::global());
+UnificationRegistry::global().propagateTags(TagRegistry::global());
+TagRegistry::global().rebuild();  // Re-resolve with propagated tags
+```
+
+---
+
 ## Further Reading
 
 - [LLM_REFERENCE.md](LLM_REFERENCE.md) -- Dense API reference (every method signature)

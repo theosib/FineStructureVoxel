@@ -60,6 +60,9 @@ add_library(finevox SHARED
     src/core/module.cpp
     src/core/entity_registry.cpp
     src/core/item_registry.cpp
+    src/core/name_registry.cpp
+    src/core/inventory.cpp
+    src/core/item_drop_entity.cpp
     src/core/config_parser.cpp
     src/core/config_file.cpp
     src/core/mesh_worker_pool.cpp
@@ -70,6 +73,10 @@ add_library(finevox SHARED
     src/core/entity.cpp
     src/core/graphics_event_queue.cpp
     src/core/entity_manager.cpp
+    src/core/player_controller.cpp
+    src/core/key_bindings.cpp
+    src/core/tag_registry.cpp
+    src/core/unification.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -311,6 +318,9 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_biome.cpp
         tests/test_feature.cpp
         tests/test_generation.cpp
+        tests/test_player_controller.cpp
+        tests/test_inventory.cpp
+        tests/test_tags.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

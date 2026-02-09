@@ -450,12 +450,15 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             continue;
         }
 
-        // Calculate view-relative offset and set fog parameters
-        ChunkPushConstants pushConstants;
+        // Calculate view-relative offset and set fog/sky parameters
+        ChunkPushConstants pushConstants{};
         pushConstants.chunkOffset = calculateViewRelativeOffset(pos);
         pushConstants.fogStart = config_.fog.enabled ? config_.fog.startDistance : 0.0f;
-        pushConstants.fogColor = config_.fog.color;
+        pushConstants.fogColor = config_.fog.enabled ? config_.fog.color : glm::vec3(skyParams_.fogColor);
         pushConstants.fogEnd = config_.fog.enabled ? config_.fog.endDistance : 0.0f;
+        pushConstants.sunDirection = skyParams_.sunDirection;
+        pushConstants.skyBrightness = skyParams_.skyBrightness;
+        pushConstants.ambientLevel = skyParams_.ambientLevel;
 
         // Push constants (shared between vertex and fragment stages)
         pipelineLayout_->pushConstants(cmd.handle(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pushConstants);

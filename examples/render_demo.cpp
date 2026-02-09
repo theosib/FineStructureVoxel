@@ -50,6 +50,8 @@
 #include <finevox/core/player_controller.hpp>
 #include <finevox/core/input_context.hpp>
 #include <finevox/core/key_bindings.hpp>
+#include <finevox/core/world_time.hpp>
+#include <finevox/core/sky.hpp>
 #include <finevox/worldgen/world_generator.hpp>
 #include <finevox/worldgen/generation_passes.hpp>
 #include <finevox/worldgen/biome_loader.hpp>
@@ -533,6 +535,14 @@ int main(int argc, char* argv[]) {
         EntityManager entityManager(world, graphicsEventQueue);
         std::cout << "Entity system initialized\n";
 
+        // World time system for day/night cycle
+        WorldTime worldTime;
+        worldTime.setTicksPerSecond(20.0f);
+        worldTime.setTimeSpeed(1.0f);
+        bool timeFrozen = false;
+        float timeSpeedMultiplier = 1.0f;
+        std::cout << "World time initialized (20 ticks/sec, speed 1x)\n";
+
         // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
         int lightingMode = 2;  // Start with smooth lighting
         auto applyLightingMode = [&]() {
@@ -570,8 +580,11 @@ int main(int argc, char* argv[]) {
         std::cout << "Block light propagated.\n";
 
         // Set up light provider for lighting calculations
+        // Returns packed byte: sky in high nibble, block in low nibble
         worldRenderer.setLightProvider([&lightEngine](const BlockPos& pos) -> uint8_t {
-            return lightEngine.getCombinedLight(pos);
+            uint8_t sky = lightEngine.getSkyLight(pos);
+            uint8_t block = lightEngine.getBlockLight(pos);
+            return static_cast<uint8_t>((sky << 4) | block);
         });
         applyLightingMode();
 
@@ -826,6 +839,29 @@ int main(int argc, char* argv[]) {
                     std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
                 }
 
+                if (e.key == GLFW_KEY_T) {
+                    // Cycle time speed: 1x -> 10x -> 100x -> frozen -> 1x
+                    if (timeFrozen) {
+                        timeFrozen = false;
+                        timeSpeedMultiplier = 1.0f;
+                        worldTime.setFrozen(false);
+                        worldTime.setTimeSpeed(1.0f);
+                        std::cout << "Time: 1x speed\n";
+                    } else if (timeSpeedMultiplier < 5.0f) {
+                        timeSpeedMultiplier = 10.0f;
+                        worldTime.setTimeSpeed(10.0f);
+                        std::cout << "Time: 10x speed\n";
+                    } else if (timeSpeedMultiplier < 50.0f) {
+                        timeSpeedMultiplier = 100.0f;
+                        worldTime.setTimeSpeed(100.0f);
+                        std::cout << "Time: 100x speed\n";
+                    } else {
+                        timeFrozen = true;
+                        worldTime.setFrozen(true);
+                        std::cout << "Time: FROZEN\n";
+                    }
+                }
+
                 if (e.key == GLFW_KEY_B) {
                     // Cycle lighting mode: OFF -> FLAT -> SMOOTH -> OFF
                     lightingMode = (lightingMode + 1) % 3;
@@ -931,6 +967,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
         std::cout << "  F5: Toggle physics mode (gravity, collision)\n";
         std::cout << "  F6: Toggle async meshing\n";
+        std::cout << "  T: Cycle time speed (1x/10x/100x/frozen)\n";
         std::cout << "  B: Toggle smooth lighting\n";
         std::cout << "  C: Toggle frustum culling\n";
         std::cout << "  G: Toggle greedy meshing\n";
@@ -985,15 +1022,28 @@ int main(int argc, char* argv[]) {
             float dt = std::chrono::duration<float>(now - lastTime).count();
             lastTime = now;
 
+            // Advance world time and compute sky parameters
+            worldTime.advance(dt);
+            auto skyParams = computeSkyParameters(worldTime.timeOfDay());
+            worldRenderer.setSkyParameters(skyParams);
+
+            // Use dynamic fog color from sky
+            if (worldRenderer.fogDynamicColor()) {
+                worldRenderer.setFogColor(skyParams.fogColor);
+            }
+
             // FPS counter
             frameCount++;
             fpsTimer += dt;
             if (fpsTimer >= 1.0f) {
+                float tod = worldTime.timeOfDay();
+                const char* phase = worldTime.isDaytime() ? "Day" : "Night";
                 std::cout << "FPS: " << frameCount
                           << " | Chunks: " << worldRenderer.renderedChunkCount()
                           << "/" << worldRenderer.loadedChunkCount()
                           << " | Culled: " << worldRenderer.culledChunkCount()
                           << " | Tris: " << worldRenderer.renderedTriangleCount()
+                          << " | Time: " << phase << " " << static_cast<int>(tod * 24000) << "/24000"
                           << " | Frame: " << framePeriod.count() / 1000.0f << "ms"
                           << "\r" << std::flush;
                 frameCount = 0;
@@ -1078,7 +1128,7 @@ int main(int argc, char* argv[]) {
 
             // Render
             if (auto frame = renderer->beginFrame()) {
-                frame.beginRenderPass({0.2f, 0.3f, 0.4f, 1.0f});  // Sky blue
+                frame.beginRenderPass(skyParams.skyColor);  // Dynamic sky color
 
                 // Render the world
                 worldRenderer.render(frame);

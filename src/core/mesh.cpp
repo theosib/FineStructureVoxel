@@ -257,11 +257,13 @@ void MeshBuilder::buildSimpleMesh(
                 if (customGeom && !customGeom->isEmpty()) {
                     // Render custom geometry faces
                     // Get base light level for the block (sample from center)
-                    float baseLightLevel = 1.0f;
+                    float baseSkyLight = 1.0f;
+                    float baseBlockLight = 0.0f;
                     if ((smoothLighting_ || flatLighting_) && lightProvider_) {
                         // Sample light from the block's position (center approximation)
-                        uint8_t lightLevel = lightProvider_(blockWorldPos);
-                        baseLightLevel = static_cast<float>(lightLevel) / 15.0f;
+                        uint8_t packed = lightProvider_(blockWorldPos);
+                        baseSkyLight = static_cast<float>(packed >> 4) / 15.0f;
+                        baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
                     // Render each face in the custom geometry
@@ -291,16 +293,18 @@ void MeshBuilder::buildSimpleMesh(
                         glm::vec4 uvBounds = textureProvider(blockType, texFace);
 
                         // Calculate lighting for this face
-                        float faceLight = baseLightLevel;
+                        float faceSkyLight = baseSkyLight;
+                        float faceBlockLight = baseBlockLight;
                         if (faceGeom.isStandardFace() && lightProvider_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
                             BlockPos faceAirPos = blockWorldPos.neighbor(face);
-                            uint8_t lightLevel = lightProvider_(faceAirPos);
-                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                            uint8_t packed = lightProvider_(faceAirPos);
+                            faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
+                            faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                         }
 
                         // Add the custom face
-                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceLight);
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
                     }
                 } else {
                     // Standard cube rendering
@@ -337,22 +341,28 @@ void MeshBuilder::buildSimpleMesh(
                         }
 
                         // Calculate lighting for this face
-                        std::array<float, 4> lightValues;
+                        std::array<float, 4> skyLightValues;
+                        std::array<float, 4> blockLightValues;
                         if (smoothLighting_ && lightProvider_) {
                             // Smooth lighting: sample 9 points, average to 4 corners
-                            lightValues = getFaceLight(blockWorldPos, face);
+                            auto lightResult = getFaceSkyBlockLight(blockWorldPos, face);
+                            skyLightValues = lightResult.sky;
+                            blockLightValues = lightResult.block;
                         } else if (flatLighting_ && lightProvider_) {
                             // Flat lighting: sample 1 point, apply to all corners (shows raw L1 ball)
                             BlockPos faceAirPos = blockWorldPos.neighbor(face);
-                            uint8_t lightLevel = lightProvider_(faceAirPos);
-                            float light = static_cast<float>(lightLevel) / 15.0f;
-                            lightValues = {light, light, light, light};
+                            uint8_t packed = lightProvider_(faceAirPos);
+                            float skyVal = static_cast<float>(packed >> 4) / 15.0f;
+                            float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
+                            skyLightValues = {skyVal, skyVal, skyVal, skyVal};
+                            blockLightValues = {blockVal, blockVal, blockVal, blockVal};
                         } else {
-                            lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                            skyLightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+                            blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f};
                         }
 
                         // Add the face to the mesh
-                        addFace(mesh, localPos, face, uvBounds, aoValues, lightValues);
+                        addFace(mesh, localPos, face, uvBounds, aoValues, skyLightValues, blockLightValues);
                     }
                 }
             }
@@ -422,10 +432,12 @@ void MeshBuilder::buildGreedyMesh(
                     );
 
                     // Get base light level for the block
-                    float baseLightLevel = 1.0f;
+                    float baseSkyLight = 1.0f;
+                    float baseBlockLight = 0.0f;
                     if ((smoothLighting_ || flatLighting_) && lightProvider_) {
-                        uint8_t lightLevel = lightProvider_(blockWorldPos);
-                        baseLightLevel = static_cast<float>(lightLevel) / 15.0f;
+                        uint8_t packed = lightProvider_(blockWorldPos);
+                        baseSkyLight = static_cast<float>(packed >> 4) / 15.0f;
+                        baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
                     // Render each face in the custom geometry
@@ -455,15 +467,17 @@ void MeshBuilder::buildGreedyMesh(
                         glm::vec4 uvBounds = textureProvider(blockType, texFace);
 
                         // Calculate lighting for this face
-                        float faceLight = baseLightLevel;
+                        float faceSkyLight = baseSkyLight;
+                        float faceBlockLight = baseBlockLight;
                         if (faceGeom.isStandardFace() && lightProvider_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
                             BlockPos faceAirPos = blockWorldPos.neighbor(face);
-                            uint8_t lightLevel = lightProvider_(faceAirPos);
-                            faceLight = static_cast<float>(lightLevel) / 15.0f;
+                            uint8_t packed = lightProvider_(faceAirPos);
+                            faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
+                            faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                         }
 
-                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceLight);
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
                     }
                 }
             }
@@ -582,13 +596,17 @@ void MeshBuilder::greedyMeshFace(
 
                 if (smoothLighting_ && lightProvider_) {
                     // Smooth lighting: sample 9 points, average to 4 corners
-                    mask[maskIdx].lightValues = getFaceLight(blockWorldPos, face);
+                    auto lightResult = getFaceSkyBlockLight(blockWorldPos, face);
+                    mask[maskIdx].skyLightValues = lightResult.sky;
+                    mask[maskIdx].blockLightValues = lightResult.block;
                 } else if (flatLighting_ && lightProvider_) {
                     // Flat lighting: sample 1 point, apply to all corners
                     BlockPos faceAirPos = blockWorldPos.neighbor(face);
-                    uint8_t lightLevel = lightProvider_(faceAirPos);
-                    float light = static_cast<float>(lightLevel) / 15.0f;
-                    mask[maskIdx].lightValues = {light, light, light, light};
+                    uint8_t packed = lightProvider_(faceAirPos);
+                    float skyVal = static_cast<float>(packed >> 4) / 15.0f;
+                    float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
+                    mask[maskIdx].skyLightValues = {skyVal, skyVal, skyVal, skyVal};
+                    mask[maskIdx].blockLightValues = {blockVal, blockVal, blockVal, blockVal};
                 }
             }
         }
@@ -769,7 +787,8 @@ void MeshBuilder::addGreedyQuad(
     // (averaging would be complex and greedy meshing typically assumes uniform lighting)
     // Use the entry's AO and light values directly
     const auto& aoValues = entry.aoValues;
-    const auto& lightValues = entry.lightValues;
+    const auto& skyLightValues = entry.skyLightValues;
+    const auto& blockLightValues = entry.blockLightValues;
 
     // Add vertices
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -780,7 +799,8 @@ void MeshBuilder::addGreedyQuad(
         vertex.texCoord = uvs[i];
         vertex.tileBounds = tileBounds;  // Pass tile bounds for shader wrapping
         vertex.ao = aoValues[i];
-        vertex.light = lightValues[i];
+        vertex.skyLight = skyLightValues[i];
+        vertex.blockLight = blockLightValues[i];
         mesh.vertices.push_back(vertex);
     }
 
@@ -816,7 +836,8 @@ void MeshBuilder::addFace(
     Face face,
     const glm::vec4& uvBounds,
     const std::array<float, 4>& aoValues,
-    const std::array<float, 4>& lightValues
+    const std::array<float, 4>& skyLightValues,
+    const std::array<float, 4>& blockLightValues
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -843,7 +864,8 @@ void MeshBuilder::addFace(
         vertex.tileBounds = uvBounds;
 
         vertex.ao = aoValues[i];
-        vertex.light = lightValues[i];
+        vertex.skyLight = skyLightValues[i];
+        vertex.blockLight = blockLightValues[i];
         mesh.vertices.push_back(vertex);
     }
 
@@ -864,7 +886,8 @@ void MeshBuilder::addCustomFace(
     const FaceGeometry& face,
     const glm::vec4& uvBounds,
     float ao,
-    float light
+    float sky,
+    float block
 ) {
     if (face.vertices.size() < 3) {
         return;  // Invalid face
@@ -901,7 +924,8 @@ void MeshBuilder::addCustomFace(
         );
         vertex.tileBounds = uvBounds;
         vertex.ao = ao;
-        vertex.light = light;
+        vertex.skyLight = sky;
+        vertex.blockLight = block;
         mesh.vertices.push_back(vertex);
     }
 
@@ -1012,7 +1036,7 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     //
     // The tangent1 negation for NegX/PosY/NegZ faces means the sampling grid
     // is mirrored in the U direction for those faces. We need to account for this
-    // when mapping samples to vertex corners (same as getFaceLight).
+    // when mapping samples to vertex corners (same as getFaceSkyBlockLight).
     bool mirroredU = (face == Face::NegX || face == Face::PosY || face == Face::NegZ);
 
     if (mirroredU) {
@@ -1033,14 +1057,14 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     return aoValues;
 }
 
-std::array<float, 4> MeshBuilder::getFaceLight(
+MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
     const BlockPos& blockWorldPos,
     Face face
 ) const {
-    std::array<float, 4> lightValues = {1.0f, 1.0f, 1.0f, 1.0f};
+    FaceLightResult result;
 
     if (!lightProvider_) {
-        return lightValues;
+        return result;
     }
 
     // Get tangent directions for this face (same as AO calculation)
@@ -1091,30 +1115,37 @@ std::array<float, 4> MeshBuilder::getFaceLight(
     // - Vertex 0 (bottom-left): (-1,-1), (0,-1), (-1,0), (0,0)
     // - Vertex 1 (bottom-right): (0,-1), (1,-1), (0,0), (1,0)
     // - etc.
-    // - The position offset by both tangent1 and tangent2
 
-    auto getLightAt = [&](int dx, int dy) -> float {
+    // Sample packed light and unpack into separate sky/block arrays
+    struct LightSample {
+        float sky;
+        float block;
+    };
+
+    auto getLightAt = [&](int dx, int dy) -> LightSample {
         BlockPos checkPos(
             facePos.x + tangent1.x * dx + tangent2.x * dy,
             facePos.y + tangent1.y * dx + tangent2.y * dy,
             facePos.z + tangent1.z * dx + tangent2.z * dy
         );
-        uint8_t light = lightProvider_(checkPos);
-        return static_cast<float>(light) / 15.0f;  // Normalize to 0-1
+        uint8_t packed = lightProvider_(checkPos);
+        float skyVal = static_cast<float>(packed >> 4) / 15.0f;
+        float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
+        return {skyVal, blockVal};
     };
 
     // Sample light at the 9 positions (3x3 grid centered on face)
-    float l00 = getLightAt(-1, -1);
-    float l10 = getLightAt( 0, -1);
-    float l20 = getLightAt( 1, -1);
-    float l01 = getLightAt(-1,  0);
-    float l11 = getLightAt( 0,  0);  // Face center
-    float l21 = getLightAt( 1,  0);
-    float l02 = getLightAt(-1,  1);
-    float l12 = getLightAt( 0,  1);
-    float l22 = getLightAt( 1,  1);
+    LightSample l00 = getLightAt(-1, -1);
+    LightSample l10 = getLightAt( 0, -1);
+    LightSample l20 = getLightAt( 1, -1);
+    LightSample l01 = getLightAt(-1,  0);
+    LightSample l11 = getLightAt( 0,  0);  // Face center
+    LightSample l21 = getLightAt( 1,  0);
+    LightSample l02 = getLightAt(-1,  1);
+    LightSample l12 = getLightAt( 0,  1);
+    LightSample l22 = getLightAt( 1,  1);
 
-    // Average light for each corner
+    // Average light for each corner (sky and block separately)
     // Vertex indices match FACE_DATA: 0=bottom-left (uv 0,0), 1=bottom-right (uv 1,0),
     // 2=top-right (uv 1,1), 3=top-left (uv 0,1)
     //
@@ -1126,19 +1157,29 @@ std::array<float, 4> MeshBuilder::getFaceLight(
 
     if (mirroredU) {
         // Grid is mirrored: what we sampled as "left" is actually "right" in vertex space
-        lightValues[0] = (l20 + l10 + l21 + l11) * 0.25f;  // vertex 0 (uv 0,0) from right side
-        lightValues[1] = (l10 + l00 + l11 + l01) * 0.25f;  // vertex 1 (uv 1,0) from left side
-        lightValues[2] = (l11 + l01 + l12 + l02) * 0.25f;  // vertex 2 (uv 1,1) from left side
-        lightValues[3] = (l21 + l11 + l22 + l12) * 0.25f;  // vertex 3 (uv 0,1) from right side
+        result.sky[0] = (l20.sky + l10.sky + l21.sky + l11.sky) * 0.25f;
+        result.sky[1] = (l10.sky + l00.sky + l11.sky + l01.sky) * 0.25f;
+        result.sky[2] = (l11.sky + l01.sky + l12.sky + l02.sky) * 0.25f;
+        result.sky[3] = (l21.sky + l11.sky + l22.sky + l12.sky) * 0.25f;
+
+        result.block[0] = (l20.block + l10.block + l21.block + l11.block) * 0.25f;
+        result.block[1] = (l10.block + l00.block + l11.block + l01.block) * 0.25f;
+        result.block[2] = (l11.block + l01.block + l12.block + l02.block) * 0.25f;
+        result.block[3] = (l21.block + l11.block + l22.block + l12.block) * 0.25f;
     } else {
         // Normal mapping
-        lightValues[0] = (l00 + l10 + l01 + l11) * 0.25f;  // bottom-left
-        lightValues[1] = (l10 + l20 + l11 + l21) * 0.25f;  // bottom-right
-        lightValues[2] = (l11 + l21 + l12 + l22) * 0.25f;  // top-right
-        lightValues[3] = (l01 + l11 + l02 + l12) * 0.25f;  // top-left
+        result.sky[0] = (l00.sky + l10.sky + l01.sky + l11.sky) * 0.25f;
+        result.sky[1] = (l10.sky + l20.sky + l11.sky + l21.sky) * 0.25f;
+        result.sky[2] = (l11.sky + l21.sky + l12.sky + l22.sky) * 0.25f;
+        result.sky[3] = (l01.sky + l11.sky + l02.sky + l12.sky) * 0.25f;
+
+        result.block[0] = (l00.block + l10.block + l01.block + l11.block) * 0.25f;
+        result.block[1] = (l10.block + l20.block + l11.block + l21.block) * 0.25f;
+        result.block[2] = (l11.block + l21.block + l12.block + l22.block) * 0.25f;
+        result.block[3] = (l01.block + l11.block + l02.block + l12.block) * 0.25f;
     }
 
-    return lightValues;
+    return result;
 }
 
 // ============================================================================
@@ -1152,7 +1193,8 @@ void MeshBuilder::addScaledFace(
     float blockScale,
     const glm::vec4& uvBounds,
     const std::array<float, 4>& aoValues,
-    float light
+    float skyLight,
+    float blockLightVal
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -1183,7 +1225,8 @@ void MeshBuilder::addScaledFace(
         vertex.tileBounds = uvBounds;
 
         vertex.ao = aoValues[i];
-        vertex.light = light;  // Uniform light across LOD face
+        vertex.skyLight = skyLight;  // Uniform sky light across LOD face
+        vertex.blockLight = blockLightVal;  // Uniform block light across LOD face
         mesh.vertices.push_back(vertex);
     }
 
@@ -1204,7 +1247,8 @@ void MeshBuilder::addHeightLimitedFace(
     float height,
     const glm::vec4& uvBounds,
     const std::array<float, 4>& aoValues,
-    float light
+    float skyLight,
+    float blockLightVal
 ) {
     // For height-limited blocks:
     // - Top face (PosY): at height instead of blockScale
@@ -1265,7 +1309,8 @@ void MeshBuilder::addHeightLimitedFace(
         vertex.texCoord = getUVScale(faceData.uvOffsets[i]);
         vertex.tileBounds = uvBounds;
         vertex.ao = aoValues[i];
-        vertex.light = light;  // Uniform light across LOD face
+        vertex.skyLight = skyLight;  // Uniform sky light across LOD face
+        vertex.blockLight = blockLightVal;  // Uniform block light across LOD face
         mesh.vertices.push_back(vertex);
     }
 
@@ -1408,10 +1453,12 @@ MeshData MeshBuilder::buildLODMesh(
 
                         // Sample light for this LOD cell if lighting is enabled
                         // Sample at 4 corners of the face and take max to avoid missing nearby lights
-                        float faceLight = 1.0f;
+                        float faceSkyLight = 1.0f;
+                        float faceBlockLight = 0.0f;
                         if ((smoothLighting_ || flatLighting_) && lightProvider_) {
                             auto normal = faceNormal(face);
-                            uint8_t maxLight = 0;
+                            uint8_t maxSky = 0;
+                            uint8_t maxBlock = 0;
 
                             // Face position in the normal direction (just outside the LOD cell)
                             int32_t normalOffset = (normal[0] + normal[1] + normal[2]) > 0 ? grouping : -1;
@@ -1445,16 +1492,19 @@ MeshData MeshBuilder::buildLODMesh(
                                     };
                                 }
 
-                                maxLight = std::max(maxLight, lightProvider_(samplePos));
+                                uint8_t packed = lightProvider_(samplePos);
+                                maxSky = std::max(maxSky, static_cast<uint8_t>(packed >> 4));
+                                maxBlock = std::max(maxBlock, static_cast<uint8_t>(packed & 0x0F));
                             }
-                            faceLight = static_cast<float>(maxLight) / 15.0f;
+                            faceSkyLight = static_cast<float>(maxSky) / 15.0f;
+                            faceBlockLight = static_cast<float>(maxBlock) / 15.0f;
                         }
 
                         // Add the face with height limitation
                         if (mergeMode == LODMergeMode::HeightLimited && height < blockScale) {
-                            addHeightLimitedFace(mesh, localPos, face, blockScale, height, uvBounds, defaultAO, faceLight);
+                            addHeightLimitedFace(mesh, localPos, face, blockScale, height, uvBounds, defaultAO, faceSkyLight, faceBlockLight);
                         } else {
-                            addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO, faceLight);
+                            addScaledFace(mesh, localPos, face, blockScale, uvBounds, defaultAO, faceSkyLight, faceBlockLight);
                         }
                     }
                 }
@@ -1614,7 +1664,8 @@ void MeshBuilder::greedyMeshLODFace(
                 // Sample at 4 corners of the face and take max to avoid missing nearby lights
                 if ((smoothLighting_ || flatLighting_) && lightProvider_) {
                     auto normal = faceNormal(face);
-                    uint8_t maxLight = 0;
+                    uint8_t maxSky = 0;
+                    uint8_t maxBlock = 0;
 
                     // Face position in the normal direction (just outside the LOD cell)
                     int32_t normalOffset = (normal[0] + normal[1] + normal[2]) > 0 ? grouping : -1;
@@ -1645,9 +1696,12 @@ void MeshBuilder::greedyMeshLODFace(
                             };
                         }
 
-                        maxLight = std::max(maxLight, lightProvider_(samplePos));
+                        uint8_t packed = lightProvider_(samplePos);
+                        maxSky = std::max(maxSky, static_cast<uint8_t>(packed >> 4));
+                        maxBlock = std::max(maxBlock, static_cast<uint8_t>(packed & 0x0F));
                     }
-                    mask[maskIdx].light = static_cast<float>(maxLight) / 15.0f;
+                    mask[maskIdx].skyLight = static_cast<float>(maxSky) / 15.0f;
+                    mask[maskIdx].blockLightVal = static_cast<float>(maxBlock) / 15.0f;
                 }
             }
         }
@@ -1847,7 +1901,8 @@ void MeshBuilder::addGreedyLODQuad(
         vertex.texCoord = uvs[i];
         vertex.tileBounds = tileBounds;
         vertex.ao = 1.0f;      // No AO for LOD meshes
-        vertex.light = entry.light;  // Use sampled light from mask entry
+        vertex.skyLight = entry.skyLight;  // Use sampled sky light from mask entry
+        vertex.blockLight = entry.blockLightVal;  // Use sampled block light from mask entry
         mesh.vertices.push_back(vertex);
     }
 

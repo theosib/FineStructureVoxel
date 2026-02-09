@@ -54,7 +54,9 @@ TEST(ChunkVertexTest, ParameterizedConstruction) {
         glm::vec3(0.0f, 1.0f, 0.0f),
         glm::vec2(0.5f, 0.5f),
         glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),  // tileBounds
-        0.75f
+        0.75f,
+        0.8f,  // skyLight
+        0.5f   // blockLight
     );
 
     EXPECT_EQ(v.position, glm::vec3(1.0f, 2.0f, 3.0f));
@@ -62,6 +64,8 @@ TEST(ChunkVertexTest, ParameterizedConstruction) {
     EXPECT_EQ(v.texCoord, glm::vec2(0.5f, 0.5f));
     EXPECT_EQ(v.tileBounds, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
     EXPECT_FLOAT_EQ(v.ao, 0.75f);
+    EXPECT_FLOAT_EQ(v.skyLight, 0.8f);
+    EXPECT_FLOAT_EQ(v.blockLight, 0.5f);
 }
 
 TEST(ChunkVertexTest, Equality) {

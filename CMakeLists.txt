@@ -77,6 +77,7 @@ add_library(finevox SHARED
     src/core/key_bindings.cpp
     src/core/tag_registry.cpp
     src/core/unification.cpp
+    src/core/world_time.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -321,6 +322,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_player_controller.cpp
         tests/test_inventory.cpp
         tests/test_tags.cpp
+        tests/test_sky.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

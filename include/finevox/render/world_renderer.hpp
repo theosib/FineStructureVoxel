@@ -15,6 +15,7 @@
 #include "finevox/render/texture_manager.hpp"
 #include "finevox/core/lod.hpp"
 #include "finevox/core/distances.hpp"
+#include "finevox/core/sky.hpp"
 #include "finevox/core/mesh_worker_pool.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/wake_signal.hpp"
@@ -46,6 +47,12 @@ struct ChunkPushConstants {
     alignas(4) float fogStart;          // Fog start distance
     alignas(16) glm::vec3 fogColor;     // Fog color
     alignas(4) float fogEnd;            // Fog end distance
+    alignas(16) glm::vec3 sunDirection; // Directional light vector (normalized)
+    alignas(4) float skyBrightness;     // Sky light multiplier (0-1)
+    alignas(4) float ambientLevel;      // Minimum ambient light
+    alignas(4) float pad0;
+    alignas(4) float pad1;
+    alignas(4) float pad2;
 };
 
 // ============================================================================
@@ -280,6 +287,17 @@ public:
     // ========================================================================
     // Per-Frame Updates
     // ========================================================================
+
+    /**
+     * @brief Set sky parameters for current frame (sun direction, brightness, ambient)
+     * @param params Sky parameters computed from WorldTime
+     */
+    void setSkyParameters(const SkyParameters& params) { skyParams_ = params; }
+
+    /**
+     * @brief Get current sky parameters
+     */
+    [[nodiscard]] const SkyParameters& skyParameters() const { return skyParams_; }
 
     /**
      * @brief Update camera state for culling and rendering
@@ -704,6 +722,9 @@ private:
     std::array<std::chrono::microseconds, kFrameHistorySize> frameHistory_;
     size_t frameHistoryIndex_ = 0;
     size_t frameHistoryCount_ = 0;  // How many valid entries (0 until first frame)
+
+    // Sky parameters (updated per frame)
+    SkyParameters skyParams_;
 
     // State
     bool initialized_ = false;

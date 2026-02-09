@@ -1305,7 +1305,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
 
     // Create a light provider that uses the engine
     BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
-        return engine.getCombinedLight(pos);
+        return static_cast<uint8_t>((engine.getSkyLight(pos) << 4) | engine.getBlockLight(pos));
     };
 
     // Build the mesh for subchunk 0,0,0
@@ -1348,10 +1348,10 @@ TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
             vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
             vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
             foundFloorFace = true;
-            floorFaceLight = std::max(floorFaceLight, vertex.light);
+            floorFaceLight = std::max(floorFaceLight, std::max(vertex.skyLight, vertex.blockLight));
             std::cout << "Floor face vertex at (" << vertex.position.x << ", "
                       << vertex.position.y << ", " << vertex.position.z
-                      << ") light=" << vertex.light << "\n";
+                      << ") light=" << std::max(vertex.skyLight, vertex.blockLight) << "\n";
         }
     }
 
@@ -1403,7 +1403,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
     // FIRST MESH BUILD: Before onBlockRemoved is called (light not yet propagated)
     // This simulates what happens when the world setBlock pushes a rebuild before lighting
     BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
-        return engine.getCombinedLight(pos);
+        return static_cast<uint8_t>((engine.getSkyLight(pos) << 4) | engine.getBlockLight(pos));
     };
 
     ChunkPos chunkPos{0, 0, 0};
@@ -1434,7 +1434,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
             std::abs(vertex.normal.y - 1.0f) < 0.1f &&
             vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
             vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
-            mesh1FloorLight = std::max(mesh1FloorLight, vertex.light);
+            mesh1FloorLight = std::max(mesh1FloorLight, std::max(vertex.skyLight, vertex.blockLight));
         }
     }
     std::cout << "FIRST mesh floor face light: " << mesh1FloorLight << "\n";
@@ -1455,7 +1455,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
             std::abs(vertex.normal.y - 1.0f) < 0.1f &&
             vertex.position.x >= 4.9f && vertex.position.x <= 6.1f &&
             vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
-            mesh2FloorLight = std::max(mesh2FloorLight, vertex.light);
+            mesh2FloorLight = std::max(mesh2FloorLight, std::max(vertex.skyLight, vertex.blockLight));
         }
     }
     std::cout << "SECOND mesh floor face light: " << mesh2FloorLight << "\n";
@@ -1482,7 +1482,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
             std::abs(vertex.position.x - 6.0f) < 0.1f &&
             vertex.position.y >= 4.9f && vertex.position.y <= 6.1f &&
             vertex.position.z >= 4.9f && vertex.position.z <= 6.1f) {
-            sideFaceLight = std::max(sideFaceLight, vertex.light);
+            sideFaceLight = std::max(sideFaceLight, std::max(vertex.skyLight, vertex.blockLight));
             sideFaceCount++;
         }
     }

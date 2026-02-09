@@ -34,13 +34,15 @@ struct ChunkVertex {
     glm::vec2 texCoord;   // Texture coordinates (may extend beyond 0-1 for tiling)
     glm::vec4 tileBounds; // Texture tile bounds (minU, minV, maxU, maxV) for atlas tiling
     float ao;             // Ambient occlusion (0-1, 1 = fully lit)
-    float light;          // Smooth lighting (0-1, interpolated from block/sky light)
+    float skyLight;       // Sky light (0-1, from LightEngine sky channel)
+    float blockLight;     // Block light (0-1, from LightEngine block channel)
 
     ChunkVertex() = default;
     ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex,
-                const glm::vec4& tile, float ambientOcclusion, float lightLevel = 1.0f)
+                const glm::vec4& tile, float ambientOcclusion,
+                float sky = 1.0f, float block = 0.0f)
         : position(pos), normal(norm), texCoord(tex), tileBounds(tile),
-          ao(ambientOcclusion), light(lightLevel) {}
+          ao(ambientOcclusion), skyLight(sky), blockLight(block) {}
 
     bool operator==(const ChunkVertex& other) const {
         return position == other.position &&
@@ -48,11 +50,12 @@ struct ChunkVertex {
                texCoord == other.texCoord &&
                tileBounds == other.tileBounds &&
                ao == other.ao &&
-               light == other.light;
+               skyLight == other.skyLight &&
+               blockLight == other.blockLight;
     }
 
-    /// Get combined brightness (AO * light) for final rendering
-    [[nodiscard]] float combinedBrightness() const { return ao * light; }
+    /// Get combined brightness (AO * max light) for final rendering
+    [[nodiscard]] float combinedBrightness() const { return ao * std::max(skyLight, blockLight); }
 };
 
 // ============================================================================
@@ -147,9 +150,10 @@ using BlockTransparentProvider = std::function<bool(BlockTypeId type)>;
 // Returns UV coordinates (minU, minV, maxU, maxV) for the given block type and face
 using BlockTextureProvider = std::function<glm::vec4(BlockTypeId type, Face face)>;
 
-// Callback to get light level at a position for smooth lighting
-// Returns combined light level (0-15) at the given world position
-// If null, mesh builder will use default lighting (full brightness)
+// Callback to get packed light at a position for smooth lighting
+// Returns packed byte: sky light in high nibble (bits 4-7), block light in low nibble (bits 0-3)
+// This matches LightData internal format: (sky << 4) | block
+// If null, mesh builder will use default lighting (full sky brightness, no block light)
 using BlockLightProvider = std::function<uint8_t(const BlockPos& pos)>;
 
 // Callback to check if a block type has custom geometry (non-cube)
@@ -313,7 +317,8 @@ private:
         Face face,
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues,  // AO for each corner (CCW from bottom-left)
-        const std::array<float, 4>& lightValues = {1.0f, 1.0f, 1.0f, 1.0f}  // Light for each corner
+        const std::array<float, 4>& skyLightValues = {1.0f, 1.0f, 1.0f, 1.0f},
+        const std::array<float, 4>& blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f}
     );
 
     // Add a custom face from BlockGeometry (for non-cube blocks)
@@ -324,7 +329,8 @@ private:
         const FaceGeometry& face,    // Face geometry with vertices and UVs
         const glm::vec4& uvBounds,   // Texture tile bounds for atlas wrapping
         float ao = 1.0f,             // Ambient occlusion (uniform for custom faces)
-        float light = 1.0f           // Light level (uniform for custom faces)
+        float sky = 1.0f,            // Sky light level (uniform for custom faces)
+        float block = 0.0f           // Block light level (uniform for custom faces)
     );
 
     // Add a scaled face to the mesh data (for LOD blocks)
@@ -336,7 +342,8 @@ private:
         float blockScale,            // Scale factor for the block
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues,  // AO for each corner
-        float light = 1.0f           // Light value (uniform across face for LOD)
+        float skyLight = 1.0f,       // Sky light value (uniform across face for LOD)
+        float blockLightVal = 0.0f   // Block light value (uniform across face for LOD)
     );
 
     // Add a height-limited scaled face (for HeightLimited LOD mode)
@@ -349,7 +356,8 @@ private:
         float height,                // Actual height (1 to blockScale)
         const glm::vec4& uvBounds,
         const std::array<float, 4>& aoValues,
-        float light = 1.0f           // Light value (uniform across face for LOD)
+        float skyLight = 1.0f,       // Sky light value (uniform across face for LOD)
+        float blockLightVal = 0.0f   // Block light value (uniform across face for LOD)
     );
 
     // Calculate ambient occlusion for a face corner
@@ -364,9 +372,14 @@ private:
         const BlockOpaqueProvider& opaqueProvider
     ) const;
 
-    // Get the 4 smooth light values for a face (CCW from bottom-left)
+    // Get separate sky and block light values for a face (CCW from bottom-left)
     // Averages light from the 4 blocks adjacent to each vertex
-    [[nodiscard]] std::array<float, 4> getFaceLight(
+    // Returns {skyLightValues, blockLightValues}
+    struct FaceLightResult {
+        std::array<float, 4> sky{1.0f, 1.0f, 1.0f, 1.0f};
+        std::array<float, 4> block{0.0f, 0.0f, 0.0f, 0.0f};
+    };
+    [[nodiscard]] FaceLightResult getFaceSkyBlockLight(
         const BlockPos& blockWorldPos,
         Face face
     ) const;
@@ -387,15 +400,17 @@ private:
     struct FaceMaskEntry {
         BlockTypeId blockType = AIR_BLOCK_TYPE;  // Block type (AIR means no visible face)
         glm::vec4 uvBounds{0.0f};                // Texture UVs
-        std::array<float, 4> aoValues{1.0f, 1.0f, 1.0f, 1.0f};  // AO per corner
-        std::array<float, 4> lightValues{1.0f, 1.0f, 1.0f, 1.0f};  // Light per corner
+        std::array<float, 4> aoValues{1.0f, 1.0f, 1.0f, 1.0f};        // AO per corner
+        std::array<float, 4> skyLightValues{1.0f, 1.0f, 1.0f, 1.0f};  // Sky light per corner
+        std::array<float, 4> blockLightValues{0.0f, 0.0f, 0.0f, 0.0f};// Block light per corner
 
         bool operator==(const FaceMaskEntry& other) const {
             // For greedy meshing, faces can merge if they have same block type, AO, and light
             // UVs will be tiled, so we don't check them
             return blockType == other.blockType &&
                    aoValues == other.aoValues &&
-                   lightValues == other.lightValues;
+                   skyLightValues == other.skyLightValues &&
+                   blockLightValues == other.blockLightValues;
         }
 
         bool isEmpty() const { return blockType == AIR_BLOCK_TYPE; }
@@ -454,15 +469,16 @@ private:
     struct LODFaceMaskEntry {
         BlockTypeId blockType = AIR_BLOCK_TYPE;
         glm::vec4 uvBounds{0.0f};
-        float height = 0.0f;  // For height-limited mode
-        float light = 1.0f;   // Light value for smooth lighting
+        float height = 0.0f;      // For height-limited mode
+        float skyLight = 1.0f;    // Sky light value
+        float blockLightVal = 0.0f;// Block light value
 
         bool operator==(const LODFaceMaskEntry& other) const {
             // For greedy meshing, faces can merge if same block type, height, and light
-            // Light values are 4-bit integers (0-15) mapped to float, so exact comparison works
             return blockType == other.blockType &&
                    height == other.height &&
-                   light == other.light;
+                   skyLight == other.skyLight &&
+                   blockLightVal == other.blockLightVal;
         }
 
         bool operator!=(const LODFaceMaskEntry& other) const {

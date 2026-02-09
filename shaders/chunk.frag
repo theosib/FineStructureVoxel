@@ -3,8 +3,9 @@
 // ============================================================================
 // Chunk Fragment Shader
 //
-// Simple textured rendering with ambient occlusion and basic directional
-// lighting for block faces.
+// Textured rendering with ambient occlusion, directional lighting from
+// dynamic sun direction, and separate sky/block light channels for
+// day/night cycle support.
 // ============================================================================
 
 // Inputs from vertex shader
@@ -15,7 +16,8 @@ layout(location = 3) in vec4 fragTileBounds;   // Texture tile bounds (minU, min
 layout(location = 4) in float fragAO;
 layout(location = 5) in vec4 fragClipPos;      // DEBUG
 layout(location = 6) in float fragDistance;    // Distance from camera (for fog)
-layout(location = 7) in float fragLight;       // Smooth lighting (0-1, from block/sky light)
+layout(location = 7) in float fragSkyLight;    // Sky light (0-1)
+layout(location = 8) in float fragBlockLight;  // Block light (0-1)
 
 // Output color
 layout(location = 0) out vec4 outColor;
@@ -36,16 +38,20 @@ layout(set = 0, binding = 1) uniform sampler2D blockAtlas;
 
 // Per-chunk push constants (must match vertex shader)
 layout(push_constant) uniform PushConstants {
-    vec3 chunkOffset;  // View-relative position of subchunk origin
-    float fogStart;    // Fog start distance (0 = fog disabled)
-    vec3 fogColor;     // Fog color
-    float fogEnd;      // Fog end distance
+    vec3 chunkOffset;    // View-relative position of subchunk origin
+    float fogStart;      // Fog start distance (0 = fog disabled)
+    vec3 fogColor;       // Fog color
+    float fogEnd;        // Fog end distance
+    vec3 sunDirection;   // Directional light vector (normalized)
+    float skyBrightness; // Sky light multiplier (0-1)
+    float ambientLevel;  // Minimum ambient light
+    float pad0;
+    float pad1;
+    float pad2;
 } chunk;
 
 // Lighting constants
-const vec3 LIGHT_DIR = normalize(vec3(0.5, 1.0, 0.3));  // Sun direction
-const float AMBIENT = 0.4;                               // Ambient light level
-const float DIFFUSE = 0.6;                               // Diffuse light strength
+const float DIFFUSE = 0.6;  // Diffuse light strength
 
 // Calculate fog factor based on distance
 // Returns 0.0 (no fog) to 1.0 (full fog)
@@ -139,12 +145,6 @@ void main() {
 
 #ifdef DEBUG_NORMALS
     // DEBUG: Visualize normals - just show them as colors
-    // Normal (0,-1,0) maps to color (0.5, 0, 0.5) = dark purple
-    // Normal (0,1,0) maps to color (0.5, 1, 0.5) = light green
-    // Normal (1,0,0) maps to color (1, 0.5, 0.5) = salmon
-    // Normal (-1,0,0) maps to color (0, 0.5, 0.5) = teal
-    // Normal (0,0,1) maps to color (0.5, 0.5, 1) = light blue
-    // Normal (0,0,-1) maps to color (0.5, 0.5, 0) = olive
     outColor = vec4(fragNormal * 0.5 + 0.5, 1.0);
     return;
 #endif
@@ -152,24 +152,25 @@ void main() {
     // Calculate lighting
     vec3 normal = normalize(fragNormal);
 
-    // Simple directional light (sun)
-    float NdotL = max(dot(normal, LIGHT_DIR), 0.0);
+    // Dynamic directional light (sun direction from push constants)
+    float NdotL = max(dot(normal, chunk.sunDirection), 0.0);
     float diffuse = NdotL * DIFFUSE;
 
     // Per-face shading for that classic voxel look
     float faceShade = getFaceShade(normal);
 
     // Combine directional lighting with face shading
-    float dirLighting = (AMBIENT + diffuse) * faceShade;
+    float dirLighting = (chunk.ambientLevel + diffuse) * faceShade;
 
     // Apply ambient occlusion
     dirLighting *= fragAO;
 
-    // Apply smooth lighting from block/sky light
-    // fragLight is 0-1 (from LightEngine), combine with directional lighting
-    // When smooth lighting is disabled, fragLight is 1.0
-    // Add minimum ambient (0.1) so unlit areas aren't completely black
-    float smoothLight = max(fragLight, 0.1);
+    // Combine sky and block light with sky brightness multiplier
+    // Sky light is attenuated by time of day; block light (torches) stays constant
+    float skyContrib = fragSkyLight * chunk.skyBrightness;
+    float blockContrib = fragBlockLight;
+    float smoothLight = max(max(skyContrib, blockContrib), 0.1);  // Min ambient floor
+
     float lighting = dirLighting * smoothLight;
 
     // Final color before fog
@@ -178,9 +179,6 @@ void main() {
     // Apply distance fog
     float fogFactor = calculateFog(fragDistance);
     finalColor = mix(finalColor, chunk.fogColor, fogFactor);
-
-    // Output with gamma correction (if not using sRGB framebuffer)
-    // outColor = vec4(pow(finalColor, vec3(1.0/2.2)), texColor.a);
 
     // Assuming sRGB framebuffer handles gamma
     outColor = vec4(finalColor, texColor.a);

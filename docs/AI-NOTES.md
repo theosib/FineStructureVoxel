@@ -212,6 +212,17 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - ItemMatch predicate (empty/exact/tagged) for recipe ingredients
 - .tag file format (tag/unify/separate directives)
 
+### Phase 15: Sky + Day/Night Cycle ✓
+- WorldTime: tick-based time (24000 ticks/day, 20 tps default)
+  - advance(), timeOfDay(), isDaytime(), skyBrightness(), persistence
+- SkyParameters: pure computation from time of day
+  - Sky color gradients (dawn/day/sunset/dusk/night), fog color, sun arc
+- ChunkVertex split: `float light` → `float skyLight` + `float blockLight`
+- BlockLightProvider returns packed byte (sky<<4 | block)
+- Push constants extended: sunDirection, skyBrightness, ambientLevel
+- Shaders: dynamic sun direction, sky brightness multiplier for sky light
+- render_demo: T key cycles time speed (1x/10x/100x/frozen)
+
 ---
 
 ## Command Language Syntax Quick Reference
@@ -244,7 +255,7 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**Phases 0-14 complete.** 1120 tests passing. Library refactored into three shared libraries with separate namespaces.
+**Phases 0-15 complete.** 1153 tests passing. Library refactored into three shared libraries with separate namespaces.
 
 **Directory layout:**
 - `include/finevox/core/` — core headers (`finevox::`)
@@ -257,10 +268,11 @@ items[0]                # Array indexing (brackets - future)
 - `libfinevox_worldgen.dylib` — world generation (links finevox PUBLIC)
 - `libfinevox_render.dylib` — Vulkan rendering (links finevox PUBLIC)
 
-**Recent work (Phases 11-14):**
+**Recent work (Phases 11-15):**
 - Phase 11/12: PlayerController (fly + physics modes), KeyBindings persistence
 - Phase 13: ItemTypeId, ItemStack, InventoryView (ephemeral DC adapter), NameRegistry (per-world persistence), ItemDropEntity
 - Phase 14: TagRegistry (composable tags with cycle detection), UnificationRegistry (cross-mod item equivalence with auto-resolution), ItemMatch predicate, .tag file format
+- Phase 15: WorldTime (tick-based day/night), SkyParameters (dynamic sky colors, sun direction, brightness), split vertex skyLight/blockLight, shader-side sky brightness multiplier
 
 **Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load
@@ -269,6 +281,13 @@ items[0]                # Array indexing (brackets - future)
 
 **Next task:** TBD (crafting recipes, or next system)
 **Blockers:** None
+
+**Phase 15 notes:**
+- Sky light values stored per-block (0-15) are NOT re-propagated every tick
+- Shader applies `skyBrightness` multiplier from push constants to sky light channel
+- BlockLightProvider now returns packed byte: `(sky << 4) | block`
+- ChunkVertex has separate `skyLight` and `blockLight` float fields
+- Torch-lit caves stay bright at night (block light unaffected by sky brightness)
 
 ---
 
@@ -325,4 +344,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-08 — Phase 14 (Tags, Unification & Item Matching) complete*
+*Last updated: 2026-02-08 — Phase 15 (Sky + Day/Night Cycle) complete*

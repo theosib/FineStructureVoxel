@@ -1,0 +1,16 @@
+# Stone sound set
+place: sounds/stone/place1.wav
+place: sounds/stone/place2.wav
+place: sounds/stone/place3.wav
+break: sounds/stone/break1.wav
+break: sounds/stone/break2.wav
+step: sounds/stone/step1.wav
+step: sounds/stone/step2.wav
+step: sounds/stone/step3.wav
+step: sounds/stone/step4.wav
+dig: sounds/stone/dig1.wav
+dig: sounds/stone/dig2.wav
+hit: sounds/stone/hit1.wav
+fall: sounds/stone/fall1.wav
+volume: 1.0
+pitch-variance: 0.1

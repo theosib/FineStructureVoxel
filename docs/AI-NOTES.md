@@ -16,7 +16,7 @@
 
 | Decision | Choice |
 |----------|--------|
-| Namespaces | `finevox::` (core), `finevox::worldgen::`, `finevox::render::` |
+| Namespaces | `finevox::` (core), `finevox::worldgen::`, `finevox::render::`, `finevox::audio::`, `finevox::script::` |
 | Block IDs | Per-subchunk palette + global string interning (unlimited types, compressible) |
 | Loading unit | Full-height columns (16x16xHeight), but subchunk granularity for lifecycle |
 | Serialization | CBOR (RFC 8949) |
@@ -55,7 +55,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │  Game Modules (loaded .so/.dll)                         │  <- Games built here
 ├─────────────────────────────────────────────────────────┤
-│  finevox Engine (three shared libraries)                │  <- This project
+│  finevox Engine (five shared libraries)                  │  <- This project
 │  ├── libfinevox (core) — finevox::                      │
 │  │   ├── World, SubChunk, BlockType, Physics            │
 │  │   ├── Persistence, Events, Mesh generation           │
@@ -64,9 +64,14 @@
 │  │   ├── Noise (Perlin, Simplex, Voronoi, FBM)         │
 │  │   ├── Biomes, Features, Schematics                   │
 │  │   └── Generation Pipeline (multi-pass)               │
-│  └── libfinevox_render — finevox::render::              │
-│      ├── WorldRenderer, SubChunkView                    │
-│      └── TextureManager, BlockAtlas                     │
+│  ├── libfinevox_render — finevox::render::              │
+│  │   ├── WorldRenderer, SubChunkView                    │
+│  │   └── TextureManager, BlockAtlas                     │
+│  ├── libfinevox_audio — finevox::audio::                │
+│  │   └── AudioEngine, SoundLoader, FootstepTracker      │
+│  └── libfinevox_script — finevox::script::              │
+│      ├── GameScriptEngine, ScriptBlockHandler           │
+│      └── BlockContextProxy, DataContainerProxy          │
 ├─────────────────────────────────────────────────────────┤
 │  finegui                                                │  <- GUI toolkit
 │  └── Dear ImGui + finevk Vulkan backend                 │
@@ -223,6 +228,22 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - Shaders: dynamic sun direction, sky brightness multiplier for sky light
 - render_demo: T key cycles time speed (1x/10x/100x/frozen)
 
+### Phase 16: Audio System ✓
+- SoundRegistry, SoundEvent, SoundEventQueue in core
+- AudioEngine (miniaudio), SoundLoader, FootstepTracker in audio module
+- Fire-and-forget sounds with thread-safe cleanup (never uninit from audio callback)
+- 3D spatialization, volume/pitch variance, per-category volume control
+
+### Phase 17: Script Integration ✓
+- finescript integration via shared interner (FineVoxInterner)
+- GameScriptEngine: central owner, registers native ctx.*/world.* functions
+- ScriptBlockHandler: BlockHandler subclass delegating to finescript closures
+- BlockContextProxy: ProxyMap wrapping BlockContext (pre-interned field IDs)
+- DataContainerProxy: ProxyMap wrapping DataContainer (zero-overhead uint32_t keys)
+- ScriptCache: file-mtime aware hot-reloadable script loading
+- .model files support `script:` field for referencing .fsc script files
+- Event symbols: :place, :break, :tick, :neighbor_changed, :block_update, :use, :hit, :repaint
+
 ---
 
 ## Command Language Syntax Quick Reference
@@ -255,39 +276,31 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**Phases 0-15 complete.** 1153 tests passing. Library refactored into three shared libraries with separate namespaces.
+**Phases 0-17 complete.** 1198 tests passing (1185 main + 13 script integration). Five shared libraries with separate namespaces.
 
 **Directory layout:**
-- `include/finevox/core/` — core headers (`finevox::`)
-- `include/finevox/worldgen/` — world generation headers (`finevox::worldgen::`)
-- `include/finevox/render/` — Vulkan render headers (`finevox::render::`)
-- `src/core/`, `src/worldgen/`, `src/render/` — source files mirror headers
+- `include/finevox/{core,worldgen,render,audio,script}/` — headers
+- `src/{core,worldgen,render,audio,script}/` — source files mirror headers
 
 **Shared libraries:**
 - `libfinevox.dylib` — core (world, mesh, physics, persistence, events, items, tags)
 - `libfinevox_worldgen.dylib` — world generation (links finevox PUBLIC)
 - `libfinevox_render.dylib` — Vulkan rendering (links finevox PUBLIC)
+- `libfinevox_audio.dylib` — audio (miniaudio; optional, `FINEVOX_BUILD_AUDIO`)
+- `libfinevox_script.dylib` — script integration (finescript; always built)
 
-**Recent work (Phases 11-15):**
-- Phase 11/12: PlayerController (fly + physics modes), KeyBindings persistence
-- Phase 13: ItemTypeId, ItemStack, InventoryView (ephemeral DC adapter), NameRegistry (per-world persistence), ItemDropEntity
-- Phase 14: TagRegistry (composable tags with cycle detection), UnificationRegistry (cross-mod item equivalence with auto-resolution), ItemMatch predicate, .tag file format
-- Phase 15: WorldTime (tick-based day/night), SkyParameters (dynamic sky colors, sun direction, brightness), split vertex skyLight/blockLight, shader-side sky brightness multiplier
+**Recent work (Phases 15-17):**
+- Phase 15: WorldTime, SkyParameters, split vertex skyLight/blockLight, shader sky brightness
+- Phase 16: AudioEngine (miniaudio), SoundRegistry, FootstepTracker, fire-and-forget sounds
+- Phase 17: finescript integration — GameScriptEngine, ScriptBlockHandler, BlockContext/DataContainer proxies, ScriptCache, .model `script:` field
 
 **Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load
 - `UpdatePropagationPolicy` for cross-chunk updates
 - Network quiescence protocol
 
-**Next task:** TBD (crafting recipes, or next system)
+**Next task:** TBD
 **Blockers:** None
-
-**Phase 15 notes:**
-- Sky light values stored per-block (0-15) are NOT re-propagated every tick
-- Shader applies `skyBrightness` multiplier from push constants to sky light channel
-- BlockLightProvider now returns packed byte: `(sky << 4) | block`
-- ChunkVertex has separate `skyLight` and `blockLight` float fields
-- Torch-lit caves stay bright at night (block light unaffected by sky brightness)
 
 ---
 
@@ -344,4 +357,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-08 — Phase 15 (Sky + Day/Night Cycle) complete*
+*Last updated: 2026-02-12 — Phase 17 (Script Integration) complete*

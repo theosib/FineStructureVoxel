@@ -282,6 +282,11 @@ BlockModel& BlockModel::setLightAttenuation(uint8_t level) {
     return *this;
 }
 
+BlockModel& BlockModel::setScript(const std::string& script) {
+    script_ = script;
+    return *this;
+}
+
 const CollisionShape& BlockModel::resolvedCollision() const {
     if (!collisionResolved_) {
         if (hasExplicitCollision_) {

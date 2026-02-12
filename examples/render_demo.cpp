@@ -69,6 +69,12 @@
 #include <imgui.h>
 #endif
 
+#ifdef FINEVOX_HAS_AUDIO
+#include <finevox/audio/audio_engine.hpp>
+#include <finevox/audio/footstep_tracker.hpp>
+#include <finevox/audio/sound_loader.hpp>
+#endif
+
 #include <iostream>
 #include <cmath>
 #include <filesystem>
@@ -152,6 +158,11 @@ std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
             // Mark as custom mesh if it has non-cube geometry
             if (model->hasCustomGeometry()) {
                 blockType.setHasCustomMesh(true);
+            }
+
+            // Set sound set from model (e.g., "stone", "grass")
+            if (!model->sounds().empty()) {
+                blockType.setSoundSet(SoundSetId::fromName(model->sounds()));
             }
 
             registry.registerType(blockId, blockType);
@@ -543,6 +554,27 @@ int main(int argc, char* argv[]) {
         float timeSpeedMultiplier = 1.0f;
         std::cout << "World time initialized (20 ticks/sec, speed 1x)\n";
 
+        // Audio system
+#ifdef FINEVOX_HAS_AUDIO
+        SoundEventQueue soundEventQueue;
+
+        // Load sound set definitions
+        auto soundDir = ResourceLocator::instance().resolve("game/sounds");
+        if (std::filesystem::exists(soundDir)) {
+            size_t soundSets = finevox::audio::SoundLoader::loadDirectory(soundDir.string());
+            std::cout << "Loaded " << soundSets << " sound sets\n";
+        }
+
+        finevox::audio::AudioEngine audioEngine(soundEventQueue, SoundRegistry::global());
+        if (audioEngine.initialize()) {
+            std::cout << "Audio engine initialized\n";
+        } else {
+            std::cout << "Warning: Audio engine failed to initialize\n";
+        }
+
+        finevox::audio::FootstepTracker footstepTracker(soundEventQueue, world);
+#endif
+
         // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
         int lightingMode = 2;  // Start with smooth lighting
         auto applyLightingMode = [&]() {
@@ -901,6 +933,14 @@ int main(int argc, char* argv[]) {
 
                         RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                         if (result.hit) {
+#ifdef FINEVOX_HAS_AUDIO
+                            // Queue break sound before removing the block
+                            BlockTypeId breakType = world.getBlock(result.blockPos);
+                            auto breakSoundSet = BlockRegistry::global().getType(breakType).soundSet();
+                            if (breakSoundSet.isValid()) {
+                                soundEventQueue.push(SoundEvent::blockBreak(breakSoundSet, result.blockPos));
+                            }
+#endif
                             // Use external API - triggers events, lighting, etc.
                             world.breakBlock(result.blockPos);
                             std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
@@ -930,6 +970,12 @@ int main(int argc, char* argv[]) {
                                 // "push" mode: place block and push player
                                 // TODO: Implement push logic (requires finding safe position)
                                 world.placeBlock(placePos, selectedBlock);
+#ifdef FINEVOX_HAS_AUDIO
+                                auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
+                                if (placeSoundSet.isValid()) {
+                                    soundEventQueue.push(SoundEvent::blockPlace(placeSoundSet, placePos));
+                                }
+#endif
                                 std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                                           << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
                                           << ") - pushing player\n";
@@ -937,6 +983,12 @@ int main(int argc, char* argv[]) {
                         } else {
                             // No intersection, place normally
                             world.placeBlock(placePos, selectedBlock);
+#ifdef FINEVOX_HAS_AUDIO
+                            auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
+                            if (placeSoundSet.isValid()) {
+                                soundEventQueue.push(SoundEvent::blockPlace(placeSoundSet, placePos));
+                            }
+#endif
                             std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                                       << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                         }
@@ -1053,6 +1105,10 @@ int main(int argc, char* argv[]) {
             // Update player/camera position
             playerController.update(dt);
 
+#ifdef FINEVOX_HAS_AUDIO
+            footstepTracker.update(dt, playerController, camera.positionD());
+#endif
+
             if (playerController.flyMode()) {
                 // Fly mode: apply position delta to camera
                 camera.move(playerController.flyPositionDelta());
@@ -1096,6 +1152,10 @@ int main(int argc, char* argv[]) {
                 // Async meshing uses push-based system (lighting thread handles remesh)
                 worldRenderer.markAllDirty();
             }
+
+#ifdef FINEVOX_HAS_AUDIO
+            audioEngine.update(camera.positionD(), playerController.forwardVector(), glm::vec3(0, 1, 0));
+#endif
 
             // Update world renderer - camera.positionD() provides high-precision position
             worldRenderer.updateCamera(camera.state(), camera.positionD());
@@ -1211,6 +1271,11 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "\n\nShutting down...\n";
+
+#ifdef FINEVOX_HAS_AUDIO
+        audioEngine.shutdown();
+        std::cout << "Audio engine stopped.\n";
+#endif
 
         // Stop lighting thread before destroying world
         lightEngine.stop();

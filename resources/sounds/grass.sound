@@ -1,0 +1,14 @@
+# Grass sound set
+place: sounds/grass/place1.wav
+place: sounds/grass/place2.wav
+break: sounds/grass/break1.wav
+break: sounds/grass/break2.wav
+step: sounds/grass/step1.wav
+step: sounds/grass/step2.wav
+step: sounds/grass/step3.wav
+step: sounds/grass/step4.wav
+dig: sounds/grass/dig1.wav
+hit: sounds/grass/hit1.wav
+fall: sounds/grass/fall1.wav
+volume: 0.9
+pitch-variance: 0.15

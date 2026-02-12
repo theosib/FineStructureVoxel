@@ -8,6 +8,7 @@
  */
 
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/sound_event.hpp"
 #include "finevox/core/physics.hpp"
 #include "finevox/core/rotation.hpp"
 
@@ -87,6 +88,9 @@ public:
     /// Blocks with custom meshes are excluded from greedy meshing
     BlockType& setHasCustomMesh(bool hasMesh);
 
+    /// Set the sound set for this block type (e.g., "stone", "grass")
+    BlockType& setSoundSet(SoundSetId soundSet);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -130,6 +134,9 @@ public:
     /// Custom mesh blocks are excluded from greedy meshing
     [[nodiscard]] bool hasCustomMesh() const { return hasCustomMesh_; }
 
+    /// Get the sound set for this block type
+    [[nodiscard]] SoundSetId soundSet() const { return soundSet_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -146,6 +153,7 @@ private:
     float hardness_ = 1.0f;          // Default mining difficulty
     bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
+    SoundSetId soundSet_;            // Sound set for this block type
 };
 
 /**

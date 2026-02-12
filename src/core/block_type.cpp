@@ -85,6 +85,11 @@ BlockType& BlockType::setHasCustomMesh(bool hasMesh) {
     return *this;
 }
 
+BlockType& BlockType::setSoundSet(SoundSetId soundSet) {
+    soundSet_ = soundSet;
+    return *this;
+}
+
 const CollisionShape& BlockType::collisionShape(const Rotation& rotation) const {
     return collisionShapes_[rotation.index()];
 }

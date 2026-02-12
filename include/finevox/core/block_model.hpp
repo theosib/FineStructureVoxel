@@ -203,6 +203,9 @@ public:
     /// Set light attenuation (0 = transparent to light, higher = blocks more light)
     BlockModel& setLightAttenuation(uint8_t level);
 
+    /// Set script path (for scripted block handlers)
+    BlockModel& setScript(const std::string& script);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -246,6 +249,12 @@ public:
     /// Get light attenuation level
     [[nodiscard]] uint8_t lightAttenuation() const { return lightAttenuation_; }
 
+    /// Get script path (empty if no script)
+    [[nodiscard]] const std::string& script() const { return script_; }
+
+    /// Check if this model has a script handler
+    [[nodiscard]] bool hasScript() const { return !script_.empty(); }
+
     /// Check if this model has custom geometry (non-cube)
     [[nodiscard]] bool hasCustomGeometry() const { return !geometry_.isEmpty(); }
 
@@ -260,6 +269,7 @@ private:
     float hardness_ = 1.0f;
     std::string texture_;
     std::string sounds_;
+    std::string script_;
     uint8_t lightEmission_ = 0;
     uint8_t lightAttenuation_ = 15;  // Default: blocks all light
 

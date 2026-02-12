@@ -9,6 +9,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Options
 option(FINEVOX_BUILD_TESTS "Build unit tests" ON)
 option(FINEVOX_BUILD_RENDER "Build Vulkan render module (requires FineStructureVK)" OFF)
+option(FINEVOX_BUILD_AUDIO "Build audio module (miniaudio)" OFF)
 
 # Dependencies
 include(FetchContent)
@@ -78,6 +79,8 @@ add_library(finevox SHARED
     src/core/tag_registry.cpp
     src/core/unification.cpp
     src/core/world_time.cpp
+    src/core/sound_event.cpp
+    src/core/sound_registry.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -91,6 +94,57 @@ target_compile_options(finevox PRIVATE
 )
 
 target_link_libraries(finevox PUBLIC lz4_static glm::glm)
+
+# ============================================================================
+# Script Module (namespace: finevox::script) - always built
+# ============================================================================
+
+# Find finescript
+if(NOT DEFINED FINESCRIPT_DIR)
+    set(FINESCRIPT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../game-language"
+        CACHE PATH "Path to finescript")
+endif()
+
+if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
+    add_library(finevox_script SHARED
+        src/script/script_cache.cpp
+        src/script/block_context_proxy.cpp
+        src/script/data_container_proxy.cpp
+        src/script/script_block_handler.cpp
+        src/script/game_script_engine.cpp
+    )
+
+    target_include_directories(finevox_script PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+        ${FINESCRIPT_DIR}/include
+    )
+
+    target_compile_options(finevox_script PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    )
+
+    target_link_libraries(finevox_script PUBLIC finevox)
+
+    # Link finescript shared library
+    if(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.dylib")
+        target_link_libraries(finevox_script PUBLIC
+            "${FINESCRIPT_DIR}/build/libfinescript.dylib")
+    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.so")
+        target_link_libraries(finevox_script PUBLIC
+            "${FINESCRIPT_DIR}/build/libfinescript.so")
+    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.a")
+        target_link_libraries(finevox_script PUBLIC
+            "${FINESCRIPT_DIR}/build/libfinescript.a")
+    endif()
+
+    target_compile_definitions(finevox_script PUBLIC FINEVOX_HAS_SCRIPT=1)
+
+    message(STATUS "FineStructureVoxel: Building script module with finescript at ${FINESCRIPT_DIR}")
+else()
+    message(WARNING "finescript not found at ${FINESCRIPT_DIR} - script module disabled")
+endif()
 
 # ============================================================================
 # World Generation Module (namespace: finevox::worldgen)
@@ -271,6 +325,63 @@ if(FINEVOX_BUILD_RENDER)
     endif()
 endif()
 
+# ============================================================================
+# Audio Module (namespace: finevox::audio)
+# ============================================================================
+
+if(FINEVOX_BUILD_AUDIO)
+    # Fetch miniaudio (single-header library)
+    FetchContent_Declare(
+        miniaudio
+        GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+        GIT_TAG 0.11.21
+    )
+    FetchContent_MakeAvailable(miniaudio)
+
+    add_library(finevox_audio SHARED
+        src/audio/audio_engine.cpp
+        src/audio/sound_loader.cpp
+        src/audio/footstep_tracker.cpp
+    )
+
+    target_include_directories(finevox_audio PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+        ${miniaudio_SOURCE_DIR}
+    )
+
+    target_compile_options(finevox_audio PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    )
+
+    target_link_libraries(finevox_audio PUBLIC finevox)
+
+    # Platform-specific audio libraries
+    if(APPLE)
+        find_library(COREAUDIO_LIB CoreAudio)
+        find_library(AUDIOUNIT_LIB AudioUnit)
+        find_library(COREFOUND_LIB CoreFoundation)
+        target_link_libraries(finevox_audio PRIVATE
+            ${COREAUDIO_LIB} ${AUDIOUNIT_LIB} ${COREFOUND_LIB})
+    elseif(UNIX AND NOT APPLE)
+        target_link_libraries(finevox_audio PRIVATE pthread dl m)
+    endif()
+
+    target_compile_definitions(finevox_audio PUBLIC FINEVOX_HAS_AUDIO=1)
+
+    message(STATUS "FineStructureVoxel: Building audio module")
+
+    # Audio test executable
+    add_executable(finevox_audio_test examples/audio_test.cpp)
+    target_link_libraries(finevox_audio_test PRIVATE finevox_audio)
+
+    # Link audio to render demo if both are being built
+    if(FINEVOX_BUILD_RENDER AND FINEVOX_BUILD_EXAMPLES)
+        target_link_libraries(finevox_render_demo PRIVATE finevox_audio)
+    endif()
+endif()
+
 # Tests
 if(FINEVOX_BUILD_TESTS)
     enable_testing()
@@ -323,6 +434,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_inventory.cpp
         tests/test_tags.cpp
         tests/test_sky.cpp
+        tests/test_sound_system.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -332,4 +444,19 @@ if(FINEVOX_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(finevox_tests)
+
+    # Script integration tests (separate binary, links finescript)
+    if(TARGET finevox_script)
+        add_executable(finevox_script_tests
+            tests/test_script_integration.cpp
+        )
+
+        target_link_libraries(finevox_script_tests PRIVATE
+            finevox_script
+            finevox_worldgen
+            GTest::gtest_main
+        )
+
+        gtest_discover_tests(finevox_script_tests)
+    endif()
 endif()

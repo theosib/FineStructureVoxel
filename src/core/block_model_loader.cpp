@@ -158,6 +158,10 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
         model.setLightAttenuation(static_cast<uint8_t>(attenEntry->value.asInt(15)));
     }
 
+    if (auto* scriptEntry = doc->get("script")) {
+        model.setScript(scriptEntry->value.asStringOwned());
+    }
+
     cleanup();
     return model;
 }
@@ -329,6 +333,10 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
 
     if (const ConfigEntry* attenEntry = doc.get("light-attenuation")) {
         model.setLightAttenuation(static_cast<uint8_t>(attenEntry->value.asInt(15)));
+    }
+
+    if (const ConfigEntry* scriptEntry = doc.get("script")) {
+        model.setScript(scriptEntry->value.asStringOwned());
     }
 
     return model;

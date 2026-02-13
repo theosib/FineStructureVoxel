@@ -289,10 +289,11 @@ items[0]                # Array indexing (brackets - future)
 - `libfinevox_audio.dylib` — audio (miniaudio; optional, `FINEVOX_BUILD_AUDIO`)
 - `libfinevox_script.dylib` — script integration (finescript; always built)
 
-**Recent work (Phases 15-17):**
+**Recent work (Phases 15-17 + Input Context Switching):**
 - Phase 15: WorldTime, SkyParameters, split vertex skyLight/blockLight, shader sky brightness
 - Phase 16: AudioEngine (miniaudio), SoundRegistry, FootstepTracker, fire-and-forget sounds
 - Phase 17: finescript integration — GameScriptEngine, ScriptBlockHandler, BlockContext/DataContainer proxies, ScriptCache, .model `script:` field
+- Input Context Switching: Priority-ordered listener chain via finevk InputManager + finegui GuiMode integration. Escape toggles Gameplay↔Menu. Pause menu with Resume/Quit. HUD gated on context.
 
 **Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load

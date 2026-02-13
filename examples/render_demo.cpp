@@ -715,24 +715,68 @@ int main(int argc, char* argv[]) {
         entityManager.setLocalPlayerId(playerId);
         std::cout << "Player entity spawned with ID " << playerId << "\n";
 
-        // Input event callback - handles all discrete input events
-        inputManager->setEventCallback([&](const finevk::InputEvent& e) {
+        // Context switching helper — coordinates CursorMode, GuiMode, and input clearing
+        auto setInputContext = [&](InputContext ctx) {
+            inputContext = ctx;
+            switch (ctx) {
+                case InputContext::Gameplay:
+                    inputManager->setCursorMode(finevk::CursorMode::Disabled);
 #ifdef FINEVOX_HAS_GUI
-            gui.processInput(finegui::InputAdapter::fromFineVK(e));
+                    gui.setGuiMode(finegui::GuiMode::Passive);
 #endif
-            // Key press events for toggles and actions
-            if (e.type == finevk::InputEventType::KeyPress) {
-                if (e.key == GLFW_KEY_ESCAPE) {
-                    if (inputManager->isMouseCaptured()) {
-                        inputManager->setMouseCaptured(false);
-                    } else {
-                        window->close();
-                    }
-                }
+                    break;
+                case InputContext::Menu:
+                    inputManager->setCursorMode(finevk::CursorMode::Normal);
+#ifdef FINEVOX_HAS_GUI
+                    gui.setGuiMode(finegui::GuiMode::Exclusive);
+#endif
+                    break;
+                case InputContext::Chat:
+                    inputManager->setCursorMode(finevk::CursorMode::Normal);
+#ifdef FINEVOX_HAS_GUI
+                    gui.setGuiMode(finegui::GuiMode::Auto);
+#endif
+                    break;
+            }
+            playerController.clearInput();
+        };
 
+        // --- Input listener chain (priority-ordered) ---
+
+        // Priority 200 (Menu): Context switching — handles Escape only
+        inputManager->addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
+            if (e.type == finevk::InputEventType::KeyPress && e.key == GLFW_KEY_ESCAPE) {
+                switch (inputContext) {
+                    case InputContext::Gameplay:
+                        setInputContext(InputContext::Menu);
+                        return finevk::ListenerResult::Consumed;
+                    case InputContext::Menu:
+                    case InputContext::Chat:
+                        setInputContext(InputContext::Gameplay);
+                        return finevk::ListenerResult::Consumed;
+                }
+            }
+            return finevk::ListenerResult::Reject;
+        }, finevk::InputPriority::Menu);
+
+        // Priority 300 (HUD): finegui input routing (respects GuiMode)
+#ifdef FINEVOX_HAS_GUI
+        gui.connectToInputManager(*inputManager);
+#endif
+
+        // Priority 500 (Game): Gameplay input handling
+        inputManager->addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
+            // Only handle input in Gameplay context
+            if (inputContext != InputContext::Gameplay) {
+                return finevk::ListenerResult::Reject;
+            }
+
+            // Key press events
+            if (e.type == finevk::InputEventType::KeyPress) {
                 // Jump in physics mode (space key)
-                if (e.key == GLFW_KEY_SPACE && !playerController.flyMode() && inputManager->isMouseCaptured()) {
+                if (e.key == GLFW_KEY_SPACE && !playerController.flyMode()) {
                     playerController.requestJump();
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 // Debug controls
@@ -740,51 +784,50 @@ int main(int argc, char* argv[]) {
                     bool enabled = !worldRenderer.debugCameraOffset();
                     worldRenderer.setDebugCameraOffset(enabled);
                     std::cout << "Debug camera offset: " << (enabled ? "ON" : "OFF") << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_F2) {
-                    // Teleport to large coordinates
                     glm::dvec3 teleportPos(1000000.0, 32.0, 1000000.0);
                     camera.moveTo(teleportPos);
                     playerController.setFlyPosition(teleportPos);
                     playerBody.setPosition(Vec3(1000000.0f, 32.0f - playerController.eyeHeight(), 1000000.0f));
                     playerBody.setVelocity(Vec3(0.0f));
                     std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_F3) {
-                    // Teleport back to origin
                     glm::dvec3 teleportPos(0.0, 32.0, 0.0);
                     camera.moveTo(teleportPos);
                     playerController.setFlyPosition(teleportPos);
                     playerBody.setPosition(Vec3(0.0f, 32.0f - playerController.eyeHeight(), 0.0f));
                     playerBody.setVelocity(Vec3(0.0f));
                     std::cout << "Teleported to origin\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_F4 || e.key == GLFW_KEY_4) {
-                    // Toggle hidden face culling (debug)
                     bool disabled = !worldRenderer.disableFaceCulling();
                     worldRenderer.setDisableFaceCulling(disabled);
-                    worldRenderer.markAllDirty();  // Rebuild meshes
+                    worldRenderer.markAllDirty();
                     std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_F5) {
-                    // Toggle physics mode
                     bool wasFlying = playerController.flyMode();
                     playerController.setFlyMode(!wasFlying);
                     if (!playerController.flyMode()) {
-                        // Sync camera to body position after mode switch
                         camera.moveTo(playerController.eyePosition());
                         std::cout << "Physics mode: ON (gravity, collision, step-climbing)\n";
                     } else {
                         std::cout << "Physics mode: OFF (free-fly camera)\n";
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_F6) {
-                    // Toggle async meshing
                     if (worldRenderer.asyncMeshingEnabled()) {
                         worldRenderer.disableAsyncMeshing();
                         std::cout << "Async meshing: OFF (synchronous mode)\n";
@@ -793,18 +836,18 @@ int main(int argc, char* argv[]) {
                         std::cout << "Async meshing: ON ("
                                   << worldRenderer.meshWorkerPool()->threadCount() << " worker threads)\n";
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_G) {
-                    // Toggle greedy meshing
                     bool enabled = !worldRenderer.greedyMeshing();
                     worldRenderer.setGreedyMeshing(enabled);
-                    worldRenderer.markAllDirty();  // Rebuild meshes
+                    worldRenderer.markAllDirty();
                     std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_V) {
-                    // Print mesh stats
                     std::cout << "\n=== Mesh Stats ===\n";
                     std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
                     std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
@@ -820,8 +863,6 @@ int main(int argc, char* argv[]) {
                             case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
                         }
                         std::cout << "  LOD merge mode: " << mergeModeName << "\n";
-
-                        // Show LOD distribution
                         auto lodStats = worldRenderer.getLODStats();
                         std::cout << "  LOD distribution:\n";
                         for (int i = 0; i < 5; ++i) {
@@ -831,10 +872,10 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     std::cout << "==================\n\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_M) {
-                    // Cycle LOD merge mode
                     auto currentMode = worldRenderer.lodMergeMode();
                     LODMergeMode nextMode;
                     const char* modeName;
@@ -854,25 +895,25 @@ int main(int argc, char* argv[]) {
                     }
                     worldRenderer.setLODMergeMode(nextMode);
                     std::cout << "LOD merge mode: " << modeName << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_L) {
-                    // Toggle LOD system (off = all chunks at LOD0, no merging)
                     bool enabled = !worldRenderer.lodEnabled();
                     worldRenderer.setLODEnabled(enabled);
                     worldRenderer.markAllDirty();
                     std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_C) {
-                    // Toggle frustum culling (for profiling)
                     bool enabled = !worldRenderer.frustumCullingEnabled();
                     worldRenderer.setFrustumCullingEnabled(enabled);
                     std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_T) {
-                    // Cycle time speed: 1x -> 10x -> 100x -> frozen -> 1x
                     if (timeFrozen) {
                         timeFrozen = false;
                         timeSpeedMultiplier = 1.0f;
@@ -892,63 +933,58 @@ int main(int argc, char* argv[]) {
                         worldTime.setFrozen(true);
                         std::cout << "Time: FROZEN\n";
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_B) {
-                    // Cycle lighting mode: OFF -> FLAT -> SMOOTH -> OFF
                     lightingMode = (lightingMode + 1) % 3;
                     applyLightingMode();
-                    worldRenderer.markAllDirty();  // Rebuild meshes with new lighting
+                    worldRenderer.markAllDirty();
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key == GLFW_KEY_TAB) {
-                    // Cycle through block palette
                     selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
                     selectedBlock = blockPalette[selectedBlockIndex];
                     std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+                    return finevk::ListenerResult::Consumed;
                 }
 
                 if (e.key >= GLFW_KEY_1 && e.key <= GLFW_KEY_9) {
-                    // Number keys 1-9 select block directly
                     int index = e.key - GLFW_KEY_1;
                     if (index < static_cast<int>(blockPalette.size())) {
                         selectedBlockIndex = index;
                         selectedBlock = blockPalette[selectedBlockIndex];
                         std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
             }
 
             // Mouse button events
             if (e.type == finevk::InputEventType::MouseButtonPress) {
                 if (e.mouseButton == GLFW_MOUSE_BUTTON_LEFT) {
-                    if (!inputManager->isMouseCaptured()) {
-                        // First click captures mouse
-                        inputManager->setMouseCaptured(true);
-                    } else {
-                        // Left click while captured = break block
-                        glm::dvec3 camPos = camera.positionD();
-                        Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                        Vec3 direction = playerController.forwardVector();
+                    // Left click = break block
+                    glm::dvec3 camPos = camera.positionD();
+                    Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+                    Vec3 direction = playerController.forwardVector();
 
-                        RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
-                        if (result.hit) {
+                    RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+                    if (result.hit) {
 #ifdef FINEVOX_HAS_AUDIO
-                            // Queue break sound before removing the block
-                            BlockTypeId breakType = world.getBlock(result.blockPos);
-                            auto breakSoundSet = BlockRegistry::global().getType(breakType).soundSet();
-                            if (breakSoundSet.isValid()) {
-                                soundEventQueue.push(SoundEvent::blockBreak(breakSoundSet, result.blockPos));
-                            }
-#endif
-                            // Use external API - triggers events, lighting, etc.
-                            world.breakBlock(result.blockPos);
-                            std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
+                        BlockTypeId breakType = world.getBlock(result.blockPos);
+                        auto breakSoundSet = BlockRegistry::global().getType(breakType).soundSet();
+                        if (breakSoundSet.isValid()) {
+                            soundEventQueue.push(SoundEvent::blockBreak(breakSoundSet, result.blockPos));
                         }
+#endif
+                        world.breakBlock(result.blockPos);
+                        std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
 
-                if (e.mouseButton == GLFW_MOUSE_BUTTON_RIGHT && inputManager->isMouseCaptured()) {
+                if (e.mouseButton == GLFW_MOUSE_BUTTON_RIGHT) {
                     // Right click = place block
                     glm::dvec3 camPos = camera.positionD();
                     Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
@@ -958,17 +994,12 @@ int main(int argc, char* argv[]) {
                     if (result.hit) {
                         BlockPos placePos = getPlacePosition(result.blockPos, result.face);
 
-                        // Check if block would intersect player (uses COLLISION_MARGIN for precision)
-                        // Config: physics.block_placement_mode = "block" (default) or "push"
                         if (wouldBlockIntersectBody(placePos, playerBody)) {
                             auto mode = ConfigManager::instance().blockPlacementMode();
                             if (mode == "block") {
-                                // Default: prevent placement
                                 std::cout << "Cannot place block at (" << placePos.x << "," << placePos.y << "," << placePos.z
                                           << ") - would intersect player\n";
                             } else {
-                                // "push" mode: place block and push player
-                                // TODO: Implement push logic (requires finding safe position)
                                 world.placeBlock(placePos, selectedBlock);
 #ifdef FINEVOX_HAS_AUDIO
                                 auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
@@ -981,7 +1012,6 @@ int main(int argc, char* argv[]) {
                                           << ") - pushing player\n";
                             }
                         } else {
-                            // No intersection, place normally
                             world.placeBlock(placePos, selectedBlock);
 #ifdef FINEVOX_HAS_AUDIO
                             auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
@@ -993,9 +1023,15 @@ int main(int argc, char* argv[]) {
                                       << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                         }
                     }
+                    return finevk::ListenerResult::Consumed;
                 }
             }
-        });
+
+            return finevk::ListenerResult::Reject;
+        }, finevk::InputPriority::Game);
+
+        // Start in gameplay mode with cursor captured
+        setInputContext(InputContext::Gameplay);
 
         // Resize callback
         window->onResize([&](uint32_t width, uint32_t height) {
@@ -1008,8 +1044,8 @@ int main(int argc, char* argv[]) {
         std::cout << "  WASD + Mouse: Move and look\n";
         std::cout << "  Space: Jump (physics) / Up (fly)\n";
         std::cout << "  Shift: Down (fly mode)\n";
-        std::cout << "  Left Click: Break block (uses event system)\n";
-        std::cout << "  Right Click: Place block (uses event system)\n";
+        std::cout << "  Left Click: Break block\n";
+        std::cout << "  Right Click: Place block\n";
         std::cout << "  1-8 / Tab: Select block type\n";
         std::cout << "    1=stone 2=dirt 3=grass 4=cobble 5=glowstone\n";
         std::cout << "    6=slab 7=stairs 8=wedge (non-cube blocks)\n";
@@ -1026,8 +1062,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  L: Toggle LOD (off = no merging)\n";
         std::cout << "  M: Cycle LOD merge mode\n";
         std::cout << "  V: Print mesh statistics\n";
-        std::cout << "  Click: Capture mouse\n";
-        std::cout << "  Escape: Release mouse / Exit\n";
+        std::cout << "  Escape: Toggle pause menu\n";
         std::cout << "\nFlags: --single-block, --large-coords, --sync (async is default)\n\n";
 
         // Timing
@@ -1040,30 +1075,25 @@ int main(int argc, char* argv[]) {
             window->pollEvents();
 
             // Query mouse delta BEFORE update() clears it
-            // (update() clears per-frame state like mouseDelta after dispatching events)
             glm::vec2 mouseDelta = inputManager->mouseDelta();
 
-            // Update input manager - dispatches queued events to callback, clears per-frame state
+            // Update input manager - clears per-frame state (mouseDelta, key press/release sets)
             inputManager->update();
 
-            // Update movement state from action mappings (only when mouse captured in gameplay)
-            if (inputManager->isMouseCaptured() && inputContext == InputContext::Gameplay) {
+            // Update movement state from action mappings (only in gameplay context)
+            if (inputContext == InputContext::Gameplay) {
                 playerController.setMoveForward(inputManager->isActionActive("forward"));
                 playerController.setMoveBack(inputManager->isActionActive("back"));
                 playerController.setMoveLeft(inputManager->isActionActive("left"));
                 playerController.setMoveRight(inputManager->isActionActive("right"));
                 playerController.setMoveDown(inputManager->isActionActive("down"));
-                // Space is handled specially: jump in physics mode, fly-up in fly mode
                 if (playerController.flyMode()) {
                     playerController.setMoveUp(inputManager->isActionActive("up"));
                 }
 
-                // Handle mouse look (using delta captured before update())
                 if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
                     playerController.look(mouseDelta.x, mouseDelta.y);
                 }
-            } else {
-                playerController.clearInput();
             }
 
             // Record frame start and get estimated frame period (tracks vsync timing)
@@ -1193,14 +1223,16 @@ int main(int argc, char* argv[]) {
                 // Render the world
                 worldRenderer.render(frame);
 
-                // Draw crosshair at screen center
+                // Draw crosshair at screen center (only in gameplay)
                 overlay->beginFrame(frame.frameIndex(), frame.extent.width, frame.extent.height);
-                overlay->drawCrosshair(
-                    frame.extent.width / 2.0f, frame.extent.height / 2.0f,
-                    20.0f,   // size
-                    2.0f,    // thickness
-                    {1.0f, 1.0f, 1.0f, 0.8f}  // white with slight transparency
-                );
+                if (inputContext == InputContext::Gameplay) {
+                    overlay->drawCrosshair(
+                        frame.extent.width / 2.0f, frame.extent.height / 2.0f,
+                        20.0f,   // size
+                        2.0f,    // thickness
+                        {1.0f, 1.0f, 1.0f, 0.8f}  // white with slight transparency
+                    );
+                }
                 overlay->render(frame);
 
                 // GUI overlays
@@ -1221,8 +1253,8 @@ int main(int argc, char* argv[]) {
                     ImGui::End();
                 }
 
-                // Mock hotbar (bottom center)
-                {
+                // Hotbar (bottom center) — only in gameplay
+                if (inputContext == InputContext::Gameplay) {
                     const char* slotNames[] = {
                         "Stone", "Dirt", "Grass", "Cobble",
                         "Glow", "Slab", "Stair", "Wedge", ""
@@ -1257,6 +1289,42 @@ int main(int argc, char* argv[]) {
                         ImGui::Button(label, ImVec2(slotSize, slotSize));
 
                         ImGui::PopStyleColor(2);
+                    }
+                    ImGui::End();
+                }
+
+                // Pause menu — only in menu context
+                if (inputContext == InputContext::Menu) {
+                    ImGuiIO& io = ImGui::GetIO();
+
+                    // Semi-transparent fullscreen dim overlay
+                    ImGui::SetNextWindowPos(ImVec2(0, 0));
+                    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y));
+                    ImGui::Begin("##dim", nullptr,
+                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
+                    ImGui::GetWindowDrawList()->AddRectFilled(
+                        ImVec2(0, 0), ImVec2(io.DisplaySize.x, io.DisplaySize.y),
+                        IM_COL32(0, 0, 0, 120));
+                    ImGui::End();
+
+                    // Centered pause menu window
+                    ImGui::SetNextWindowPos(
+                        ImVec2(io.DisplaySize.x / 2.0f, io.DisplaySize.y / 2.0f),
+                        ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+                    ImGui::Begin("##pause", nullptr,
+                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
+                    ImGui::TextColored(ImVec4(1, 1, 1, 0.9f), "Game Paused");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                    if (ImGui::Button("Resume", ImVec2(200, 40))) {
+                        setInputContext(InputContext::Gameplay);
+                    }
+                    ImGui::Spacing();
+                    if (ImGui::Button("Quit", ImVec2(200, 40))) {
+                        window->close();
                     }
                     ImGui::End();
                 }

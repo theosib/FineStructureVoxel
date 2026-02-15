@@ -78,23 +78,10 @@ struct GraphicsEvent {
     uint64_t timestamp = 0;
     uint64_t tickNumber = 0;  // Game tick when this was generated
 
-    // Entity identification
-    EntityId entityId = INVALID_ENTITY_ID;
-    uint16_t entityType = 0;  // EntityType as uint16_t for serialization
-
-    // Position/motion (for snapshots and corrections)
-    float posX = 0.0f, posY = 0.0f, posZ = 0.0f;
-    float velX = 0.0f, velY = 0.0f, velZ = 0.0f;
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-    bool onGround = false;
-
-    // Animation state
-    float animationTime = 0.0f;
-    uint8_t animationId = 0;
+    // Entity state (position, velocity, look, animation — all in one struct)
+    EntityState entity;
 
     // Correction-specific
-    uint64_t inputSequence = 0;
     CorrectionReason correctionReason = CorrectionReason::PhysicsDivergence;
 
     // Block correction
@@ -106,12 +93,7 @@ struct GraphicsEvent {
     // Helpers
     // ========================================================================
 
-    [[nodiscard]] Vec3 position() const { return Vec3(posX, posY, posZ); }
-    [[nodiscard]] Vec3 velocity() const { return Vec3(velX, velY, velZ); }
     [[nodiscard]] BlockPos blockPos() const { return BlockPos(blockX, blockY, blockZ); }
-
-    void setPosition(Vec3 p) { posX = p.x; posY = p.y; posZ = p.z; }
-    void setVelocity(Vec3 v) { velX = v.x; velY = v.y; velZ = v.z; }
 
     // ========================================================================
     // Factory Methods
@@ -126,7 +108,7 @@ struct GraphicsEvent {
      * @brief Create entity spawn event
      */
     static GraphicsEvent entitySpawn(EntityId id, EntityType type,
-                                      Vec3 pos, float yaw, float pitch);
+                                      glm::dvec3 pos, float yaw, float pitch);
 
     /**
      * @brief Create entity despawn event
@@ -136,7 +118,7 @@ struct GraphicsEvent {
     /**
      * @brief Create player correction event
      */
-    static GraphicsEvent playerCorrection(EntityId id, Vec3 pos, Vec3 vel,
+    static GraphicsEvent playerCorrection(EntityId id, glm::dvec3 pos, glm::dvec3 vel,
                                            bool ground, uint64_t seq,
                                            CorrectionReason reason);
 

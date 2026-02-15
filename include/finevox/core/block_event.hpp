@@ -10,6 +10,7 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/entity_state.hpp"
 #include <cstdint>
 #include <glm/glm.hpp>
 
@@ -21,11 +22,8 @@ namespace finevox {
 // Forward declaration
 enum class TickType : uint8_t;
 
-/// Unique entity identifier
-using EntityId = uint64_t;
-
-/// Invalid entity ID constant
-constexpr EntityId INVALID_ENTITY_ID = 0;
+// Re-export EntityId from entity_state.hpp for backward compatibility
+// (EntityId and INVALID_ENTITY_ID are defined in entity_state.hpp)
 
 // ============================================================================
 // EventType - Types of block-related events
@@ -74,36 +72,6 @@ enum class EventType : uint8_t {
 };
 
 // ============================================================================
-// PlayerEventData - Player-specific event data for entity events
-// ============================================================================
-
-/**
- * @brief Player-specific event data
- *
- * Serialization-ready: all fixed-size POD fields.
- * Used with PlayerPosition, PlayerLook, PlayerJump, etc. event types.
- */
-struct PlayerEventData {
-    // Position/motion (for PlayerPosition events)
-    float posX = 0.0f, posY = 0.0f, posZ = 0.0f;
-    float velX = 0.0f, velY = 0.0f, velZ = 0.0f;
-    bool onGround = false;
-
-    // Look direction (for PlayerLook events)
-    float yaw = 0.0f;
-    float pitch = 0.0f;
-
-    // Input sequence for reconciliation
-    uint64_t inputSequence = 0;
-
-    // Helpers
-    [[nodiscard]] Vec3 position() const { return Vec3(posX, posY, posZ); }
-    [[nodiscard]] Vec3 velocity() const { return Vec3(velX, velY, velZ); }
-    void setPosition(Vec3 p) { posX = p.x; posY = p.y; posZ = p.z; }
-    void setVelocity(Vec3 v) { velX = v.x; velY = v.y; velZ = v.z; }
-};
-
-// ============================================================================
 // BlockEvent - Unified event container for block-related events
 // ============================================================================
 
@@ -146,7 +114,7 @@ struct BlockEvent {
 
     // Entity data (for player/entity events)
     EntityId entityId = INVALID_ENTITY_ID;  // Which entity triggered this event
-    PlayerEventData playerData;              // Player-specific data (for player events)
+    EntityState entityState;                 // Entity state (for player state events)
 
     // ========================================================================
     // Factory Methods
@@ -222,12 +190,12 @@ struct BlockEvent {
     /**
      * @brief Create a player position update event
      * @param id Entity ID of the player
-     * @param position Current position
-     * @param velocity Current velocity
+     * @param position Current position (double precision)
+     * @param velocity Current velocity (double precision)
      * @param onGround Whether player is on ground
      * @param inputSequence Input sequence number for reconciliation
      */
-    static BlockEvent playerPosition(EntityId id, Vec3 position, Vec3 velocity,
+    static BlockEvent playerPosition(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
                                       bool onGround, uint64_t inputSequence);
 
     /**

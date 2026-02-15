@@ -15,6 +15,7 @@
  *   0.00 = dawn, 0.25 = noon, 0.50 = sunset, 0.75 = midnight
  */
 
+#include <atomic>
 #include <cstdint>
 
 namespace finevox {
@@ -24,6 +25,26 @@ class DataContainer;
 
 class WorldTime {
 public:
+    WorldTime() = default;
+
+    // std::atomic is non-movable — provide explicit move operations
+    WorldTime(WorldTime&& other) noexcept
+        : totalTicks_(other.totalTicks_.load(std::memory_order_relaxed))
+        , accumulator_(other.accumulator_)
+        , ticksPerSecond_(other.ticksPerSecond_)
+        , timeSpeed_(other.timeSpeed_)
+        , frozen_(other.frozen_) {}
+
+    WorldTime& operator=(WorldTime&& other) noexcept {
+        totalTicks_.store(other.totalTicks_.load(std::memory_order_relaxed),
+                          std::memory_order_relaxed);
+        accumulator_ = other.accumulator_;
+        ticksPerSecond_ = other.ticksPerSecond_;
+        timeSpeed_ = other.timeSpeed_;
+        frozen_ = other.frozen_;
+        return *this;
+    }
+
     // ========================================================================
     // Constants
     // ========================================================================
@@ -46,8 +67,8 @@ public:
     // Queries
     // ========================================================================
 
-    /// Total ticks elapsed since world creation
-    [[nodiscard]] int64_t totalTicks() const { return totalTicks_; }
+    /// Total ticks elapsed since world creation (thread-safe)
+    [[nodiscard]] int64_t totalTicks() const { return totalTicks_.load(std::memory_order_acquire); }
 
     /// Ticks within current day [0, TICKS_PER_DAY)
     [[nodiscard]] int64_t dayTicks() const;
@@ -100,7 +121,7 @@ public:
     static WorldTime loadFrom(const DataContainer& dc);
 
 private:
-    int64_t totalTicks_ = 0;
+    std::atomic<int64_t> totalTicks_{0};
     float accumulator_ = 0.0f;   // Sub-tick fractional accumulator
     float ticksPerSecond_ = 20.0f;
     float timeSpeed_ = 1.0f;

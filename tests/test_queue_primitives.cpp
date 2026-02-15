@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "finevox/core/wake_signal.hpp"
-#include "finevox/core/simple_queue.hpp"
-#include "finevox/core/coalescing_queue.hpp"
+#include "finevox/core/deprecated/simple_queue.hpp"
+#include "finevox/core/deprecated/coalescing_queue.hpp"
 #include "finevox/core/position.hpp"
 #include <thread>
 #include <chrono>

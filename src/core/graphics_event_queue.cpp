@@ -10,33 +10,23 @@ GraphicsEvent GraphicsEvent::entitySnapshot(const Entity& entity, uint64_t tick)
     event.timestamp = static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
 
-    event.entityId = entity.id();
-    event.entityType = static_cast<uint16_t>(entity.type());
-
-    event.setPosition(entity.position());
-    event.setVelocity(entity.velocity());
-    event.yaw = entity.yaw();
-    event.pitch = entity.pitch();
-    event.onGround = entity.isOnGround();
-
-    event.animationTime = entity.animationTime();
-    event.animationId = entity.animationId();
+    event.entity = EntityState::fromEntity(entity);
 
     return event;
 }
 
 GraphicsEvent GraphicsEvent::entitySpawn(EntityId id, EntityType type,
-                                          Vec3 pos, float yaw, float pitch) {
+                                          glm::dvec3 pos, float yaw, float pitch) {
     GraphicsEvent event;
     event.type = GraphicsEventType::EntitySpawn;
     event.timestamp = static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
 
-    event.entityId = id;
-    event.entityType = static_cast<uint16_t>(type);
-    event.setPosition(pos);
-    event.yaw = yaw;
-    event.pitch = pitch;
+    event.entity.id = id;
+    event.entity.entityType = static_cast<uint16_t>(type);
+    event.entity.position = pos;
+    event.entity.yaw = yaw;
+    event.entity.pitch = pitch;
 
     return event;
 }
@@ -46,11 +36,11 @@ GraphicsEvent GraphicsEvent::entityDespawn(EntityId id) {
     event.type = GraphicsEventType::EntityDespawn;
     event.timestamp = static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
-    event.entityId = id;
+    event.entity.id = id;
     return event;
 }
 
-GraphicsEvent GraphicsEvent::playerCorrection(EntityId id, Vec3 pos, Vec3 vel,
+GraphicsEvent GraphicsEvent::playerCorrection(EntityId id, glm::dvec3 pos, glm::dvec3 vel,
                                                bool ground, uint64_t seq,
                                                CorrectionReason reason) {
     GraphicsEvent event;
@@ -58,11 +48,11 @@ GraphicsEvent GraphicsEvent::playerCorrection(EntityId id, Vec3 pos, Vec3 vel,
     event.timestamp = static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
 
-    event.entityId = id;
-    event.setPosition(pos);
-    event.setVelocity(vel);
-    event.onGround = ground;
-    event.inputSequence = seq;
+    event.entity.id = id;
+    event.entity.position = pos;
+    event.entity.velocity = vel;
+    event.entity.onGround = ground;
+    event.entity.inputSequence = seq;
     event.correctionReason = reason;
 
     return event;
@@ -90,9 +80,9 @@ GraphicsEvent GraphicsEvent::animation(EntityId id, uint8_t animId, float time) 
     event.timestamp = static_cast<uint64_t>(
         std::chrono::steady_clock::now().time_since_epoch().count());
 
-    event.entityId = id;
-    event.animationId = animId;
-    event.animationTime = time;
+    event.entity.id = id;
+    event.entity.animationId = animId;
+    event.entity.animationTime = time;
 
     return event;
 }

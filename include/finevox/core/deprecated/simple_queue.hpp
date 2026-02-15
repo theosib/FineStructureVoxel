@@ -252,4 +252,4 @@ private:
 }  // namespace finevox
 
 // Include implementation (needs WakeSignal definition)
-#include "finevox/core/simple_queue_impl.hpp"
+#include "finevox/core/deprecated/simple_queue_impl.hpp"

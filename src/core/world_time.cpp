@@ -18,7 +18,7 @@ void WorldTime::advance(float deltaSeconds) {
     // Convert accumulated time to whole ticks
     auto wholeTicks = static_cast<int64_t>(accumulator_);
     if (wholeTicks > 0) {
-        totalTicks_ += wholeTicks;
+        totalTicks_.fetch_add(wholeTicks, std::memory_order_release);
         accumulator_ -= static_cast<float>(wholeTicks);
     }
 }
@@ -28,14 +28,16 @@ void WorldTime::advance(float deltaSeconds) {
 // ============================================================================
 
 int64_t WorldTime::dayTicks() const {
-    int64_t dt = totalTicks_ % TICKS_PER_DAY;
+    int64_t ticks = totalTicks_.load(std::memory_order_acquire);
+    int64_t dt = ticks % TICKS_PER_DAY;
     if (dt < 0) dt += TICKS_PER_DAY;  // Handle negative totalTicks
     return dt;
 }
 
 int32_t WorldTime::dayNumber() const {
-    if (totalTicks_ < 0) return static_cast<int32_t>((totalTicks_ - TICKS_PER_DAY + 1) / TICKS_PER_DAY);
-    return static_cast<int32_t>(totalTicks_ / TICKS_PER_DAY);
+    int64_t ticks = totalTicks_.load(std::memory_order_acquire);
+    if (ticks < 0) return static_cast<int32_t>((ticks - TICKS_PER_DAY + 1) / TICKS_PER_DAY);
+    return static_cast<int32_t>(ticks / TICKS_PER_DAY);
 }
 
 float WorldTime::timeOfDay() const {
@@ -99,7 +101,7 @@ void WorldTime::setTimeSpeed(float speed) {
 }
 
 void WorldTime::setTime(int64_t ticks) {
-    totalTicks_ = ticks;
+    totalTicks_.store(ticks, std::memory_order_release);
     accumulator_ = 0.0f;
 }
 
@@ -112,7 +114,7 @@ void WorldTime::setFrozen(bool frozen) {
 // ============================================================================
 
 void WorldTime::saveTo(DataContainer& dc) const {
-    dc.set<int64_t>("totalTicks", totalTicks_);
+    dc.set<int64_t>("totalTicks", totalTicks_.load(std::memory_order_relaxed));
     dc.set<double>("ticksPerSecond", static_cast<double>(ticksPerSecond_));
     dc.set<double>("timeSpeed", static_cast<double>(timeSpeed_));
     dc.set<int64_t>("frozen", frozen_ ? 1 : 0);
@@ -121,7 +123,7 @@ void WorldTime::saveTo(DataContainer& dc) const {
 WorldTime WorldTime::loadFrom(const DataContainer& dc) {
     WorldTime wt;
     if (dc.has("totalTicks")) {
-        wt.totalTicks_ = dc.get<int64_t>("totalTicks");
+        wt.totalTicks_.store(dc.get<int64_t>("totalTicks"), std::memory_order_relaxed);
     }
     if (dc.has("ticksPerSecond")) {
         wt.ticksPerSecond_ = static_cast<float>(dc.get<double>("ticksPerSecond", 20.0));

@@ -301,4 +301,4 @@ private:
 }  // namespace finevox
 
 // Include implementation
-#include "finevox/core/coalescing_queue_impl.hpp"
+#include "finevox/core/deprecated/coalescing_queue_impl.hpp"

@@ -34,6 +34,7 @@
  */
 
 #include <finevox/core/world.hpp>
+#include <finevox/core/game_session.hpp>
 #include <finevox/render/world_renderer.hpp>
 #include <finevox/render/block_atlas.hpp>
 #include <finevox/core/block_type.hpp>
@@ -45,6 +46,7 @@
 #include <finevox/core/event_queue.hpp>
 #include <finevox/core/physics.hpp>
 #include <finevox/core/entity_manager.hpp>
+#include <finevox/core/entity_state.hpp>
 #include <finevox/core/graphics_event_queue.hpp>
 #include <finevox/core/config.hpp>
 #include <finevox/core/player_controller.hpp>
@@ -52,6 +54,7 @@
 #include <finevox/core/key_bindings.hpp>
 #include <finevox/core/world_time.hpp>
 #include <finevox/core/sky.hpp>
+#include <finevox/render/frame_fence_waiter.hpp>
 #include <finevox/worldgen/world_generator.hpp>
 #include <finevox/worldgen/generation_passes.hpp>
 #include <finevox/worldgen/biome_loader.hpp>
@@ -445,8 +448,10 @@ int main(int argc, char* argv[]) {
         // This registers block types and loads custom geometries
         std::unordered_map<uint32_t, BlockGeometry> blockGeometries = loadBlockDefinitions();
 
-        // Create finevox world
-        World world;
+        // Create game session (owns World, UpdateScheduler, LightEngine, EntityManager, WorldTime, event queues)
+        auto session = GameSession::createLocal();
+        World& world = session->world();
+
         if (useWorldGen) {
             buildGeneratedWorld(world, resourcePath);
         } else {
@@ -525,30 +530,20 @@ int main(int argc, char* argv[]) {
 
         worldRenderer.initialize();
 
-        // Create UpdateScheduler for event-driven block changes
-        UpdateScheduler scheduler(world);
-
-        // Create LightEngine for smooth lighting
-        LightEngine lightEngine(world);
-        // Increase propagation limit to allow full L1 ball (default 256 is too small)
-        lightEngine.setMaxPropagationDistance(10000);
-
-        // Wire up systems to World for event-driven block changes
-        world.setLightEngine(&lightEngine);
-        world.setUpdateScheduler(&scheduler);
+        // Convenience references to session subsystems
+        LightEngine& lightEngine = session->lightEngine();
+        WorldTime& worldTime = session->worldTime();
+        EntityManager& entityManager = session->entities();
 
         // Start lighting thread (processes lighting updates asynchronously)
         lightEngine.start();
         std::cout << "Lighting thread started (async lighting updates enabled)\n";
 
-        // Create entity system (game thread to graphics thread communication)
-        GraphicsEventQueue graphicsEventQueue;
-        EntityManager entityManager(world, graphicsEventQueue);
+        // Start game thread (processes commands + ticks at configured rate)
+        session->startGameThread();
+        std::cout << "Game thread started (20 TPS)\n";
         std::cout << "Entity system initialized\n";
 
-        // World time system for day/night cycle
-        WorldTime worldTime;
-        worldTime.setTicksPerSecond(20.0f);
         worldTime.setTimeSpeed(1.0f);
         bool timeFrozen = false;
         float timeSpeedMultiplier = 1.0f;
@@ -556,8 +551,6 @@ int main(int argc, char* argv[]) {
 
         // Audio system
 #ifdef FINEVOX_HAS_AUDIO
-        SoundEventQueue soundEventQueue;
-
         // Load sound set definitions
         auto soundDir = ResourceLocator::instance().resolve("game/sounds");
         if (std::filesystem::exists(soundDir)) {
@@ -565,14 +558,15 @@ int main(int argc, char* argv[]) {
             std::cout << "Loaded " << soundSets << " sound sets\n";
         }
 
-        finevox::audio::AudioEngine audioEngine(soundEventQueue, SoundRegistry::global());
+        // Audio engine reads from session's sound event queue
+        finevox::audio::AudioEngine audioEngine(session->soundEvents(), SoundRegistry::global());
         if (audioEngine.initialize()) {
             std::cout << "Audio engine initialized\n";
         } else {
             std::cout << "Warning: Audio engine failed to initialize\n";
         }
 
-        finevox::audio::FootstepTracker footstepTracker(soundEventQueue, world);
+        finevox::audio::FootstepTracker footstepTracker(session->soundEvents(), world);
 #endif
 
         // Lighting modes: 0 = off, 1 = flat (raw L1 ball), 2 = smooth (interpolated)
@@ -621,6 +615,7 @@ int main(int argc, char* argv[]) {
         applyLightingMode();
 
         // Enable async meshing if requested
+        FrameFenceWaiter fenceWaiter;
         if (useAsyncMeshing) {
             worldRenderer.enableAsyncMeshing();
             std::cout << "Async meshing enabled with "
@@ -635,6 +630,14 @@ int main(int argc, char* argv[]) {
                 world.setAlwaysDeferMeshRebuild(false);
                 std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
             }
+
+            // Set up fence-wait thread: overlaps mesh processing with GPU fence wait
+            fenceWaiter.setRenderer(renderer.get());
+            if (auto* ws = worldRenderer.wakeSignal()) {
+                fenceWaiter.attach(ws);
+            }
+            fenceWaiter.start();
+            std::cout << "Fence-wait thread started\n";
         }
 
         // Mark all chunks as dirty to generate initial meshes
@@ -971,14 +974,7 @@ int main(int argc, char* argv[]) {
 
                     RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                     if (result.hit) {
-#ifdef FINEVOX_HAS_AUDIO
-                        BlockTypeId breakType = world.getBlock(result.blockPos);
-                        auto breakSoundSet = BlockRegistry::global().getType(breakType).soundSet();
-                        if (breakSoundSet.isValid()) {
-                            soundEventQueue.push(SoundEvent::blockBreak(breakSoundSet, result.blockPos));
-                        }
-#endif
-                        world.breakBlock(result.blockPos);
+                        session->actions().breakBlock(result.blockPos);
                         std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
                     }
                     return finevk::ListenerResult::Consumed;
@@ -1000,25 +996,13 @@ int main(int argc, char* argv[]) {
                                 std::cout << "Cannot place block at (" << placePos.x << "," << placePos.y << "," << placePos.z
                                           << ") - would intersect player\n";
                             } else {
-                                world.placeBlock(placePos, selectedBlock);
-#ifdef FINEVOX_HAS_AUDIO
-                                auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
-                                if (placeSoundSet.isValid()) {
-                                    soundEventQueue.push(SoundEvent::blockPlace(placeSoundSet, placePos));
-                                }
-#endif
+                                session->actions().placeBlock(placePos, selectedBlock);
                                 std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                                           << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
                                           << ") - pushing player\n";
                             }
                         } else {
-                            world.placeBlock(placePos, selectedBlock);
-#ifdef FINEVOX_HAS_AUDIO
-                            auto placeSoundSet = BlockRegistry::global().getType(selectedBlock).soundSet();
-                            if (placeSoundSet.isValid()) {
-                                soundEventQueue.push(SoundEvent::blockPlace(placeSoundSet, placePos));
-                            }
-#endif
+                            session->actions().placeBlock(placePos, selectedBlock);
                             std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                                       << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                         }
@@ -1072,6 +1056,36 @@ int main(int argc, char* argv[]) {
 
         // Main loop
         while (window->isOpen()) {
+            // ================================================================
+            // Phase 1: Fence wait + mesh processing overlap
+            // ================================================================
+            // Kick the fence wait thread, then process meshes while the GPU
+            // finishes the previous frame. This eliminates dead time: instead
+            // of blocking on vkWaitForFences, we upload meshes concurrently.
+            bool useFenceThread = worldRenderer.asyncMeshingEnabled();
+
+            if (useFenceThread) {
+                fenceWaiter.kickWait();
+
+                // Process meshes while fence is pending (no deadline yet)
+                while (!fenceWaiter.isReady()) {
+                    if (!worldRenderer.waitForMeshUploads(
+                            std::chrono::steady_clock::now() + std::chrono::milliseconds(5))) {
+                        break;  // Shutdown signaled
+                    }
+                    worldRenderer.updateMeshes(0);
+                }
+
+                // Drain any meshes that arrived right as fence completed
+                worldRenderer.updateMeshes(0);
+
+                // Detach from WakeSignal during render — prevents spurious wakes
+                fenceWaiter.detach();
+            }
+
+            // ================================================================
+            // Phase 2: Input, world updates, acquire frame, deadline meshes
+            // ================================================================
             window->pollEvents();
 
             // Query mouse delta BEFORE update() clears it
@@ -1104,8 +1118,7 @@ int main(int argc, char* argv[]) {
             float dt = std::chrono::duration<float>(now - lastTime).count();
             lastTime = now;
 
-            // Advance world time and compute sky parameters
-            worldTime.advance(dt);
+            // Compute sky parameters (worldTime advanced by game thread; reads are thread-safe)
             auto skyParams = computeSkyParameters(worldTime.timeOfDay());
             worldRenderer.setSkyParameters(skyParams);
 
@@ -1159,29 +1172,20 @@ int main(int argc, char* argv[]) {
             camera.setOrientation(playerController.forwardVector(), glm::vec3(0, 1, 0));
             camera.updateState();
 
-            // Sync player entity position with physics body
-            if (Entity* player = entityManager.getLocalPlayer()) {
-                player->setPosition(playerBody.position());
-                player->setVelocity(playerBody.velocity());
-                player->setOnGround(playerBody.isOnGround());
-                player->setLook(glm::degrees(playerController.yaw()), glm::degrees(playerController.pitch()));
+            // Send player state to game thread via command queue
+            {
+                EntityState state;
+                state.position = glm::dvec3(playerBody.position());
+                state.velocity = glm::dvec3(playerBody.velocity());
+                state.onGround = playerBody.isOnGround();
+                state.yaw = glm::degrees(playerController.yaw());
+                state.pitch = glm::degrees(playerController.pitch());
+                session->actions().sendPlayerState(playerId, state);
             }
-
-            // Tick the entity manager (publishes snapshots to graphics queue)
-            entityManager.tick(dt);
 
             // Drain graphics event queue (for now, just discard the events)
             // In a full implementation, we'd use these for entity interpolation
-            [[maybe_unused]] auto graphicsEvents = graphicsEventQueue.drainAll();
-
-            // Process events from external API (block place/break)
-            // This triggers handlers, lighting updates, neighbor notifications
-            size_t eventsProcessed = scheduler.processEvents();
-            if (eventsProcessed > 0 && !worldRenderer.asyncMeshingEnabled()) {
-                // For sync meshing, mark chunks dirty for rebuild
-                // Async meshing uses push-based system (lighting thread handles remesh)
-                worldRenderer.markAllDirty();
-            }
+            [[maybe_unused]] auto graphicsEvents = session->graphicsEvents().drainAll();
 
 #ifdef FINEVOX_HAS_AUDIO
             audioEngine.update(camera.positionD(), playerController.forwardVector(), glm::vec3(0, 1, 0));
@@ -1190,34 +1194,28 @@ int main(int argc, char* argv[]) {
             // Update world renderer - camera.positionD() provides high-precision position
             worldRenderer.updateCamera(camera.state(), camera.positionD());
 
-            // For async meshing: wait for mesh uploads with deadline, processing as they arrive
-            // This allows the graphics thread to sleep efficiently instead of busy-polling.
-            // We use half the frame period as a safety margin for render/submit.
+            // Deadline-based mesh processing: catch input-driven changes in the same frame.
+            // The deadline starts HERE (after frame acquire + input), giving mesh workers
+            // time to respond to block placements etc. triggered by pollEvents().
             if (worldRenderer.asyncMeshingEnabled()) {
-                // Calculate deadline once - this is the fixed point we must render by
                 auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(framePeriod.count() / 2);
 
-                // Loop: wait for meshes, process them, repeat until deadline
-                // When woken by a mesh arriving, we process and go back to waiting
-                // on the SAME deadline. Loop exits when deadline reached.
                 while (std::chrono::steady_clock::now() < deadline) {
-                    // Wait returns true if woken normally (mesh or deadline), false on shutdown
                     if (!worldRenderer.waitForMeshUploads(deadline)) {
                         break;  // Shutdown signaled
                     }
-
-                    // Process whatever meshes are ready (non-blocking)
-                    // This drains the queue each time we wake
-                    worldRenderer.updateMeshes(0);  // 0 = unlimited, drain queue
+                    worldRenderer.updateMeshes(0);
                 }
             } else {
                 // Sync meshing: just process directly
                 worldRenderer.updateMeshes(16);
             }
 
-            // Render
-            if (auto frame = renderer->beginFrame()) {
+            // ================================================================
+            // Phase 3: Render + submit
+            // ================================================================
+            if (auto frame = renderer->beginFrame(useFenceThread)) {
                 frame.beginRenderPass(skyParams.skyColor);  // Dynamic sky color
 
                 // Render the world
@@ -1335,19 +1333,41 @@ int main(int argc, char* argv[]) {
 
                 frame.endRenderPass();
                 renderer->endFrame();
+
+                // Re-attach fence waiter for next frame's fence wait
+                if (useFenceThread) {
+                    if (auto* ws = worldRenderer.wakeSignal()) {
+                        fenceWaiter.attach(ws);
+                    }
+                }
             }
         }
 
         std::cout << "\n\nShutting down...\n";
+
+        // Two-phase shutdown: signal threads to stop first, then join.
+        // Fence waiter uses requestStop()/join() so it can exit its timeout
+        // loop concurrently while other threads shut down.
+
+        // Signal fence waiter to stop (non-blocking, exits within ~100ms)
+        fenceWaiter.requestStop();
 
 #ifdef FINEVOX_HAS_AUDIO
         audioEngine.shutdown();
         std::cout << "Audio engine stopped.\n";
 #endif
 
+        // Stop game thread first (flushes pending commands)
+        session->stopGameThread();
+        std::cout << "Game thread stopped.\n";
+
         // Stop lighting thread before destroying world
         lightEngine.stop();
         std::cout << "Lighting thread stopped.\n";
+
+        // Join fence waiter (should already be done by now)
+        fenceWaiter.join();
+        std::cout << "Fence-wait thread stopped.\n";
 
         renderer->waitIdle();
 

@@ -408,7 +408,7 @@ TEST(MeshRebuildQueueTest, VersionUpdate) {
 // AlarmQueue tests
 // ============================================================================
 
-#include "finevox/core/alarm_queue.hpp"
+#include "finevox/core/deprecated/alarm_queue.hpp"
 
 TEST(AlarmQueueTest, BasicPushTryPop) {
     AlarmQueue<int> queue;

@@ -226,10 +226,10 @@ void EntityManager::handlePlayerPosition(const BlockEvent& event) {
     Entity* player = getEntity(playerId);
     if (!player) return;
 
-    Vec3 pos = event.playerData.position();
-    Vec3 vel = event.playerData.velocity();
-    bool ground = event.playerData.onGround;
-    uint64_t seq = event.playerData.inputSequence;
+    Vec3 pos = Vec3(event.entityState.position);
+    Vec3 vel = Vec3(event.entityState.velocity);
+    bool ground = event.entityState.onGround;
+    uint64_t seq = event.entityState.inputSequence;
 
     // Update authority tracking
     auto& auth = getPlayerAuthority(playerId);
@@ -242,13 +242,16 @@ void EntityManager::handlePlayerPosition(const BlockEvent& event) {
     player->setPosition(pos);
     player->setVelocity(vel);
     player->setOnGround(ground);
+
+    // Also update look direction if provided via sendPlayerState
+    player->setLook(event.entityState.yaw, event.entityState.pitch);
 }
 
 void EntityManager::handlePlayerLook(const BlockEvent& event) {
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
-    player->setLook(event.playerData.yaw, event.playerData.pitch);
+    player->setLook(event.entityState.yaw, event.entityState.pitch);
 }
 
 void EntityManager::handlePlayerJump(const BlockEvent& event) {

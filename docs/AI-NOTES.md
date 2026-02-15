@@ -43,6 +43,9 @@
 | Event system / block handlers | [24-event-system.md](24-event-system.md) |
 | Entity system design | [25-entity-system.md](25-entity-system.md) |
 | Network protocol | [26-network-protocol.md](26-network-protocol.md) |
+| Network transport spec | [PLAN-network-layer.md](PLAN-network-layer.md) |
+| Fence-wait thread design | [PLAN-fence-wait-thread.md](PLAN-fence-wait-thread.md) |
+| finenet design (external) | `/Users/theosib/projects/finenet/docs/DESIGN.md` |
 | Implementation phases | [17-implementation-phases.md](17-implementation-phases.md) |
 | GUI toolkit design | [finegui-design.md](finegui-design.md) |
 | Source ↔ Doc mapping | [SOURCE-DOC-MAPPING.md](SOURCE-DOC-MAPPING.md) |
@@ -66,7 +69,8 @@
 │  │   └── Generation Pipeline (multi-pass)               │
 │  ├── libfinevox_render — finevox::render::              │
 │  │   ├── WorldRenderer, SubChunkView                    │
-│  │   └── TextureManager, BlockAtlas                     │
+│  │   ├── TextureManager, BlockAtlas                     │
+│  │   └── FrameFenceWaiter (fence-wait thread)           │
 │  ├── libfinevox_audio — finevox::audio::                │
 │  │   └── AudioEngine, SoundLoader, FootstepTracker      │
 │  └── libfinevox_script — finevox::script::              │
@@ -75,6 +79,12 @@
 ├─────────────────────────────────────────────────────────┤
 │  finegui                                                │  <- GUI toolkit
 │  └── Dear ImGui + finevk Vulkan backend                 │
+├─────────────────────────────────────────────────────────┤
+│  finenet (planned mandatory dep)                        │  <- Network transport
+│  ├── Connection, ConnectionListener                     │
+│  ├── Channels, Priority scheduling, Compression         │
+│  ├── Queue<T>, KeyedQueue<K,D>, WakeSignal (migrated)  │
+│  └── Local in-process transport + UDP/TCP               │
 ├─────────────────────────────────────────────────────────┤
 │  FineStructureVK                                        │  <- Vulkan wrapper
 │  ├── Device, Swapchain, Pipelines                       │
@@ -244,6 +254,44 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - .model files support `script:` field for referencing .fsc script files
 - Event symbols: :place, :break, :tick, :neighbor_changed, :block_update, :use, :hit, :repaint
 
+### Phase 18: Game Session & Game Thread ✓
+- **GameSession**: Owns all game state (World, UpdateScheduler, LightEngine, EntityManager, WorldTime)
+  - Factory: `GameSession::createLocal(config)` — constructs and wires all subsystems
+  - `GameActions` abstract interface: `breakBlock()`, `placeBlock()`, `useBlock()`, `hitBlock()`, `sendPlayerState()`
+  - `LocalGameActions` implementation routes commands through `Queue<BlockEvent>` command queue
+  - Sound events pushed eagerly on calling thread (instant audio feedback)
+  - Block mutations deferred to game thread via command queue
+- **EntityState**: Unified POD struct for entity snapshots (position/velocity as `glm::dvec3`)
+  - Replaces `PlayerEventData` in BlockEvent and scattered fields in GraphicsEvent
+  - Used for game→graphics communication, player state updates, future network packets
+  - `EntityState::fromEntity()` factory handles float→double conversion
+- **Game thread**: Dedicated thread for game logic at fixed tick rate (20 TPS default)
+  - Uses `Queue<BlockEvent>` with alarm support: wakes on command arrival OR tick alarm
+  - Commands processed immediately (not waiting for next tick)
+  - Ticks drive: `worldTime.advance()`, `scheduler.advanceGameTick()`, `entityManager.tick()`
+  - Catch-up capped at 10 ticks to avoid spiral
+  - `startGameThread()` / `stopGameThread()` lifecycle (follows LightEngine pattern)
+  - `tick(float dt)` kept for backwards compat (synchronous, asserts game thread not running)
+- **Thread safety**: `WorldTime::totalTicks_` is `std::atomic<int64_t>` for cross-thread reads
+- **render_demo**: Game thread started alongside lighting thread; uses `sendPlayerState()` instead of direct entity access
+- 1229 tests passing (1216 main + 13 script)
+
+### Networking Preparation
+- **Fence-wait thread** (complete): FrameFenceWaiter overlaps mesh processing with GPU fence wait
+  - 3-phase render loop: fence wait + mesh overlap → input/world updates + deadline meshes → render
+  - Two-phase shutdown: requestStop() (non-blocking) + join() (blocking)
+  - Timeout-based fence wait (100ms default) for clean shutdown
+  - 16 tests in test_frame_fence_waiter.cpp
+- **Concurrency primitives** (in finevox core, planned migration to finenet):
+  - WakeSignal: multi-queue wake mechanism with deadline + shutdown support
+  - Queue<T>: thread-safe FIFO with alarm, WakeSignal attachment
+  - KeyedQueue<K,D>: deduplicating queue with merge semantics
+- **finenet integration** (planned): standalone network transport library
+  - Queue/KeyedQueue/WakeSignal will migrate into finenet
+  - finenet becomes a mandatory dependency (replaces core queue primitives)
+  - Local in-process transport: single-player uses identical Connection API as multiplayer
+  - See [PLAN-network-layer.md](PLAN-network-layer.md) for full protocol spec
+
 ---
 
 ## Command Language Syntax Quick Reference
@@ -276,31 +324,36 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**Phases 0-17 complete.** 1198 tests passing (1185 main + 13 script integration). Five shared libraries with separate namespaces.
+**Phases 0-18 complete.** 1229 tests passing (1216 main + 13 script). Five shared libraries with separate namespaces.
 
 **Directory layout:**
 - `include/finevox/{core,worldgen,render,audio,script}/` — headers
 - `src/{core,worldgen,render,audio,script}/` — source files mirror headers
 
 **Shared libraries:**
-- `libfinevox.dylib` — core (world, mesh, physics, persistence, events, items, tags)
+- `libfinevox.dylib` — core (world, mesh, physics, persistence, events, items, tags, game session)
 - `libfinevox_worldgen.dylib` — world generation (links finevox PUBLIC)
 - `libfinevox_render.dylib` — Vulkan rendering (links finevox PUBLIC)
 - `libfinevox_audio.dylib` — audio (miniaudio; optional, `FINEVOX_BUILD_AUDIO`)
 - `libfinevox_script.dylib` — script integration (finescript; always built)
 
-**Recent work (Phases 15-17 + Input Context Switching):**
-- Phase 15: WorldTime, SkyParameters, split vertex skyLight/blockLight, shader sky brightness
-- Phase 16: AudioEngine (miniaudio), SoundRegistry, FootstepTracker, fire-and-forget sounds
-- Phase 17: finescript integration — GameScriptEngine, ScriptBlockHandler, BlockContext/DataContainer proxies, ScriptCache, .model `script:` field
-- Input Context Switching: Priority-ordered listener chain via finevk InputManager + finegui GuiMode integration. Escape toggles Gameplay↔Menu. Pause menu with Resume/Quit. HUD gated on context.
+**Recent work (Phase 18 - Game Thread):**
+- GameSession owns all game state with GameActions command interface
+- Dedicated game thread at 20 TPS with immediate command processing
+- EntityState unified POD struct (dvec3 position/velocity) across BlockEvent/GraphicsEvent
+- render_demo uses sendPlayerState() instead of direct entity access
+
+**Planned: Queue migration to finenet:**
+- WakeSignal, Queue<T>, KeyedQueue<K,D> → finenet
+- finenet becomes mandatory dependency (replaces finevox core queue primitives)
+- Local transport: in-process MPSC queues — single-player uses same Connection API as multiplayer
 
 **Remaining Phase 9 work (deferred):**
 - Scheduled tick persistence across save/load
 - `UpdatePropagationPolicy` for cross-chunk updates
 - Network quiescence protocol
 
-**Next task:** TBD
+**Next task:** finenet library implementation / queue migration
 **Blockers:** None
 
 ---
@@ -358,4 +411,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-12 — Phase 17 (Script Integration) complete*
+*Last updated: 2026-02-14 — Phase 18 (GameSession, game thread, EntityState) complete*

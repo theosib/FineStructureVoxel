@@ -104,15 +104,16 @@ BlockEvent BlockEvent::blockUpdate(BlockPos pos) {
 // Player Event Factory Methods
 // ============================================================================
 
-BlockEvent BlockEvent::playerPosition(EntityId id, Vec3 position, Vec3 velocity,
+BlockEvent BlockEvent::playerPosition(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
                                        bool onGround, uint64_t inputSequence) {
     BlockEvent event;
     event.type = EventType::PlayerPosition;
     event.entityId = id;
-    event.playerData.setPosition(position);
-    event.playerData.setVelocity(velocity);
-    event.playerData.onGround = onGround;
-    event.playerData.inputSequence = inputSequence;
+    event.entityState.id = id;
+    event.entityState.position = position;
+    event.entityState.velocity = velocity;
+    event.entityState.onGround = onGround;
+    event.entityState.inputSequence = inputSequence;
     return event;
 }
 
@@ -120,8 +121,9 @@ BlockEvent BlockEvent::playerLook(EntityId id, float yaw, float pitch) {
     BlockEvent event;
     event.type = EventType::PlayerLook;
     event.entityId = id;
-    event.playerData.yaw = yaw;
-    event.playerData.pitch = pitch;
+    event.entityState.id = id;
+    event.entityState.yaw = yaw;
+    event.entityState.pitch = pitch;
     return event;
 }
 

@@ -73,6 +73,7 @@ add_library(finevox SHARED
     src/core/event_queue.cpp
     src/core/entity.cpp
     src/core/graphics_event_queue.cpp
+    src/core/entity_state.cpp
     src/core/entity_manager.cpp
     src/core/player_controller.cpp
     src/core/key_bindings.cpp
@@ -81,6 +82,7 @@ add_library(finevox SHARED
     src/core/world_time.cpp
     src/core/sound_event.cpp
     src/core/sound_registry.cpp
+    src/core/game_session.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -211,6 +213,7 @@ if(FINEVOX_BUILD_RENDER)
         src/render/world_renderer.cpp
         src/render/block_atlas.cpp
         src/render/texture_manager.cpp
+        src/render/frame_fence_waiter.cpp
     )
 
     target_include_directories(finevox_render PUBLIC
@@ -435,6 +438,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_tags.cpp
         tests/test_sky.cpp
         tests/test_sound_system.cpp
+        tests/test_game_session.cpp
+        tests/test_game_thread.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -458,5 +463,19 @@ if(FINEVOX_BUILD_TESTS)
         )
 
         gtest_discover_tests(finevox_script_tests)
+    endif()
+
+    # Render tests (separate binary, links finevox_render)
+    if(TARGET finevox_render)
+        add_executable(finevox_render_tests
+            tests/test_frame_fence_waiter.cpp
+        )
+
+        target_link_libraries(finevox_render_tests PRIVATE
+            finevox_render
+            GTest::gtest_main
+        )
+
+        gtest_discover_tests(finevox_render_tests)
     endif()
 endif()

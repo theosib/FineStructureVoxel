@@ -238,83 +238,14 @@ public:
     void draw(finevk::CommandBuffer& cmd, uint32_t instanceCount = 1) const;
 
     // ========================================================================
-    // Version and LOD-Based Change Detection
+    // LOD Tracking
     // ========================================================================
-
-    /// Get the block version this mesh was built from
-    /// Returns 0 if no mesh has been built yet
-    [[nodiscard]] uint64_t lastBuiltVersion() const { return lastBuiltVersion_; }
-
-    /// Set the block version after building a mesh
-    void setLastBuiltVersion(uint64_t version) { lastBuiltVersion_ = version; }
-
-    /// Get the light version this mesh was built from
-    /// Returns 0 if no mesh has been built yet
-    [[nodiscard]] uint64_t lastBuiltLightVersion() const { return lastBuiltLightVersion_; }
-
-    /// Set the light version after building a mesh
-    void setLastBuiltLightVersion(uint64_t version) { lastBuiltLightVersion_ = version; }
 
     /// Get the LOD level this mesh was built at
     [[nodiscard]] LODLevel lastBuiltLOD() const { return lastBuiltLOD_; }
 
     /// Set the LOD level after building a mesh
     void setLastBuiltLOD(LODLevel lod) { lastBuiltLOD_ = lod; }
-
-    /// Check if mesh needs regeneration by comparing block version
-    /// @param currentBlockVersion The current SubChunk::blockVersion()
-    [[nodiscard]] bool needsBlockRebuild(uint64_t currentBlockVersion) const {
-        return lastBuiltVersion_ != currentBlockVersion;
-    }
-
-    /// Check if mesh needs regeneration by comparing light version
-    /// @param currentLightVersion The current SubChunk::lightVersion()
-    [[nodiscard]] bool needsLightRebuild(uint64_t currentLightVersion) const {
-        return lastBuiltLightVersion_ != currentLightVersion;
-    }
-
-    /// Check if mesh needs regeneration by comparing either version
-    /// @param currentBlockVersion The current SubChunk::blockVersion()
-    /// @param currentLightVersion The current SubChunk::lightVersion()
-    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion, uint64_t currentLightVersion) const {
-        return needsBlockRebuild(currentBlockVersion) || needsLightRebuild(currentLightVersion);
-    }
-
-    /// Check if mesh needs regeneration due to LOD change (exact match)
-    /// @param targetLOD The desired LOD level
-    [[nodiscard]] bool needsLODChange(LODLevel targetLOD) const {
-        return lastBuiltLOD_ != targetLOD;
-    }
-
-    /// Check if the current mesh satisfies an LOD request
-    /// Uses flexible matching: request may accept multiple LOD levels
-    /// @param request The LOD request (may be exact or flexible)
-    [[nodiscard]] bool satisfiesLODRequest(LODRequest request) const {
-        return request.accepts(lastBuiltLOD_);
-    }
-
-    /// Check if mesh needs any kind of rebuild (block/light version or LOD)
-    /// @param currentBlockVersion The current SubChunk::blockVersion()
-    /// @param currentLightVersion The current SubChunk::lightVersion()
-    /// @param targetLOD The desired LOD level (exact match)
-    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion, uint64_t currentLightVersion, LODLevel targetLOD) const {
-        return needsRebuild(currentBlockVersion, currentLightVersion) || needsLODChange(targetLOD);
-    }
-
-    /// Check if mesh needs any kind of rebuild (block/light version or LOD request)
-    /// Uses flexible LOD matching for hysteresis
-    /// @param currentBlockVersion The current SubChunk::blockVersion()
-    /// @param currentLightVersion The current SubChunk::lightVersion()
-    /// @param lodRequest The LOD request (may accept multiple levels)
-    [[nodiscard]] bool needsRebuild(uint64_t currentBlockVersion, uint64_t currentLightVersion, LODRequest lodRequest) const {
-        return needsRebuild(currentBlockVersion, currentLightVersion) || !satisfiesLODRequest(lodRequest);
-    }
-
-    // Legacy dirty flag interface (deprecated - use version comparison instead)
-    // Kept for compatibility during transition
-    void markDirty() { lastBuiltVersion_ = 0; lastBuiltLightVersion_ = 0; }
-    void clearDirty() { /* no-op, use setLastBuiltVersion instead */ }
-    [[nodiscard]] bool isDirty() const { return lastBuiltVersion_ == 0 || lastBuiltLightVersion_ == 0; }
 
     // Non-copyable, movable
     SubChunkView(const SubChunkView&) = delete;
@@ -328,8 +259,6 @@ private:
     uint32_t indexCount_ = 0;
     uint32_t vertexCount_ = 0;
     size_t gpuMemoryBytes_ = 0;       // Allocated GPU memory (vertex + index buffers)
-    uint64_t lastBuiltVersion_ = 0;       // 0 means never built (block version)
-    uint64_t lastBuiltLightVersion_ = 0;  // 0 means never built (light version)
     LODLevel lastBuiltLOD_ = LODLevel::LOD0;  // LOD level of current mesh
 };
 

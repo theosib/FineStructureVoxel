@@ -26,6 +26,12 @@ WorldRenderer::WorldRenderer(
 }
 
 WorldRenderer::~WorldRenderer() {
+    // Stop worker pool before destroying GPU resources
+    if (meshWorkerPool_) {
+        meshWorkerPool_->uploadQueue().detach();
+        meshWorkerPool_->stop();
+    }
+
     if (device_) {
         device_->waitIdle();
     }
@@ -83,6 +89,38 @@ void WorldRenderer::initialize() {
 
     // Create pipeline
     createPipeline();
+
+    // Create the mesh rebuild queue and worker pool (always active)
+    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(mergeMeshRebuildRequest);
+
+    meshWorkerPool_ = std::make_unique<MeshWorkerPool>(world_, 0);
+    meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());
+    meshWorkerPool_->setBlockTextureProvider(textureProvider_);
+    meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
+    meshWorkerPool_->setLODMergeMode(lodMergeMode_);
+
+    // Copy lighting settings to worker pool
+    meshWorkerPool_->setSmoothLighting(meshBuilder_.smoothLighting());
+    meshWorkerPool_->setFlatLighting(meshBuilder_.flatLighting());
+    if (lightProvider_) {
+        meshWorkerPool_->setLightProvider(lightProvider_);
+    }
+
+    // Copy geometry provider for custom block shapes
+    if (geometryProvider_) {
+        meshWorkerPool_->setGeometryProvider(geometryProvider_);
+    }
+
+    // Copy face occludes provider for directional face culling
+    if (faceOccludesProvider_) {
+        meshWorkerPool_->setFaceOccludesProvider(faceOccludesProvider_);
+    }
+
+    // Attach upload queue to wake signal for deadline-based waiting
+    meshWorkerPool_->uploadQueue().attach(&wakeSignal_);
+
+    // Start worker threads
+    meshWorkerPool_->start();
 
     initialized_ = true;
 }
@@ -169,250 +207,72 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
 void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
     if (!initialized_) return;
 
-    // Use async path if worker pool is enabled
-    if (meshWorkerPool_) {
-        updateMeshesAsync(maxUpdates);
-        return;
-    }
-
-    uint32_t updates = 0;
-
-    // Collect chunks that need rebuilding based on version mismatch or LOD change
-    // This replaces the explicit dirty tracking with self-throttling version checks
-    struct ChunkUpdateInfo {
-        ChunkPos pos;
-        float distance;
-        LODRequest lodRequest;  // Uses 2x encoding for hysteresis
-        bool needsRebuild;
-    };
-    std::vector<ChunkUpdateInfo> chunksToUpdate;
-
-    // First pass: check existing views for version mismatches or LOD changes
-    for (auto& [pos, view] : views_) {
-        const SubChunk* subchunk = world_.getSubChunk(pos);
-        if (!subchunk) continue;
-
-        // Calculate distance in blocks (not chunk coordinates)
-        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
-
-        // Get LOD request based on distance
-        // - Returns exact request when clearly in one LOD zone
-        // - Returns flexible request (accepts 2 levels) in hysteresis zones
-        LODRequest lodRequest = lodEnabled_
-            ? lodConfig_.getRequestForDistance(distBlocks)
-            : LODRequest::exact(LODLevel::LOD0);
-
-        // Check if rebuild needed: version mismatch OR LOD doesn't satisfy request
-        // The LODRequest::accepts() method handles the hysteresis logic:
-        // - Exact requests only match one LOD level
-        // - Flexible requests match either neighboring level
-        uint64_t currentBlockVersion = subchunk->blockVersion();
-        uint64_t currentLightVersion = subchunk->lightVersion();
-        if (view->needsRebuild(currentBlockVersion, currentLightVersion, lodRequest)) {
-            chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
-        }
-    }
-
-    // Second pass: check explicitly marked dirty chunks (for new chunks not yet in views_)
-    // Keep track of which dirty chunks we're going to process
-    std::vector<ChunkPos> remainingDirty;
-    for (const auto& pos : dirtyChunks_) {
-        if (views_.find(pos) != views_.end()) continue;  // Already checked above
-        if (!isInViewDistance(pos)) {
-            // Keep chunks outside view distance - they may come into view later
-            remainingDirty.push_back(pos);
-            continue;
-        }
-
-        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
-        LODRequest lodRequest = lodEnabled_
-            ? lodConfig_.getRequestForDistance(distBlocks)
-            : LODRequest::exact(LODLevel::LOD0);
-
-        chunksToUpdate.push_back({pos, distBlocks, lodRequest, true});
-    }
-    dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
-
-    // Sort by distance to camera (nearest first) - prioritize close chunks
-    std::sort(chunksToUpdate.begin(), chunksToUpdate.end(),
-        [](const ChunkUpdateInfo& a, const ChunkUpdateInfo& b) {
-            return a.distance < b.distance;
-        });
-
-    // Process chunks that need updating
-    for (size_t i = 0; i < chunksToUpdate.size(); ++i) {
-        const auto& info = chunksToUpdate[i];
-
-        if (maxUpdates > 0 && updates >= maxUpdates) {
-            // Hit the limit - re-add remaining chunks to dirty list for next frame
-            for (size_t j = i; j < chunksToUpdate.size(); ++j) {
-                // Only re-add if not already in views_ (views will be checked via version)
-                if (views_.find(chunksToUpdate[j].pos) == views_.end()) {
-                    dirtyChunks_.push_back(chunksToUpdate[j].pos);
-                }
-            }
-            break;
-        }
-
-        // Skip if too far
-        if (!isInViewDistance(info.pos)) continue;
-
-        // Get or create view
-        SubChunkView* view = getOrCreateView(info.pos);
-        if (!view) continue;
-
-        // CRITICAL: Capture versions BEFORE reading any block/light data (see mesh_worker_pool.cpp)
-        // This gives us "floor" versions - if the chunk is modified during mesh build,
-        // we'll have stale version numbers which triggers a rebuild next frame.
-        const SubChunk* subchunk = world_.getSubChunk(info.pos);
-        uint64_t blockVersionBeforeBuild = subchunk ? subchunk->blockVersion() : 0;
-        uint64_t lightVersionBeforeBuild = subchunk ? subchunk->lightVersion() : 0;
-
-        // Build mesh at the LOD level specified by the request
-        // For flexible requests, buildLevel() returns the finer (lower number) of the two acceptable levels
-        LODLevel buildLOD = info.lodRequest.buildLevel();
-        MeshData meshData = buildMeshFor(info.pos, buildLOD);
-
-        // Upload to GPU
-        if (view->canUpdateInPlace(meshData)) {
-            view->update(*renderer_->commandPool(), meshData);
-        } else {
-            view->upload(*device_, *renderer_->commandPool(), meshData, config_.meshCapacityMultiplier);
-        }
-
-        // Record the versions and LOD we built
-        view->setLastBuiltVersion(blockVersionBeforeBuild);
-        view->setLastBuiltLightVersion(lightVersionBeforeBuild);
-        view->setLastBuiltLOD(buildLOD);
-
-        ++updates;
-    }
-}
-
-void WorldRenderer::updateMeshesAsync(uint32_t maxUpdates) {
+    // Pop completed meshes from the upload queue and send to GPU.
+    // Rebuilds are triggered by game logic, lighting thread, and LOD checks
+    // in render() — no polling or dirty list scanning needed here.
     uint32_t uploads = 0;
-
-    // First pass: check existing views for version mismatches or LOD changes
-    // This ensures LOD updates when camera moves, not just when blocks change
-    for (auto& [pos, view] : views_) {
-        const SubChunk* subchunk = world_.getSubChunk(pos);
-        if (!subchunk) continue;
-
-        // Calculate distance and LOD request
-        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
-        LODRequest lodRequest = lodEnabled_
-            ? lodConfig_.getRequestForDistance(distBlocks)
-            : LODRequest::exact(LODLevel::LOD0);
-
-        // Check if rebuild needed: version mismatch OR LOD doesn't satisfy request
-        uint64_t currentBlockVersion = subchunk->blockVersion();
-        uint64_t currentLightVersion = subchunk->lightVersion();
-        if (view->needsRebuild(currentBlockVersion, currentLightVersion, lodRequest)) {
-            // Queue rebuild with appropriate priority
-            uint32_t priority = (distBlocks < 32.0f) ? 0 : 100;  // Immediate for close chunks
-            meshRebuildQueue_->push(pos, MeshRebuildRequest(currentBlockVersion, currentLightVersion, priority, lodRequest));
-        }
-    }
-
-    // Process explicitly dirty chunks (for new chunks not yet in views_)
-    std::vector<ChunkPos> remainingDirty;
-    for (const auto& pos : dirtyChunks_) {
-        if (!isInViewDistance(pos)) {
-            // Keep chunks outside view distance - they may come into view later
-            remainingDirty.push_back(pos);
-            continue;
-        }
-
-        auto subchunk = world_.getSubChunkShared(pos);
-        if (!subchunk) continue;
-
-        // Calculate LOD request
-        float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
-        LODRequest lodRequest = lodEnabled_
-            ? lodConfig_.getRequestForDistance(distBlocks)
-            : LODRequest::exact(LODLevel::LOD0);
-
-        // Queue rebuild request - workers will build it and push to upload queue
-        uint64_t blockVersion = subchunk->blockVersion();
-        uint64_t lightVersion = subchunk->lightVersion();
-        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion, lodRequest));
-    }
-    dirtyChunks_ = std::move(remainingDirty);  // Keep chunks that weren't processed
-
-    // Pop completed meshes from the upload queue (push-based model)
-    // Workers push completed meshes here; we pop and upload to GPU
     while (maxUpdates == 0 || uploads < maxUpdates) {
         auto uploadData = meshWorkerPool_->tryPopUpload();
-        if (!uploadData) break;  // No more pending meshes
+        if (!uploadData) break;
 
         const ChunkPos& pos = uploadData->pos;
-
-        // Get or create view for this position
         SubChunkView* view = getOrCreateView(pos);
 
-        // Handle empty mesh (subchunk was unloaded or empty)
         if (uploadData->mesh.isEmpty()) {
-            // Release GPU resources for empty subchunks
             view->release();
-            view->setLastBuiltVersion(uploadData->blockVersion);
-            view->setLastBuiltLightVersion(uploadData->lightVersion);
             view->setLastBuiltLOD(uploadData->lodLevel);
             ++uploads;
             continue;
         }
 
-        // Upload mesh to GPU
         if (view->canUpdateInPlace(uploadData->mesh)) {
             view->update(*renderer_->commandPool(), uploadData->mesh);
         } else {
             view->upload(*device_, *renderer_->commandPool(), uploadData->mesh, config_.meshCapacityMultiplier);
         }
 
-        // Record the versions and LOD from the uploaded mesh
-        view->setLastBuiltVersion(uploadData->blockVersion);
-        view->setLastBuiltLightVersion(uploadData->lightVersion);
         view->setLastBuiltLOD(uploadData->lodLevel);
-
         ++uploads;
     }
-
-    // Note: In pure push-based model, rebuilds are triggered by game logic
-    // and lighting threads pushing to meshRebuildQueue_, not by polling here.
 }
 
 void WorldRenderer::markDirty(ChunkPos pos) {
-    // Avoid duplicates
-    for (const auto& p : dirtyChunks_) {
-        if (p == pos) return;
+    if (meshRebuildQueue_) {
+        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal());
     }
-    dirtyChunks_.push_back(pos);
 }
 
 void WorldRenderer::markColumnDirty(ColumnPos pos) {
-    // Get the column and mark all its non-empty subchunks dirty
+    if (!meshRebuildQueue_) return;
+
     ChunkColumn* column = world_.getColumn(pos);
     if (!column) return;
 
-    // ChunkColumn uses sparse storage - iterate over existing subchunks only
     column->forEachSubChunk([this, &pos](int32_t chunkY, const SubChunk& subchunk) {
         if (!subchunk.isEmpty()) {
-            markDirty(ChunkPos(pos.x, chunkY, pos.z));
+            meshRebuildQueue_->push(ChunkPos(pos.x, chunkY, pos.z), MeshRebuildRequest::normal());
         }
     });
 }
 
-void WorldRenderer::markAllDirty() {
-    // Invalidate version on all existing views (forces rebuild on next updateMeshes)
-    for (auto& [pos, view] : views_) {
-        view->markDirty();  // Sets lastBuiltVersion to 0, guaranteeing version mismatch
-    }
+void WorldRenderer::rebuildAllMeshes() {
+    if (!meshRebuildQueue_) return;
 
-    // Also scan the world for all subchunks with data and add to dirty list
-    // This is needed for initial population when views_ is empty
-    auto subchunkPositions = world_.getAllSubChunkPositions();
-    for (const auto& pos : subchunkPositions) {
-        markDirty(pos);
+    // Push all existing views
+    for (auto& [pos, view] : views_) {
+        meshRebuildQueue_->push(pos,
+            MeshRebuildRequest::normal(LODRequest::exact(view->lastBuiltLOD())));
     }
+    // Also queue any world subchunks not yet in views_
+    for (const auto& pos : world_.getAllSubChunkPositions()) {
+        if (views_.find(pos) == views_.end()) {
+            meshRebuildQueue_->push(pos, MeshRebuildRequest::normal());
+        }
+    }
+}
+
+void WorldRenderer::markAllDirty() {
+    rebuildAllMeshes();
 }
 
 void WorldRenderer::render(finevk::CommandBuffer& cmd) {
@@ -450,6 +310,16 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             continue;
         }
 
+        // LOD check — piggyback on render iteration (essentially free)
+        if (lodEnabled_ && meshRebuildQueue_) {
+            float distBlocks = LODConfig::distanceToChunk(highPrecisionCameraPos_, pos);
+            LODRequest lodRequest = lodConfig_.getRequestForDistance(distBlocks);
+            if (!lodRequest.accepts(view->lastBuiltLOD())) {
+                uint32_t priority = (distBlocks < 32.0f) ? 0 : 100;
+                meshRebuildQueue_->push(pos, MeshRebuildRequest(priority, lodRequest));
+            }
+        }
+
         // Calculate view-relative offset and set fog/sky parameters
         ChunkPushConstants pushConstants{};
         pushConstants.chunkOffset = calculateViewRelativeOffset(pos);
@@ -483,28 +353,6 @@ SubChunkView* WorldRenderer::getOrCreateView(ChunkPos pos) {
     auto* ptr = view.get();
     views_[pos] = std::move(view);
     return ptr;
-}
-
-MeshData WorldRenderer::buildMeshFor(ChunkPos pos, LODLevel lodLevel) {
-    // Get the subchunk from the world
-    const SubChunk* subchunk = world_.getSubChunk(pos);
-    if (!subchunk) {
-        return MeshData{};
-    }
-
-    // For LOD0, use normal mesh building
-    if (lodLevel == LODLevel::LOD0) {
-        return meshBuilder_.buildSubChunkMesh(*subchunk, pos, world_, textureProvider_);
-    }
-
-    // For higher LOD levels, generate downsampled mesh
-    // Create temporary LOD subchunk, downsample, and build mesh
-    LODSubChunk lodData(lodLevel);
-    lodData.downsampleFrom(*subchunk, lodMergeMode_);
-
-    // Use merge-mode-aware mesh building
-    BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
-    return meshBuilder_.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider_, lodMergeMode_);
 }
 
 bool WorldRenderer::isInViewDistance(ChunkPos pos) const {
@@ -661,7 +509,6 @@ void WorldRenderer::performCleanup() {
 
 void WorldRenderer::unloadAll() {
     views_.clear();
-    dirtyChunks_.clear();
 }
 
 size_t WorldRenderer::totalVertexCount() const {
@@ -720,65 +567,6 @@ WorldRenderer::LODStats WorldRenderer::getLODStats() const {
 }
 
 // ============================================================================
-// Async Meshing
-// ============================================================================
-
-void WorldRenderer::enableAsyncMeshing(size_t numThreads) {
-    if (meshWorkerPool_) return;  // Already enabled
-
-    // Create the rebuild queue
-    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(mergeMeshRebuildRequest);
-
-    // Create the worker pool
-    meshWorkerPool_ = std::make_unique<MeshWorkerPool>(world_, numThreads);
-    meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());
-    meshWorkerPool_->setBlockTextureProvider(textureProvider_);
-    meshWorkerPool_->setGreedyMeshing(meshBuilder_.greedyMeshing());
-    meshWorkerPool_->setLODMergeMode(lodMergeMode_);
-
-    // Copy lighting settings to worker pool
-    meshWorkerPool_->setSmoothLighting(meshBuilder_.smoothLighting());
-    meshWorkerPool_->setFlatLighting(meshBuilder_.flatLighting());
-    if (lightProvider_) {
-        meshWorkerPool_->setLightProvider(lightProvider_);
-    }
-
-    // Copy geometry provider for custom block shapes
-    if (geometryProvider_) {
-        meshWorkerPool_->setGeometryProvider(geometryProvider_);
-    }
-
-    // Copy face occludes provider for directional face culling
-    if (faceOccludesProvider_) {
-        meshWorkerPool_->setFaceOccludesProvider(faceOccludesProvider_);
-    }
-
-    // Attach upload queue to wake signal for deadline-based waiting
-    // When workers push completed meshes, the graphics thread will be woken
-    meshWorkerPool_->uploadQueue().attach(&wakeSignal_);
-
-    // Start worker threads
-    meshWorkerPool_->start();
-
-    // In pure push-based model, existing views are rebuilt when game logic
-    // or lighting thread pushes requests to meshRebuildQueue_
-}
-
-void WorldRenderer::disableAsyncMeshing() {
-    if (!meshWorkerPool_) return;  // Already disabled
-
-    // Detach upload queue from wake signal before stopping
-    meshWorkerPool_->uploadQueue().detach();
-
-    // Stop worker threads
-    meshWorkerPool_->stop();
-
-    // Destroy pool and queue (GPU meshes in views_ are preserved)
-    meshWorkerPool_.reset();
-    meshRebuildQueue_.reset();
-}
-
-// ============================================================================
 // LOD Merge Mode
 // ============================================================================
 
@@ -787,13 +575,13 @@ void WorldRenderer::setLODMergeMode(LODMergeMode mode) {
 
     lodMergeMode_ = mode;
 
-    // Propagate to worker pool if active
+    // Propagate to worker pool
     if (meshWorkerPool_) {
         meshWorkerPool_->setLODMergeMode(mode);
     }
 
-    // Mark all chunks dirty to rebuild with new mode
-    markAllDirty();
+    // Rebuild all meshes with new mode
+    rebuildAllMeshes();
 }
 
 LODMergeMode WorldRenderer::lodMergeMode() const {
@@ -807,7 +595,6 @@ LODMergeMode WorldRenderer::lodMergeMode() const {
 void WorldRenderer::setSmoothLighting(bool enabled) {
     meshBuilder_.setSmoothLighting(enabled);
 
-    // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setSmoothLighting(enabled);
     }
@@ -816,46 +603,33 @@ void WorldRenderer::setSmoothLighting(bool enabled) {
 void WorldRenderer::setFlatLighting(bool enabled) {
     meshBuilder_.setFlatLighting(enabled);
 
-    // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setFlatLighting(enabled);
     }
 }
 
 void WorldRenderer::setLightProvider(BlockLightProvider provider) {
-    // Store locally for worker pool access
     lightProvider_ = provider;
-
-    // Set on mesh builder for sync path
     meshBuilder_.setLightProvider(provider);
 
-    // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setLightProvider(provider);
     }
 }
 
 void WorldRenderer::setGeometryProvider(BlockGeometryProvider provider) {
-    // Store locally for worker pool access
     geometryProvider_ = provider;
-
-    // Set on mesh builder for sync path
     meshBuilder_.setGeometryProvider(provider);
 
-    // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setGeometryProvider(provider);
     }
 }
 
 void WorldRenderer::setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
-    // Store locally for worker pool access
     faceOccludesProvider_ = provider;
-
-    // Set on mesh builder for sync path
     meshBuilder_.setFaceOccludesProvider(provider);
 
-    // Propagate to worker pool if active
     if (meshWorkerPool_) {
         meshWorkerPool_->setFaceOccludesProvider(provider);
     }
@@ -866,10 +640,6 @@ void WorldRenderer::setFaceOccludesProvider(BlockFaceOccludesProvider provider) 
 // ============================================================================
 
 bool WorldRenderer::waitForMeshUploads(std::chrono::steady_clock::time_point deadline) {
-    if (!meshWorkerPool_) {
-        return true;  // No async meshing, nothing to wait for
-    }
-
     wakeSignal_.setDeadline(deadline);
     return wakeSignal_.wait();
 }

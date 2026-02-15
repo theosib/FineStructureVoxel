@@ -37,13 +37,11 @@ class SubChunk;
 struct MeshUploadData {
     ChunkPos pos;                           // Position of the subchunk
     MeshData mesh;                          // The generated mesh data
-    uint64_t blockVersion = 0;              // Block version mesh was built from
-    uint64_t lightVersion = 0;              // Light version mesh was built from
     LODLevel lodLevel = LODLevel::LOD0;     // LOD level of the mesh
 
     MeshUploadData() = default;
-    MeshUploadData(ChunkPos p, MeshData m, uint64_t bv, uint64_t lv, LODLevel lod)
-        : pos(p), mesh(std::move(m)), blockVersion(bv), lightVersion(lv), lodLevel(lod) {}
+    MeshUploadData(ChunkPos p, MeshData m, LODLevel lod)
+        : pos(p), mesh(std::move(m)), lodLevel(lod) {}
 };
 
 /// Queue type for mesh uploads (workers push, graphics thread pops)
@@ -61,7 +59,7 @@ using MeshUploadQueue = Queue<MeshUploadData>;
 //   pool.start();
 //
 //   // Game logic or lighting thread:
-//   rebuildQueue.push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion));
+//   rebuildQueue.push(pos, MeshRebuildRequest::normal());
 //
 //   // Per-frame in graphics thread:
 //   while (auto data = pool.tryPopUpload()) {

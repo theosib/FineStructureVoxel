@@ -38,8 +38,8 @@ protected:
     }
 
     // Helper to push a rebuild request to the input queue
-    void pushRebuildRequest(ChunkPos pos, uint64_t blockVersion = 1, uint64_t lightVersion = 1) {
-        queue_->push(pos, MeshRebuildRequest::normal(blockVersion, lightVersion));
+    void pushRebuildRequest(ChunkPos pos) {
+        queue_->push(pos, MeshRebuildRequest::normal());
     }
 
     // Wait for upload queue to have at least count items
@@ -186,12 +186,9 @@ TEST_F(MeshWorkerPoolTest, MeshIncludesVersionInfo) {
 
     pool.stop();
 
-    // The mesh versions come from the subchunk at build time, not the request
     auto uploadData = pool.tryPopUpload();
     ASSERT_TRUE(uploadData.has_value());
-    // Versions should be non-zero (from the actual subchunk)
-    // We can't predict exact values as they depend on subchunk state
-    EXPECT_GT(uploadData->blockVersion, 0);
+    EXPECT_EQ(uploadData->pos, pos);
 }
 
 // ============================================================================
@@ -342,9 +339,9 @@ TEST_F(MeshWorkerPoolTest, RequestCoalescingPreventsDuplicateBuilds) {
     ChunkPos pos(0, 0, 0);
 
     // Push multiple requests for the same position
-    pushRebuildRequest(pos, 1, 1);
-    pushRebuildRequest(pos, 2, 2);  // Should overwrite the first
-    pushRebuildRequest(pos, 3, 3);  // Should overwrite again
+    pushRebuildRequest(pos);
+    pushRebuildRequest(pos);  // Should merge with the first
+    pushRebuildRequest(pos);  // Should merge again
 
     // Now start - only one item should be in queue due to coalescing
     pool.start();
@@ -360,9 +357,8 @@ TEST_F(MeshWorkerPoolTest, RequestCoalescingPreventsDuplicateBuilds) {
 
     auto uploadData = pool.tryPopUpload();
     ASSERT_TRUE(uploadData.has_value());
-    // Versions come from subchunk at build time, not from request
     // The key test is that only ONE mesh was built despite 3 requests
-    EXPECT_GT(uploadData->blockVersion, 0);
+    EXPECT_EQ(uploadData->pos, pos);
 }
 
 // ============================================================================
@@ -387,7 +383,7 @@ TEST_F(MeshWorkerPoolTest, MeshIncludesLODLevel) {
     pool.start();
 
     ChunkPos pos(0, 0, 0);
-    queue_->push(pos, MeshRebuildRequest::normal(1, 1, LODLevel::LOD2));
+    queue_->push(pos, MeshRebuildRequest::normal(LODLevel::LOD2));
 
     ASSERT_TRUE(waitForUploads(pool, 1));
 

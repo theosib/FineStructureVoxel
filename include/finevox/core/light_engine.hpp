@@ -11,6 +11,7 @@
 #include "finevox/core/light_data.hpp"  // Keep for utility functions (packLightValue, etc.)
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
+#include "finevox/core/lod.hpp"
 #include <functional>
 #include <queue>
 #include <vector>
@@ -20,6 +21,7 @@
 #include <condition_variable>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 namespace finevox {
 
@@ -80,12 +82,13 @@ public:
      * @brief Dequeue a batch of updates
      *
      * Returns up to maxCount updates. If queue is empty, blocks until
-     * updates are available or stop() is called.
+     * updates are available, alarm fires, or stop() is called.
      *
      * @param maxCount Maximum number of updates to return
-     * @return Vector of updates (may be empty if stopped)
+     * @param alarmFired Output parameter set to true if woken by alarm
+     * @return Vector of updates (may be empty if stopped or alarm fired)
      */
-    std::vector<LightingUpdate> dequeueBatch(size_t maxCount);
+    std::vector<LightingUpdate> dequeueBatch(size_t maxCount, bool* alarmFired = nullptr);
 
     /**
      * @brief Non-blocking dequeue
@@ -117,6 +120,19 @@ public:
      */
     void reset();
 
+    /**
+     * @brief Set an alarm time point
+     *
+     * The next dequeueBatch() call will wake at this time even if no
+     * updates are available. Used for periodic background scan work.
+     */
+    void setAlarm(std::chrono::steady_clock::time_point tp);
+
+    /**
+     * @brief Clear any pending alarm
+     */
+    void clearAlarm();
+
 private:
     // Internal helper (caller must hold mutex_)
     std::vector<LightingUpdate> tryDequeueBatchUnlocked(size_t maxCount);
@@ -126,6 +142,10 @@ private:
     std::unordered_map<BlockPos, LightingUpdate> pending_;
     std::condition_variable cv_;
     std::atomic<bool> stopped_{false};
+
+    // Alarm support for periodic background work
+    std::chrono::steady_clock::time_point alarmTime_{};
+    bool alarmSet_ = false;
 };
 
 // Forward declarations
@@ -335,6 +355,13 @@ public:
     /// Get batch size
     [[nodiscard]] size_t batchSize() const { return batchSize_; }
 
+    /// Update player positions for background scan distance culling
+    /// Thread-safe: can be called from game thread while lighting thread runs
+    void setPlayerPositions(std::vector<glm::dvec3> positions);
+
+    /// Set scan radius for background scan distance culling (in blocks)
+    void setScanRadius(float radius) { scanRadius_ = radius; }
+
 private:
     World& world_;
 
@@ -409,6 +436,31 @@ private:
 
     // Push mesh rebuild requests for all affected chunks and clear the set
     void flushAffectedChunks();
+
+    // ========================================================================
+    // Background Scan State (safety net for missed pushes)
+    // ========================================================================
+
+    // Inbox/outbox double-buffered scan tracking
+    std::unordered_set<ChunkPos> scanInbox_;   // Current scan agenda
+    std::unordered_set<ChunkPos> scanOutbox_;  // Accumulates for next cycle
+
+    // Background scan step: process one entry from inbox
+    void backgroundScanStep();
+
+    // Compute adaptive scan interval based on world size
+    [[nodiscard]] std::chrono::milliseconds computeScanInterval() const;
+
+    // Check if a subchunk is near any tracked player
+    [[nodiscard]] bool isNearAnyPlayer(ChunkPos pos) const;
+
+    // Player positions for scan distance culling (updated by game thread)
+    std::vector<glm::dvec3> playerPositions_;
+    mutable std::mutex playerPosMutex_;
+    float scanRadius_ = 320.0f;  // View distance + margin (in blocks)
+
+    // Scan timing constant
+    static constexpr int64_t SCAN_CYCLE_SECONDS = 480;  // Target: one full cycle every 8 minutes
 };
 
 }  // namespace finevox

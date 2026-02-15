@@ -353,7 +353,6 @@ int main(int argc, char* argv[]) {
     // Parse command line
     bool startAtLargeCoords = false;
     bool singleBlockMode = false;
-    bool useAsyncMeshing = true;  // Async is default (prevents lighting blink artifacts)
     bool useWorldGen = false;
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
@@ -361,12 +360,6 @@ int main(int argc, char* argv[]) {
         }
         if (std::string(argv[i]) == "--single-block") {
             singleBlockMode = true;
-        }
-        if (std::string(argv[i]) == "--async") {
-            useAsyncMeshing = true;
-        }
-        if (std::string(argv[i]) == "--sync") {
-            useAsyncMeshing = false;
         }
         if (std::string(argv[i]) == "--worldgen") {
             useWorldGen = true;
@@ -614,34 +607,26 @@ int main(int argc, char* argv[]) {
         });
         applyLightingMode();
 
-        // Enable async meshing if requested
+        // Connect MeshRebuildQueue to LightEngine and World for push-based meshing
+        std::cout << "Mesh worker pool: "
+                  << worldRenderer.meshWorkerPool()->threadCount() << " worker threads\n";
+
+        lightEngine.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
+        world.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
+        // Conditional defer: only defer if lighting queue is empty
+        // Set to true to always defer (prevents visual blink but adds latency)
+        world.setAlwaysDeferMeshRebuild(false);
+        std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
+
+        // Set up fence-wait thread: overlaps mesh processing with GPU fence wait
         FrameFenceWaiter fenceWaiter;
-        if (useAsyncMeshing) {
-            worldRenderer.enableAsyncMeshing();
-            std::cout << "Async meshing enabled with "
-                      << worldRenderer.meshWorkerPool()->threadCount() << " worker threads\n";
-
-            // Connect MeshRebuildQueue to LightEngine and World for push-based meshing
-            if (worldRenderer.meshRebuildQueue()) {
-                lightEngine.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
-                world.setMeshRebuildQueue(worldRenderer.meshRebuildQueue());
-                // Conditional defer: only defer if lighting queue is empty
-                // Set to true to always defer (prevents visual blink but adds latency)
-                world.setAlwaysDeferMeshRebuild(false);
-                std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
-            }
-
-            // Set up fence-wait thread: overlaps mesh processing with GPU fence wait
-            fenceWaiter.setRenderer(renderer.get());
-            if (auto* ws = worldRenderer.wakeSignal()) {
-                fenceWaiter.attach(ws);
-            }
-            fenceWaiter.start();
-            std::cout << "Fence-wait thread started\n";
-        }
+        fenceWaiter.setRenderer(renderer.get());
+        fenceWaiter.attach(worldRenderer.wakeSignal());
+        fenceWaiter.start();
+        std::cout << "Fence-wait thread started\n";
 
         // Mark all chunks as dirty to generate initial meshes
-        worldRenderer.markAllDirty();
+        worldRenderer.rebuildAllMeshes();
 
         // Camera setup - use FineVK's Camera with double-precision support
         PlayerController playerController;
@@ -813,7 +798,7 @@ int main(int argc, char* argv[]) {
                 if (e.key == GLFW_KEY_F4 || e.key == GLFW_KEY_4) {
                     bool disabled = !worldRenderer.disableFaceCulling();
                     worldRenderer.setDisableFaceCulling(disabled);
-                    worldRenderer.markAllDirty();
+                    worldRenderer.rebuildAllMeshes();
                     std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
                     return finevk::ListenerResult::Consumed;
                 }
@@ -830,22 +815,10 @@ int main(int argc, char* argv[]) {
                     return finevk::ListenerResult::Consumed;
                 }
 
-                if (e.key == GLFW_KEY_F6) {
-                    if (worldRenderer.asyncMeshingEnabled()) {
-                        worldRenderer.disableAsyncMeshing();
-                        std::cout << "Async meshing: OFF (synchronous mode)\n";
-                    } else {
-                        worldRenderer.enableAsyncMeshing();
-                        std::cout << "Async meshing: ON ("
-                                  << worldRenderer.meshWorkerPool()->threadCount() << " worker threads)\n";
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
-
                 if (e.key == GLFW_KEY_G) {
                     bool enabled = !worldRenderer.greedyMeshing();
                     worldRenderer.setGreedyMeshing(enabled);
-                    worldRenderer.markAllDirty();
+                    worldRenderer.rebuildAllMeshes();
                     std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
                     return finevk::ListenerResult::Consumed;
                 }
@@ -904,7 +877,7 @@ int main(int argc, char* argv[]) {
                 if (e.key == GLFW_KEY_L) {
                     bool enabled = !worldRenderer.lodEnabled();
                     worldRenderer.setLODEnabled(enabled);
-                    worldRenderer.markAllDirty();
+                    worldRenderer.rebuildAllMeshes();
                     std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
                     return finevk::ListenerResult::Consumed;
                 }
@@ -942,7 +915,7 @@ int main(int argc, char* argv[]) {
                 if (e.key == GLFW_KEY_B) {
                     lightingMode = (lightingMode + 1) % 3;
                     applyLightingMode();
-                    worldRenderer.markAllDirty();
+                    worldRenderer.rebuildAllMeshes();
                     return finevk::ListenerResult::Consumed;
                 }
 
@@ -1062,9 +1035,7 @@ int main(int argc, char* argv[]) {
             // Kick the fence wait thread, then process meshes while the GPU
             // finishes the previous frame. This eliminates dead time: instead
             // of blocking on vkWaitForFences, we upload meshes concurrently.
-            bool useFenceThread = worldRenderer.asyncMeshingEnabled();
-
-            if (useFenceThread) {
+            {
                 fenceWaiter.kickWait();
 
                 // Process meshes while fence is pending (no deadline yet)
@@ -1197,7 +1168,7 @@ int main(int argc, char* argv[]) {
             // Deadline-based mesh processing: catch input-driven changes in the same frame.
             // The deadline starts HERE (after frame acquire + input), giving mesh workers
             // time to respond to block placements etc. triggered by pollEvents().
-            if (worldRenderer.asyncMeshingEnabled()) {
+            {
                 auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(framePeriod.count() / 2);
 
@@ -1207,15 +1178,12 @@ int main(int argc, char* argv[]) {
                     }
                     worldRenderer.updateMeshes(0);
                 }
-            } else {
-                // Sync meshing: just process directly
-                worldRenderer.updateMeshes(16);
             }
 
             // ================================================================
             // Phase 3: Render + submit
             // ================================================================
-            if (auto frame = renderer->beginFrame(useFenceThread)) {
+            if (auto frame = renderer->beginFrame(true)) {
                 frame.beginRenderPass(skyParams.skyColor);  // Dynamic sky color
 
                 // Render the world
@@ -1335,11 +1303,7 @@ int main(int argc, char* argv[]) {
                 renderer->endFrame();
 
                 // Re-attach fence waiter for next frame's fence wait
-                if (useFenceThread) {
-                    if (auto* ws = worldRenderer.wakeSignal()) {
-                        fenceWaiter.attach(ws);
-                    }
-                }
+                fenceWaiter.attach(worldRenderer.wakeSignal());
             }
         }
 

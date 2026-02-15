@@ -361,10 +361,9 @@ TEST(BlockingQueueTest, WorksWithStringKeys) {
 // ============================================================================
 
 TEST(MeshRebuildQueueTest, BasicPushPop) {
-    // MeshRebuildQueue is BlockingQueueWithData<ChunkPos, MeshRebuildRequest>
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
-    queue.push(ChunkPos(1, 2, 3), MeshRebuildRequest::normal(1, 1));
+    queue.push(ChunkPos(1, 2, 3), MeshRebuildRequest::normal());
     EXPECT_EQ(queue.size(), 1);
 
     auto result = queue.pop();
@@ -377,31 +376,31 @@ TEST(MeshRebuildQueueTest, PriorityMerging) {
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
     // Push with normal priority
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal(1, 1));
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal());
     EXPECT_EQ(queue.size(), 1);
 
     // Push same position with higher priority (immediate = 0)
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::immediate(2, 2));
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::immediate());
     EXPECT_EQ(queue.size(), 1);  // Still 1 - merged
 
     auto result = queue.pop();
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->second.priority, 0);  // Should be immediate (lowest = most urgent)
-    EXPECT_EQ(result->second.targetVersion, 2);  // Should have latest version
 }
 
-TEST(MeshRebuildQueueTest, VersionUpdate) {
+TEST(MeshRebuildQueueTest, LODMerging) {
     MeshRebuildQueue queue(mergeMeshRebuildRequest);
 
-    // Push with block version 5, light version 1
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(5, 1, 100));
+    // Push with normal priority and LOD0
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::normal(LODLevel::LOD0));
 
-    // Push same position with block version 10, light version 2
-    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest(10, 2, 100));
+    // Push same position with background priority and LOD2
+    queue.push(ChunkPos(0, 0, 0), MeshRebuildRequest::background(LODLevel::LOD2));
 
     auto result = queue.pop();
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->second.targetVersion, 10);  // Latest version
+    EXPECT_EQ(result->second.priority, 100);  // Keep highest urgency (normal)
+    EXPECT_EQ(result->second.lodRequest.buildLevel(), LODLevel::LOD2);  // Latest LOD
 }
 
 // ============================================================================

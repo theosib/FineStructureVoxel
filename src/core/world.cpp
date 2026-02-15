@@ -343,13 +343,7 @@ void World::enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, B
         // Lighting thread may push additional remeshes if light actually changes
         if (meshRebuildQueue_) {
             ChunkPos chunkPos = ChunkPos::fromBlock(pos);
-            SubChunk* subChunk = getSubChunk(chunkPos);
-            if (subChunk) {
-                meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(
-                    subChunk->blockVersion(),
-                    subChunk->lightVersion()
-                ));
-            }
+            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal());
         }
 
         // Enqueue lighting update without triggerMeshRebuild

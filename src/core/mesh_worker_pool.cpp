@@ -96,8 +96,6 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
     LODLevel buildLOD = request.lodRequest.buildLevel();
 
     MeshData meshData;
-    uint64_t builtBlockVersion = 0;
-    uint64_t builtLightVersion = 0;
     bool success = false;
 
     try {
@@ -107,18 +105,13 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         if (!subchunk) {
             // Subchunk doesn't exist (might have been unloaded)
             // Push empty mesh to upload queue - graphics thread will detect via isEmpty()
-            uploadQueue_.push(MeshUploadData(pos, MeshData{}, 0, 0, buildLOD));
+            uploadQueue_.push(MeshUploadData(pos, MeshData{}, buildLOD));
             return true;
         }
 
-        // CRITICAL: Capture versions BEFORE reading any block/light data.
-        // This ensures version consistency - see detailed comment in original.
-        builtBlockVersion = subchunk->blockVersion();
-        builtLightVersion = subchunk->lightVersion();
-
         if (subchunk->isEmpty()) {
             // Empty subchunk - push empty mesh to upload queue
-            uploadQueue_.push(MeshUploadData(pos, MeshData{}, builtBlockVersion, builtLightVersion, buildLOD));
+            uploadQueue_.push(MeshUploadData(pos, MeshData{}, buildLOD));
             return true;
         }
 
@@ -186,7 +179,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
 
     // Push to upload queue (move semantics - no copy)
     if (success) {
-        uploadQueue_.push(MeshUploadData(pos, std::move(meshData), builtBlockVersion, builtLightVersion, buildLOD));
+        uploadQueue_.push(MeshUploadData(pos, std::move(meshData), buildLOD));
     }
 
     return success;

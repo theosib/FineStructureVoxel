@@ -22,19 +22,49 @@ void LightingQueue::enqueue(LightingUpdate update) {
     cv_.notify_one();
 }
 
-std::vector<LightingUpdate> LightingQueue::dequeueBatch(size_t maxCount) {
+std::vector<LightingUpdate> LightingQueue::dequeueBatch(size_t maxCount, bool* alarmFired) {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    // Wait until we have updates or are stopped
-    cv_.wait(lock, [this] {
-        return !pending_.empty() || stopped_.load(std::memory_order_acquire);
-    });
+    if (alarmFired) *alarmFired = false;
+
+    if (alarmSet_) {
+        // Wait until updates, stopped, or alarm fires
+        cv_.wait_until(lock, alarmTime_, [this] {
+            return !pending_.empty() || stopped_.load(std::memory_order_acquire);
+        });
+
+        // Check if alarm fired (time expired without data or stop)
+        if (pending_.empty() && !stopped_.load(std::memory_order_acquire)) {
+            if (alarmFired) *alarmFired = true;
+            alarmSet_ = false;
+            return {};
+        }
+    } else {
+        // No alarm — wait indefinitely for updates or stop
+        cv_.wait(lock, [this] {
+            return !pending_.empty() || stopped_.load(std::memory_order_acquire);
+        });
+    }
 
     if (stopped_.load(std::memory_order_acquire) && pending_.empty()) {
         return {};  // Stopped and no more work
     }
 
     return tryDequeueBatchUnlocked(maxCount);
+}
+
+void LightingQueue::setAlarm(std::chrono::steady_clock::time_point tp) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        alarmTime_ = tp;
+        alarmSet_ = true;
+    }
+    cv_.notify_all();
+}
+
+void LightingQueue::clearAlarm() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    alarmSet_ = false;
 }
 
 std::vector<LightingUpdate> LightingQueue::tryDequeueBatch(size_t maxCount) {
@@ -721,25 +751,41 @@ void LightEngine::stop() {
 }
 
 void LightEngine::lightingThreadLoop() {
-    while (running_.load(std::memory_order_acquire)) {
-        // Dequeue a batch of updates (blocks if queue is empty)
-        auto batch = queue_.dequeueBatch(batchSize_);
+    using Clock = std::chrono::steady_clock;
 
-        if (batch.empty()) {
+    // Set initial alarm for background scan
+    auto nextScanTime = Clock::now() + computeScanInterval();
+    queue_.setAlarm(nextScanTime);
+
+    while (running_.load(std::memory_order_acquire)) {
+        // Dequeue a batch of updates (blocks until data, alarm, or stop)
+        bool alarmFired = false;
+        auto batch = queue_.dequeueBatch(batchSize_, &alarmFired);
+
+        if (batch.empty() && !alarmFired) {
             // Queue was stopped
             break;
         }
 
-        // Clear affected chunks set before processing batch
-        batchAffectedChunks_.clear();
+        if (!batch.empty()) {
+            // Clear affected chunks set before processing batch
+            batchAffectedChunks_.clear();
 
-        // Process each update in the batch
-        for (const auto& update : batch) {
-            processLightingUpdate(update);
+            // Process each update in the batch
+            for (const auto& update : batch) {
+                processLightingUpdate(update);
+            }
+
+            // After processing entire batch, push mesh rebuild requests for all affected chunks
+            flushAffectedChunks();
         }
 
-        // After processing entire batch, push mesh rebuild requests for all affected chunks
-        flushAffectedChunks();
+        // Background scan: if alarm fired, scan one entry
+        if (alarmFired || Clock::now() >= nextScanTime) {
+            backgroundScanStep();
+            nextScanTime = Clock::now() + computeScanInterval();
+            queue_.setAlarm(nextScanTime);
+        }
     }
 }
 
@@ -779,14 +825,10 @@ void LightEngine::flushAffectedChunks() {
     }
 
     for (const auto& chunkPos : batchAffectedChunks_) {
-        SubChunk* subChunk = getSubChunkForLight(chunkPos);
-        if (subChunk) {
-            // Push rebuild request - MeshRebuildQueue will coalesce duplicates
-            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal(
-                subChunk->blockVersion(),
-                subChunk->lightVersion()
-            ));
-        }
+        // Push rebuild request - MeshRebuildQueue will coalesce duplicates
+        meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal());
+        // Ensure affected positions appear in next scan cycle
+        scanOutbox_.insert(chunkPos);
     }
 
     batchAffectedChunks_.clear();
@@ -826,6 +868,70 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
 
     // Note: Mesh rebuild requests are now batched and pushed by flushAffectedChunks()
     // at the end of each batch, not per-update
+}
+
+// ============================================================================
+// Background Scan (Safety Net)
+// ============================================================================
+
+void LightEngine::backgroundScanStep() {
+    if (!meshRebuildQueue_) return;
+
+    // If inbox is empty, swap with outbox (start new cycle)
+    if (scanInbox_.empty()) {
+        scanInbox_ = std::move(scanOutbox_);
+        scanOutbox_.clear();  // outbox is now moved-from; reset to empty
+
+        // Seed outbox with all currently loaded subchunks for next cycle
+        for (const auto& pos : world_.getAllSubChunkPositions()) {
+            scanOutbox_.insert(pos);
+        }
+    }
+
+    if (scanInbox_.empty()) return;
+
+    // Pull one entry from inbox
+    auto it = scanInbox_.begin();
+    ChunkPos pos = *it;
+    scanInbox_.erase(it);
+
+    // Copy to outbox (so it appears in next cycle)
+    scanOutbox_.insert(pos);
+
+    // Drop stale entries (subchunk no longer loaded)
+    if (!world_.getSubChunk(pos)) return;
+
+    // Skip subchunks too far from any player to matter
+    if (!isNearAnyPlayer(pos)) return;
+
+    // Push background-priority remesh
+    meshRebuildQueue_->push(pos, MeshRebuildRequest::background());
+}
+
+std::chrono::milliseconds LightEngine::computeScanInterval() const {
+    size_t count = scanInbox_.size() + scanOutbox_.size();
+    if (count == 0) count = 1;
+
+    // ms per entry = (cycle_seconds * 1000) / count
+    int64_t ms = (SCAN_CYCLE_SECONDS * 1000) / static_cast<int64_t>(count);
+    ms = std::clamp(ms, int64_t(100), int64_t(2000));
+    return std::chrono::milliseconds(ms);
+}
+
+bool LightEngine::isNearAnyPlayer(ChunkPos pos) const {
+    std::lock_guard<std::mutex> lock(playerPosMutex_);
+    if (playerPositions_.empty()) return true;  // No players tracked: scan everything
+
+    for (const auto& playerPos : playerPositions_) {
+        float dist = LODConfig::distanceToChunk(playerPos, pos);
+        if (dist <= scanRadius_) return true;
+    }
+    return false;
+}
+
+void LightEngine::setPlayerPositions(std::vector<glm::dvec3> positions) {
+    std::lock_guard<std::mutex> lock(playerPosMutex_);
+    playerPositions_ = std::move(positions);
 }
 
 }  // namespace finevox

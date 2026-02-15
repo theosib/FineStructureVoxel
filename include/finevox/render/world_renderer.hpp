@@ -184,42 +184,18 @@ public:
     void initialize();
 
     // ========================================================================
-    // Async Meshing (Optional)
+    // Mesh Worker Pool
     // ========================================================================
 
     /**
-     * @brief Enable async meshing with a worker thread pool
-     *
-     * When enabled, mesh generation runs on background threads. The graphics
-     * thread uploads pending meshes each frame. Stale meshes continue to render
-     * while new meshes are being built.
-     *
-     * @param numThreads Number of worker threads (0 = auto, based on hardware)
-     */
-    void enableAsyncMeshing(size_t numThreads = 0);
-
-    /**
-     * @brief Disable async meshing and return to synchronous mode
-     *
-     * Stops worker threads and clears the mesh cache. Existing GPU meshes
-     * are preserved.
-     */
-    void disableAsyncMeshing();
-
-    /**
-     * @brief Check if async meshing is enabled
-     */
-    [[nodiscard]] bool asyncMeshingEnabled() const { return meshWorkerPool_ != nullptr; }
-
-    /**
      * @brief Get the mesh worker pool (for advanced configuration)
-     * @return Pointer to worker pool, or nullptr if async meshing is disabled
+     * @return Pointer to worker pool (non-null after initialize())
      */
     [[nodiscard]] MeshWorkerPool* meshWorkerPool() { return meshWorkerPool_.get(); }
 
     /**
      * @brief Get the mesh rebuild queue (for connecting to LightEngine)
-     * @return Pointer to rebuild queue, or nullptr if async meshing is disabled
+     * @return Pointer to rebuild queue (non-null after initialize())
      */
     [[nodiscard]] MeshRebuildQueue* meshRebuildQueue() { return meshRebuildQueue_.get(); }
 
@@ -280,9 +256,9 @@ public:
      * @brief Get the WakeSignal for external coordination
      *
      * Allows other systems to signal the graphics thread wake.
-     * Returns nullptr if async meshing is disabled.
+     * Always valid after construction.
      */
-    [[nodiscard]] WakeSignal* wakeSignal() { return asyncMeshingEnabled() ? &wakeSignal_ : nullptr; }
+    [[nodiscard]] WakeSignal* wakeSignal() { return &wakeSignal_; }
 
     // ========================================================================
     // Per-Frame Updates
@@ -347,6 +323,14 @@ public:
      * @brief Mark all loaded subchunks as dirty
      */
     void markAllDirty();
+
+    /**
+     * @brief Push rebuild requests for all loaded subchunks
+     *
+     * Directly pushes to the mesh rebuild queue, replacing markAllDirty()
+     * for the push-based architecture.
+     */
+    void rebuildAllMeshes();
 
     // ========================================================================
     // Rendering
@@ -639,9 +623,6 @@ private:
     // Get or create SubChunkView for a position
     SubChunkView* getOrCreateView(ChunkPos pos);
 
-    // Build mesh for a subchunk at the given LOD level
-    MeshData buildMeshFor(ChunkPos pos, LODLevel lodLevel = LODLevel::LOD0);
-
     // Check if a subchunk is within view distance
     bool isInViewDistance(ChunkPos pos) const;
 
@@ -650,9 +631,6 @@ private:
 
     // Calculate view-relative offset for a subchunk
     glm::vec3 calculateViewRelativeOffset(ChunkPos pos) const;
-
-    // Async mesh update path (used when meshWorkerPool_ is active)
-    void updateMeshesAsync(uint32_t maxUpdates);
 
     // Configuration
     WorldRendererConfig config_;
@@ -691,9 +669,6 @@ private:
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;
-
-    // Dirty tracking
-    std::vector<ChunkPos> dirtyChunks_;
 
     // Mesh building
     MeshBuilder meshBuilder_;

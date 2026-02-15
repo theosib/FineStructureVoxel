@@ -1220,12 +1220,10 @@ TEST(CrossSubchunkBoundaryTest, BreakBlockInFloorSameSubchunk) {
 
     // Drain the mesh queue and check which chunks were marked
     std::unordered_set<ChunkPos> rebuiltChunks;
-    std::vector<std::pair<ChunkPos, uint64_t>> rebuiltChunksWithLightVersion;
     while (auto req = meshQueue.tryPop()) {
         rebuiltChunks.insert(req->first);
-        rebuiltChunksWithLightVersion.push_back({req->first, req->second.targetLightVersion});
         std::cout << "Chunk marked: (" << req->first.x << ", " << req->first.y << ", " << req->first.z
-                  << ") lightVersion=" << req->second.targetLightVersion << "\n";
+                  << ") priority=" << req->second.priority << "\n";
     }
 
     ChunkPos subchunk0{0, 0, 0};  // y=0-15 (contains both floor at y=4 and broken block at y=5)
@@ -1233,24 +1231,6 @@ TEST(CrossSubchunkBoundaryTest, BreakBlockInFloorSameSubchunk) {
     // The subchunk must be marked for rebuild (light changed inside it)
     EXPECT_TRUE(rebuiltChunks.count(subchunk0) > 0)
         << "Subchunk 0 should be marked (light changed at y=5 inside this subchunk)";
-
-    // Verify the light version in the request is AFTER lighting was updated
-    SubChunk* subchunk = world.getSubChunk(subchunk0);
-    if (subchunk) {
-        uint64_t currentLightVersion = subchunk->lightVersion();
-        std::cout << "Current light version of subchunk 0: " << currentLightVersion << "\n";
-
-        // Check that we got a rebuild request with the updated light version
-        bool hasUpdatedRequest = false;
-        for (const auto& [pos, lightVer] : rebuiltChunksWithLightVersion) {
-            if (pos == subchunk0 && lightVer >= currentLightVersion) {
-                hasUpdatedRequest = true;
-                break;
-            }
-        }
-        EXPECT_TRUE(hasUpdatedRequest)
-            << "Should have a rebuild request with light version >= " << currentLightVersion;
-    }
 }
 
 // Test that mesh building actually uses the correct light values
@@ -1491,4 +1471,107 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
               << " (vertices found: " << sideFaceCount << ")\n";
     std::cout << "Floor face light: " << mesh2FloorLight << "\n";
     std::cout << "Ratio (side/floor): " << (mesh2FloorLight > 0 ? sideFaceLight / mesh2FloorLight : 0) << "\n";
+}
+
+// ============================================================================
+// LightingQueue Alarm Tests
+// ============================================================================
+
+TEST(LightingQueueAlarmTest, AlarmWakesBlockingDequeue) {
+    LightingQueue queue;
+
+    // Set alarm 50ms from now
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::milliseconds(50));
+
+    auto start = std::chrono::steady_clock::now();
+    bool alarmFired = false;
+    auto batch = queue.dequeueBatch(10, &alarmFired);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+
+    // Should have woken due to alarm, not data
+    EXPECT_TRUE(alarmFired);
+    EXPECT_TRUE(batch.empty());
+    // Should have waited roughly 50ms (allow some slack)
+    EXPECT_GE(elapsed.count(), 30);
+    EXPECT_LE(elapsed.count(), 200);
+}
+
+TEST(LightingQueueAlarmTest, DataWakesBeforeAlarm) {
+    LightingQueue queue;
+
+    // Set alarm far in the future
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::seconds(10));
+
+    // Push data after 30ms
+    std::thread pusher([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        LightingUpdate update;
+        update.pos = BlockPos(0, 0, 0);
+        update.oldType = BlockTypeId();
+        update.newType = BlockTypeId();
+        queue.enqueue(std::move(update));
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    bool alarmFired = false;
+    auto batch = queue.dequeueBatch(10, &alarmFired);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+
+    pusher.join();
+
+    // Should have woken due to data, not alarm
+    EXPECT_FALSE(alarmFired);
+    EXPECT_EQ(batch.size(), 1u);
+    EXPECT_LE(elapsed.count(), 500);
+}
+
+TEST(LightingQueueAlarmTest, ClearAlarmPreventsWake) {
+    LightingQueue queue;
+
+    // Set alarm, then clear it
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::milliseconds(30));
+    queue.clearAlarm();
+
+    // Should block until stopped (not wake on cleared alarm)
+    std::thread stopper([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        queue.stop();
+    });
+
+    bool alarmFired = false;
+    auto batch = queue.dequeueBatch(10, &alarmFired);
+
+    stopper.join();
+
+    // Should have been stopped, not alarm-woken
+    EXPECT_FALSE(alarmFired);
+    EXPECT_TRUE(batch.empty());
+}
+
+TEST(LightingQueueAlarmTest, StopWakesDuringAlarmWait) {
+    LightingQueue queue;
+
+    // Set alarm far in the future
+    queue.setAlarm(std::chrono::steady_clock::now() + std::chrono::seconds(10));
+
+    // Stop after 50ms
+    std::thread stopper([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        queue.stop();
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    bool alarmFired = false;
+    auto batch = queue.dequeueBatch(10, &alarmFired);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+
+    stopper.join();
+
+    // Should have been stopped quickly, not waiting for 10s alarm
+    EXPECT_FALSE(alarmFired);
+    EXPECT_TRUE(batch.empty());
+    EXPECT_LE(elapsed.count(), 500);
 }

@@ -903,6 +903,7 @@ int main(int argc, char* argv[]) {
                     auto consoleTree = uiCtx.get("console_window");
                     if (!consoleTree.isNil()) {
                         auto& cm = consoleTree.asMap();
+                        cm.set(uiSyms.visible, finescript::Value::boolean(true)); // reset after X-close
                         cm.set(symWindowPosX, finescript::Value::number(0));
                         cm.set(symWindowPosY, finescript::Value::number(h - consoleHeight));
                         cm.set(symWindowSizeW, finescript::Value::number(w));
@@ -1400,6 +1401,18 @@ int main(int argc, char* argv[]) {
                     return finescript::Value::string(commandHistory[historyIndex]);
                 }
                 return finescript::Value::string("");
+            });
+
+        guiEngine.registerFunction("close_console",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                deferredUiActions.push_back([&]() {
+                    if (consoleWindowId >= 0) { mapRenderer.hide(consoleWindowId); consoleWindowId = -1; }
+                    if (inputContext == InputContext::Chat) setInputContext(InputContext::Gameplay);
+                    // Reset visible so re-show works
+                    auto ct = uiCtx.get("console_window");
+                    if (!ct.isNil()) ct.asMap().set(uiSyms.visible, finescript::Value::boolean(true));
+                });
+                return finescript::Value::nil();
             });
 
         // Console command functions

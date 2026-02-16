@@ -287,6 +287,11 @@ BlockModel& BlockModel::setScript(const std::string& script) {
     return *this;
 }
 
+BlockModel& BlockModel::setLoot(const std::string& loot) {
+    loot_ = loot;
+    return *this;
+}
+
 const CollisionShape& BlockModel::resolvedCollision() const {
     if (!collisionResolved_) {
         if (hasExplicitCollision_) {

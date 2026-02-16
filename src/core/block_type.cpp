@@ -90,6 +90,11 @@ BlockType& BlockType::setSoundSet(SoundSetId soundSet) {
     return *this;
 }
 
+BlockType& BlockType::setLootTable(LootTableId lootTable) {
+    lootTable_ = lootTable;
+    return *this;
+}
+
 const CollisionShape& BlockType::collisionShape(const Rotation& rotation) const {
     return collisionShapes_[rotation.index()];
 }

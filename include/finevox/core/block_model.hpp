@@ -206,6 +206,9 @@ public:
     /// Set script path (for scripted block handlers)
     BlockModel& setScript(const std::string& script);
 
+    /// Set loot table name (references a .loot file)
+    BlockModel& setLoot(const std::string& loot);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -255,6 +258,12 @@ public:
     /// Check if this model has a script handler
     [[nodiscard]] bool hasScript() const { return !script_.empty(); }
 
+    /// Get loot table name (empty if no loot table)
+    [[nodiscard]] const std::string& loot() const { return loot_; }
+
+    /// Check if this model has a loot table
+    [[nodiscard]] bool hasLoot() const { return !loot_.empty(); }
+
     /// Check if this model has custom geometry (non-cube)
     [[nodiscard]] bool hasCustomGeometry() const { return !geometry_.isEmpty(); }
 
@@ -270,6 +279,7 @@ private:
     std::string texture_;
     std::string sounds_;
     std::string script_;
+    std::string loot_;
     uint8_t lightEmission_ = 0;
     uint8_t lightAttenuation_ = 15;  // Default: blocks all light
 

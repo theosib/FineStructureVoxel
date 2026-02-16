@@ -83,6 +83,9 @@ add_library(finevox SHARED
     src/core/sound_event.cpp
     src/core/sound_registry.cpp
     src/core/game_session.cpp
+    src/core/loot_table.cpp
+    src/core/loot_registry.cpp
+    src/core/loot_table_loader.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -457,6 +460,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_sound_system.cpp
         tests/test_game_session.cpp
         tests/test_game_thread.cpp
+        tests/test_loot_system.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

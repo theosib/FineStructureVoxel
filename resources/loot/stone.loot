@@ -1,0 +1,13 @@
+# Stone loot table — silk touch returns stone, otherwise cobblestone
+pool:default:
+rolls: 1
+entry:silk:
+type: item
+item: stone
+count: 1
+condition: silk-touch
+entry:normal:
+type: item
+item: cobblestone
+count: 1
+condition: not silk-touch

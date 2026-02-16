@@ -162,6 +162,10 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
         model.setScript(scriptEntry->value.asStringOwned());
     }
 
+    if (auto* lootEntry = doc->get("loot")) {
+        model.setLoot(lootEntry->value.asStringOwned());
+    }
+
     cleanup();
     return model;
 }
@@ -337,6 +341,10 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
 
     if (const ConfigEntry* scriptEntry = doc.get("script")) {
         model.setScript(scriptEntry->value.asStringOwned());
+    }
+
+    if (const ConfigEntry* lootEntry = doc.get("loot")) {
+        model.setLoot(lootEntry->value.asStringOwned());
     }
 
     return model;

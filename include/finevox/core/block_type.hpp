@@ -11,6 +11,7 @@
 #include "finevox/core/sound_event.hpp"
 #include "finevox/core/physics.hpp"
 #include "finevox/core/rotation.hpp"
+#include "finevox/core/loot_table.hpp"
 
 #include <vector>
 #include <unordered_map>
@@ -91,6 +92,9 @@ public:
     /// Set the sound set for this block type (e.g., "stone", "grass")
     BlockType& setSoundSet(SoundSetId soundSet);
 
+    /// Set the loot table for this block type
+    BlockType& setLootTable(LootTableId lootTable);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -137,6 +141,9 @@ public:
     /// Get the sound set for this block type
     [[nodiscard]] SoundSetId soundSet() const { return soundSet_; }
 
+    /// Get the loot table for this block type
+    [[nodiscard]] LootTableId lootTable() const { return lootTable_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -154,6 +161,7 @@ private:
     bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
     SoundSetId soundSet_;            // Sound set for this block type
+    LootTableId lootTable_;          // Loot table for this block type
 };
 
 /**

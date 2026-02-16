@@ -12,6 +12,7 @@
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/loot_table.hpp"
 #include <memory>
 #include <string_view>
 #include <cstdint>
@@ -466,6 +467,22 @@ public:
      * When nullptr, those methods are no-ops.
      */
     void setScheduler(UpdateScheduler* scheduler) { scheduler_ = scheduler; }
+
+    // ========================================================================
+    // Loot
+    // ========================================================================
+
+    /**
+     * @brief Roll the block's loot table, returning any item drops
+     *
+     * Fills in brokenBlock and position from this context, then merges
+     * with any additional context fields provided by the caller (tool,
+     * fortune, silk touch, etc.).
+     *
+     * @param extraCtx Additional context (tool, fortune, etc.)
+     * @return Vector of ItemStacks produced by the loot table (empty if no loot)
+     */
+    [[nodiscard]] std::vector<ItemStack> rollBlockLoot(const LootContext& extraCtx = {}) const;
 
     // ========================================================================
     // Block Modification (for handlers to alter/undo placement)

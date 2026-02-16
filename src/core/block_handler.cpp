@@ -4,6 +4,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/event_queue.hpp"  // For UpdateScheduler
+#include "finevox/core/loot_registry.hpp"
 
 #include <cassert>
 #include <stdexcept>
@@ -171,6 +172,22 @@ std::unique_ptr<DataContainer> BlockContext::takePreviousData() {
 
 void BlockContext::setPreviousData(std::unique_ptr<DataContainer> data) {
     previousData_ = std::move(data);
+}
+
+std::vector<ItemStack> BlockContext::rollBlockLoot(const LootContext& extraCtx) const {
+    auto blockId = blockType();
+    auto* bt = type();
+    if (!bt) return {};
+
+    auto tableId = bt->lootTable();
+    if (tableId.isEmpty()) return {};
+
+    // Merge: fill in block-specific fields, preserve caller-provided fields
+    LootContext ctx = extraCtx;
+    ctx.brokenBlock = blockId;
+    ctx.position = pos_;
+
+    return LootRegistry::global().roll(tableId, ctx);
 }
 
 }  // namespace finevox

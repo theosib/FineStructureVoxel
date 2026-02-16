@@ -94,13 +94,18 @@ Tracks what's built, what's partially done, and what's still needed for a playab
 ## 9. UI Framework Integration (Priority: MEDIUM) - PARTIALLY COMPLETE
 
 - [x] finegui core integrated (GuiSystem, InputAdapter in render_demo)
-- [x] Pause menu (resume, settings, quit)
+- [x] Pause menu (resume, settings, quit) — finegui MapRenderer + finescript
 - [ ] Inventory screen (drag-and-drop item management)
 - [ ] Crafting UI (recipe grid with output preview)
-- [ ] Chat/command bar (for scripting/commands)
-- [ ] Settings screen (key bindings, render distance, audio)
+- [x] Chat/command bar (backtick console with finescript evaluation)
+- [x] Settings screen (render distance, FOV, sensitivity, time, lighting)
 - [ ] HUD (health, hunger, hotbar, crosshair)
-- [ ] Script-driven UI via finegui-script (MapRenderer)
+- [x] Script-driven UI via finegui-script (MapRenderer + ScriptGuiManager wired in)
+- [x] UI definitions in finescript files (resources/ui/*.fs) loaded via ResourceLocator
+- [x] VoxelResourceFinder adapter (finescript ResourceFinder → finevox ResourceLocator)
+- [x] HiDPI-correct UI positioning (windowSize() screen coords, not framebuffer pixels)
+- [x] Debug stats overlay (F7 toggle, upper-right with pivot positioning)
+- [x] Coordinates overlay (always visible, upper-left)
 
 ## 10. Scripting System (Priority: LOW-MEDIUM) - PARTIALLY COMPLETE
 
@@ -111,11 +116,11 @@ Tracks what's built, what's partially done, and what's still needed for a playab
 - [x] Native functions (ctx.*, world.*)
 - [x] ScriptCache with hot-reload
 - [x] .model file `script:` field
-- [ ] In-game command console
+- [x] In-game command console (backtick key, finescript REPL with game state)
 - [ ] Entity/mob AI scripting
 - [ ] User chat commands
-- [ ] Script sandboxing / security restrictions
-- [ ] Script error reporting UI
+- [x] Script sandboxing / security restrictions (inherent: finescript per-engine function isolation)
+- [x] Script error reporting UI (errors shown in red in console)
 
 ## 11. Multiplayer (Priority: LOW) - NOT STARTED
 
@@ -191,4 +196,4 @@ Design docs exist (25-entity-system.md, 26-network-protocol.md) but no implement
 
 ---
 
-*Last updated: 2026-02-12*
+*Last updated: 2026-02-15*

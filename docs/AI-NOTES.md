@@ -276,6 +276,23 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - **render_demo**: Game thread started alongside lighting thread; uses `sendPlayerState()` instead of direct entity access
 - 1229 tests passing (1216 main + 13 script)
 
+### Phase 19: UI Refactor to finegui MapRenderer ✓
+- All render_demo UI (except hotbar) driven by finegui MapRenderer + finescript
+- UI definitions in finescript files: resources/ui/{pause_menu,overlays,console}.fs
+- VoxelResourceFinder: adapts finescript's ResourceFinder to finevox's ResourceLocator
+  - Resolves logical paths like "ui/pause_menu.fs" via ResourceLocator::instance().resolve("game/...")
+- Native C++ functions registered on guiEngine for UI callbacks:
+  - Menu: resume_game, quit_game, show_settings, show_main_menu
+  - Settings: set_view_distance, set_fov, set_sensitivity, set_time_speed, set_freeze_time, set_lighting
+  - Console: submit_command, get_history, tp, set_time, place, break_block, print
+- Deferred action pattern: button callbacks queue actions during renderAll(), processed after iteration
+- Per-frame overlay updates via mapRenderer.findById() + map mutation
+- HiDPI fix: all UI positioning uses window->windowSize() (screen coords) not width()/height() (framebuffer px)
+- SetWorldTime command event added (EventType::SetWorldTime, GameActions::setWorldTime())
+- WorldRenderer::setViewDistance()/viewDistance() accessors added
+- Mouse sensitivity support
+- 1233 tests passing (1220 main + 13 script)
+
 ### Networking Preparation
 - **Fence-wait thread** (complete): FrameFenceWaiter overlaps mesh processing with GPU fence wait
   - 3-phase render loop: fence wait + mesh overlap → input/world updates + deadline meshes → render
@@ -324,7 +341,7 @@ items[0]                # Array indexing (brackets - future)
 
 *Update this section when resuming work*
 
-**Phases 0-18 complete.** 1229 tests passing (1216 main + 13 script). Five shared libraries with separate namespaces.
+**Phases 0-19 complete.** 1233 tests passing (1220 main + 13 script). Five shared libraries with separate namespaces.
 
 **Directory layout:**
 - `include/finevox/{core,worldgen,render,audio,script}/` — headers
@@ -337,11 +354,11 @@ items[0]                # Array indexing (brackets - future)
 - `libfinevox_audio.dylib` — audio (miniaudio; optional, `FINEVOX_BUILD_AUDIO`)
 - `libfinevox_script.dylib` — script integration (finescript; always built)
 
-**Recent work (Phase 18 - Game Thread):**
-- GameSession owns all game state with GameActions command interface
-- Dedicated game thread at 20 TPS with immediate command processing
-- EntityState unified POD struct (dvec3 position/velocity) across BlockEvent/GraphicsEvent
-- render_demo uses sendPlayerState() instead of direct entity access
+**Recent work (Phase 19 - UI Refactor):**
+- All UI (except hotbar) driven by finegui MapRenderer + finescript definitions
+- UI scripts in resources/ui/*.fs loaded via VoxelResourceFinder → ResourceLocator
+- Native functions for menu control, settings, console commands
+- HiDPI positioning fix (windowSize() not framebuffer pixels)
 
 **Planned: Queue migration to finenet:**
 - WakeSignal, Queue<T>, KeyedQueue<K,D> → finenet
@@ -352,6 +369,10 @@ items[0]                # Array indexing (brackets - future)
 - Scheduled tick persistence across save/load
 - `UpdatePropagationPolicy` for cross-chunk updates
 - Network quiescence protocol
+
+**Known design issue (deferred):**
+- Native functions like show_main_menu() crossing finescript contexts is awkward
+- Should revisit with message-passing or state-machine approach
 
 **Next task:** finenet library implementation / queue migration
 **Blockers:** None
@@ -411,4 +432,4 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 
 ---
 
-*Last updated: 2026-02-14 — Phase 18 (GameSession, game thread, EntityState) complete*
+*Last updated: 2026-02-15 — Phase 19 (UI refactor to finegui MapRenderer + finescript) complete*

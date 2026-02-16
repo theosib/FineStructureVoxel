@@ -148,4 +148,11 @@ BlockEvent BlockEvent::playerSneak(EntityId id, bool starting) {
     return event;
 }
 
+BlockEvent BlockEvent::setWorldTime(int64_t ticks) {
+    BlockEvent event;
+    event.type = EventType::SetWorldTime;
+    event.entityState.inputSequence = static_cast<uint64_t>(ticks);
+    return event;
+}
+
 }  // namespace finevox

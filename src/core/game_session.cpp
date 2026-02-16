@@ -81,6 +81,10 @@ public:
         commandQueue_.push(std::move(event));
     }
 
+    void setWorldTime(int64_t ticks) override {
+        commandQueue_.push(BlockEvent::setWorldTime(ticks));
+    }
+
 private:
     World& world_;
     SoundEventQueue& soundQueue_;
@@ -92,7 +96,8 @@ private:
 // ============================================================================
 
 static void executeCommand(World& world, UpdateScheduler& scheduler,
-                           EntityManager& entityManager, const BlockEvent& cmd) {
+                           EntityManager& entityManager, WorldTime& worldTime,
+                           const BlockEvent& cmd) {
     switch (cmd.type) {
         case EventType::BlockBroken:
             world.breakBlock(cmd.pos);
@@ -129,6 +134,10 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         case EventType::PlayerStopSneak:
             entityManager.handlePlayerSneak(cmd,
                 cmd.type == EventType::PlayerStartSneak);
+            break;
+
+        case EventType::SetWorldTime:
+            worldTime.setTime(static_cast<int64_t>(cmd.entityState.inputSequence));
             break;
 
         default:
@@ -171,7 +180,7 @@ struct GameSession::Impl {
         if (commands.empty()) return;
 
         for (const auto& cmd : commands) {
-            executeCommand(*world, *scheduler, *entityManager, cmd);
+            executeCommand(*world, *scheduler, *entityManager, *worldTime, cmd);
         }
         scheduler->processEvents();
     }

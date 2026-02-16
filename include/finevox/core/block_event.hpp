@@ -69,6 +69,9 @@ enum class EventType : uint8_t {
 
     // Visual events
     RepaintRequested,   // Block needs visual update
+
+    // Console/admin commands
+    SetWorldTime,       // Set world time (ticks in entityState.inputSequence)
 };
 
 // ============================================================================
@@ -225,6 +228,12 @@ struct BlockEvent {
      * @param starting True if starting sneak, false if stopping
      */
     static BlockEvent playerSneak(EntityId id, bool starting);
+
+    /**
+     * @brief Create a set world time command
+     * @param ticks Absolute world time in ticks
+     */
+    static BlockEvent setWorldTime(int64_t ticks);
 
     // ========================================================================
     // Sentinel Checks

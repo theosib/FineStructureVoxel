@@ -310,6 +310,23 @@ if(FINEVOX_BUILD_RENDER)
             endif()
             target_compile_definitions(finevox_render_demo PRIVATE FINEVOX_HAS_GUI=1)
             message(STATUS "FineStructureVoxel: finegui found at ${FINEGUI_DIR}")
+
+            # Script-driven GUI: requires both finegui and finevox_script
+            if(TARGET finevox_script)
+                target_link_libraries(finevox_render_demo PRIVATE finevox_script)
+                if(EXISTS "${FINEGUI_DIR}/build/libfinegui-script.a")
+                    target_link_libraries(finevox_render_demo PRIVATE
+                        "${FINEGUI_DIR}/build/libfinegui-script.a"
+                    )
+                endif()
+                if(EXISTS "${FINEGUI_DIR}/build/libfinegui-retained.a")
+                    target_link_libraries(finevox_render_demo PRIVATE
+                        "${FINEGUI_DIR}/build/libfinegui-retained.a"
+                    )
+                endif()
+                target_compile_definitions(finevox_render_demo PRIVATE FINEVOX_HAS_SCRIPT_GUI=1)
+                message(STATUS "FineStructureVoxel: Script-driven GUI enabled (finegui + finescript)")
+            endif()
         else()
             message(STATUS "FineStructureVoxel: finegui not found, GUI disabled")
         endif()

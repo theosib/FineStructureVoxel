@@ -396,6 +396,10 @@ public:
     void setDebugOffset(const glm::vec3& offset) { config_.debugOffset = offset; }
     [[nodiscard]] glm::vec3 debugOffset() const { return config_.debugOffset; }
 
+    /// Set view distance in blocks (triggers LOD recalculation on next camera update)
+    void setViewDistance(float distance) { config_.viewDistance = distance; }
+    [[nodiscard]] float viewDistance() const { return config_.viewDistance; }
+
     /**
      * @brief Enable/disable frustum culling (for profiling)
      * When disabled, all chunks in view distance are rendered regardless of frustum

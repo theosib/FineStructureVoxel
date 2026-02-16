@@ -30,7 +30,9 @@
  * - L: Toggle LOD system (off = all LOD0, no merging)
  * - M: Cycle LOD merge mode (FullHeight vs HeightLimited)
  * - V: Print mesh statistics (vertices, indices)
- * - Escape: Exit
+ * - F7: Toggle debug stats overlay
+ * - ` (backtick): Toggle console
+ * - Escape: Toggle pause menu
  */
 
 #include <finevox/core/world.hpp>
@@ -72,6 +74,18 @@
 #include <imgui.h>
 #endif
 
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+#include <finegui/map_renderer.hpp>
+#include <finegui/script_gui.hpp>
+#include <finegui/script_gui_manager.hpp>
+#include <finegui/script_bindings.hpp>
+#include <finescript/script_engine.h>
+#include <finescript/execution_context.h>
+#include <finescript/value.h>
+#include <finescript/map_data.h>
+#include <finescript/resource_finder.h>
+#endif
+
 #ifdef FINEVOX_HAS_AUDIO
 #include <finevox/audio/audio_engine.hpp>
 #include <finevox/audio/footstep_tracker.hpp>
@@ -80,6 +94,7 @@
 
 #include <iostream>
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -87,6 +102,21 @@
 using namespace finevox;
 using namespace finevox::worldgen;
 using namespace finevox::render;
+
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+// Adapter: bridges finescript's ResourceFinder to finevox's ResourceLocator
+class VoxelResourceFinder : public finescript::ResourceFinder {
+public:
+    std::filesystem::path resolve(std::string_view name) override {
+        auto s = std::string(name);
+        auto p = ResourceLocator::instance().resolve("game/" + s);
+        if (std::filesystem::exists(p)) return p;
+        p = ResourceLocator::instance().resolve("game/" + s + ".fs");
+        if (std::filesystem::exists(p)) return p;
+        return {};
+    }
+};
+#endif
 
 // Get the block position to place a block adjacent to the hit face
 BlockPos getPlacePosition(const BlockPos& hitPos, Face face) {
@@ -424,6 +454,78 @@ int main(int argc, char* argv[]) {
         std::cout << "GUI system initialized\n";
 #endif
 
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+        // Script engine for GUI scripts and console (separate from GameScriptEngine)
+        finescript::ScriptEngine guiEngine;
+        finegui::registerGuiBindings(guiEngine);
+        finegui::MapRenderer mapRenderer(guiEngine);
+        finegui::ScriptGuiManager guiManager(guiEngine, mapRenderer);
+
+        // Resource finder: bridges finescript source directive to finevox ResourceLocator
+        VoxelResourceFinder voxelResourceFinder;
+        guiEngine.setResourceFinder(&voxelResourceFinder);
+
+        // Pre-intern symbol IDs for per-frame field updates
+        auto& uiSyms = mapRenderer.syms();
+        uint32_t symText = guiEngine.intern("text");
+        uint32_t symWindowPosX = guiEngine.intern("window_pos_x");
+        uint32_t symWindowPosY = guiEngine.intern("window_pos_y");
+        uint32_t symWindowSizeW = guiEngine.intern("window_size_w");
+        uint32_t symWindowSizeH = guiEngine.intern("window_size_h");
+        uint32_t symChildren = guiEngine.intern("children");
+
+        // UI tree IDs (-1 = not shown)
+        int dimOverlayId = -1;
+        int mainMenuId = -1;
+        int settingsMenuId = -1;
+        int debugOverlayId = -1;
+        int coordsOverlayId = -1;
+        int consoleWindowId = -1;
+
+        // Console state
+        struct ConsoleEntry {
+            std::string text;
+            bool isError = false;
+        };
+        std::deque<ConsoleEntry> consoleLog;
+        std::vector<std::string> commandHistory;
+        int historyIndex = -1;
+        static constexpr size_t MAX_CONSOLE_LINES = 500;
+
+        // Shared execution context for UI script definitions
+        finescript::ExecutionContext uiCtx(guiEngine);
+        // Separate context for console command execution (retains variables across commands)
+        finescript::ExecutionContext consoleCtx(guiEngine);
+
+        // Deferred UI actions (for callbacks that run during renderAll)
+        std::vector<std::function<void()>> deferredUiActions;
+
+        // Load UI scripts
+        auto loadUiScript = [&](const char* name) {
+            auto path = guiEngine.resolveScript(name);
+            if (!path.empty()) {
+                auto* compiled = guiEngine.loadScript(path);
+                auto result = guiEngine.execute(*compiled, uiCtx);
+                if (!result.success) {
+                    std::cerr << "Error loading " << name << ": " << result.error << "\n";
+                }
+            } else {
+                std::cerr << "Could not find UI script: " << name << "\n";
+            }
+        };
+        loadUiScript("ui/pause_menu.fs");
+        loadUiScript("ui/overlays.fs");
+        loadUiScript("ui/console.fs");
+
+        // Show coords overlay at startup (immediate = skip warmup)
+        auto coordsTree = uiCtx.get("coords_overlay");
+        if (!coordsTree.isNil()) {
+            coordsOverlayId = mapRenderer.show(coordsTree, uiCtx, true);
+        }
+
+        std::cout << "Script-driven GUI engine initialized\n";
+#endif
+
         // Create input manager
         auto inputManager = finevk::InputManager::create(window.get());
 
@@ -670,6 +772,14 @@ int main(int argc, char* argv[]) {
         // Input context for routing (gameplay vs menu vs chat)
         InputContext inputContext = InputContext::Gameplay;
 
+        // Debug overlay toggle (F7)
+        bool showDebugOverlay = false;
+        int lastFps = 0;
+
+        // Settings state
+        float mouseSensitivity = 1.0f;
+        float fovDegrees = 70.0f;
+
         // Sync player controller fly position with initial camera position
         playerController.setFlyPosition(camera.positionD());
 
@@ -731,19 +841,83 @@ int main(int argc, char* argv[]) {
 
         // --- Input listener chain (priority-ordered) ---
 
-        // Priority 200 (Menu): Context switching — handles Escape only
+        // Priority 200 (Menu): Context switching — handles Escape and backtick
         inputManager->addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
-            if (e.type == finevk::InputEventType::KeyPress && e.key == GLFW_KEY_ESCAPE) {
+            if (e.type != finevk::InputEventType::KeyPress)
+                return finevk::ListenerResult::Reject;
+
+            if (e.key == GLFW_KEY_ESCAPE) {
                 switch (inputContext) {
                     case InputContext::Gameplay:
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                    {
+                        // Show dim overlay + main menu
+                        auto winSz = window->windowSize();
+                        float w = static_cast<float>(winSz.x);
+                        float h = static_cast<float>(winSz.y);
+                        auto dimTree = uiCtx.get("dim_overlay");
+                        if (!dimTree.isNil()) {
+                            auto& dm = dimTree.asMap();
+                            dm.set(symWindowPosX, finescript::Value::number(0));
+                            dm.set(symWindowPosY, finescript::Value::number(0));
+                            dm.set(symWindowSizeW, finescript::Value::number(w));
+                            dm.set(symWindowSizeH, finescript::Value::number(h));
+                            dimOverlayId = mapRenderer.show(dimTree, uiCtx, true);
+                        }
+                        auto mainTree = uiCtx.get("main_menu");
+                        if (!mainTree.isNil()) {
+                            mainTree.asMap().set(symWindowPosX, finescript::Value::number(w / 2.0f));
+                            mainTree.asMap().set(symWindowPosY, finescript::Value::number(h / 2.0f));
+                            mainMenuId = mapRenderer.show(mainTree, uiCtx);
+                        }
+                    }
+#endif
                         setInputContext(InputContext::Menu);
                         return finevk::ListenerResult::Consumed;
                     case InputContext::Menu:
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                        // Hide all menu windows
+                        if (dimOverlayId >= 0) { mapRenderer.hide(dimOverlayId); dimOverlayId = -1; }
+                        if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
+                        if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
+#endif
+                        setInputContext(InputContext::Gameplay);
+                        return finevk::ListenerResult::Consumed;
                     case InputContext::Chat:
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                        // Hide console
+                        if (consoleWindowId >= 0) { mapRenderer.hide(consoleWindowId); consoleWindowId = -1; }
+#endif
                         setInputContext(InputContext::Gameplay);
                         return finevk::ListenerResult::Consumed;
                 }
             }
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+            // Backtick toggles console (Gameplay <-> Chat)
+            if (e.key == GLFW_KEY_GRAVE_ACCENT) {
+                if (inputContext == InputContext::Gameplay) {
+                    auto cWinSz = window->windowSize();
+                    float w = static_cast<float>(cWinSz.x);
+                    float h = static_cast<float>(cWinSz.y);
+                    float consoleHeight = h * 0.4f;
+                    auto consoleTree = uiCtx.get("console_window");
+                    if (!consoleTree.isNil()) {
+                        auto& cm = consoleTree.asMap();
+                        cm.set(symWindowPosX, finescript::Value::number(0));
+                        cm.set(symWindowPosY, finescript::Value::number(h - consoleHeight));
+                        cm.set(symWindowSizeW, finescript::Value::number(w));
+                        cm.set(symWindowSizeH, finescript::Value::number(consoleHeight));
+                        consoleWindowId = mapRenderer.show(consoleTree, uiCtx, true);
+                        mapRenderer.setFocus("console_input");
+                    }
+                    setInputContext(InputContext::Chat);
+                } else if (inputContext == InputContext::Chat) {
+                    if (consoleWindowId >= 0) { mapRenderer.hide(consoleWindowId); consoleWindowId = -1; }
+                    setInputContext(InputContext::Gameplay);
+                }
+                return finevk::ListenerResult::Consumed;
+            }
+#endif
             return finevk::ListenerResult::Reject;
         }, finevk::InputPriority::Menu);
 
@@ -812,6 +986,28 @@ int main(int argc, char* argv[]) {
                     } else {
                         std::cout << "Physics mode: OFF (free-fly camera)\n";
                     }
+                    return finevk::ListenerResult::Consumed;
+                }
+
+                if (e.key == GLFW_KEY_F7) {
+                    showDebugOverlay = !showDebugOverlay;
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                    if (showDebugOverlay) {
+                        auto debugTree = uiCtx.get("debug_overlay");
+                        if (!debugTree.isNil()) {
+                            // Position at upper-right
+                            float w = static_cast<float>(window->windowSize().x);
+                            debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
+                            debugTree.asMap().set(symWindowPosY, finescript::Value::number(10));
+                            debugTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(1.0));
+                            debugTree.asMap().set(guiEngine.intern("window_pivot_y"), finescript::Value::number(0.0));
+                            debugOverlayId = mapRenderer.show(debugTree, uiCtx, true);
+                        }
+                    } else {
+                        if (debugOverlayId >= 0) { mapRenderer.hide(debugOverlayId); debugOverlayId = -1; }
+                    }
+#endif
+                    std::cout << "Debug overlay: " << (showDebugOverlay ? "ON" : "OFF") << "\n";
                     return finevk::ListenerResult::Consumed;
                 }
 
@@ -987,13 +1183,290 @@ int main(int argc, char* argv[]) {
             return finevk::ListenerResult::Reject;
         }, finevk::InputPriority::Game);
 
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+        // ====================================================================
+        // UI control native functions (called from finescript button callbacks)
+        // ====================================================================
+        guiEngine.registerFunction("resume_game",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                deferredUiActions.push_back([&]() {
+                    if (dimOverlayId >= 0) { mapRenderer.hide(dimOverlayId); dimOverlayId = -1; }
+                    if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
+                    if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
+                    setInputContext(InputContext::Gameplay);
+                });
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("quit_game",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                deferredUiActions.push_back([&]() { window->close(); });
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("show_settings",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                deferredUiActions.push_back([&]() {
+                    if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
+                    auto settingsTree = uiCtx.get("settings_menu");
+                    if (!settingsTree.isNil()) {
+                        auto sWinSz = window->windowSize();
+                        settingsTree.asMap().set(symWindowPosX, finescript::Value::number(sWinSz.x / 2.0f));
+                        settingsTree.asMap().set(symWindowPosY, finescript::Value::number(sWinSz.y / 2.0f));
+                        settingsMenuId = mapRenderer.show(settingsTree, uiCtx);
+                        // Update slider values to current state
+                        auto v = mapRenderer.findById("view_dist");
+                        if (!v.isNil()) v.asMap().set(uiSyms.value, finescript::Value::number(worldRenderer.viewDistance()));
+                        v = mapRenderer.findById("fov");
+                        if (!v.isNil()) v.asMap().set(uiSyms.value, finescript::Value::number(fovDegrees));
+                        v = mapRenderer.findById("sensitivity");
+                        if (!v.isNil()) v.asMap().set(uiSyms.value, finescript::Value::number(mouseSensitivity));
+                        v = mapRenderer.findById("time_speed");
+                        if (!v.isNil()) v.asMap().set(uiSyms.value, finescript::Value::number(worldTime.timeSpeed()));
+                        v = mapRenderer.findById("freeze_time");
+                        if (!v.isNil()) v.asMap().set(uiSyms.value, finescript::Value::boolean(worldTime.isFrozen()));
+                        v = mapRenderer.findById("lighting");
+                        if (!v.isNil()) v.asMap().set(uiSyms.selected, finescript::Value::integer(lightingMode));
+                    }
+                });
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("show_main_menu",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                deferredUiActions.push_back([&]() {
+                    if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
+                    auto mainTree = uiCtx.get("main_menu");
+                    if (!mainTree.isNil()) {
+                        auto mWinSz = window->windowSize();
+                        mainTree.asMap().set(symWindowPosX, finescript::Value::number(mWinSz.x / 2.0f));
+                        mainTree.asMap().set(symWindowPosY, finescript::Value::number(mWinSz.y / 2.0f));
+                        mainMenuId = mapRenderer.show(mainTree, uiCtx);
+                    }
+                });
+                return finescript::Value::nil();
+            });
+
+        // Settings change callbacks
+        guiEngine.registerFunction("set_view_distance",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) worldRenderer.setViewDistance(static_cast<float>(args[0].asNumber()));
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("set_fov",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) {
+                    fovDegrees = static_cast<float>(args[0].asNumber());
+                    auto winSize = window->size();
+                    if (winSize.x > 0 && winSize.y > 0) {
+                        camera.setPerspective(fovDegrees, float(winSize.x) / float(winSize.y), 0.1f, 500.0f);
+                    }
+                }
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("set_sensitivity",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) mouseSensitivity = static_cast<float>(args[0].asNumber());
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("set_time_speed",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) {
+                    float speed = static_cast<float>(args[0].asNumber());
+                    worldTime.setTimeSpeed(speed);
+                    timeSpeedMultiplier = speed;
+                }
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("set_freeze_time",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) {
+                    bool frozen = args[0].asBool();
+                    worldTime.setFrozen(frozen);
+                    timeFrozen = frozen;
+                }
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("set_lighting",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty()) {
+                    lightingMode = static_cast<int>(args[0].asInt());
+                    applyLightingMode();
+                    worldRenderer.rebuildAllMeshes();
+                }
+                return finescript::Value::nil();
+            });
+
+        // Console native functions
+        guiEngine.registerFunction("submit_command",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.empty()) return finescript::Value::nil();
+                std::string command = args[0].toString();
+                if (command.empty()) return finescript::Value::nil();
+
+                // Add to history
+                commandHistory.push_back(command);
+                historyIndex = -1;
+
+                // Echo command
+                consoleLog.push_back({"> " + command, false});
+
+                // Pre-load game state map
+                {
+                    auto gameMap = finescript::Value::map();
+                    auto& gm = gameMap.asMap();
+                    gm.set(guiEngine.intern("fps"), finescript::Value::integer(lastFps));
+                    gm.set(guiEngine.intern("time"), finescript::Value::number(worldTime.timeOfDay()));
+                    gm.set(guiEngine.intern("day"), finescript::Value::integer(worldTime.dayNumber()));
+                    gm.set(guiEngine.intern("ticks"), finescript::Value::integer(worldTime.totalTicks()));
+                    auto posMap = finescript::Value::map();
+                    glm::dvec3 camPos = camera.positionD();
+                    auto& pm = posMap.asMap();
+                    pm.set(guiEngine.intern("x"), finescript::Value::number(camPos.x));
+                    pm.set(guiEngine.intern("y"), finescript::Value::number(camPos.y));
+                    pm.set(guiEngine.intern("z"), finescript::Value::number(camPos.z));
+                    gm.set(guiEngine.intern("pos"), std::move(posMap));
+                    gm.set(guiEngine.intern("fly"), finescript::Value::boolean(playerController.flyMode()));
+                    gm.set(guiEngine.intern("chunks"), finescript::Value::integer(worldRenderer.loadedChunkCount()));
+                    consoleCtx.set("game", std::move(gameMap));
+                }
+
+                // Execute command
+                auto result = guiEngine.executeCommand(command, consoleCtx);
+                if (result.success) {
+                    if (!result.returnValue.isNil()) {
+                        consoleLog.push_back({result.returnValue.toString(), false});
+                    }
+                } else {
+                    consoleLog.push_back({result.error, true});
+                }
+                if (consoleLog.size() > MAX_CONSOLE_LINES) consoleLog.pop_front();
+
+                // Update console output widget children
+                deferredUiActions.push_back([&]() {
+                    auto output = mapRenderer.findById("console_output");
+                    if (!output.isNil()) {
+                        auto children = finescript::Value::array(std::vector<finescript::Value>{});
+                        auto& arr = children.asArrayMut();
+                        for (const auto& entry : consoleLog) {
+                            auto textWidget = finescript::Value::map();
+                            auto& tw = textWidget.asMap();
+                            if (entry.isError) {
+                                tw.set(guiEngine.intern("type"), finescript::Value::symbol(uiSyms.sym_text_colored));
+                                std::vector<finescript::Value> colorVec;
+                                colorVec.push_back(finescript::Value::number(1.0));
+                                colorVec.push_back(finescript::Value::number(0.3));
+                                colorVec.push_back(finescript::Value::number(0.3));
+                                colorVec.push_back(finescript::Value::number(1.0));
+                                tw.set(guiEngine.intern("color"), finescript::Value::array(std::move(colorVec)));
+                            } else {
+                                tw.set(guiEngine.intern("type"), finescript::Value::symbol(uiSyms.sym_text_wrapped));
+                            }
+                            tw.set(symText, finescript::Value::string(entry.text));
+                            arr.push_back(std::move(textWidget));
+                        }
+                        output.asMap().set(symChildren, std::move(children));
+                    }
+                    // Clear input and re-focus
+                    auto input = mapRenderer.findById("console_input");
+                    if (!input.isNil()) {
+                        input.asMap().set(uiSyms.value, finescript::Value::string(""));
+                    }
+                    mapRenderer.setFocus("console_input");
+                });
+
+                return finescript::Value::nil();
+            });
+
+        guiEngine.registerFunction("get_history",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.empty() || commandHistory.empty()) return finescript::Value::nil();
+                int dir = static_cast<int>(args[0].asInt());
+                if (dir < 0) {
+                    // Up arrow
+                    if (historyIndex < 0) historyIndex = static_cast<int>(commandHistory.size()) - 1;
+                    else if (historyIndex > 0) historyIndex--;
+                } else {
+                    // Down arrow
+                    if (historyIndex >= 0) historyIndex++;
+                    if (historyIndex >= static_cast<int>(commandHistory.size())) historyIndex = -1;
+                }
+                if (historyIndex >= 0 && historyIndex < static_cast<int>(commandHistory.size())) {
+                    return finescript::Value::string(commandHistory[historyIndex]);
+                }
+                return finescript::Value::string("");
+            });
+
+        // Console command functions
+        guiEngine.registerFunction("tp",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.size() < 3) return finescript::Value::string("Usage: tp x y z");
+                float x = static_cast<float>(args[0].asNumber());
+                float y = static_cast<float>(args[1].asNumber());
+                float z = static_cast<float>(args[2].asNumber());
+                playerBody.setPosition(Vec3(x, y - playerController.eyeHeight(), z));
+                playerBody.setVelocity(Vec3(0.0f));
+                playerController.setFlyPosition(glm::dvec3(x, y, z));
+                camera.moveTo(glm::dvec3(x, y, z));
+                return finescript::Value::string("Teleported to (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
+            });
+
+        guiEngine.registerFunction("set_time",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.empty()) return finescript::Value::string("Usage: set_time <ticks>");
+                int64_t ticks = args[0].asInt();
+                session->actions().setWorldTime(ticks);
+                return finescript::Value::string("World time set to " + std::to_string(ticks));
+            });
+
+        guiEngine.registerFunction("place",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.size() < 4) return finescript::Value::string("Usage: place x y z \"type\"");
+                int x = static_cast<int>(args[0].asInt());
+                int y = static_cast<int>(args[1].asInt());
+                int z = static_cast<int>(args[2].asInt());
+                std::string typeName = args[3].asString();
+                auto typeId = BlockTypeId::fromName(typeName);
+                session->actions().placeBlock(BlockPos(x, y, z), typeId);
+                return finescript::Value::string("Placed " + typeName + " at (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
+            });
+
+        guiEngine.registerFunction("break_block",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (args.size() < 3) return finescript::Value::string("Usage: break_block x y z");
+                int x = static_cast<int>(args[0].asInt());
+                int y = static_cast<int>(args[1].asInt());
+                int z = static_cast<int>(args[2].asInt());
+                session->actions().breakBlock(BlockPos(x, y, z));
+                return finescript::Value::string("Breaking block at (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
+            });
+
+        // Override print to route to console output
+        guiEngine.registerFunction("print",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                std::string text;
+                for (size_t i = 0; i < args.size(); i++) {
+                    if (i > 0) text += " ";
+                    text += args[i].toString();
+                }
+                consoleLog.push_back({text, false});
+                if (consoleLog.size() > MAX_CONSOLE_LINES) consoleLog.pop_front();
+                return finescript::Value::nil();
+            });
+#endif
+
         // Start in gameplay mode with cursor captured
         setInputContext(InputContext::Gameplay);
 
         // Resize callback
         window->onResize([&](uint32_t width, uint32_t height) {
             if (width > 0 && height > 0) {
-                camera.setPerspective(70.0f, float(width) / float(height), 0.1f, 500.0f);
+                camera.setPerspective(fovDegrees, float(width) / float(height), 0.1f, 500.0f);
             }
         });
 
@@ -1012,6 +1485,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  F4: Toggle hidden face culling (debug)\n";
         std::cout << "  F5: Toggle physics mode (gravity, collision)\n";
         std::cout << "  F6: Toggle async meshing\n";
+        std::cout << "  F7: Toggle debug stats overlay\n";
         std::cout << "  T: Cycle time speed (1x/10x/100x/frozen)\n";
         std::cout << "  B: Toggle smooth lighting\n";
         std::cout << "  C: Toggle frustum culling\n";
@@ -1020,6 +1494,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  M: Cycle LOD merge mode\n";
         std::cout << "  V: Print mesh statistics\n";
         std::cout << "  Escape: Toggle pause menu\n";
+        std::cout << "  ` (backtick): Toggle console\n";
         std::cout << "\nFlags: --single-block, --large-coords, --sync (async is default)\n\n";
 
         // Timing
@@ -1077,7 +1552,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
-                    playerController.look(mouseDelta.x, mouseDelta.y);
+                    playerController.look(mouseDelta.x * mouseSensitivity, mouseDelta.y * mouseSensitivity);
                 }
             }
 
@@ -1102,6 +1577,7 @@ int main(int argc, char* argv[]) {
             frameCount++;
             fpsTimer += dt;
             if (fpsTimer >= 1.0f) {
+                lastFps = frameCount;
                 float tod = worldTime.timeOfDay();
                 const char* phase = worldTime.isDaytime() ? "Day" : "Night";
                 std::cout << "FPS: " << frameCount
@@ -1205,19 +1681,79 @@ int main(int argc, char* argv[]) {
 #ifdef FINEVOX_HAS_GUI
                 gui.beginFrame();
 
-                // Coordinates overlay (upper left)
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                // Per-frame overlay text updates via finegui mapRenderer
                 {
+                    // Coordinates overlay
                     glm::dvec3 pos = camera.positionD();
-                    ImGui::SetNextWindowPos(ImVec2(10, 10));
-                    ImGui::Begin("##coords", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground |
-                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
-                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "X: %.1f", pos.x);
-                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "Y: %.1f", pos.y);
-                    ImGui::TextColored(ImVec4(1, 1, 1, 0.85f), "Z: %.1f", pos.z);
-                    ImGui::End();
+                    char buf[64];
+                    auto updateText = [&](const char* id, const char* fmt, auto... args) {
+                        snprintf(buf, sizeof(buf), fmt, args...);
+                        auto widget = mapRenderer.findById(id);
+                        if (!widget.isNil()) widget.asMap().set(symText, finescript::Value::string(buf));
+                    };
+                    updateText("pos_x", "X: %.1f", pos.x);
+                    updateText("pos_y", "Y: %.1f", pos.y);
+                    updateText("pos_z", "Z: %.1f", pos.z);
+
+                    // Debug overlay text (only if shown)
+                    if (debugOverlayId >= 0) {
+                        updateText("fps", "FPS: %d", lastFps);
+                        updateText("chunks", "Chunks: %u/%u (culled %u)",
+                            worldRenderer.renderedChunkCount(), worldRenderer.loadedChunkCount(),
+                            worldRenderer.culledChunkCount());
+                        updateText("tris", "Tris: %u", worldRenderer.renderedTriangleCount());
+                        float tod = worldTime.timeOfDay();
+                        const char* phase = worldTime.isDaytime() ? "Day" : "Night";
+                        updateText("time", "Time: %s %d/24000", phase, static_cast<int>(tod * 24000));
+                        updateText("mode", "Mode: %s", playerController.flyMode() ? "Fly" : "Physics");
+                        updateText("lod", "LOD: %s  Greedy: %s",
+                            worldRenderer.lodEnabled() ? "ON" : "OFF",
+                            worldRenderer.greedyMeshing() ? "ON" : "OFF");
+
+                        // Update debug overlay position (upper-right, may change on resize)
+                        auto debugTree = uiCtx.get("debug_overlay");
+                        if (!debugTree.isNil()) {
+                            float w = static_cast<float>(window->windowSize().x);
+                            debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
+                        }
+                    }
+
+                    // Update dim overlay size (in case of window resize)
+                    if (dimOverlayId >= 0) {
+                        auto dimTree = uiCtx.get("dim_overlay");
+                        if (!dimTree.isNil()) {
+                            auto dSz = window->windowSize();
+                            dimTree.asMap().set(symWindowSizeW, finescript::Value::number(static_cast<float>(dSz.x)));
+                            dimTree.asMap().set(symWindowSizeH, finescript::Value::number(static_cast<float>(dSz.y)));
+                        }
+                    }
+
+                    // Update console position/size (in case of window resize)
+                    if (consoleWindowId >= 0) {
+                        auto consoleTree = uiCtx.get("console_window");
+                        if (!consoleTree.isNil()) {
+                            auto cSz = window->windowSize();
+                            float w = static_cast<float>(cSz.x);
+                            float h = static_cast<float>(cSz.y);
+                            float consoleHeight = h * 0.4f;
+                            auto& cm = consoleTree.asMap();
+                            cm.set(symWindowPosX, finescript::Value::number(0));
+                            cm.set(symWindowPosY, finescript::Value::number(h - consoleHeight));
+                            cm.set(symWindowSizeW, finescript::Value::number(w));
+                            cm.set(symWindowSizeH, finescript::Value::number(consoleHeight));
+                        }
+                    }
                 }
+
+                // Render all finegui map trees
+                guiManager.processPendingMessages();
+                mapRenderer.renderAll();
+
+                // Process deferred UI actions (from button callbacks)
+                for (auto& action : deferredUiActions) action();
+                deferredUiActions.clear();
+#endif
 
                 // Hotbar (bottom center) — only in gameplay
                 if (inputContext == InputContext::Gameplay) {
@@ -1255,42 +1791,6 @@ int main(int argc, char* argv[]) {
                         ImGui::Button(label, ImVec2(slotSize, slotSize));
 
                         ImGui::PopStyleColor(2);
-                    }
-                    ImGui::End();
-                }
-
-                // Pause menu — only in menu context
-                if (inputContext == InputContext::Menu) {
-                    ImGuiIO& io = ImGui::GetIO();
-
-                    // Semi-transparent fullscreen dim overlay
-                    ImGui::SetNextWindowPos(ImVec2(0, 0));
-                    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y));
-                    ImGui::Begin("##dim", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground);
-                    ImGui::GetWindowDrawList()->AddRectFilled(
-                        ImVec2(0, 0), ImVec2(io.DisplaySize.x, io.DisplaySize.y),
-                        IM_COL32(0, 0, 0, 120));
-                    ImGui::End();
-
-                    // Centered pause menu window
-                    ImGui::SetNextWindowPos(
-                        ImVec2(io.DisplaySize.x / 2.0f, io.DisplaySize.y / 2.0f),
-                        ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-                    ImGui::Begin("##pause", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
-                    ImGui::TextColored(ImVec4(1, 1, 1, 0.9f), "Game Paused");
-                    ImGui::Separator();
-                    ImGui::Spacing();
-                    if (ImGui::Button("Resume", ImVec2(200, 40))) {
-                        setInputContext(InputContext::Gameplay);
-                    }
-                    ImGui::Spacing();
-                    if (ImGui::Button("Quit", ImVec2(200, 40))) {
-                        window->close();
                     }
                     ImGui::End();
                 }

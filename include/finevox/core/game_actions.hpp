@@ -29,6 +29,9 @@ public:
     /// Send player state to game thread (position, velocity, look).
     /// Default no-op for subclasses that don't need it.
     virtual void sendPlayerState(EntityId id, const EntityState& state) { (void)id; (void)state; }
+
+    /// Set world time to an absolute tick value.
+    virtual void setWorldTime(int64_t ticks) { (void)ticks; }
 };
 
 }  // namespace finevox

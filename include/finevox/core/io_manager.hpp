@@ -53,7 +53,7 @@ public:
     // Uses regionPath(worldName, dimension) to find the region directory
     // Returns nullptr if world is not registered with ResourceLocator
     static std::unique_ptr<IOManager> forWorld(const std::string& worldName,
-                                                const std::string& dimension = "overworld");
+                                                const std::string& dimension = "surface");
 
     ~IOManager();
 

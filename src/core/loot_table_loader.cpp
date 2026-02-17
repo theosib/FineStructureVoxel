@@ -69,9 +69,9 @@ std::unique_ptr<LootCondition> LootTableLoader::parseCondition(std::string_view 
     str = trimView(str);
     if (str.empty()) return nullptr;
 
-    // silk-touch
-    if (str == "silk-touch") {
-        return std::make_unique<SilkTouchCondition>();
+    // precise-break
+    if (str == "precise-break") {
+        return std::make_unique<PreciseBreakCondition>();
     }
 
     // not <condition>
@@ -87,7 +87,7 @@ std::unique_ptr<LootCondition> LootTableLoader::parseCondition(std::string_view 
         return std::make_unique<ToolTagCondition>(TagId::fromName(tagName));
     }
 
-    // random-chance <chance> [fortune-bonus]
+    // random-chance <chance> [bounty-bonus]
     if (str.substr(0, 14) == "random-chance " && str.size() > 14) {
         auto rest = trimView(str.substr(14));
         float chance = 0.0f, bonus = 0.0f;
@@ -119,13 +119,13 @@ std::unique_ptr<LootModifier> LootTableLoader::parseModifier(std::string_view st
     str = trimView(str);
     if (str.empty()) return nullptr;
 
-    // fortune-count [multiplier]
-    if (str == "fortune-count" || str.substr(0, 14) == "fortune-count ") {
+    // bounty [multiplier]
+    if (str == "bounty" || str.substr(0, 7) == "bounty ") {
         float mult = 1.0f;
-        if (str.size() > 14) {
-            mult = parseFloatSafe(str.substr(14));
+        if (str.size() > 7) {
+            mult = parseFloatSafe(str.substr(7));
         }
-        return std::make_unique<FortuneCountModifier>(mult);
+        return std::make_unique<BountyModifier>(mult);
     }
 
     // set-count <min>-<max> or set-count <n>
@@ -134,13 +134,13 @@ std::unique_ptr<LootModifier> LootTableLoader::parseModifier(std::string_view st
         return std::make_unique<SetCountModifier>(min, max);
     }
 
-    // looting-bonus [n]
-    if (str == "looting-bonus" || str.substr(0, 14) == "looting-bonus ") {
+    // plunder-bonus [n]
+    if (str == "plunder-bonus" || str.substr(0, 14) == "plunder-bonus ") {
         int32_t bonus = 1;
         if (str.size() > 14) {
             bonus = parseIntSafe(str.substr(14));
         }
-        return std::make_unique<LootingBonusModifier>(bonus);
+        return std::make_unique<PlunderModifier>(bonus);
     }
 
     std::cerr << "[LootTableLoader] Unknown modifier: " << str << "\n";

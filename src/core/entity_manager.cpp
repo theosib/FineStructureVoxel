@@ -3,6 +3,8 @@
 #include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/event_queue.hpp"
+#include "finevox/core/chunk_column.hpp"
+#include "finevox/core/entity_serializer.hpp"
 
 namespace finevox {
 
@@ -23,7 +25,7 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
     EntityId id = nextEntityId_++;
     auto entity = createEntity(type, id);
     entity->setPosition(position);
-    entity->setCurrentChunk(ChunkPos::fromBlock(toBlockPos(position)));
+    entity->setCurrentChunk(ChunkPos::fromBlock(toBlockCoord(position)));
 
     // Publish spawn event to graphics
     graphicsQueue_.push(GraphicsEvent::entitySpawn(
@@ -35,7 +37,11 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
 
 EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     EntityId id = entity->id();
-    entity->setCurrentChunk(ChunkPos::fromBlock(toBlockPos(entity->position())));
+    if (id == INVALID_ENTITY_ID) {
+        id = nextEntityId_++;
+        entity->setId(id);
+    }
+    entity->setCurrentChunk(ChunkPos::fromBlock(toBlockCoord(entity->position())));
 
     // Publish spawn event to graphics
     graphicsQueue_.push(GraphicsEvent::entitySpawn(
@@ -157,7 +163,7 @@ void EntityManager::physicsPass(float tickDt) {
 
 void EntityManager::processEntityTransfers() {
     for (auto& [id, entity] : entities_) {
-        ChunkPos newChunk = ChunkPos::fromBlock(toBlockPos(entity->position()));
+        ChunkPos newChunk = ChunkPos::fromBlock(toBlockCoord(entity->position()));
         if (newChunk != entity->currentChunk()) {
             // Entity moved to a new chunk
             // TODO: Notify chunk system for entity tracking
@@ -295,36 +301,31 @@ std::unique_ptr<Entity> EntityManager::createEntity(EntityType type, EntityId id
     // Configure based on type
     switch (type) {
         case EntityType::Player:
-            entity->setHalfExtents(Vec3(0.3f, 0.9f, 0.3f));  // 0.6 x 1.8 x 0.6
-            entity->setEyeHeight(1.62f);
-            entity->setMaxStepHeight(0.625f);
+            entity->setHalfExtents(Vec3(0.35f, 0.925f, 0.35f));  // 0.7 x 1.85 x 0.7
+            entity->setEyeHeight(1.65f);
+            entity->setMaxStepHeight(0.6f);
             break;
 
         case EntityType::Pig:
         case EntityType::Cow:
         case EntityType::Sheep:
-            entity->setHalfExtents(Vec3(0.45f, 0.45f, 0.45f));  // ~0.9 cube
+            entity->setHalfExtents(Vec3(0.5f, 0.5f, 0.5f));  // ~1.0 cube
             entity->setEyeHeight(0.7f);
             break;
 
         case EntityType::Chicken:
-            entity->setHalfExtents(Vec3(0.2f, 0.35f, 0.2f));  // Small
+            entity->setHalfExtents(Vec3(0.25f, 0.4f, 0.25f));  // Small bird
             entity->setEyeHeight(0.5f);
             break;
 
         case EntityType::Zombie:
         case EntityType::Skeleton:
-            entity->setHalfExtents(Vec3(0.3f, 0.95f, 0.3f));  // Slightly taller than player
+            entity->setHalfExtents(Vec3(0.35f, 0.95f, 0.35f));  // Slightly taller than player
             entity->setEyeHeight(1.7f);
             break;
 
-        case EntityType::Creeper:
-            entity->setHalfExtents(Vec3(0.3f, 0.85f, 0.3f));
-            entity->setEyeHeight(1.4f);
-            break;
-
         case EntityType::Spider:
-            entity->setHalfExtents(Vec3(0.7f, 0.45f, 0.7f));  // Wide and flat
+            entity->setHalfExtents(Vec3(0.75f, 0.5f, 0.75f));  // Wide and flat
             entity->setEyeHeight(0.65f);
             break;
 
@@ -335,18 +336,18 @@ std::unique_ptr<Entity> EntityManager::createEntity(EntityType type, EntityId id
             break;
 
         case EntityType::Minecart:
-            entity->setHalfExtents(Vec3(0.49f, 0.35f, 0.49f));
+            entity->setHalfExtents(Vec3(0.5f, 0.4f, 0.5f));
             entity->setEyeHeight(0.5f);
             break;
 
         case EntityType::Boat:
-            entity->setHalfExtents(Vec3(0.7f, 0.225f, 0.7f));
+            entity->setHalfExtents(Vec3(0.75f, 0.25f, 0.75f));
             entity->setEyeHeight(0.3f);
             break;
 
         default:
             // Default entity size
-            entity->setHalfExtents(Vec3(0.3f, 0.5f, 0.3f));
+            entity->setHalfExtents(Vec3(0.35f, 0.5f, 0.35f));
             entity->setEyeHeight(0.8f);
             break;
     }
@@ -363,6 +364,78 @@ PlayerAuthority& EntityManager::getPlayerAuthority(EntityId playerId) {
         return auth;
     }
     return it->second;
+}
+
+// ============================================================================
+// Persistence (Column-based save/load)
+// ============================================================================
+
+std::vector<Entity*> EntityManager::getEntitiesInColumn(ColumnPos colPos) {
+    std::vector<Entity*> result;
+    for (auto& [id, entity] : entities_) {
+        auto eColPos = ColumnPos::fromChunk(entity->currentChunk());
+        if (eColPos.x == colPos.x && eColPos.z == colPos.z) {
+            result.push_back(entity.get());
+        }
+    }
+    return result;
+}
+
+std::vector<const Entity*> EntityManager::getEntitiesInColumn(ColumnPos colPos) const {
+    std::vector<const Entity*> result;
+    for (const auto& [id, entity] : entities_) {
+        auto eColPos = ColumnPos::fromChunk(entity->currentChunk());
+        if (eColPos.x == colPos.x && eColPos.z == colPos.z) {
+            result.push_back(entity.get());
+        }
+    }
+    return result;
+}
+
+void EntityManager::saveColumnEntities(ChunkColumn& column) {
+    auto colPos = column.position();
+
+    // Gather non-player entities in this column
+    std::vector<const Entity*> toSave;
+    for (const auto& [id, entity] : entities_) {
+        // Skip players — they are managed separately
+        if (entity->type() == EntityType::Player) continue;
+
+        auto eColPos = ColumnPos::fromChunk(entity->currentChunk());
+        if (eColPos.x == colPos.x && eColPos.z == colPos.z) {
+            toSave.push_back(entity.get());
+        }
+    }
+
+    if (toSave.empty()) {
+        // Remove stale entity data if present
+        if (column.hasData()) {
+            column.data()->remove(StringInterner::global().intern("entity_data"));
+        }
+        return;
+    }
+
+    auto bytes = EntitySerializer::serialize(toSave);
+    column.getOrCreateData().set<std::vector<uint8_t>>("entity_data", std::move(bytes));
+}
+
+size_t EntityManager::loadColumnEntities(ChunkColumn& column) {
+    if (!column.hasData()) return 0;
+
+    auto entityBytes = column.data()->get<std::vector<uint8_t>>("entity_data");
+    if (entityBytes.empty()) return 0;
+
+    auto entities = EntitySerializer::deserialize(entityBytes);
+    size_t count = entities.size();
+
+    for (auto& entity : entities) {
+        spawnEntity(std::move(entity));
+    }
+
+    // Clear the entity data from the column to avoid re-loading
+    column.data()->remove(StringInterner::global().intern("entity_data"));
+
+    return count;
 }
 
 // ============================================================================

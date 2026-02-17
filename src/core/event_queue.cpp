@@ -31,7 +31,7 @@ BlockEvent EventOutbox::mergeEvents(const BlockEvent& existing, const BlockEvent
     BlockEvent merged = incoming;  // Start with incoming (more recent)
 
     switch (existing.type) {
-        case EventType::NeighborChanged:
+        case EventType::NeighborUpdated:
             // Merge face masks - OR them together
             merged.neighborFaceMask = existing.neighborFaceMask | incoming.neighborFaceMask;
             // Keep changedFace from incoming (most recent primary face)
@@ -85,7 +85,7 @@ void UpdateScheduler::setTickConfig(const TickConfig& config) {
     }
 }
 
-void UpdateScheduler::scheduleTick(BlockPos pos, int ticksFromNow, TickType type) {
+void UpdateScheduler::scheduleTick(BlockCoord pos, int ticksFromNow, TickType type) {
     if (ticksFromNow <= 0) {
         ticksFromNow = 1;  // Minimum 1 tick in the future
     }
@@ -98,7 +98,7 @@ void UpdateScheduler::scheduleTick(BlockPos pos, int ticksFromNow, TickType type
     scheduledTicks_.push(tick);
 }
 
-void UpdateScheduler::cancelScheduledTicks(BlockPos pos) {
+void UpdateScheduler::cancelScheduledTicks(BlockCoord pos) {
     // O(n) operation - rebuild queue without matching position
     std::vector<ScheduledTick> remaining;
     remaining.reserve(scheduledTicks_.size());
@@ -117,7 +117,7 @@ void UpdateScheduler::cancelScheduledTicks(BlockPos pos) {
     }
 }
 
-bool UpdateScheduler::hasScheduledTick(BlockPos pos) const {
+bool UpdateScheduler::hasScheduledTick(BlockCoord pos) const {
     // Need non-const access to iterate - use a copy
     auto copy = scheduledTicks_;
     while (!copy.empty()) {
@@ -278,7 +278,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
             if (handler) {
                 BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
                 ctx.setScheduler(this);
-                handler->onBreak(ctx);
+                handler->onDestroy(ctx);
             }
         }
 
@@ -340,11 +340,11 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
 
     switch (event.type) {
 
-        case EventType::NeighborChanged:
+        case EventType::NeighborUpdated:
             if (handler) {
                 // Call for each changed face
                 event.forEachChangedNeighbor([&](Face face) {
-                    handler->onNeighborChanged(ctx, face);
+                    handler->onNeighborUpdated(ctx, face);
                 });
             }
             break;
@@ -366,13 +366,13 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
 
         case EventType::PlayerUse:
             if (handler) {
-                handler->onUse(ctx, event.face);
+                handler->onInteract(ctx, event.face);
             }
             break;
 
         case EventType::PlayerHit:
             if (handler) {
-                handler->onHit(ctx, event.face);
+                handler->onStrike(ctx, event.face);
             }
             break;
 
@@ -400,7 +400,7 @@ void UpdateScheduler::generateGameTickEvents() {
 
         const auto& tickBlocks = subchunk->gameTickBlocks();
         for (uint16_t localIndex : tickBlocks) {
-            BlockPos worldPos = chunkPos.toWorld(localIndex);
+            BlockCoord worldPos = chunkPos.toWorld(localIndex);
             outbox_.push(BlockEvent::tick(worldPos, TickType::Scheduled));  // Use Scheduled for game ticks
         }
     }
@@ -418,7 +418,7 @@ void UpdateScheduler::generateRandomTickEvents() {
         // Generate N random tick positions
         for (uint32_t i = 0; i < config_.randomTicksPerSubchunk; ++i) {
             int32_t localIndex = dist(rng_);
-            BlockPos worldPos = chunkPos.toWorld(localIndex);
+            BlockCoord worldPos = chunkPos.toWorld(localIndex);
 
             // Only generate tick if block is not air
             BlockTypeId blockType = subchunk->getBlock(localIndex);

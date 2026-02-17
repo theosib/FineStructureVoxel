@@ -8,11 +8,11 @@
  *
  * Defines:
  * - Face: 6 block face directions
- * - LocalBlockPos: Position within a subchunk (0-15 each axis)
- * - BlockPos: World-space block position
+ * - LocalBlockCoord: Position within a subchunk (0-15 each axis)
+ * - BlockCoord: World-space block position
  * - ChunkPos: 16³ subchunk position
  * - ColumnPos: 16x∞x16 column position (X, Z only)
- * - RegionPos: 32x32 region position for persistence
+ * - RegionPos: 64x64 region position for persistence
  */
 
 #include <cstdint>
@@ -53,22 +53,22 @@ constexpr std::array<int32_t, 3> faceNormal(Face f) {
 }
 
 // ============================================================================
-// LocalBlockPos - Block position within a subchunk (0-15 each axis)
+// LocalBlockCoord - Block position within a subchunk (0-15 each axis)
 // ============================================================================
 //
-// Distinct type from BlockPos to prevent accidental mixing of world and local
-// coordinates. All conversions between LocalBlockPos and BlockPos are explicit.
+// Distinct type from BlockCoord to prevent accidental mixing of world and local
+// coordinates. All conversions between LocalBlockCoord and BlockCoord are explicit.
 //
-struct LocalBlockPos {
+struct LocalBlockCoord {
     uint8_t x = 0;
     uint8_t y = 0;
     uint8_t z = 0;
 
-    constexpr LocalBlockPos() = default;
-    constexpr LocalBlockPos(uint8_t x_, uint8_t y_, uint8_t z_) : x(x_), y(y_), z(z_) {}
+    constexpr LocalBlockCoord() = default;
+    constexpr LocalBlockCoord(uint8_t x_, uint8_t y_, uint8_t z_) : x(x_), y(y_), z(z_) {}
 
     // Construct from int32_t (masks to 0-15)
-    constexpr LocalBlockPos(int32_t x_, int32_t y_, int32_t z_)
+    constexpr LocalBlockCoord(int32_t x_, int32_t y_, int32_t z_)
         : x(static_cast<uint8_t>(x_ & 0xF))
         , y(static_cast<uint8_t>(y_ & 0xF))
         , z(static_cast<uint8_t>(z_ & 0xF)) {}
@@ -79,7 +79,7 @@ struct LocalBlockPos {
     }
 
     // Unpack from 12-bit index
-    [[nodiscard]] static constexpr LocalBlockPos fromIndex(uint16_t index) {
+    [[nodiscard]] static constexpr LocalBlockCoord fromIndex(uint16_t index) {
         return {
             static_cast<uint8_t>(index & 0xF),
             static_cast<uint8_t>((index >> 8) & 0xF),
@@ -88,7 +88,7 @@ struct LocalBlockPos {
     }
 
     // Get neighbor position if within bounds (0-15), nullopt if outside
-    [[nodiscard]] constexpr std::optional<LocalBlockPos> neighbor(Face face) const {
+    [[nodiscard]] constexpr std::optional<LocalBlockCoord> neighbor(Face face) const {
         auto n = faceNormal(face);
         int32_t nx = static_cast<int32_t>(x) + n[0];
         int32_t ny = static_cast<int32_t>(y) + n[1];
@@ -97,7 +97,7 @@ struct LocalBlockPos {
         if (nx < 0 || nx > 15 || ny < 0 || ny > 15 || nz < 0 || nz > 15) {
             return std::nullopt;
         }
-        return LocalBlockPos{static_cast<uint8_t>(nx), static_cast<uint8_t>(ny), static_cast<uint8_t>(nz)};
+        return LocalBlockCoord{static_cast<uint8_t>(nx), static_cast<uint8_t>(ny), static_cast<uint8_t>(nz)};
     }
 
     // Check if neighbor is within bounds
@@ -109,35 +109,35 @@ struct LocalBlockPos {
         return nx >= 0 && nx <= 15 && ny >= 0 && ny <= 15 && nz >= 0 && nz <= 15;
     }
 
-    constexpr bool operator==(const LocalBlockPos& other) const = default;
-    constexpr auto operator<=>(const LocalBlockPos& other) const = default;
+    constexpr bool operator==(const LocalBlockCoord& other) const = default;
+    constexpr auto operator<=>(const LocalBlockCoord& other) const = default;
 };
 
 // ============================================================================
-// BlockPos - Block position in world coordinates
+// BlockCoord - Block position in world coordinates
 // ============================================================================
-struct BlockPos {
+struct BlockCoord {
     int32_t x = 0;
     int32_t y = 0;
     int32_t z = 0;
 
-    constexpr BlockPos() = default;
-    constexpr BlockPos(int32_t x_, int32_t y_, int32_t z_) : x(x_), y(y_), z(z_) {}
+    constexpr BlockCoord() = default;
+    constexpr BlockCoord(int32_t x_, int32_t y_, int32_t z_) : x(x_), y(y_), z(z_) {}
 
     // Pack into 64-bit value for use as map key
     // Layout: [sign bits][x:21][y:21][z:21] - supports +/- 1M blocks in each axis
     [[nodiscard]] uint64_t pack() const;
-    [[nodiscard]] static BlockPos unpack(uint64_t packed);
+    [[nodiscard]] static BlockCoord unpack(uint64_t packed);
 
     // Get position of neighbor in given direction
-    [[nodiscard]] constexpr BlockPos neighbor(Face face) const {
+    [[nodiscard]] constexpr BlockCoord neighbor(Face face) const {
         auto n = faceNormal(face);
         return {x + n[0], y + n[1], z + n[2]};
     }
 
-    // Get local position within subchunk as LocalBlockPos
-    [[nodiscard]] constexpr LocalBlockPos local() const {
-        return LocalBlockPos{
+    // Get local position within subchunk as LocalBlockCoord
+    [[nodiscard]] constexpr LocalBlockCoord local() const {
+        return LocalBlockCoord{
             static_cast<uint8_t>(x & 0xF),
             static_cast<uint8_t>(y & 0xF),
             static_cast<uint8_t>(z & 0xF)
@@ -149,8 +149,8 @@ struct BlockPos {
         return local().toIndex();
     }
 
-    constexpr bool operator==(const BlockPos& other) const = default;
-    constexpr auto operator<=>(const BlockPos& other) const = default;
+    constexpr bool operator==(const BlockCoord& other) const = default;
+    constexpr auto operator<=>(const BlockCoord& other) const = default;
 };
 
 // Subchunk position (16x16x16 region)
@@ -163,18 +163,18 @@ struct ChunkPos {
     constexpr ChunkPos(int32_t x_, int32_t y_, int32_t z_) : x(x_), y(y_), z(z_) {}
 
     // Create from block position
-    [[nodiscard]] static constexpr ChunkPos fromBlock(const BlockPos& block) {
+    [[nodiscard]] static constexpr ChunkPos fromBlock(const BlockCoord& block) {
         // Arithmetic right shift to handle negative coordinates correctly
         return {block.x >> 4, block.y >> 4, block.z >> 4};
     }
 
     // Get the block position of the corner (minimum x,y,z)
-    [[nodiscard]] constexpr BlockPos cornerBlockPos() const {
+    [[nodiscard]] constexpr BlockCoord cornerBlockCoord() const {
         return {x << 4, y << 4, z << 4};
     }
 
     // Convert local block position to world block position
-    [[nodiscard]] constexpr BlockPos toWorld(LocalBlockPos local) const {
+    [[nodiscard]] constexpr BlockCoord toWorld(LocalBlockCoord local) const {
         return {
             (x << 4) + local.x,
             (y << 4) + local.y,
@@ -183,8 +183,8 @@ struct ChunkPos {
     }
 
     // Convert local block index to world block position
-    [[nodiscard]] constexpr BlockPos toWorld(uint16_t localIndex) const {
-        return toWorld(LocalBlockPos::fromIndex(localIndex));
+    [[nodiscard]] constexpr BlockCoord toWorld(uint16_t localIndex) const {
+        return toWorld(LocalBlockCoord::fromIndex(localIndex));
     }
 
     // Pack into 64-bit value
@@ -210,7 +210,7 @@ struct ColumnPos {
     constexpr ColumnPos(int32_t x_, int32_t z_) : x(x_), z(z_) {}
 
     // Create from block position
-    [[nodiscard]] static constexpr ColumnPos fromBlock(const BlockPos& block) {
+    [[nodiscard]] static constexpr ColumnPos fromBlock(const BlockCoord& block) {
         return {block.x >> 4, block.z >> 4};
     }
 
@@ -231,15 +231,15 @@ struct ColumnPos {
 
 // Hash specializations for use in unordered containers
 template<>
-struct std::hash<finevox::LocalBlockPos> {
-    size_t operator()(const finevox::LocalBlockPos& pos) const noexcept {
+struct std::hash<finevox::LocalBlockCoord> {
+    size_t operator()(const finevox::LocalBlockCoord& pos) const noexcept {
         return std::hash<uint16_t>{}(pos.toIndex());
     }
 };
 
 template<>
-struct std::hash<finevox::BlockPos> {
-    size_t operator()(const finevox::BlockPos& pos) const noexcept {
+struct std::hash<finevox::BlockCoord> {
+    size_t operator()(const finevox::BlockCoord& pos) const noexcept {
         return std::hash<uint64_t>{}(pos.pack());
     }
 };

@@ -140,7 +140,7 @@ struct BlockFaceInfo {
 
 // Callback to check if a block is solid/opaque (for face culling)
 // Returns true if the block at the given position is opaque (hides faces behind it)
-using BlockOpaqueProvider = std::function<bool(const BlockPos& pos)>;
+using BlockOpaqueProvider = std::function<bool(const BlockCoord& pos)>;
 
 // Callback to check if a block is transparent
 // Returns true if the block at the given position is transparent (needs separate render pass)
@@ -154,7 +154,7 @@ using BlockTextureProvider = std::function<glm::vec4(BlockTypeId type, Face face
 // Returns packed byte: sky light in high nibble (bits 4-7), block light in low nibble (bits 0-3)
 // This matches LightData internal format: (sky << 4) | block
 // If null, mesh builder will use default lighting (full sky brightness, no block light)
-using BlockLightProvider = std::function<uint8_t(const BlockPos& pos)>;
+using BlockLightProvider = std::function<uint8_t(const BlockCoord& pos)>;
 
 // Callback to check if a block type has custom geometry (non-cube)
 // Returns true if the block should use custom mesh instead of standard cube faces
@@ -170,7 +170,7 @@ using BlockGeometryProvider = std::function<const BlockGeometry*(BlockTypeId typ
 // For standard opaque blocks, all faces occlude
 // For custom geometry blocks, only faces in solidFacesMask occlude
 // For air/transparent blocks, no faces occlude
-using BlockFaceOccludesProvider = std::function<bool(const BlockPos& pos, Face face)>;
+using BlockFaceOccludesProvider = std::function<bool(const BlockCoord& pos, Face face)>;
 
 // ============================================================================
 // MeshBuilder - Generates mesh data from subchunk blocks
@@ -367,7 +367,7 @@ private:
 
     // Get the 4 AO values for a face (CCW from bottom-left when looking at face)
     [[nodiscard]] std::array<float, 4> getFaceAO(
-        const BlockPos& blockWorldPos,
+        const BlockCoord& blockWorldPos,
         Face face,
         const BlockOpaqueProvider& opaqueProvider
     ) const;
@@ -380,7 +380,7 @@ private:
         std::array<float, 4> block{0.0f, 0.0f, 0.0f, 0.0f};
     };
     [[nodiscard]] FaceLightResult getFaceSkyBlockLight(
-        const BlockPos& blockWorldPos,
+        const BlockCoord& blockWorldPos,
         Face face
     ) const;
 
@@ -541,15 +541,15 @@ private:
 }
 
 // Get offset to neighbor block in the direction of a face
-[[nodiscard]] inline BlockPos faceOffset(Face face) {
+[[nodiscard]] inline BlockCoord faceOffset(Face face) {
     switch (face) {
-        case Face::PosX: return BlockPos( 1,  0,  0);
-        case Face::NegX: return BlockPos(-1,  0,  0);
-        case Face::PosY: return BlockPos( 0,  1,  0);
-        case Face::NegY: return BlockPos( 0, -1,  0);
-        case Face::PosZ: return BlockPos( 0,  0,  1);
-        case Face::NegZ: return BlockPos( 0,  0, -1);
-        default: return BlockPos(0, 0, 0);
+        case Face::PosX: return BlockCoord( 1,  0,  0);
+        case Face::NegX: return BlockCoord(-1,  0,  0);
+        case Face::PosY: return BlockCoord( 0,  1,  0);
+        case Face::NegY: return BlockCoord( 0, -1,  0);
+        case Face::PosZ: return BlockCoord( 0,  0,  1);
+        case Face::NegZ: return BlockCoord( 0,  0, -1);
+        default: return BlockCoord(0, 0, 0);
     }
 }
 

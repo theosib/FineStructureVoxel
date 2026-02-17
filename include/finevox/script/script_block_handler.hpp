@@ -25,12 +25,12 @@ public:
     [[nodiscard]] std::string_view name() const override;
 
     void onPlace(BlockContext& ctx) override;
-    void onBreak(BlockContext& ctx) override;
+    void onDestroy(BlockContext& ctx) override;
     void onTick(BlockContext& ctx, TickType type) override;
-    void onNeighborChanged(BlockContext& ctx, Face changedFace) override;
+    void onNeighborUpdated(BlockContext& ctx, Face changedFace) override;
     void onBlockUpdate(BlockContext& ctx) override;
-    bool onUse(BlockContext& ctx, Face face) override;
-    bool onHit(BlockContext& ctx, Face face) override;
+    bool onInteract(BlockContext& ctx, Face face) override;
+    bool onStrike(BlockContext& ctx, Face face) override;
     void onRepaint(BlockContext& ctx) override;
 
     /// Check if this handler has any event handlers registered

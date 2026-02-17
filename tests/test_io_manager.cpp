@@ -140,11 +140,11 @@ TEST_F(IOManagerTest, MultipleRegions) {
 
     // Save columns in different regions
     std::vector<ColumnPos> positions = {
-        {0, 0},     // Region (0, 0)
-        {32, 0},    // Region (1, 0)
-        {0, 32},    // Region (0, 1)
-        {-1, 0},    // Region (-1, 0)
-        {-33, -33}, // Region (-2, -2)
+        {0, 0},       // Region (0, 0)
+        {64, 0},      // Region (1, 0)
+        {0, 64},      // Region (0, 1)
+        {-1, 0},      // Region (-1, 0)
+        {-65, -65},   // Region (-2, -2)
     };
 
     for (const auto& pos : positions) {
@@ -287,7 +287,7 @@ TEST_F(IOManagerTest, RegionEviction) {
 
     // Save to many different regions
     for (int i = 0; i < 10; ++i) {
-        ColumnPos pos{i * 32, 0};  // Each in a different region
+        ColumnPos pos{i * 64, 0};  // Each in a different region
         ChunkColumn col(pos);
         col.setBlock(0, 0, 0, stone);
         io.queueSave(pos, col);
@@ -317,7 +317,7 @@ TEST_F(IOManagerTest, RoundTripSaveLoad) {
     BlockTypeId ore = BlockTypeId::fromName("test:diamond_ore");
 
     // Store original block data for verification
-    // Map: ColumnPos -> Map: local BlockPos -> BlockTypeId
+    // Map: ColumnPos -> Map: local BlockCoord -> BlockTypeId
     struct ColumnData {
         ColumnPos pos;
         std::unordered_map<uint64_t, BlockTypeId> blocks;  // packed local pos -> type
@@ -330,8 +330,8 @@ TEST_F(IOManagerTest, RoundTripSaveLoad) {
         {1, 0},     // Adjacent to origin
         {0, 1},     // Adjacent to origin
         {-1, -1},   // Negative coordinates
-        {32, 32},   // Different region
-        {-32, 0},   // Negative region
+        {64, 64},   // Different region
+        {-64, 0},   // Negative region
     };
 
     for (const auto& colPos : positions) {

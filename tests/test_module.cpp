@@ -76,7 +76,7 @@ public:
         (void)ctx;
     }
 
-    bool onUse(BlockContext& ctx, Face face) override {
+    bool onInteract(BlockContext& ctx, Face face) override {
         useCalled = true;
         lastUseFace = face;
         (void)ctx;
@@ -96,7 +96,7 @@ private:
 // ============================================================================
 
 TEST(BlockRegistryNamespaceTest, ValidNamespacedNames) {
-    EXPECT_TRUE(BlockRegistry::isValidNamespacedName("blockgame:stone"));
+    EXPECT_TRUE(BlockRegistry::isValidNamespacedName("finevox:stone"));
     EXPECT_TRUE(BlockRegistry::isValidNamespacedName("mymod:custom_block"));
     EXPECT_TRUE(BlockRegistry::isValidNamespacedName("a:b"));
     EXPECT_TRUE(BlockRegistry::isValidNamespacedName("Test123:Block456"));
@@ -105,7 +105,7 @@ TEST(BlockRegistryNamespaceTest, ValidNamespacedNames) {
 TEST(BlockRegistryNamespaceTest, InvalidNamespacedNames) {
     EXPECT_FALSE(BlockRegistry::isValidNamespacedName("stone"));           // No colon
     EXPECT_FALSE(BlockRegistry::isValidNamespacedName(":stone"));          // Empty namespace
-    EXPECT_FALSE(BlockRegistry::isValidNamespacedName("blockgame:"));      // Empty local name
+    EXPECT_FALSE(BlockRegistry::isValidNamespacedName("finevox:"));      // Empty local name
     EXPECT_FALSE(BlockRegistry::isValidNamespacedName("a:b:c"));           // Multiple colons
     EXPECT_FALSE(BlockRegistry::isValidNamespacedName("my-mod:block"));    // Hyphen not allowed
     EXPECT_FALSE(BlockRegistry::isValidNamespacedName("my.mod:block"));    // Dot not allowed
@@ -113,19 +113,19 @@ TEST(BlockRegistryNamespaceTest, InvalidNamespacedNames) {
 }
 
 TEST(BlockRegistryNamespaceTest, GetNamespace) {
-    EXPECT_EQ(BlockRegistry::getNamespace("blockgame:stone"), "blockgame");
+    EXPECT_EQ(BlockRegistry::getNamespace("finevox:stone"), "finevox");
     EXPECT_EQ(BlockRegistry::getNamespace("mymod:block"), "mymod");
     EXPECT_EQ(BlockRegistry::getNamespace("stone"), "");  // No namespace
 }
 
 TEST(BlockRegistryNamespaceTest, GetLocalName) {
-    EXPECT_EQ(BlockRegistry::getLocalName("blockgame:stone"), "stone");
+    EXPECT_EQ(BlockRegistry::getLocalName("finevox:stone"), "stone");
     EXPECT_EQ(BlockRegistry::getLocalName("mymod:custom_block"), "custom_block");
     EXPECT_EQ(BlockRegistry::getLocalName("stone"), "stone");  // No namespace, returns full name
 }
 
 TEST(BlockRegistryNamespaceTest, MakeQualifiedName) {
-    EXPECT_EQ(BlockRegistry::makeQualifiedName("blockgame", "stone"), "blockgame:stone");
+    EXPECT_EQ(BlockRegistry::makeQualifiedName("finevox", "stone"), "finevox:stone");
     EXPECT_EQ(BlockRegistry::makeQualifiedName("mymod", "test"), "mymod:test");
 }
 

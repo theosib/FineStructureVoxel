@@ -86,7 +86,7 @@ public:
     //   "engine/defaults.cbor" → /usr/share/finevox/defaults.cbor
     //   "user/config.cbor" → ~/.config/finevox/config.cbor
     //   "world/MyWorld/world.cbor" → /path/to/saves/MyWorld/world.cbor
-    //   "world/MyWorld/dim/nether/regions" → /path/to/saves/MyWorld/dim/nether/regions
+    //   "world/MyWorld/dim/underground/regions" → /path/to/saves/MyWorld/dim/underground/regions
     [[nodiscard]] std::filesystem::path resolve(const std::string& logicalPath) const;
 
     // Check if a logical path exists on disk
@@ -104,9 +104,9 @@ public:
                                                       const std::string& dim) const;
 
     // Get region files directory for a world/dimension
-    // dimension defaults to "overworld" (which uses world root, not dim/ subdir)
+    // dimension defaults to "surface" (which uses world root, not dim/ subdir)
     [[nodiscard]] std::filesystem::path regionPath(const std::string& world,
-                                                   const std::string& dim = "overworld") const;
+                                                   const std::string& dim = "surface") const;
 
     // ========================================================================
     // Utility

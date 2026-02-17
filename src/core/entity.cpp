@@ -18,7 +18,6 @@ std::string Entity::typeName() const {
         case EntityType::Chicken: return "Chicken";
         case EntityType::Zombie: return "Zombie";
         case EntityType::Skeleton: return "Skeleton";
-        case EntityType::Creeper: return "Creeper";
         case EntityType::Spider: return "Spider";
         case EntityType::ItemDrop: return "ItemDrop";
         case EntityType::Arrow: return "Arrow";
@@ -35,7 +34,7 @@ std::string Entity::typeName() const {
 
 Vec3 Entity::lookDirection() const {
     // Convert yaw and pitch (in degrees) to a unit direction vector
-    // Yaw: 0 = +Z, 90 = -X, 180 = -Z, 270 = +X (Minecraft-style)
+    // Yaw: 0 = +Z, 90 = -X, 180 = -Z, 270 = +X
     // Pitch: 0 = forward, -90 = up, +90 = down
 
     float yawRad = glm::radians(yaw_);

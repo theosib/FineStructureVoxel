@@ -119,14 +119,14 @@ public:
 #endif
 
 // Get the block position to place a block adjacent to the hit face
-BlockPos getPlacePosition(const BlockPos& hitPos, Face face) {
+BlockCoord getPlacePosition(const BlockCoord& hitPos, Face face) {
     switch (face) {
-        case Face::PosX: return BlockPos(hitPos.x + 1, hitPos.y, hitPos.z);
-        case Face::NegX: return BlockPos(hitPos.x - 1, hitPos.y, hitPos.z);
-        case Face::PosY: return BlockPos(hitPos.x, hitPos.y + 1, hitPos.z);
-        case Face::NegY: return BlockPos(hitPos.x, hitPos.y - 1, hitPos.z);
-        case Face::PosZ: return BlockPos(hitPos.x, hitPos.y, hitPos.z + 1);
-        case Face::NegZ: return BlockPos(hitPos.x, hitPos.y, hitPos.z - 1);
+        case Face::PosX: return BlockCoord(hitPos.x + 1, hitPos.y, hitPos.z);
+        case Face::NegX: return BlockCoord(hitPos.x - 1, hitPos.y, hitPos.z);
+        case Face::PosY: return BlockCoord(hitPos.x, hitPos.y + 1, hitPos.z);
+        case Face::NegY: return BlockCoord(hitPos.x, hitPos.y - 1, hitPos.z);
+        case Face::PosZ: return BlockCoord(hitPos.x, hitPos.y, hitPos.z + 1);
+        case Face::NegZ: return BlockCoord(hitPos.x, hitPos.y, hitPos.z - 1);
         default: return hitPos;
     }
 }
@@ -157,7 +157,7 @@ std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
 
     // List of blocks to load
     std::vector<std::string> blockNames = {
-        "stone", "dirt", "grass", "cobble", "glowstone",
+        "stone", "dirt", "grass", "cobble", "luminite",
         "slab", "stairs", "wedge"
     };
 
@@ -222,12 +222,12 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
     auto dirt = BlockTypeId::fromName("dirt");
     auto grass = BlockTypeId::fromName("grass");
     auto cobble = BlockTypeId::fromName("cobble");
-    auto glowstone = BlockTypeId::fromName("glowstone");
+    auto luminite = BlockTypeId::fromName("luminite");
 
     std::cout << "Building test world...\n";
     std::cout << "  Block IDs: stone=" << stone.id << " dirt=" << dirt.id
               << " grass=" << grass.id << " cobble=" << cobble.id
-              << " glowstone=" << glowstone.id << "\n";
+              << " luminite=" << luminite.id << "\n";
 
     // Base offset for large coordinate testing
     // At 1,000,000 blocks, float32 has ~0.06 block precision loss
@@ -274,11 +274,11 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
             }
         }
 
-        // Add glowstone lights inside the house and scattered around
-        world.setBlock({baseX + 3, 7, baseZ + 3}, glowstone);  // Inside house ceiling
-        world.setBlock({baseX + 5, 7, baseZ + 5}, glowstone);  // Inside house ceiling
-        world.setBlock({baseX + 20, 50, baseZ + 20}, glowstone);  // On top of tower
-        world.setBlock({baseX - 10, 5, baseZ - 10}, glowstone);  // Standalone
+        // Add luminite lights inside the house and scattered around
+        world.setBlock({baseX + 3, 7, baseZ + 3}, luminite);  // Inside house ceiling
+        world.setBlock({baseX + 5, 7, baseZ + 5}, luminite);  // Inside house ceiling
+        world.setBlock({baseX + 20, 50, baseZ + 20}, luminite);  // On top of tower
+        world.setBlock({baseX - 10, 5, baseZ - 10}, luminite);  // Standalone
 
         // A tall tower for frustum culling testing
         for (int y = 5; y < 50; y++) {
@@ -586,7 +586,7 @@ int main(int argc, char* argv[]) {
         atlas.setBlockTexture(BlockTypeId::fromName("dirt"), 1, 0);     // Brown
         atlas.setBlockTexture(BlockTypeId::fromName("grass"), 2, 0);    // Green (top)
         atlas.setBlockTexture(BlockTypeId::fromName("cobble"), 3, 0);   // Dark gray
-        atlas.setBlockTexture(BlockTypeId::fromName("glowstone"), 4, 0); // Yellow (light source)
+        atlas.setBlockTexture(BlockTypeId::fromName("luminite"), 4, 0); // Yellow (light source)
         atlas.setBlockTexture(BlockTypeId::fromName("slab"), 5, 0);     // Slab (use distinct color)
         atlas.setBlockTexture(BlockTypeId::fromName("stairs"), 6, 0);   // Stairs
         atlas.setBlockTexture(BlockTypeId::fromName("wedge"), 7, 0);    // Wedge
@@ -605,7 +605,7 @@ int main(int argc, char* argv[]) {
 
         // Set face occludes provider for directional face culling
         // This handles slabs/stairs where only some faces are solid
-        worldRenderer.setFaceOccludesProvider([&world, &blockGeometries](const BlockPos& pos, Face face) -> bool {
+        worldRenderer.setFaceOccludesProvider([&world, &blockGeometries](const BlockCoord& pos, Face face) -> bool {
             BlockTypeId blockType = world.getBlock(pos);
             if (blockType.isAir()) {
                 return false;  // Air doesn't occlude anything
@@ -686,7 +686,7 @@ int main(int argc, char* argv[]) {
         //     }
         // }
 
-        // Propagate block light from glowstone blocks
+        // Propagate block light from luminite blocks
         // Note: We can't use recalculateSubChunk in a loop because it clears light,
         // which destroys cross-chunk propagation. Instead, directly propagate from
         // known light source positions.
@@ -702,7 +702,7 @@ int main(int argc, char* argv[]) {
 
         // Set up light provider for lighting calculations
         // Returns packed byte: sky in high nibble, block in low nibble
-        worldRenderer.setLightProvider([&lightEngine](const BlockPos& pos) -> uint8_t {
+        worldRenderer.setLightProvider([&lightEngine](const BlockCoord& pos) -> uint8_t {
             uint8_t sky = lightEngine.getSkyLight(pos);
             uint8_t block = lightEngine.getBlockLight(pos);
             return static_cast<uint8_t>((sky << 4) | block);
@@ -763,7 +763,7 @@ int main(int argc, char* argv[]) {
             BlockTypeId::fromName("dirt"),
             BlockTypeId::fromName("grass"),
             BlockTypeId::fromName("cobble"),
-            BlockTypeId::fromName("glowstone"),
+            BlockTypeId::fromName("luminite"),
             BlockTypeId::fromName("slab"),
             BlockTypeId::fromName("stairs"),
             BlockTypeId::fromName("wedge")
@@ -784,7 +784,7 @@ int main(int argc, char* argv[]) {
         playerController.setFlyPosition(camera.positionD());
 
         // Block shape provider for raycasting - uses BlockRegistry for collision shapes
-        BlockShapeProvider shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+        BlockShapeProvider shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
             BlockTypeId blockType = world.getBlock(pos);
             if (blockType.isAir()) {
                 return nullptr;  // No collision
@@ -802,7 +802,7 @@ int main(int argc, char* argv[]) {
         glm::dvec3 startPos = camera.positionD();
         SimplePhysicsBody playerBody(
             Vec3(static_cast<float>(startPos.x), static_cast<float>(startPos.y - playerController.eyeHeight()), static_cast<float>(startPos.z)),
-            Vec3(0.3f, 0.9f, 0.3f)  // Player half-extents (0.6 x 1.8 x 0.6 full size)
+            Vec3(0.35f, 0.925f, 0.35f)  // Player half-extents (0.7 x 1.85 x 0.7 full size)
         );
 
         // Connect player controller to physics
@@ -1158,7 +1158,7 @@ int main(int argc, char* argv[]) {
 
                     RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
                     if (result.hit) {
-                        BlockPos placePos = getPlacePosition(result.blockPos, result.face);
+                        BlockCoord placePos = getPlacePosition(result.blockPos, result.face);
 
                         if (wouldBlockIntersectBody(placePos, playerBody)) {
                             auto mode = ConfigManager::instance().blockPlacementMode();
@@ -1445,7 +1445,7 @@ int main(int argc, char* argv[]) {
                 int z = static_cast<int>(args[2].asInt());
                 std::string typeName = args[3].asString();
                 auto typeId = BlockTypeId::fromName(typeName);
-                session->actions().placeBlock(BlockPos(x, y, z), typeId);
+                session->actions().placeBlock(BlockCoord(x, y, z), typeId);
                 return finescript::Value::string("Placed " + typeName + " at (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
             });
 
@@ -1455,7 +1455,7 @@ int main(int argc, char* argv[]) {
                 int x = static_cast<int>(args[0].asInt());
                 int y = static_cast<int>(args[1].asInt());
                 int z = static_cast<int>(args[2].asInt());
-                session->actions().breakBlock(BlockPos(x, y, z));
+                session->actions().breakBlock(BlockCoord(x, y, z));
                 return finescript::Value::string("Breaking block at (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
             });
 
@@ -1490,7 +1490,7 @@ int main(int argc, char* argv[]) {
         std::cout << "  Left Click: Break block\n";
         std::cout << "  Right Click: Place block\n";
         std::cout << "  1-8 / Tab: Select block type\n";
-        std::cout << "    1=stone 2=dirt 3=grass 4=cobble 5=glowstone\n";
+        std::cout << "    1=stone 2=dirt 3=grass 4=cobble 5=luminite\n";
         std::cout << "    6=slab 7=stairs 8=wedge (non-cube blocks)\n";
         std::cout << "  F1: Toggle debug camera offset\n";
         std::cout << "  F2: Teleport to large coords (1M)\n";
@@ -1598,7 +1598,7 @@ int main(int argc, char* argv[]) {
                           << "/" << worldRenderer.loadedChunkCount()
                           << " | Culled: " << worldRenderer.culledChunkCount()
                           << " | Tris: " << worldRenderer.renderedTriangleCount()
-                          << " | Time: " << phase << " " << static_cast<int>(tod * 24000) << "/24000"
+                          << " | Time: " << phase << " " << static_cast<int>(tod * 36000) << "/36000"
                           << " | Frame: " << framePeriod.count() / 1000.0f << "ms"
                           << "\r" << std::flush;
                 frameCount = 0;
@@ -1718,7 +1718,7 @@ int main(int argc, char* argv[]) {
                         updateText("tris", "Tris: %u", worldRenderer.renderedTriangleCount());
                         float tod = worldTime.timeOfDay();
                         const char* phase = worldTime.isDaytime() ? "Day" : "Night";
-                        updateText("time", "Time: %s %d/24000", phase, static_cast<int>(tod * 24000));
+                        updateText("time", "Time: %s %d/36000", phase, static_cast<int>(tod * 36000));
                         updateText("mode", "Mode: %s", playerController.flyMode() ? "Fly" : "Physics");
                         updateText("lod", "LOD: %s  Greedy: %s",
                             worldRenderer.lodEnabled() ? "ON" : "OFF",

@@ -1,13 +1,13 @@
-# Stone loot table — silk touch returns stone, otherwise cobblestone
+# Stone loot table — precise break returns stone, otherwise cobble
 pool:default:
 rolls: 1
-entry:silk:
+entry:precise:
 type: item
 item: stone
 count: 1
-condition: silk-touch
+condition: precise-break
 entry:normal:
 type: item
-item: cobblestone
+item: cobble
 count: 1
-condition: not silk-touch
+condition: not precise-break

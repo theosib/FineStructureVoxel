@@ -50,8 +50,8 @@ void ResourceLocator::registerWorld(const std::string& name, const std::filesyst
     std::unique_lock lock(mutex_);
     worlds_[name] = path;
 
-    // Auto-register overworld dimension (uses world root directly)
-    std::string key = name + "/overworld";
+    // Auto-register surface dimension (uses world root directly)
+    std::string key = name + "/surface";
     dimensions_[key] = "";  // Empty subpath = world root
 }
 
@@ -169,7 +169,7 @@ std::filesystem::path ResourceLocator::resolve(const std::string& logicalPath) c
         // Check if rest starts with "dim/"
         if (rest.starts_with("dim/")) {
             // Parse dimension name
-            // "dim/nether/regions" → dim="nether", dimRest="regions"
+            // "dim/underground/regions" → dim="underground", dimRest="regions"
             std::string dimPart = rest.substr(4);  // Skip "dim/"
             auto dimSlash = dimPart.find('/');
 
@@ -229,8 +229,8 @@ std::filesystem::path ResourceLocator::dimensionPath(const std::string& world,
 
 std::filesystem::path ResourceLocator::regionPath(const std::string& world,
                                                   const std::string& dim) const {
-    if (dim == "overworld" || dim.empty()) {
-        // Overworld regions are in world root
+    if (dim == "surface" || dim.empty()) {
+        // Surface dimension regions are in world root
         return resolve("world/" + world + "/regions");
     }
     // Other dimensions use dim/<name>/regions

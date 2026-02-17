@@ -50,18 +50,18 @@ protected:
         FeatureRegistry::global().clear();
     }
 
-    /// Create a world with a flat stone+dirt+grass surface at y=63
+    /// Create a world with a flat stone+dirt+grass surface at y=79
     std::unique_ptr<World> createFlatWorld() {
         auto world = std::make_unique<World>();
         auto& col = world->getOrCreateColumn(ColumnPos(0, 0));
         for (int32_t x = 0; x < 16; ++x) {
             for (int32_t z = 0; z < 16; ++z) {
-                for (int32_t y = 0; y <= 60; ++y) {
+                for (int32_t y = 0; y <= 76; ++y) {
                     col.setBlock(x, y, z, stoneId_);
                 }
-                col.setBlock(x, 61, z, dirtId_);
-                col.setBlock(x, 62, z, dirtId_);
-                col.setBlock(x, 63, z, grassId_);
+                col.setBlock(x, 77, z, dirtId_);
+                col.setBlock(x, 78, z, dirtId_);
+                col.setBlock(x, 79, z, grassId_);
             }
         }
         return world;
@@ -90,21 +90,21 @@ TEST_F(TreeFeatureTest, PlacesTreeOnSoil) {
     TreeFeature tree("oak_tree", config);
     EXPECT_EQ(tree.name(), "oak_tree");
 
-    FeaturePlacementContext ctx{*world, BlockPos(8, 64, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{*world, BlockCoord(8, 80, 8), BiomeId{}, 42, nullptr};
 
     auto result = tree.place(ctx);
     EXPECT_EQ(result, FeatureResult::Placed);
 
     for (int32_t y = 0; y < 5; ++y) {
-        EXPECT_EQ(world->getBlock(8, 64 + y, 8), oakLogId_)
-            << "Missing trunk at y=" << (64 + y);
+        EXPECT_EQ(world->getBlock(8, 80 + y, 8), oakLogId_)
+            << "Missing trunk at y=" << (80 + y);
     }
 
     bool foundLeaves = false;
     for (int32_t dx = -2; dx <= 2; ++dx) {
         for (int32_t dz = -2; dz <= 2; ++dz) {
             for (int32_t dy = 3; dy <= 6; ++dy) {
-                if (world->getBlock(8 + dx, 64 + dy, 8 + dz) == oakLeavesId_) {
+                if (world->getBlock(8 + dx, 80 + dy, 8 + dz) == oakLeavesId_) {
                     foundLeaves = true;
                 }
             }
@@ -122,7 +122,7 @@ TEST_F(TreeFeatureTest, SkipsWithoutSoil) {
     config.requiresSoil = true;
 
     TreeFeature tree("oak_tree", config);
-    FeaturePlacementContext ctx{world, BlockPos(8, 64, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{world, BlockCoord(8, 80, 8), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(tree.place(ctx), FeatureResult::Skipped);
 }
@@ -138,10 +138,10 @@ TEST_F(TreeFeatureTest, PlacesWithoutSoilCheck) {
     config.requiresSoil = false;
 
     TreeFeature tree("oak_tree", config);
-    FeaturePlacementContext ctx{world, BlockPos(8, 64, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{world, BlockCoord(8, 80, 8), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(tree.place(ctx), FeatureResult::Placed);
-    EXPECT_EQ(world.getBlock(8, 64, 8), oakLogId_);
+    EXPECT_EQ(world.getBlock(8, 80, 8), oakLogId_);
 }
 
 TEST_F(TreeFeatureTest, MaxExtent) {
@@ -168,13 +168,13 @@ TEST_F(TreeFeatureTest, DeterministicFromSeed) {
     World world2;
     TreeFeature tree("oak", config);
 
-    FeaturePlacementContext ctx1{world1, BlockPos(8, 64, 8), BiomeId{}, 12345, nullptr};
-    FeaturePlacementContext ctx2{world2, BlockPos(8, 64, 8), BiomeId{}, 12345, nullptr};
+    FeaturePlacementContext ctx1{world1, BlockCoord(8, 80, 8), BiomeId{}, 12345, nullptr};
+    FeaturePlacementContext ctx2{world2, BlockCoord(8, 80, 8), BiomeId{}, 12345, nullptr};
 
     (void)tree.place(ctx1);
     (void)tree.place(ctx2);
 
-    for (int32_t y = 64; y < 72; ++y) {
+    for (int32_t y = 80; y < 88; ++y) {
         EXPECT_EQ(world1.getBlock(8, y, 8), world2.getBlock(8, y, 8))
             << "Mismatch at y=" << y;
     }
@@ -199,7 +199,7 @@ TEST_F(OreFeatureTest, PlacesOreInStone) {
     OreFeature ore("iron_ore", config);
     EXPECT_EQ(ore.name(), "iron_ore");
 
-    FeaturePlacementContext ctx{*world, BlockPos(8, 30, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{*world, BlockCoord(8, 30, 8), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(ore.place(ctx), FeatureResult::Placed);
 
@@ -227,7 +227,7 @@ TEST_F(OreFeatureTest, SkipsOutOfHeightRange) {
     config.maxHeight = 20;
 
     OreFeature ore("iron_ore", config);
-    FeaturePlacementContext ctx{*world, BlockPos(8, 50, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{*world, BlockCoord(8, 50, 8), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(ore.place(ctx), FeatureResult::Skipped);
 }
@@ -243,7 +243,7 @@ TEST_F(OreFeatureTest, DoesNotReplaceWrongBlock) {
     config.maxHeight = 64;
 
     OreFeature ore("iron_ore", config);
-    FeaturePlacementContext ctx{*world, BlockPos(8, 30, 8), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{*world, BlockCoord(8, 30, 8), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(ore.place(ctx), FeatureResult::Skipped);
 }
@@ -261,8 +261,8 @@ TEST_F(OreFeatureTest, DeterministicFromSeed) {
     auto world1 = createFlatWorld();
     auto world2 = createFlatWorld();
 
-    FeaturePlacementContext ctx1{*world1, BlockPos(8, 30, 8), BiomeId{}, 999, nullptr};
-    FeaturePlacementContext ctx2{*world2, BlockPos(8, 30, 8), BiomeId{}, 999, nullptr};
+    FeaturePlacementContext ctx1{*world1, BlockCoord(8, 30, 8), BiomeId{}, 999, nullptr};
+    FeaturePlacementContext ctx2{*world2, BlockCoord(8, 30, 8), BiomeId{}, 999, nullptr};
 
     (void)ore.place(ctx1);
     (void)ore.place(ctx2);
@@ -299,14 +299,14 @@ TEST_F(SchematicFeatureTest, PlacesSchematic) {
     EXPECT_EQ(feature.name(), "test_structure");
 
     World world;
-    FeaturePlacementContext ctx{world, BlockPos(10, 64, 10), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{world, BlockCoord(10, 80, 10), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(feature.place(ctx), FeatureResult::Placed);
 
     for (int32_t x = 0; x < 3; ++x) {
         for (int32_t y = 0; y < 3; ++y) {
             for (int32_t z = 0; z < 3; ++z) {
-                EXPECT_EQ(world.getBlock(10 + x, 64 + y, 10 + z), stoneId_);
+                EXPECT_EQ(world.getBlock(10 + x, 80 + y, 10 + z), stoneId_);
             }
         }
     }
@@ -323,16 +323,16 @@ TEST_F(SchematicFeatureTest, IgnoresAirBlocks) {
     auto& col = world.getOrCreateColumn(ColumnPos(0, 0));
     for (int32_t x = 0; x < 16; ++x) {
         for (int32_t z = 0; z < 16; ++z) {
-            col.setBlock(x, 64, z, dirtId_);
+            col.setBlock(x, 80, z, dirtId_);
         }
     }
 
-    FeaturePlacementContext ctx{world, BlockPos(5, 64, 5), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{world, BlockCoord(5, 80, 5), BiomeId{}, 42, nullptr};
     (void)feature.place(ctx);
 
-    EXPECT_EQ(world.getBlock(5, 64, 5), stoneId_);
-    EXPECT_EQ(world.getBlock(7, 64, 7), stoneId_);
-    EXPECT_EQ(world.getBlock(6, 64, 6), dirtId_);
+    EXPECT_EQ(world.getBlock(5, 80, 5), stoneId_);
+    EXPECT_EQ(world.getBlock(7, 80, 7), stoneId_);
+    EXPECT_EQ(world.getBlock(6, 80, 6), dirtId_);
 }
 
 TEST_F(SchematicFeatureTest, MaxExtent) {
@@ -349,7 +349,7 @@ TEST_F(SchematicFeatureTest, NullSchematicFails) {
     SchematicFeature feature("null_test", nullptr);
 
     World world;
-    FeaturePlacementContext ctx{world, BlockPos(0, 0, 0), BiomeId{}, 42, nullptr};
+    FeaturePlacementContext ctx{world, BlockCoord(0, 0, 0), BiomeId{}, 42, nullptr};
 
     EXPECT_EQ(feature.place(ctx), FeatureResult::Failed);
 }

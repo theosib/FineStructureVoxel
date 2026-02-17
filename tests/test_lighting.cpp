@@ -347,8 +347,8 @@ TEST(LightEngineTest, InitiallyDark) {
     World world;
     LightEngine engine(world);
 
-    EXPECT_EQ(engine.getSkyLight(BlockPos{0, 0, 0}), 0);
-    EXPECT_EQ(engine.getBlockLight(BlockPos{0, 0, 0}), 0);
+    EXPECT_EQ(engine.getSkyLight(BlockCoord{0, 0, 0}), 0);
+    EXPECT_EQ(engine.getBlockLight(BlockCoord{0, 0, 0}), 0);
 }
 
 TEST(LightEngineTest, RegisterBlockType) {
@@ -380,7 +380,7 @@ TEST(LightEngineTest, PropagateBlockLight) {
     BlockRegistry::global().registerType("lighttest:torch", torch);
 
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     BlockTypeId torchId = BlockTypeId::fromName("lighttest:torch");
     world.setBlock(torchPos, torchId);
 
@@ -391,7 +391,7 @@ TEST(LightEngineTest, PropagateBlockLight) {
     EXPECT_EQ(engine.getBlockLight(torchPos), 14);
 
     // Check light decreases with distance
-    EXPECT_LT(engine.getBlockLight(BlockPos{9, 8, 8}), 14);
+    EXPECT_LT(engine.getBlockLight(BlockCoord{9, 8, 8}), 14);
 }
 
 TEST(LightEngineTest, SubChunkCreatedOnDemand) {
@@ -404,7 +404,7 @@ TEST(LightEngineTest, SubChunkCreatedOnDemand) {
     EXPECT_EQ(world.getSubChunk(chunkPos), nullptr);
 
     // Propagate some light - this should create the subchunk
-    engine.propagateBlockLight(BlockPos{8, 8, 8}, 10);
+    engine.propagateBlockLight(BlockCoord{8, 8, 8}, 10);
 
     // Now subchunk should exist with light data
     SubChunk* subChunk = world.getSubChunk(chunkPos);
@@ -417,8 +417,8 @@ TEST(LightEngineTest, LightStoredInSubChunk) {
     LightEngine engine(world);
 
     // Place a block first to create the subchunk
-    BlockPos pos{4, 4, 4};
-    world.setBlock(pos, BlockTypeId::fromName("minecraft:stone"));
+    BlockCoord pos{4, 4, 4};
+    world.setBlock(pos, BlockTypeId::fromName("finevox:stone"));
 
     // Propagate light
     engine.propagateBlockLight(pos, 12);
@@ -469,9 +469,9 @@ TEST(LightUtilsTest, CombinedLightValue) {
 TEST(LightingDeferralTest, TriggerMeshRebuildFlag) {
     // Test that LightingUpdate has the triggerMeshRebuild flag
     LightingUpdate update;
-    update.pos = BlockPos{0, 0, 0};
+    update.pos = BlockCoord{0, 0, 0};
     update.oldType = AIR_BLOCK_TYPE;
-    update.newType = BlockTypeId::fromName("minecraft:stone");
+    update.newType = BlockTypeId::fromName("finevox:stone");
     update.triggerMeshRebuild = true;
 
     EXPECT_TRUE(update.triggerMeshRebuild);
@@ -490,8 +490,8 @@ TEST(LightingDeferralTest, MeshRebuildQueueIntegration) {
     engine.setMeshRebuildQueue(&meshQueue);
 
     // Create a subchunk with a block
-    BlockPos pos{8, 8, 8};
-    world.setBlock(pos, BlockTypeId::fromName("minecraft:stone"));
+    BlockCoord pos{8, 8, 8};
+    world.setBlock(pos, BlockTypeId::fromName("finevox:stone"));
 
     // Get the subchunk to verify it exists
     ChunkPos chunkPos{0, 0, 0};
@@ -510,7 +510,7 @@ TEST(LightingDeferralTest, MeshRebuildQueueIntegration) {
     // Enqueue a lighting update with triggerMeshRebuild=true
     LightingUpdate update;
     update.pos = pos;
-    update.oldType = BlockTypeId::fromName("minecraft:stone");
+    update.oldType = BlockTypeId::fromName("finevox:stone");
     update.newType = BlockTypeId::fromName("defertest:torch");
     update.triggerMeshRebuild = true;
 
@@ -542,13 +542,13 @@ TEST(LightingDeferralTest, NoMeshRebuildWhenFlagFalse) {
     engine.setMeshRebuildQueue(&meshQueue);
 
     // Create a subchunk with a block
-    BlockPos pos{8, 8, 8};
-    world.setBlock(pos, BlockTypeId::fromName("minecraft:stone"));
+    BlockCoord pos{8, 8, 8};
+    world.setBlock(pos, BlockTypeId::fromName("finevox:stone"));
 
     // Enqueue a lighting update WITHOUT triggerMeshRebuild
     LightingUpdate update;
     update.pos = pos;
-    update.oldType = BlockTypeId::fromName("minecraft:stone");
+    update.oldType = BlockTypeId::fromName("finevox:stone");
     update.newType = AIR_BLOCK_TYPE;
     update.triggerMeshRebuild = false;  // Explicitly false
 
@@ -604,16 +604,16 @@ protected:
 
     // Reference implementation: compute expected block light using BFS from scratch
     // This is the "ground truth" - simple but correct
-    std::unordered_map<BlockPos, uint8_t> computeExpectedBlockLight(
-        const std::vector<std::pair<BlockPos, uint8_t>>& lightSources,
-        const std::unordered_set<BlockPos>& opaqueBlocks,
+    std::unordered_map<BlockCoord, uint8_t> computeExpectedBlockLight(
+        const std::vector<std::pair<BlockCoord, uint8_t>>& lightSources,
+        const std::unordered_set<BlockCoord>& opaqueBlocks,
         int32_t maxRange = 16
     ) {
-        std::unordered_map<BlockPos, uint8_t> result;
+        std::unordered_map<BlockCoord, uint8_t> result;
 
         // BFS from each light source
         for (const auto& [sourcePos, emission] : lightSources) {
-            std::queue<std::pair<BlockPos, uint8_t>> queue;
+            std::queue<std::pair<BlockCoord, uint8_t>> queue;
             queue.push({sourcePos, emission});
 
             while (!queue.empty()) {
@@ -631,11 +631,11 @@ protected:
 
                     // Propagate to neighbors (with attenuation of 1)
                     if (light > 1) {
-                        static const BlockPos offsets[] = {
+                        static const BlockCoord offsets[] = {
                             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
                         };
                         for (const auto& offset : offsets) {
-                            BlockPos neighbor{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+                            BlockCoord neighbor{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
                             // Don't propagate into opaque blocks
                             if (!opaqueBlocks.count(neighbor)) {
                                 queue.push({neighbor, static_cast<uint8_t>(light - 1)});
@@ -650,14 +650,14 @@ protected:
     }
 
     // Get actual light from engine for a region
-    std::unordered_map<BlockPos, uint8_t> getActualBlockLight(
-        const BlockPos& center, int32_t radius
+    std::unordered_map<BlockCoord, uint8_t> getActualBlockLight(
+        const BlockCoord& center, int32_t radius
     ) {
-        std::unordered_map<BlockPos, uint8_t> result;
+        std::unordered_map<BlockCoord, uint8_t> result;
         for (int32_t x = center.x - radius; x <= center.x + radius; ++x) {
             for (int32_t y = center.y - radius; y <= center.y + radius; ++y) {
                 for (int32_t z = center.z - radius; z <= center.z + radius; ++z) {
-                    BlockPos pos{x, y, z};
+                    BlockCoord pos{x, y, z};
                     uint8_t light = engine_->getBlockLight(pos);
                     if (light > 0) {
                         result[pos] = light;
@@ -670,9 +670,9 @@ protected:
 
     // Compare expected vs actual, return list of mismatches
     std::vector<std::string> compareLighting(
-        const std::unordered_map<BlockPos, uint8_t>& expected,
-        const std::unordered_map<BlockPos, uint8_t>& actual,
-        const BlockPos& center, int32_t radius
+        const std::unordered_map<BlockCoord, uint8_t>& expected,
+        const std::unordered_map<BlockCoord, uint8_t>& actual,
+        const BlockCoord& center, int32_t radius
     ) {
         std::vector<std::string> mismatches;
 
@@ -680,7 +680,7 @@ protected:
         for (int32_t x = center.x - radius; x <= center.x + radius; ++x) {
             for (int32_t y = center.y - radius; y <= center.y + radius; ++y) {
                 for (int32_t z = center.z - radius; z <= center.z + radius; ++z) {
-                    BlockPos pos{x, y, z};
+                    BlockCoord pos{x, y, z};
                     uint8_t exp = expected.count(pos) ? expected.at(pos) : 0;
                     uint8_t act = actual.count(pos) ? actual.at(pos) : 0;
 
@@ -705,7 +705,7 @@ protected:
 
 TEST_F(LightingCorrectnessTest, SingleTorchPropagation) {
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     world_->setBlock(torchPos, torch_);
     engine_->onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torch_);
 
@@ -722,8 +722,8 @@ TEST_F(LightingCorrectnessTest, SingleTorchPropagation) {
     std::cout << "Block at (-1,8,8) isAir: " << world_->getBlock({-1,8,8}).isAir() << "\n";
 
     // Compute expected
-    std::vector<std::pair<BlockPos, uint8_t>> sources = {{torchPos, 14}};
-    std::unordered_set<BlockPos> opaque;
+    std::vector<std::pair<BlockCoord, uint8_t>> sources = {{torchPos, 14}};
+    std::unordered_set<BlockCoord> opaque;
     auto expected = computeExpectedBlockLight(sources, opaque);
 
     // Get actual
@@ -746,18 +746,18 @@ TEST_F(LightingCorrectnessTest, SingleTorchPropagation) {
 
 TEST_F(LightingCorrectnessTest, TorchWithOneOpaqueBlock) {
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     world_->setBlock(torchPos, torch_);
     engine_->onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torch_);
 
     // Place one opaque block next to it
-    BlockPos stonePos{9, 8, 8};
+    BlockCoord stonePos{9, 8, 8};
     world_->setBlock(stonePos, stone_);
     engine_->onBlockPlaced(stonePos, AIR_BLOCK_TYPE, stone_);
 
     // Compute expected
-    std::vector<std::pair<BlockPos, uint8_t>> sources = {{torchPos, 14}};
-    std::unordered_set<BlockPos> opaque = {stonePos};
+    std::vector<std::pair<BlockCoord, uint8_t>> sources = {{torchPos, 14}};
+    std::unordered_set<BlockCoord> opaque = {stonePos};
     auto expected = computeExpectedBlockLight(sources, opaque);
 
     // Get actual
@@ -777,24 +777,24 @@ TEST_F(LightingCorrectnessTest, TorchWithOneOpaqueBlock) {
 
 TEST_F(LightingCorrectnessTest, FullySurroundedTorch) {
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     world_->setBlock(torchPos, torch_);
     engine_->onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torch_);
 
     // Surround with opaque blocks
-    std::unordered_set<BlockPos> opaque;
-    static const BlockPos offsets[] = {
+    std::unordered_set<BlockCoord> opaque;
+    static const BlockCoord offsets[] = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     };
     for (const auto& offset : offsets) {
-        BlockPos stonePos{torchPos.x + offset.x, torchPos.y + offset.y, torchPos.z + offset.z};
+        BlockCoord stonePos{torchPos.x + offset.x, torchPos.y + offset.y, torchPos.z + offset.z};
         world_->setBlock(stonePos, stone_);
         engine_->onBlockPlaced(stonePos, AIR_BLOCK_TYPE, stone_);
         opaque.insert(stonePos);
     }
 
     // Compute expected - torch is surrounded, no light escapes
-    std::vector<std::pair<BlockPos, uint8_t>> sources = {{torchPos, 14}};
+    std::vector<std::pair<BlockCoord, uint8_t>> sources = {{torchPos, 14}};
     auto expected = computeExpectedBlockLight(sources, opaque);
 
     // Get actual
@@ -817,12 +817,12 @@ TEST_F(LightingCorrectnessTest, FullySurroundedTorch) {
 
 TEST_F(LightingCorrectnessTest, RemoveOpaqueBlockRestoresLight) {
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     world_->setBlock(torchPos, torch_);
     engine_->onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torch_);
 
     // Place one opaque block
-    BlockPos stonePos{9, 8, 8};
+    BlockCoord stonePos{9, 8, 8};
     world_->setBlock(stonePos, stone_);
     engine_->onBlockPlaced(stonePos, AIR_BLOCK_TYPE, stone_);
 
@@ -831,8 +831,8 @@ TEST_F(LightingCorrectnessTest, RemoveOpaqueBlockRestoresLight) {
     engine_->onBlockRemoved(stonePos, stone_);
 
     // Compute expected - should be same as torch with no obstacles
-    std::vector<std::pair<BlockPos, uint8_t>> sources = {{torchPos, 14}};
-    std::unordered_set<BlockPos> opaque;  // No opaque blocks now
+    std::vector<std::pair<BlockCoord, uint8_t>> sources = {{torchPos, 14}};
+    std::unordered_set<BlockCoord> opaque;  // No opaque blocks now
     auto expected = computeExpectedBlockLight(sources, opaque);
 
     // Get actual
@@ -855,30 +855,30 @@ TEST_F(LightingCorrectnessTest, RemoveOpaqueBlockRestoresLight) {
 
 TEST_F(LightingCorrectnessTest, SurroundThenRemoveOneBlock) {
     // Place a torch
-    BlockPos torchPos{8, 8, 8};
+    BlockCoord torchPos{8, 8, 8};
     world_->setBlock(torchPos, torch_);
     engine_->onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torch_);
 
     // Surround with opaque blocks
-    std::vector<BlockPos> stonePositions;
-    static const BlockPos offsets[] = {
+    std::vector<BlockCoord> stonePositions;
+    static const BlockCoord offsets[] = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     };
     for (const auto& offset : offsets) {
-        BlockPos stonePos{torchPos.x + offset.x, torchPos.y + offset.y, torchPos.z + offset.z};
+        BlockCoord stonePos{torchPos.x + offset.x, torchPos.y + offset.y, torchPos.z + offset.z};
         world_->setBlock(stonePos, stone_);
         engine_->onBlockPlaced(stonePos, AIR_BLOCK_TYPE, stone_);
         stonePositions.push_back(stonePos);
     }
 
     // Remove one block (the +X one)
-    BlockPos removedPos = stonePositions[0];  // {9, 8, 8}
+    BlockCoord removedPos = stonePositions[0];  // {9, 8, 8}
     world_->setBlock(removedPos, AIR_BLOCK_TYPE);
     engine_->onBlockRemoved(removedPos, stone_);
 
     // Compute expected - torch with 5 surrounding opaque blocks, one opening
-    std::vector<std::pair<BlockPos, uint8_t>> sources = {{torchPos, 14}};
-    std::unordered_set<BlockPos> opaque;
+    std::vector<std::pair<BlockCoord, uint8_t>> sources = {{torchPos, 14}};
+    std::unordered_set<BlockCoord> opaque;
     for (size_t i = 1; i < stonePositions.size(); ++i) {
         opaque.insert(stonePositions[i]);
     }
@@ -938,7 +938,7 @@ TEST(CrossSubchunkBoundaryTest, LightChangeAtYBoundaryMarksBothSubchunks) {
 
     // Setup: Place a light source at y=18 (in subchunk y=1, local y=2)
     // Use synchronous calls for initial setup (before starting thread)
-    BlockPos torchPos{8, 18, 8};
+    BlockCoord torchPos{8, 18, 8};
     world.setBlock(torchPos, torchId);
     engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
 
@@ -946,7 +946,7 @@ TEST(CrossSubchunkBoundaryTest, LightChangeAtYBoundaryMarksBothSubchunks) {
     // This blocks light from propagating further down
     for (int x = 0; x < 16; ++x) {
         for (int z = 0; z < 16; ++z) {
-            BlockPos floorPos{x, 15, z};
+            BlockCoord floorPos{x, 15, z};
             world.setBlock(floorPos, stoneId);
         }
     }
@@ -956,7 +956,7 @@ TEST(CrossSubchunkBoundaryTest, LightChangeAtYBoundaryMarksBothSubchunks) {
 
     // Now break a block in the floor at y=15, exposing y=16
     // Use enqueue() to go through the async path which calls flushAffectedChunks
-    BlockPos breakPos{8, 15, 8};  // At local y=15 in subchunk 0
+    BlockCoord breakPos{8, 15, 8};  // At local y=15 in subchunk 0
     world.setBlock(breakPos, AIR_BLOCK_TYPE);
 
     // Enqueue via async path with triggerMeshRebuild=true
@@ -1017,7 +1017,7 @@ TEST(CrossSubchunkBoundaryTest, LightChangeAtXBoundaryMarksBothSubchunks) {
 
     // Place torch at x=16, which is local x=0 in chunk (1, 0, 0)
     // Light will propagate to x=15 (local x=15 in chunk (0, 0, 0))
-    BlockPos torchPos{16, 8, 8};
+    BlockCoord torchPos{16, 8, 8};
     world.setBlock(torchPos, torchId);
 
     // Use async path
@@ -1083,12 +1083,12 @@ TEST(CrossSubchunkBoundaryTest, BreakBlockAtSubchunkBoundary) {
     BlockTypeId stoneId = BlockTypeId::fromName("boundary_test_break:stone");
 
     // Place torch at y=20 (in subchunk 1)
-    BlockPos torchPos{8, 20, 8};
+    BlockCoord torchPos{8, 20, 8};
     world.setBlock(torchPos, torchId);
 
     // Place stone at y=16 (local y=0 in subchunk 1 - at the boundary)
     // This is blocking light from reaching subchunk 0
-    BlockPos stonePos{8, 16, 8};
+    BlockCoord stonePos{8, 16, 8};
     world.setBlock(stonePos, stoneId);
 
     // Initial light propagation (synchronous, before thread starts)
@@ -1175,7 +1175,7 @@ TEST(CrossSubchunkBoundaryTest, BreakBlockInFloorSameSubchunk) {
 
     // Place torch at y=6, near where we'll break the block
     // This is in the air just above the floor
-    BlockPos torchPos{5, 6, 5};
+    BlockCoord torchPos{5, 6, 5};
     world.setBlock(torchPos, torchId);
 
     // Initial light propagation (synchronous)
@@ -1194,7 +1194,7 @@ TEST(CrossSubchunkBoundaryTest, BreakBlockInFloorSameSubchunk) {
 
     // Now break a floor block at y=5 (NOT at a subchunk boundary)
     // The block below at y=4 should have its top face (PosY) exposed
-    BlockPos breakPos{4, 5, 4};
+    BlockCoord breakPos{4, 5, 4};
     world.setBlock(breakPos, AIR_BLOCK_TYPE);
 
     LightingUpdate update;
@@ -1265,14 +1265,14 @@ TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
     }
 
     // Place torch above floor
-    BlockPos torchPos{5, 6, 5};
+    BlockCoord torchPos{5, 6, 5};
     world.setBlock(torchPos, torchId);
 
     // Synchronous light propagation for torch
     engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
 
     // Break the floor block at (5, 5, 5)
-    BlockPos breakPos{5, 5, 5};
+    BlockCoord breakPos{5, 5, 5};
     world.setBlock(breakPos, AIR_BLOCK_TYPE);
 
     // Process light update synchronously (simulate what the lighting thread does)
@@ -1284,7 +1284,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
     EXPECT_GT(lightAtBroken, 10) << "Light should propagate from torch into the hole";
 
     // Create a light provider that uses the engine
-    BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
+    BlockLightProvider lightProvider = [&engine](const BlockCoord& pos) -> uint8_t {
         return static_cast<uint8_t>((engine.getSkyLight(pos) << 4) | engine.getBlockLight(pos));
     };
 
@@ -1298,7 +1298,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBuildsWithCorrectLightValues) {
     builder.setSmoothLighting(true);
     builder.setLightProvider(lightProvider);
 
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
         BlockTypeId type = world.getBlock(pos);
         return type != AIR_BLOCK_TYPE;
     };
@@ -1372,17 +1372,17 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
     }
 
     // Place torch above floor
-    BlockPos torchPos{5, 6, 5};
+    BlockCoord torchPos{5, 6, 5};
     world.setBlock(torchPos, torchId);
     engine.onBlockPlaced(torchPos, AIR_BLOCK_TYPE, torchId);
 
     // Break the floor block at (5, 5, 5) - this removes the block from the world
-    BlockPos breakPos{5, 5, 5};
+    BlockCoord breakPos{5, 5, 5};
     world.setBlock(breakPos, AIR_BLOCK_TYPE);
 
     // FIRST MESH BUILD: Before onBlockRemoved is called (light not yet propagated)
     // This simulates what happens when the world setBlock pushes a rebuild before lighting
-    BlockLightProvider lightProvider = [&engine](const BlockPos& pos) -> uint8_t {
+    BlockLightProvider lightProvider = [&engine](const BlockCoord& pos) -> uint8_t {
         return static_cast<uint8_t>((engine.getSkyLight(pos) << 4) | engine.getBlockLight(pos));
     };
 
@@ -1394,7 +1394,7 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
     builder.setSmoothLighting(true);
     builder.setLightProvider(lightProvider);
 
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
         BlockTypeId type = world.getBlock(pos);
         return type != AIR_BLOCK_TYPE;
     };
@@ -1507,7 +1507,7 @@ TEST(LightingQueueAlarmTest, DataWakesBeforeAlarm) {
     std::thread pusher([&]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         LightingUpdate update;
-        update.pos = BlockPos(0, 0, 0);
+        update.pos = BlockCoord(0, 0, 0);
         update.oldType = BlockTypeId();
         update.newType = BlockTypeId();
         queue.enqueue(std::move(update));

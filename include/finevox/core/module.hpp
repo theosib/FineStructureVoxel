@@ -52,7 +52,7 @@ public:
      * @brief Get the module's unique identifier
      *
      * This is also the namespace prefix for all content registered by this module.
-     * For example, a module named "blockgame" registers blocks like "blockgame:stone".
+     * For example, a module named "blockgame" registers blocks like "finevox:stone".
      *
      * @return Module name (e.g., "blockgame", "mymod")
      */
@@ -158,7 +158,7 @@ public:
      * @brief Build a fully-qualified name with this module's namespace
      *
      * Convenience method that prefixes a local name with the module namespace.
-     * Example: qualifiedName("stone") -> "blockgame:stone"
+     * Example: qualifiedName("stone") -> "finevox:stone"
      *
      * @param localName Name without namespace prefix
      * @return Fully-qualified name with namespace

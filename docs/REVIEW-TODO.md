@@ -70,7 +70,7 @@ This document compares the current implementation against design documents and i
 ```cpp
 struct Block {
     std::shared_ptr<SubChunk> subchunk;
-    BlockPos pos;
+    BlockCoord pos;
     uint16_t localIndex;
     // ...
 };

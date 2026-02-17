@@ -82,7 +82,7 @@ public:
     MessageBuilder& writeString(std::string_view s);    // Length-prefixed
     MessageBuilder& writeBytes(std::span<const uint8_t> data);  // Length-prefixed
     MessageBuilder& writeVec3(float x, float y, float z);
-    MessageBuilder& writeBlockPos(int32_t x, int32_t y, int32_t z);
+    MessageBuilder& writeBlockCoord(int32_t x, int32_t y, int32_t z);
 
     // Quantized fields (compact wire representation)
     MessageBuilder& writeQuantizedPos(double x, double y, double z);  // 20.12 fixed point
@@ -137,7 +137,7 @@ public:
     std::string_view readString();           // Zero-copy view into buffer
     std::span<const uint8_t> readBytes();    // Zero-copy view
     void readVec3(float& x, float& y, float& z);
-    void readBlockPos(int32_t& x, int32_t& y, int32_t& z);
+    void readBlockCoord(int32_t& x, int32_t& y, int32_t& z);
 
     // Quantized reads
     void readQuantizedPos(double& x, double& y, double& z);

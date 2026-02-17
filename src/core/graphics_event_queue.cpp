@@ -58,7 +58,7 @@ GraphicsEvent GraphicsEvent::playerCorrection(EntityId id, glm::dvec3 pos, glm::
     return event;
 }
 
-GraphicsEvent GraphicsEvent::blockCorrection(BlockPos pos, BlockTypeId correct,
+GraphicsEvent GraphicsEvent::blockCorrection(BlockCoord pos, BlockTypeId correct,
                                               BlockTypeId expected) {
     GraphicsEvent event;
     event.type = GraphicsEventType::BlockCorrection;

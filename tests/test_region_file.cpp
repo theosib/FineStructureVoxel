@@ -28,24 +28,24 @@ protected:
 // ============================================================================
 
 TEST(RegionPosTest, FromColumnPositive) {
-    // Columns 0-31 are in region (0, 0)
+    // Columns 0-63 are in region (0, 0)
     EXPECT_EQ(RegionPos::fromColumn(ColumnPos{0, 0}), (RegionPos{0, 0}));
-    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{31, 31}), (RegionPos{0, 0}));
+    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{63, 63}), (RegionPos{0, 0}));
 
-    // Column 32 is in region (1, 0)
-    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{32, 0}), (RegionPos{1, 0}));
-    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{63, 31}), (RegionPos{1, 0}));
+    // Column 64 is in region (1, 0)
+    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{64, 0}), (RegionPos{1, 0}));
+    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{127, 63}), (RegionPos{1, 0}));
 }
 
 TEST(RegionPosTest, FromColumnNegative) {
     // Column -1 is in region (-1, 0)
     EXPECT_EQ(RegionPos::fromColumn(ColumnPos{-1, 0}), (RegionPos{-1, 0}));
 
-    // Column -32 is in region (-1, 0)
-    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{-32, 0}), (RegionPos{-1, 0}));
+    // Column -64 is in region (-1, 0)
+    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{-64, 0}), (RegionPos{-1, 0}));
 
-    // Column -33 is in region (-2, 0)
-    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{-33, 0}), (RegionPos{-2, 0}));
+    // Column -65 is in region (-2, 0)
+    EXPECT_EQ(RegionPos::fromColumn(ColumnPos{-65, 0}), (RegionPos{-2, 0}));
 }
 
 TEST(RegionPosTest, ToLocalPositive) {
@@ -53,27 +53,27 @@ TEST(RegionPosTest, ToLocalPositive) {
     EXPECT_EQ(lx, 0);
     EXPECT_EQ(lz, 0);
 
-    auto [lx2, lz2] = RegionPos::toLocal(ColumnPos{31, 31});
-    EXPECT_EQ(lx2, 31);
-    EXPECT_EQ(lz2, 31);
+    auto [lx2, lz2] = RegionPos::toLocal(ColumnPos{63, 63});
+    EXPECT_EQ(lx2, 63);
+    EXPECT_EQ(lz2, 63);
 
-    auto [lx3, lz3] = RegionPos::toLocal(ColumnPos{32, 33});
+    auto [lx3, lz3] = RegionPos::toLocal(ColumnPos{64, 65});
     EXPECT_EQ(lx3, 0);
     EXPECT_EQ(lz3, 1);
 }
 
 TEST(RegionPosTest, ToLocalNegative) {
     auto [lx, lz] = RegionPos::toLocal(ColumnPos{-1, 0});
-    EXPECT_EQ(lx, 31);  // -1 mod 32 = 31
+    EXPECT_EQ(lx, 63);  // -1 mod 64 = 63
     EXPECT_EQ(lz, 0);
 
-    auto [lx2, lz2] = RegionPos::toLocal(ColumnPos{-32, -32});
+    auto [lx2, lz2] = RegionPos::toLocal(ColumnPos{-64, -64});
     EXPECT_EQ(lx2, 0);
     EXPECT_EQ(lz2, 0);
 
-    auto [lx3, lz3] = RegionPos::toLocal(ColumnPos{-33, -33});
-    EXPECT_EQ(lx3, 31);
-    EXPECT_EQ(lz3, 31);
+    auto [lx3, lz3] = RegionPos::toLocal(ColumnPos{-65, -65});
+    EXPECT_EQ(lx3, 63);
+    EXPECT_EQ(lz3, 63);
 }
 
 // ============================================================================
@@ -233,7 +233,7 @@ TEST_F(RegionFileTest, WrongRegion) {
     RegionFile region(tempDir, RegionPos{0, 0});
     ChunkColumn col(ColumnPos{100, 100});
 
-    // Column (100, 100) is in region (3, 3), not (0, 0)
+    // Column (100, 100) is in region (1, 1), not (0, 0)
     EXPECT_FALSE(region.saveColumn(col, ColumnPos{100, 100}));
     EXPECT_FALSE(region.hasColumn(ColumnPos{100, 100}));
 }
@@ -241,7 +241,7 @@ TEST_F(RegionFileTest, WrongRegion) {
 TEST_F(RegionFileTest, NegativeCoordinates) {
     BlockTypeId stone = BlockTypeId::fromName("test:stone");
 
-    // Region (-1, -1) contains columns -32..-1
+    // Region (-1, -1) contains columns -64..-1
     {
         RegionFile region(tempDir, RegionPos{-1, -1});
 
@@ -249,9 +249,9 @@ TEST_F(RegionFileTest, NegativeCoordinates) {
         col.setBlock(0, 0, 0, stone);
         EXPECT_TRUE(region.saveColumn(col, ColumnPos{-1, -1}));
 
-        ChunkColumn col2(ColumnPos{-32, -32});
+        ChunkColumn col2(ColumnPos{-64, -64});
         col2.setBlock(0, 0, 0, stone);
-        EXPECT_TRUE(region.saveColumn(col2, ColumnPos{-32, -32}));
+        EXPECT_TRUE(region.saveColumn(col2, ColumnPos{-64, -64}));
 
         EXPECT_EQ(region.columnCount(), 2);
     }
@@ -265,7 +265,7 @@ TEST_F(RegionFileTest, NegativeCoordinates) {
         ASSERT_NE(loaded1, nullptr);
         EXPECT_EQ(loaded1->getBlock(0, 0, 0), stone);
 
-        auto loaded2 = region.loadColumn(ColumnPos{-32, -32});
+        auto loaded2 = region.loadColumn(ColumnPos{-64, -64});
         ASSERT_NE(loaded2, nullptr);
         EXPECT_EQ(loaded2->getBlock(0, 0, 0), stone);
     }
@@ -276,11 +276,11 @@ TEST_F(RegionFileTest, GetExistingColumns) {
 
     ChunkColumn col1(ColumnPos{0, 0});
     ChunkColumn col2(ColumnPos{5, 10});
-    ChunkColumn col3(ColumnPos{31, 31});
+    ChunkColumn col3(ColumnPos{63, 63});
 
     region.saveColumn(col1, ColumnPos{0, 0});
     region.saveColumn(col2, ColumnPos{5, 10});
-    region.saveColumn(col3, ColumnPos{31, 31});
+    region.saveColumn(col3, ColumnPos{63, 63});
 
     auto existing = region.getExistingColumns();
     EXPECT_EQ(existing.size(), 3);
@@ -293,7 +293,7 @@ TEST_F(RegionFileTest, GetExistingColumns) {
 
     EXPECT_TRUE(found.count({0, 0}));
     EXPECT_TRUE(found.count({5, 10}));
-    EXPECT_TRUE(found.count({31, 31}));
+    EXPECT_TRUE(found.count({63, 63}));
 }
 
 TEST_F(RegionFileTest, CompactToc) {
@@ -377,7 +377,7 @@ TEST_F(RegionFileTest, LargeColumn) {
 TEST_F(RegionFileTest, ManyColumns) {
     BlockTypeId stone = BlockTypeId::fromName("test:stone");
 
-    // Fill entire region (32x32 = 1024 columns)
+    // Fill entire region (64x64 = 4096 columns)
     {
         RegionFile region(tempDir, RegionPos{0, 0});
 
@@ -407,7 +407,7 @@ TEST_F(RegionFileTest, ManyColumns) {
         ASSERT_NE(loaded2, nullptr);
         EXPECT_EQ(loaded2->getBlock(15, 0, 15), stone);
 
-        auto loaded3 = region.loadColumn(ColumnPos{31, 31});
+        auto loaded3 = region.loadColumn(ColumnPos{63, 63});
         ASSERT_NE(loaded3, nullptr);
         EXPECT_EQ(loaded3->getBlock(15, 0, 15), stone);
     }

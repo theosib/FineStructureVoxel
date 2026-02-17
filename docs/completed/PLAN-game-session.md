@@ -74,16 +74,16 @@ public:
     virtual ~GameActions() = default;
 
     /// Break a block. Returns true if the action was accepted.
-    virtual bool breakBlock(BlockPos pos) = 0;
+    virtual bool breakBlock(BlockCoord pos) = 0;
 
     /// Place a block. Returns true if the action was accepted.
-    virtual bool placeBlock(BlockPos pos, BlockTypeId type) = 0;
+    virtual bool placeBlock(BlockCoord pos, BlockTypeId type) = 0;
 
     /// Right-click interaction with a block. Returns true if block had a handler.
-    virtual bool useBlock(BlockPos pos, Face face) = 0;
+    virtual bool useBlock(BlockCoord pos, Face face) = 0;
 
     /// Left-click hit on a block (non-break, e.g. note block). Returns true if handled.
-    virtual bool hitBlock(BlockPos pos, Face face) = 0;
+    virtual bool hitBlock(BlockCoord pos, Face face) = 0;
 };
 
 }  // namespace finevox
@@ -485,17 +485,17 @@ The API is identical — only namespace and include paths change. `GameSession` 
 
 ## Key API References
 
-- `World::placeBlock(BlockPos, BlockTypeId)` → `bool` — [world.hpp](include/finevox/core/world.hpp)
-- `World::breakBlock(BlockPos)` → `bool` — [world.hpp](include/finevox/core/world.hpp)
+- `World::placeBlock(BlockCoord, BlockTypeId)` → `bool` — [world.hpp](include/finevox/core/world.hpp)
+- `World::breakBlock(BlockCoord)` → `bool` — [world.hpp](include/finevox/core/world.hpp)
 - `World::setUpdateScheduler(UpdateScheduler*)` — [world.hpp](include/finevox/core/world.hpp)
 - `World::setLightEngine(LightEngine*)` — [world.hpp](include/finevox/core/world.hpp)
 - `UpdateScheduler::pushExternalEvent(BlockEvent)` — [event_queue.hpp](include/finevox/core/event_queue.hpp)
 - `UpdateScheduler::processEvents()` → `size_t` — [event_queue.hpp](include/finevox/core/event_queue.hpp)
 - `UpdateScheduler::advanceGameTick()` — [event_queue.hpp](include/finevox/core/event_queue.hpp)
-- `BlockEvent::playerUse(BlockPos, Face)` — [block_event.hpp](include/finevox/core/block_event.hpp)
-- `BlockEvent::playerHit(BlockPos, Face)` — [block_event.hpp](include/finevox/core/block_event.hpp)
-- `SoundEvent::blockBreak(SoundSetId, BlockPos)` — used in render_demo
-- `SoundEvent::blockPlace(SoundSetId, BlockPos)` — used in render_demo
+- `BlockEvent::playerUse(BlockCoord, Face)` — [block_event.hpp](include/finevox/core/block_event.hpp)
+- `BlockEvent::playerHit(BlockCoord, Face)` — [block_event.hpp](include/finevox/core/block_event.hpp)
+- `SoundEvent::blockBreak(SoundSetId, BlockCoord)` — used in render_demo
+- `SoundEvent::blockPlace(SoundSetId, BlockCoord)` — used in render_demo
 - `BlockRegistry::global().getType(id).soundSet()` — sound set lookup
 - `EntityManager(World&, GraphicsEventQueue&)` — [entity_manager.hpp](include/finevox/core/entity_manager.hpp)
 

@@ -131,10 +131,10 @@ public:
 
 private:
     // Current view center (camera's block position)
-    BlockPos viewCenter_;
+    BlockCoord viewCenter_;
 
     // Convert world position to view-relative position
-    glm::vec3 toViewRelative(BlockPos pos) const {
+    glm::vec3 toViewRelative(BlockCoord pos) const {
         return glm::vec3(
             pos.x - viewCenter_.x,
             pos.y - viewCenter_.y,
@@ -179,12 +179,12 @@ public:
     void render(
         finevk::CommandBuffer& cmd,
         const glm::mat4& viewProj,
-        BlockPos viewCenter,
+        BlockCoord viewCenter,
         finevk::Material& material
     );
 
     // Check if chunk is in frustum
-    bool isInFrustum(const Frustum& frustum, BlockPos viewCenter) const;
+    bool isInFrustum(const Frustum& frustum, BlockCoord viewCenter) const;
 
     // State
     bool isReady() const { return frontBuffer_.ready; }

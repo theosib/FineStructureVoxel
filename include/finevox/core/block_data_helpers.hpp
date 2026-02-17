@@ -16,14 +16,14 @@ namespace finevox {
 // Block Type Storage Helpers
 // ============================================================================
 // These functions ensure BlockTypeId values are serialized correctly as their
-// string names (e.g., "minecraft:stone") rather than numeric IDs.
+// string names (e.g., "finevox:stone") rather than numeric IDs.
 //
 // Use these instead of set/get<int64_t> when storing block type references
 // in extra data, so the data remains valid across game sessions.
 //
 // Example:
 //   DataContainer& data = ctx.getOrCreateData();
-//   setBlockType(data, "material", BlockTypeId::fromName("minecraft:stone"));
+//   setBlockType(data, "material", BlockTypeId::fromName("finevox:stone"));
 //   ...
 //   BlockTypeId mat = getBlockType(data, "material", AIR_BLOCK_TYPE);
 

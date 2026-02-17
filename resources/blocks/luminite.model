@@ -1,6 +1,6 @@
-# Glowstone - light-emitting block
+# Luminite - light-emitting block
 include: base/solid_cube
-texture: blocks/glowstone
+texture: blocks/luminite
 sounds: glass
 hardness: 0.3
 light-emission: 15

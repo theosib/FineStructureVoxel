@@ -35,7 +35,7 @@ namespace finevox::worldgen {
 
 /// Complete snapshot of a block's state (portable format using string names)
 struct BlockSnapshot {
-    std::string typeName;                          ///< Block type name (e.g., "blockgame:stone")
+    std::string typeName;                          ///< Block type name (e.g., "finevox:stone")
     Rotation rotation = Rotation::IDENTITY;        ///< 24-state rotation
     glm::vec3 displacement{0.0f};                  ///< Sub-block offset
     std::optional<DataContainer> extraData;        ///< Tile entity data

@@ -282,7 +282,7 @@ temperature_min: 0.3
 temperature_max: 0.7
 humidity_min: 0.2
 humidity_max: 0.6
-base_height: 64.0
+base_height: 80.0
 height_variation: 8.0
 surface: grass
 filler: dirt

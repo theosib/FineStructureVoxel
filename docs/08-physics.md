@@ -99,7 +99,7 @@ enum class RaycastMode {
 
 struct RaycastResult {
     bool hit = false;
-    BlockPos blockPos;        // Block that was hit
+    BlockCoord blockPos;        // Block that was hit
     Face face = Face::PosY;   // Face of the block that was hit
     glm::vec3 hitPoint;       // Exact hit point in world coordinates
     float distance = 0.0f;    // Distance from origin to hit point
@@ -114,7 +114,7 @@ struct RaycastResult {
 
 ### The Problem
 
-A famous Minecraft bug: entities would glitch through walls after save/load. The root cause:
+A well-known bug in traditional voxel games: entities would glitch through walls after save/load. The root cause:
 
 1. Entity AABBs have precise floating-point boundaries
 2. Only the bottom-center point was saved to disk
@@ -260,7 +260,7 @@ glm::vec3 PhysicsSystem::moveEntity(Entity& entity, glm::vec3 desiredMovement, f
     auto colliders = collectColliders(searchRegion);
 
     // Try step-climbing for horizontal movement
-    const float MAX_STEP_HEIGHT = 0.625f;  // Slightly over half a block
+    const float MAX_STEP_HEIGHT = 0.6f;  // Slightly over half a block
 
     if (entity.isOnGround() && (desiredMovement.x != 0 || desiredMovement.z != 0)) {
         // Try different step heights
@@ -315,8 +315,8 @@ glm::vec3 PhysicsSystem::moveEntity(Entity& entity, glm::vec3 desiredMovement, f
 The maximum step height is **configurable per-body** rather than a global constant. This allows:
 
 1. **Game-specific defaults** - Different games have different conventions:
-   - Minecraft: ~0.625 blocks (allows walking up slabs)
-   - Hytale: Full block stepping (auto-steps whole blocks)
+   - Default: ~0.6 blocks (allows walking up slabs)
+   - Hytale-style: Full block stepping (auto-steps whole blocks)
 
 2. **Entity-specific overrides** - Some entities may have enhanced movement:
    - Players with special armor could step higher
@@ -328,7 +328,7 @@ The maximum step height is **configurable per-body** rather than a global consta
 ```cpp
 class PhysicsBody {
 public:
-    // Default step height - slightly over half a block (Minecraft-style)
+    // Default step height - slightly over half a block
     [[nodiscard]] virtual float maxStepHeight() const { return MAX_STEP_HEIGHT; }
 };
 
@@ -360,7 +360,7 @@ Entity pathfinding must account for step heights when computing walkable paths:
 2. **Approximation strategy** - For performance, the pathfinder may:
    - Use whole-block approximation for distant paths
    - Use precise partial-block calculations for nearby/critical segments
-   - Cache walkability based on common step heights (0.5, 0.625, 1.0)
+   - Cache walkability based on common step heights (0.5, 0.6, 1.0)
 
 3. **Entity-specific paths** - Different entities need different path calculations:
    - A spider (can climb walls) has different reachable nodes
@@ -373,7 +373,7 @@ Entity pathfinding must account for step heights when computing walkable paths:
 // Pathfinding should query step height from entity
 class Pathfinder {
 public:
-    Path findPath(const Entity& entity, BlockPos start, BlockPos goal) {
+    Path findPath(const Entity& entity, BlockCoord start, BlockCoord goal) {
         float stepHeight = entity.maxStepHeight();
         // Use stepHeight when determining node connectivity
         // ...

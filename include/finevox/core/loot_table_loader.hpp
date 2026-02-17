@@ -12,13 +12,13 @@
  *   type: item
  *   item: stone
  *   count: 1
- *   condition: silk-touch
+ *   condition: precise-break
  *   entry:normal:
  *   type: item
- *   item: cobblestone
+ *   item: cobble
  *   count: 1-3
- *   condition: not silk-touch
- *   modifier: fortune-count 1.0
+ *   condition: not precise-break
+ *   modifier: bounty 1.0
  *
  * Parsing is sequential: pool:NAME: starts a pool, entry:NAME: starts
  * an entry within the current pool. Keys between pool and first entry
@@ -44,10 +44,10 @@ public:
     /// Returns number of tables successfully loaded.
     static size_t loadDirectory(const std::string& dirPath);
 
-    /// Parse a condition from a config string (e.g., "silk-touch", "random-chance 0.1 0.03")
+    /// Parse a condition from a config string (e.g., "precise-break", "random-chance 0.1 0.03")
     [[nodiscard]] static std::unique_ptr<LootCondition> parseCondition(std::string_view str);
 
-    /// Parse a modifier from a config string (e.g., "fortune-count 1.0", "looting-bonus 1")
+    /// Parse a modifier from a config string (e.g., "bounty 1.0", "plunder-bonus 1")
     [[nodiscard]] static std::unique_ptr<LootModifier> parseModifier(std::string_view str);
 
 private:

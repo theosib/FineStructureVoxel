@@ -577,7 +577,7 @@ TEST(DataContainer, CBORLargeArray) {
 TEST(DataContainer, CBORComplexStructure) {
     // Simulate a tile entity like a furnace
     DataContainer furnace;
-    furnace.set("id", std::string("blockgame:furnace"));
+    furnace.set("id", std::string("finevox:furnace"));
     furnace.set("burn_time", 200);
     furnace.set("cook_time", 100);
     furnace.set("cook_time_total", 200);
@@ -598,7 +598,7 @@ TEST(DataContainer, CBORComplexStructure) {
     auto restored = DataContainer::fromCBOR(bytes);
 
     // Verify all data
-    EXPECT_EQ(restored->get<std::string>("id"), "blockgame:furnace");
+    EXPECT_EQ(restored->get<std::string>("id"), "finevox:furnace");
     EXPECT_EQ(restored->get<int>("burn_time"), 200);
     EXPECT_EQ(restored->get<int>("cook_time"), 100);
     EXPECT_EQ(restored->get<int>("cook_time_total"), 200);
@@ -722,19 +722,19 @@ TEST(DataContainer, InternedStringClone) {
 
 TEST(DataContainer, BlockTypeHelperBasic) {
     DataContainer dc;
-    BlockTypeId stone = BlockTypeId::fromName("blockgame:stone");
+    BlockTypeId stone = BlockTypeId::fromName("finevox:stone");
 
     setBlockType(dc, "material", stone);
     EXPECT_TRUE(hasBlockType(dc, "material"));
 
     BlockTypeId result = getBlockType(dc, "material");
     EXPECT_EQ(result, stone);
-    EXPECT_EQ(result.name(), "blockgame:stone");
+    EXPECT_EQ(result.name(), "finevox:stone");
 }
 
 TEST(DataContainer, BlockTypeHelperDefault) {
     DataContainer dc;
-    BlockTypeId iron = BlockTypeId::fromName("blockgame:iron");
+    BlockTypeId iron = BlockTypeId::fromName("finevox:iron");
 
     // Missing key returns default
     BlockTypeId result = getBlockType(dc, "missing", iron);
@@ -747,7 +747,7 @@ TEST(DataContainer, BlockTypeHelperDefault) {
 
 TEST(DataContainer, BlockTypeHelperStringKey) {
     DataContainer dc;
-    BlockTypeId obsidian = BlockTypeId::fromName("blockgame:obsidian");
+    BlockTypeId obsidian = BlockTypeId::fromName("finevox:obsidian");
 
     setBlockType(dc, "block", obsidian);
     BlockTypeId result = getBlockType(dc, "block");
@@ -757,8 +757,8 @@ TEST(DataContainer, BlockTypeHelperStringKey) {
 
 TEST(DataContainer, BlockTypeHelperCBORRoundtrip) {
     DataContainer dc;
-    BlockTypeId diamond = BlockTypeId::fromName("blockgame:diamond_block");
-    BlockTypeId emerald = BlockTypeId::fromName("blockgame:emerald_block");
+    BlockTypeId diamond = BlockTypeId::fromName("finevox:diamond_block");
+    BlockTypeId emerald = BlockTypeId::fromName("finevox:emerald_block");
 
     setBlockType(dc, "primary", diamond);
     setBlockType(dc, "secondary", emerald);
@@ -770,8 +770,8 @@ TEST(DataContainer, BlockTypeHelperCBORRoundtrip) {
     BlockTypeId p = getBlockType(*restored, "primary");
     BlockTypeId s = getBlockType(*restored, "secondary");
 
-    EXPECT_EQ(p.name(), "blockgame:diamond_block");
-    EXPECT_EQ(s.name(), "blockgame:emerald_block");
+    EXPECT_EQ(p.name(), "finevox:diamond_block");
+    EXPECT_EQ(s.name(), "finevox:emerald_block");
 
     // IDs should match after re-interning
     EXPECT_EQ(p, diamond);

@@ -25,29 +25,29 @@ TEST_F(TagIdTest, EmptyTagConstant) {
 }
 
 TEST_F(TagIdTest, FromName) {
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     EXPECT_FALSE(tag.isEmpty());
-    EXPECT_EQ(tag.name(), "c:ingots/iron");
+    EXPECT_EQ(tag.name(), "common:ingots/iron");
 }
 
 TEST_F(TagIdTest, SameNameSameId) {
-    auto a = TagId::fromName("c:planks");
-    auto b = TagId::fromName("c:planks");
+    auto a = TagId::fromName("common:planks");
+    auto b = TagId::fromName("common:planks");
     EXPECT_EQ(a, b);
     EXPECT_EQ(a.id, b.id);
 }
 
 TEST_F(TagIdTest, DifferentNameDifferentId) {
-    auto a = TagId::fromName("c:ingots");
-    auto b = TagId::fromName("c:planks");
+    auto a = TagId::fromName("common:ingots");
+    auto b = TagId::fromName("common:planks");
     EXPECT_NE(a, b);
 }
 
 TEST_F(TagIdTest, Hashable) {
     std::unordered_set<TagId> set;
-    set.insert(TagId::fromName("c:ingots"));
-    set.insert(TagId::fromName("c:planks"));
-    set.insert(TagId::fromName("c:ingots"));  // duplicate
+    set.insert(TagId::fromName("common:ingots"));
+    set.insert(TagId::fromName("common:planks"));
+    set.insert(TagId::fromName("common:ingots"));  // duplicate
     EXPECT_EQ(set.size(), 2u);
 }
 
@@ -77,7 +77,7 @@ TEST_F(TagRegistryTest, EmptyAfterClear) {
 }
 
 TEST_F(TagRegistryTest, AddMemberAndQuery) {
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     auto ironIngot = StringInterner::global().intern("iron_ingot");
 
     tags_.addMember(tag, ironIngot);
@@ -85,11 +85,11 @@ TEST_F(TagRegistryTest, AddMemberAndQuery) {
     EXPECT_EQ(tags_.tagCount(), 1u);
 
     EXPECT_TRUE(tags_.hasTag(ironIngot, tag));
-    EXPECT_FALSE(tags_.hasTag(ironIngot, TagId::fromName("c:planks")));
+    EXPECT_FALSE(tags_.hasTag(ironIngot, TagId::fromName("common:planks")));
 }
 
 TEST_F(TagRegistryTest, AddMemberByItemTypeId) {
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     auto item = ItemTypeId::fromName("iron_ingot");
 
     tags_.addMember(tag, item);
@@ -99,7 +99,7 @@ TEST_F(TagRegistryTest, AddMemberByItemTypeId) {
 }
 
 TEST_F(TagRegistryTest, AddMemberByBlockTypeId) {
-    auto tag = TagId::fromName("c:ores");
+    auto tag = TagId::fromName("common:ores");
     auto block = BlockTypeId::fromName("iron_ore");
 
     tags_.addMember(tag, block);
@@ -109,8 +109,8 @@ TEST_F(TagRegistryTest, AddMemberByBlockTypeId) {
 }
 
 TEST_F(TagRegistryTest, GetTagsForMember) {
-    auto t1 = TagId::fromName("c:ingots");
-    auto t2 = TagId::fromName("c:metals");
+    auto t1 = TagId::fromName("common:ingots");
+    auto t2 = TagId::fromName("common:metals");
     auto item = StringInterner::global().intern("iron_ingot");
 
     tags_.addMember(t1, item);
@@ -126,7 +126,7 @@ TEST_F(TagRegistryTest, GetTagsForMember) {
 }
 
 TEST_F(TagRegistryTest, GetMembersOfTag) {
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     auto a = StringInterner::global().intern("iron_ingot");
     auto b = StringInterner::global().intern("modA:iron_ingot");
 
@@ -143,8 +143,8 @@ TEST_F(TagRegistryTest, GetMembersOfTag) {
 }
 
 TEST_F(TagRegistryTest, SimpleComposition) {
-    auto parent = TagId::fromName("c:ingots");
-    auto child = TagId::fromName("c:ingots/iron");
+    auto parent = TagId::fromName("common:ingots");
+    auto child = TagId::fromName("common:ingots/iron");
 
     auto ironIngot = StringInterner::global().intern("iron_ingot");
     tags_.addMember(child, ironIngot);
@@ -162,9 +162,9 @@ TEST_F(TagRegistryTest, SimpleComposition) {
 }
 
 TEST_F(TagRegistryTest, TransitiveComposition) {
-    auto top = TagId::fromName("c:metals");
-    auto mid = TagId::fromName("c:ingots");
-    auto leaf = TagId::fromName("c:ingots/iron");
+    auto top = TagId::fromName("common:metals");
+    auto mid = TagId::fromName("common:ingots");
+    auto leaf = TagId::fromName("common:ingots/iron");
 
     auto ironIngot = StringInterner::global().intern("iron_ingot");
     tags_.addMember(leaf, ironIngot);
@@ -228,7 +228,7 @@ TEST_F(TagRegistryTest, SelfCycle) {
 }
 
 TEST_F(TagRegistryTest, MultipleRebuild) {
-    auto tag = TagId::fromName("c:ingots");
+    auto tag = TagId::fromName("common:ingots");
     auto item = StringInterner::global().intern("iron_ingot");
 
     tags_.addMember(tag, item);
@@ -249,8 +249,8 @@ TEST_F(TagRegistryTest, MultipleRebuild) {
 }
 
 TEST_F(TagRegistryTest, CompositionMergesDirectAndIncluded) {
-    auto parent = TagId::fromName("c:ingots");
-    auto child = TagId::fromName("c:ingots/iron");
+    auto parent = TagId::fromName("common:ingots");
+    auto child = TagId::fromName("common:ingots/iron");
 
     auto directItem = StringInterner::global().intern("gold_ingot");
     auto childItem = StringInterner::global().intern("iron_ingot");
@@ -296,7 +296,7 @@ protected:
 
 TEST_F(TagFileTest, SimpleTagBlock) {
     auto content = R"(
-tag c:ingots/iron {
+tag common:ingots/iron {
     iron_ingot
     modA:iron_ingot
 }
@@ -306,24 +306,24 @@ tag c:ingots/iron {
 
     EXPECT_TRUE(tags_.rebuild());
 
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     auto members = tags_.getMembersOf(tag);
     EXPECT_EQ(members.size(), 2u);
 }
 
 TEST_F(TagFileTest, TagWithIncludes) {
     auto content = R"(
-tag c:ingots/iron {
+tag common:ingots/iron {
     iron_ingot
 }
 
-tag c:ingots/copper {
+tag common:ingots/copper {
     copper_ingot
 }
 
-tag c:ingots {
-    include c:ingots/iron
-    include c:ingots/copper
+tag common:ingots {
+    include common:ingots/iron
+    include common:ingots/copper
 }
 )";
     int count = loadTagFileFromString(content, tags_, unify_);
@@ -331,7 +331,7 @@ tag c:ingots {
 
     EXPECT_TRUE(tags_.rebuild());
 
-    auto parentTag = TagId::fromName("c:ingots");
+    auto parentTag = TagId::fromName("common:ingots");
     auto members = tags_.getMembersOf(parentTag);
     EXPECT_EQ(members.size(), 2u);
 }
@@ -340,7 +340,7 @@ TEST_F(TagFileTest, CommentsAndBlankLines) {
     auto content = R"(
 # This is a comment
 
-tag c:planks {
+tag common:planks {
     # Also a comment
     oak_planks
 
@@ -352,7 +352,7 @@ tag c:planks {
 
     EXPECT_TRUE(tags_.rebuild());
 
-    auto tag = TagId::fromName("c:planks");
+    auto tag = TagId::fromName("common:planks");
     auto members = tags_.getMembersOf(tag);
     EXPECT_EQ(members.size(), 2u);
 }
@@ -380,7 +380,7 @@ unify nickel {
 
 TEST_F(TagFileTest, SeparateDirective) {
     auto content = R"(
-separate modA:redstone, modB:redstone
+separate modA:copper_dust, modB:copper_dust
 )";
     int count = loadTagFileFromString(content, tags_, unify_);
     EXPECT_EQ(count, 1);
@@ -400,24 +400,24 @@ TEST_F(TagFileTest, MissingTagName) {
 }
 
 TEST_F(TagFileTest, UnclosedBlock) {
-    auto content = "tag c:stuff {\n    item1\n";
+    auto content = "tag common:stuff {\n    item1\n";
     int count = loadTagFileFromString(content, tags_, unify_);
     EXPECT_EQ(count, -1);
 }
 
 TEST_F(TagFileTest, MultipleBlocks) {
     auto content = R"(
-tag c:ingots/iron {
+tag common:ingots/iron {
     iron_ingot
 }
 
-tag c:ingots/copper {
+tag common:ingots/copper {
     copper_ingot
 }
 
-tag c:ingots {
-    include c:ingots/iron
-    include c:ingots/copper
+tag common:ingots {
+    include common:ingots/iron
+    include common:ingots/copper
 }
 
 unify iron_ingot {
@@ -549,14 +549,14 @@ TEST_F(UnificationTest, DuplicateGroupWarning) {
 }
 
 TEST_F(UnificationTest, DeclareSeparate) {
-    auto a = ItemTypeId::fromName("modA:redstone");
-    auto b = ItemTypeId::fromName("modB:redstone");
+    auto a = ItemTypeId::fromName("modA:copper_dust");
+    auto b = ItemTypeId::fromName("modB:copper_dust");
 
     unify_.declareSeparate({a, b});
 
     // These items should not be auto-unified
     // (Tested through autoResolve — manual declare still works)
-    auto canonical = ItemTypeId::fromName("redstone");
+    auto canonical = ItemTypeId::fromName("copper_dust");
     unify_.declareGroup(canonical, {canonical, a, b});
 
     EXPECT_EQ(unify_.groupCount(), 1u);
@@ -569,7 +569,7 @@ TEST_F(UnificationTest, DeclareSeparate) {
 
 TEST_F(UnificationTest, AutoResolveBySharedTag) {
     // Set up items from different namespaces with same community tag
-    auto tag = TagId::fromName("c:ingots/nickel");
+    auto tag = TagId::fromName("common:ingots/nickel");
     auto plain = ItemTypeId::fromName("nickel_ingot");
     auto modA = ItemTypeId::fromName("modA:nickel_ingot");
     auto modB = ItemTypeId::fromName("modB:nickel_ingot");
@@ -590,9 +590,9 @@ TEST_F(UnificationTest, AutoResolveBySharedTag) {
 }
 
 TEST_F(UnificationTest, AutoResolveSeparateOverride) {
-    auto tag = TagId::fromName("c:dusts/redstone");
-    auto modA = ItemTypeId::fromName("modA:redstone");
-    auto modB = ItemTypeId::fromName("modB:redstone");
+    auto tag = TagId::fromName("common:dusts/copper");
+    auto modA = ItemTypeId::fromName("modA:copper_dust");
+    auto modB = ItemTypeId::fromName("modB:copper_dust");
 
     tags_.addMember(tag, modA);
     tags_.addMember(tag, modB);
@@ -609,8 +609,8 @@ TEST_F(UnificationTest, TagPropagation) {
     auto canonical = ItemTypeId::fromName("iron_ingot");
     auto modA = ItemTypeId::fromName("modA:iron_ingot");
 
-    auto tagIngots = TagId::fromName("c:ingots/iron");
-    auto tagMetals = TagId::fromName("c:metals");
+    auto tagIngots = TagId::fromName("common:ingots/iron");
+    auto tagMetals = TagId::fromName("common:metals");
 
     tags_.addMember(tagIngots, canonical);
     tags_.addMember(tagIngots, modA);
@@ -629,7 +629,7 @@ TEST_F(UnificationTest, TagPropagationBidirectional) {
     auto canonical = ItemTypeId::fromName("iron_ingot");
     auto modA = ItemTypeId::fromName("modA:iron_ingot");
 
-    auto tag1 = TagId::fromName("c:ingots/iron");
+    auto tag1 = TagId::fromName("common:ingots/iron");
     auto tag2 = TagId::fromName("modA:special_metals");
 
     tags_.addMember(tag1, canonical);
@@ -702,7 +702,7 @@ TEST_F(ItemMatchTest, ExactNoMatchWhenAutoConvertOff) {
 }
 
 TEST_F(ItemMatchTest, TaggedMatchesMember) {
-    auto tag = TagId::fromName("c:ingots/iron");
+    auto tag = TagId::fromName("common:ingots/iron");
     auto iron = ItemTypeId::fromName("iron_ingot");
     auto copper = ItemTypeId::fromName("copper_ingot");
 
@@ -716,8 +716,8 @@ TEST_F(ItemMatchTest, TaggedMatchesMember) {
 }
 
 TEST_F(ItemMatchTest, TaggedMatchesTransitiveMembers) {
-    auto parent = TagId::fromName("c:ingots");
-    auto child = TagId::fromName("c:ingots/iron");
+    auto parent = TagId::fromName("common:ingots");
+    auto child = TagId::fromName("common:ingots/iron");
 
     auto iron = ItemTypeId::fromName("iron_ingot");
     tags_.addMember(child, iron);
@@ -729,7 +729,7 @@ TEST_F(ItemMatchTest, TaggedMatchesTransitiveMembers) {
 }
 
 TEST_F(ItemMatchTest, TaggedDoesNotMatchEmpty) {
-    auto tag = TagId::fromName("c:ingots");
+    auto tag = TagId::fromName("common:ingots");
     auto m = ItemMatch::tagged(tag);
     EXPECT_FALSE(m.matches(ItemTypeId{}));
 }
@@ -741,18 +741,18 @@ TEST_F(ItemMatchTest, TaggedDoesNotMatchEmpty) {
 TEST_F(ItemMatchTest, FullInitWorkflow) {
     // Step 1: Load tag definitions
     auto content = R"(
-tag c:ingots/iron {
+tag common:ingots/iron {
     iron_ingot
     modA:iron_ingot
 }
 
-tag c:ingots/copper {
+tag common:ingots/copper {
     copper_ingot
 }
 
-tag c:ingots {
-    include c:ingots/iron
-    include c:ingots/copper
+tag common:ingots {
+    include common:ingots/iron
+    include common:ingots/copper
 }
 )";
     int count = loadTagFileFromString(content, tags_, unify_);
@@ -779,7 +779,7 @@ tag c:ingots {
     EXPECT_EQ(unify_.getCanonical(modA), iron);
 
     // Verify: tagged match for "any ingot" works
-    auto ingotsTag = TagId::fromName("c:ingots");
+    auto ingotsTag = TagId::fromName("common:ingots");
     auto m = ItemMatch::tagged(ingotsTag);
     EXPECT_TRUE(m.matches(iron));
     EXPECT_TRUE(m.matches(modA));

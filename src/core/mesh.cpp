@@ -191,7 +191,7 @@ SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
     const BlockTextureProvider& textureProvider
 ) {
     // Create opaque provider that checks the world
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
         BlockTypeId type = world.getBlock(pos);
         return type != AIR_BLOCK_TYPE;
     };
@@ -209,7 +209,7 @@ void MeshBuilder::buildSimpleMesh(
     bool buildTransparent
 ) {
     // Convert chunk position to world block coordinates (corner of subchunk)
-    BlockPos subChunkWorldOrigin(
+    BlockCoord subChunkWorldOrigin(
         chunkPos.x * SubChunk::SIZE,
         chunkPos.y * SubChunk::SIZE,
         chunkPos.z * SubChunk::SIZE
@@ -235,7 +235,7 @@ void MeshBuilder::buildSimpleMesh(
                 }
 
                 // World position of this block
-                BlockPos blockWorldPos(
+                BlockCoord blockWorldPos(
                     subChunkWorldOrigin.x + x,
                     subChunkWorldOrigin.y + y,
                     subChunkWorldOrigin.z + z
@@ -275,7 +275,7 @@ void MeshBuilder::buildSimpleMesh(
                         // For standard faces (0-5), check if neighbor occludes this face
                         if (faceGeom.isStandardFace() && !disableFaceCulling_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockPos neighborPos = blockWorldPos.neighbor(face);
+                            BlockCoord neighborPos = blockWorldPos.neighbor(face);
                             if (faceOccludesProvider_) {
                                 Face oppFace = oppositeFace(face);
                                 if (faceOccludesProvider_(neighborPos, oppFace)) {
@@ -297,7 +297,7 @@ void MeshBuilder::buildSimpleMesh(
                         float faceBlockLight = baseBlockLight;
                         if (faceGeom.isStandardFace() && lightProvider_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            BlockCoord faceAirPos = blockWorldPos.neighbor(face);
                             uint8_t packed = lightProvider_(faceAirPos);
                             faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
                             faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
@@ -312,7 +312,7 @@ void MeshBuilder::buildSimpleMesh(
                         Face face = static_cast<Face>(faceIdx);
 
                         // Get neighbor position
-                        BlockPos neighborPos = blockWorldPos.neighbor(face);
+                        BlockCoord neighborPos = blockWorldPos.neighbor(face);
 
                         // Check if neighbor occludes this face
                         // Skip this check if face culling is disabled (debug mode)
@@ -350,7 +350,7 @@ void MeshBuilder::buildSimpleMesh(
                             blockLightValues = lightResult.block;
                         } else if (flatLighting_ && lightProvider_) {
                             // Flat lighting: sample 1 point, apply to all corners (shows raw L1 ball)
-                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            BlockCoord faceAirPos = blockWorldPos.neighbor(face);
                             uint8_t packed = lightProvider_(faceAirPos);
                             float skyVal = static_cast<float>(packed >> 4) / 15.0f;
                             float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
@@ -388,7 +388,7 @@ void MeshBuilder::buildGreedyMesh(
 
     // Second pass: render custom geometry blocks (can't be greedy-merged)
     if (geometryProvider_) {
-        BlockPos subChunkWorldOrigin(
+        BlockCoord subChunkWorldOrigin(
             chunkPos.x * SubChunk::SIZE,
             chunkPos.y * SubChunk::SIZE,
             chunkPos.z * SubChunk::SIZE
@@ -418,7 +418,7 @@ void MeshBuilder::buildGreedyMesh(
                     }
 
                     // World position of this block
-                    BlockPos blockWorldPos(
+                    BlockCoord blockWorldPos(
                         subChunkWorldOrigin.x + x,
                         subChunkWorldOrigin.y + y,
                         subChunkWorldOrigin.z + z
@@ -449,7 +449,7 @@ void MeshBuilder::buildGreedyMesh(
                         // For standard faces (0-5), check if neighbor occludes this face
                         if (faceGeom.isStandardFace() && !disableFaceCulling_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockPos neighborPos = blockWorldPos.neighbor(face);
+                            BlockCoord neighborPos = blockWorldPos.neighbor(face);
                             if (faceOccludesProvider_) {
                                 Face oppFace = oppositeFace(face);
                                 if (faceOccludesProvider_(neighborPos, oppFace)) {
@@ -471,7 +471,7 @@ void MeshBuilder::buildGreedyMesh(
                         float faceBlockLight = baseBlockLight;
                         if (faceGeom.isStandardFace() && lightProvider_) {
                             Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                            BlockCoord faceAirPos = blockWorldPos.neighbor(face);
                             uint8_t packed = lightProvider_(faceAirPos);
                             faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
                             faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
@@ -514,7 +514,7 @@ void MeshBuilder::greedyMeshFace(
     }
 
     // World origin of this subchunk
-    BlockPos subChunkWorldOrigin(
+    BlockCoord subChunkWorldOrigin(
         chunkPos.x * SIZE,
         chunkPos.y * SIZE,
         chunkPos.z * SIZE
@@ -566,14 +566,14 @@ void MeshBuilder::greedyMeshFace(
                 }
 
                 // World position of this block
-                BlockPos blockWorldPos(
+                BlockCoord blockWorldPos(
                     subChunkWorldOrigin.x + x,
                     subChunkWorldOrigin.y + y,
                     subChunkWorldOrigin.z + z
                 );
 
                 // Check if neighbor (in face direction) occludes this face
-                BlockPos neighborPos = blockWorldPos.neighbor(face);
+                BlockCoord neighborPos = blockWorldPos.neighbor(face);
                 if (!disableFaceCulling_) {
                     if (faceOccludesProvider_) {
                         Face oppFace = oppositeFace(face);
@@ -601,7 +601,7 @@ void MeshBuilder::greedyMeshFace(
                     mask[maskIdx].blockLightValues = lightResult.block;
                 } else if (flatLighting_ && lightProvider_) {
                     // Flat lighting: sample 1 point, apply to all corners
-                    BlockPos faceAirPos = blockWorldPos.neighbor(face);
+                    BlockCoord faceAirPos = blockWorldPos.neighbor(face);
                     uint8_t packed = lightProvider_(faceAirPos);
                     float skyVal = static_cast<float>(packed >> 4) / 15.0f;
                     float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
@@ -820,7 +820,7 @@ MeshData MeshBuilder::buildSubChunkMesh(
     const BlockTextureProvider& textureProvider
 ) {
     // Create opaque provider that checks the world
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockPos& pos) -> bool {
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
         BlockTypeId type = world.getBlock(pos);
         // For now, any non-air block is considered opaque
         // TODO: Add transparency support via block type registry
@@ -940,7 +940,7 @@ void MeshBuilder::addCustomFace(
 }
 
 float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const {
-    // Minecraft-style ambient occlusion
+    // Voxel ambient occlusion
     // Count solid neighbors and map to AO value
     // Note: We don't use the "0fps" special case of returning 0.0 when both
     // sides are solid - that's too aggressive and makes 1x1 holes pitch black.
@@ -959,7 +959,7 @@ float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const 
 }
 
 std::array<float, 4> MeshBuilder::getFaceAO(
-    const BlockPos& blockWorldPos,
+    const BlockCoord& blockWorldPos,
     Face face,
     const BlockOpaqueProvider& opaqueProvider
 ) const {
@@ -996,10 +996,10 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     }
 
     // Get the face normal as offset
-    BlockPos normalOffset = faceOffset(face);
+    BlockCoord normalOffset = faceOffset(face);
 
     // The face is one block in the normal direction from the block position
-    BlockPos facePos(
+    BlockCoord facePos(
         blockWorldPos.x + normalOffset.x,
         blockWorldPos.y + normalOffset.y,
         blockWorldPos.z + normalOffset.z
@@ -1013,7 +1013,7 @@ std::array<float, 4> MeshBuilder::getFaceAO(
     //   0 1 2
 
     auto isOpaqueAt = [&](int dx, int dy) -> bool {
-        BlockPos checkPos(
+        BlockCoord checkPos(
             facePos.x + tangent1.x * dx + tangent2.x * dy,
             facePos.y + tangent1.y * dx + tangent2.y * dy,
             facePos.z + tangent1.z * dx + tangent2.z * dy
@@ -1058,7 +1058,7 @@ std::array<float, 4> MeshBuilder::getFaceAO(
 }
 
 MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
-    const BlockPos& blockWorldPos,
+    const BlockCoord& blockWorldPos,
     Face face
 ) const {
     FaceLightResult result;
@@ -1094,17 +1094,17 @@ MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
     }
 
     // Get the face normal as offset
-    BlockPos normalOffset = faceOffset(face);
+    BlockCoord normalOffset = faceOffset(face);
 
     // The face is one block in the normal direction from the block position
-    BlockPos facePos(
+    BlockCoord facePos(
         blockWorldPos.x + normalOffset.x,
         blockWorldPos.y + normalOffset.y,
         blockWorldPos.z + normalOffset.z
     );
 
     // For smooth lighting, sample light from 4 blocks around each corner
-    // and average them. This matches Minecraft's smooth lighting algorithm.
+    // and average them for smooth lighting.
     //
     // The light sampling grid is:
     //   (-1,1)  (0,1)  (1,1)
@@ -1123,7 +1123,7 @@ MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
     };
 
     auto getLightAt = [&](int dx, int dy) -> LightSample {
-        BlockPos checkPos(
+        BlockCoord checkPos(
             facePos.x + tangent1.x * dx + tangent2.x * dy,
             facePos.y + tangent1.y * dx + tangent2.y * dy,
             facePos.z + tangent1.z * dx + tangent2.z * dy
@@ -1329,7 +1329,7 @@ MeshData MeshBuilder::buildLODMesh(
     const BlockTextureProvider& textureProvider
 ) {
     // Simple version without neighbor culling - all non-air faces are rendered
-    BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
+    BlockOpaqueProvider alwaysTransparent = [](const BlockCoord&) { return false; };
     return buildLODMesh(lodSubChunk, chunkPos, alwaysTransparent, textureProvider, LODMergeMode::FullHeight);
 }
 
@@ -1435,7 +1435,7 @@ MeshData MeshBuilder::buildLODMesh(
                                 }
                             } else {
                                 // External neighbor - use the provided neighbor provider
-                                BlockPos neighborWorldPos;
+                                BlockCoord neighborWorldPos;
                                 auto normal = faceNormal(face);
                                 neighborWorldPos.x = static_cast<int32_t>(worldX) + normal[0] * grouping;
                                 neighborWorldPos.y = static_cast<int32_t>(worldY) + normal[1] * grouping;
@@ -1468,24 +1468,24 @@ MeshData MeshBuilder::buildLODMesh(
                                 int32_t off1 = (corner & 1) ? grouping - 1 : 0;
                                 int32_t off2 = (corner & 2) ? grouping - 1 : 0;
 
-                                BlockPos samplePos;
+                                BlockCoord samplePos;
                                 if (normal[0] != 0) {
                                     // X is the face axis
-                                    samplePos = BlockPos{
+                                    samplePos = BlockCoord{
                                         static_cast<int32_t>(worldX) + normalOffset,
                                         static_cast<int32_t>(worldY) + off1,
                                         static_cast<int32_t>(worldZ) + off2
                                     };
                                 } else if (normal[1] != 0) {
                                     // Y is the face axis
-                                    samplePos = BlockPos{
+                                    samplePos = BlockCoord{
                                         static_cast<int32_t>(worldX) + off1,
                                         static_cast<int32_t>(worldY) + normalOffset,
                                         static_cast<int32_t>(worldZ) + off2
                                     };
                                 } else {
                                     // Z is the face axis
-                                    samplePos = BlockPos{
+                                    samplePos = BlockCoord{
                                         static_cast<int32_t>(worldX) + off1,
                                         static_cast<int32_t>(worldY) + off2,
                                         static_cast<int32_t>(worldZ) + normalOffset
@@ -1635,7 +1635,7 @@ void MeshBuilder::greedyMeshLODFace(
                         }
                     } else {
                         // External neighbor
-                        BlockPos neighborWorldPos;
+                        BlockCoord neighborWorldPos;
                         auto normal = faceNormal(face);
                         neighborWorldPos.x = static_cast<int32_t>(worldX) + normal[0] * grouping;
                         neighborWorldPos.y = static_cast<int32_t>(worldY) + normal[1] * grouping;
@@ -1675,21 +1675,21 @@ void MeshBuilder::greedyMeshLODFace(
                         int32_t off1 = (corner & 1) ? grouping - 1 : 0;
                         int32_t off2 = (corner & 2) ? grouping - 1 : 0;
 
-                        BlockPos samplePos;
+                        BlockCoord samplePos;
                         if (normal[0] != 0) {
-                            samplePos = BlockPos{
+                            samplePos = BlockCoord{
                                 static_cast<int32_t>(worldX) + normalOffset,
                                 static_cast<int32_t>(worldY) + off1,
                                 static_cast<int32_t>(worldZ) + off2
                             };
                         } else if (normal[1] != 0) {
-                            samplePos = BlockPos{
+                            samplePos = BlockCoord{
                                 static_cast<int32_t>(worldX) + off1,
                                 static_cast<int32_t>(worldY) + normalOffset,
                                 static_cast<int32_t>(worldZ) + off2
                             };
                         } else {
-                            samplePos = BlockPos{
+                            samplePos = BlockCoord{
                                 static_cast<int32_t>(worldX) + off1,
                                 static_cast<int32_t>(worldY) + off2,
                                 static_cast<int32_t>(worldZ) + normalOffset

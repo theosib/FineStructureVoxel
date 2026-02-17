@@ -4,7 +4,7 @@ temperature_min: 0.7
 temperature_max: 1.0
 humidity_min: 0.0
 humidity_max: 0.2
-base_height: 62.0
+base_height: 78.0
 height_variation: 4.0
 height_scale: 1.0
 surface: cobble

@@ -118,7 +118,7 @@ worlds/<world>/regions/
   ...
 ```
 
-Region coordinates: `r.{rx}.{rz}` where `rx = floor(columnX / 32)`, `rz = floor(columnZ / 32)`.
+Region coordinates: `r.{rx}.{rz}` where `rx = floor(columnX / 64)`, `rz = floor(columnZ / 64)`.
 
 ### Data File (.dat)
 
@@ -209,7 +209,7 @@ user/                - User-level settings (~/.config/finevox or platform equiva
   config.cbor        - Global ConfigManager data
 world/<name>/        - Per-world data
   world.cbor         - WorldConfig metadata
-  regions/           - Region files for overworld
+  regions/           - Region files for surface dimension
   dim/<name>/        - Named dimensions within world
     regions/         - Region files for this dimension
 ```
@@ -246,7 +246,7 @@ public:
     // Convenience methods
     std::filesystem::path worldPath(const std::string& name) const;
     std::filesystem::path dimensionPath(const std::string& world, const std::string& dim) const;
-    std::filesystem::path regionPath(const std::string& world, const std::string& dim = "overworld") const;
+    std::filesystem::path regionPath(const std::string& world, const std::string& dim = "surface") const;
 };
 ```
 
@@ -260,8 +260,8 @@ ResourceLocator::instance().setUserRoot("~/.config/finevox");  // Expands ~ auto
 
 // World management
 ResourceLocator::instance().registerWorld("MyWorld", "/path/to/saves/MyWorld");
-ResourceLocator::instance().registerDimension("MyWorld", "nether");
-ResourceLocator::instance().registerDimension("MyWorld", "the_end");
+ResourceLocator::instance().registerDimension("MyWorld", "underground");
+ResourceLocator::instance().registerDimension("MyWorld", "void_realm");
 
 // Path resolution
 auto configPath = ResourceLocator::instance().resolve("user/config.cbor");
@@ -270,8 +270,8 @@ auto configPath = ResourceLocator::instance().resolve("user/config.cbor");
 auto worldCfg = ResourceLocator::instance().resolve("world/MyWorld/world.cbor");
 // → /path/to/saves/MyWorld/world.cbor
 
-auto regions = ResourceLocator::instance().regionPath("MyWorld", "nether");
-// → /path/to/saves/MyWorld/dim/nether/regions
+auto regions = ResourceLocator::instance().regionPath("MyWorld", "underground");
+// → /path/to/saves/MyWorld/dim/underground/regions
 ```
 
 ### Integration Points

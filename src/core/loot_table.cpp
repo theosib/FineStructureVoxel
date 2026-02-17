@@ -109,7 +109,7 @@ std::vector<ItemStack> LootPool::roll(const LootContext& ctx,
         rolls = dist(rng);
     }
     if (bonusRollsPerLevel > 0.0f) {
-        rolls += static_cast<int32_t>(bonusRollsPerLevel * ctx.fortuneLevel);
+        rolls += static_cast<int32_t>(bonusRollsPerLevel * ctx.bountyLevel);
     }
     if (rolls <= 0) return {};
 

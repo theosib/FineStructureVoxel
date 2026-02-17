@@ -532,7 +532,7 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
             BlockTypeId type = sc->getBlock(idx);
             if (!type.isAir()) {
                 // Convert linear index to local coordinates
-                LocalBlockPos local = LocalBlockPos::fromIndex(static_cast<uint16_t>(idx));
+                LocalBlockCoord local = LocalBlockCoord::fromIndex(static_cast<uint16_t>(idx));
                 // Convert to world Y coordinate
                 int worldY = y * 16 + local.y;
                 column->setBlock(local.x, worldY, local.z, type);

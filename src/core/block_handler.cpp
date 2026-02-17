@@ -16,7 +16,7 @@ namespace finevox {
 // ============================================================================
 
 BlockContext::BlockContext(World& world, SubChunk& subChunk,
-                           BlockPos pos, LocalBlockPos localPos)
+                           BlockCoord pos, LocalBlockCoord localPos)
     : world_(world)
     , subChunk_(subChunk)
     , pos_(pos)
@@ -120,17 +120,17 @@ void BlockContext::markDirty() {
 }
 
 BlockTypeId BlockContext::getNeighbor(Face face) const {
-    BlockPos neighborPos = pos_.neighbor(face);
+    BlockCoord neighborPos = pos_.neighbor(face);
     return world_.getBlock(neighborPos);
 }
 
 void BlockContext::notifyNeighbors() {
-    // Get handler for each neighbor and call onNeighborChanged
+    // Get handler for each neighbor and call onNeighborUpdated
     BlockRegistry& registry = BlockRegistry::global();
 
     for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
         Face face = static_cast<Face>(faceIdx);
-        BlockPos neighborPos = pos_.neighbor(face);
+        BlockCoord neighborPos = pos_.neighbor(face);
 
         BlockTypeId neighborType = world_.getBlock(neighborPos);
         if (neighborType.isAir()) {
@@ -151,14 +151,14 @@ void BlockContext::notifyNeighbors() {
         }
 
         // Calculate local position within neighbor's subchunk
-        LocalBlockPos neighborLocalPos = neighborPos.local();
+        LocalBlockCoord neighborLocalPos = neighborPos.local();
 
         // Create context for neighbor and notify
         BlockContext neighborCtx(world_, *neighborSubChunk, neighborPos, neighborLocalPos);
 
         // The opposite face is the one that changed from the neighbor's perspective
         Face changedFace = oppositeFace(face);
-        handler->onNeighborChanged(neighborCtx, changedFace);
+        handler->onNeighborUpdated(neighborCtx, changedFace);
     }
 }
 

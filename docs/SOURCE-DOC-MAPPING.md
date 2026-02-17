@@ -10,7 +10,7 @@
 
 | Source File | Design Section | Notes |
 |-------------|----------------|-------|
-| `include/finevox/core/position.hpp` | §4.1 BlockPos, ChunkPos, ColumnPos | Position types and conversions |
+| `include/finevox/core/position.hpp` | §4.1 BlockCoord, ChunkPos, ColumnPos | Position types and conversions |
 | `src/core/position.cpp` | §4.1 | Position method implementations |
 | `include/finevox/core/subchunk.hpp` | §4.2 SubChunk | 16³ block storage, palette refs |
 | `src/core/subchunk.cpp` | §4.2, §4.4 | SubChunk + palette operations |
@@ -76,7 +76,7 @@
 | `include/finevox/core/cbor.hpp` | §11.2 CBOR Format | CBOR encoding/decoding |
 | `include/finevox/core/serialization.hpp` | §11.3 Serialization | SubChunk/Column serialize |
 | `src/core/serialization.cpp` | §11.3 | CBOR serialization |
-| `include/finevox/core/region_file.hpp` | §11.4 Region Files | 32×32 chunk regions |
+| `include/finevox/core/region_file.hpp` | §11.4 Region Files | 64×64 chunk regions |
 | `src/core/region_file.cpp` | §11.4 | Region file I/O |
 | `include/finevox/core/io_manager.hpp` | §11.5 IOManager | Async persistence |
 | `src/core/io_manager.cpp` | §11.5 | Save/load threading |
@@ -339,8 +339,8 @@ See [17-implementation-phases.md](17-implementation-phases.md) for authoritative
 | `TickGame` event type | `block_event.hpp:33` | For registered tick blocks |
 | Deferred event queue | `event_queue.hpp:263-268` | For unloaded chunk updates |
 | External input queue | `event_queue.hpp:274-276` | Thread-safe event injection |
-| `BlockHandler::onUse()` returns bool | `block_handler.hpp:155` | Not mentioned in docs |
-| `BlockHandler::onHit()` returns bool | `block_handler.hpp:171` | Not mentioned in docs |
+| `BlockHandler::onInteract()` returns bool | `block_handler.hpp:155` | Not mentioned in docs |
+| `BlockHandler::onStrike()` returns bool | `block_handler.hpp:171` | Not mentioned in docs |
 
 ---
 
@@ -413,7 +413,7 @@ Full audit of all design docs against source code. Last updated 2026-02-08.
 | 16 | FineVK Critique | Review document |
 | 18 | Open Questions | Design decisions (modules section has source mapping above) |
 | 20-rec | FineVK Recommendations | Suggestions for FineVK changes |
-| Appendix B | Differences | Comparison with Minecraft |
+| Appendix B | Differences | Comparison with traditional voxel games |
 
 ### Known Doc-vs-Source Discrepancies (Cosmetic)
 

@@ -262,12 +262,12 @@ TEST_F(BlockTypeTest, CreateBlockShapeProvider) {
     auto provider = createBlockShapeProvider(world);
 
     // Query collision at placed block
-    const CollisionShape* shape = provider(BlockPos(0, 0, 0), RaycastMode::Collision);
+    const CollisionShape* shape = provider(BlockCoord(0, 0, 0), RaycastMode::Collision);
     ASSERT_NE(shape, nullptr);
     EXPECT_FALSE(shape->isEmpty());
 
     // Query at empty position (air)
-    const CollisionShape* airShape = provider(BlockPos(100, 100, 100), RaycastMode::Collision);
+    const CollisionShape* airShape = provider(BlockCoord(100, 100, 100), RaycastMode::Collision);
     EXPECT_EQ(airShape, nullptr);  // Air returns nullptr
 }
 
@@ -284,7 +284,7 @@ TEST_F(BlockTypeTest, BlockShapeProviderRespectsRaycastMode) {
     world.setBlock(5, 5, 5, passId);
 
     auto provider = createBlockShapeProvider(world);
-    BlockPos pos(5, 5, 5);
+    BlockCoord pos(5, 5, 5);
 
     // Collision mode: should return nullptr (no collision)
     const CollisionShape* collision = provider(pos, RaycastMode::Collision);

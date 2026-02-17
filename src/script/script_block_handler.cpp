@@ -9,12 +9,12 @@ namespace finevox::script {
 // Pre-interned event symbol IDs
 struct EventSymbols {
     uint32_t place;
-    uint32_t break_;
+    uint32_t destroy;
     uint32_t tick;
-    uint32_t neighbor_changed;
+    uint32_t neighbor_updated;
     uint32_t block_update;
-    uint32_t use;
-    uint32_t hit;
+    uint32_t interact;
+    uint32_t strike;
     uint32_t repaint;
 
     // Extra context variable symbols
@@ -34,12 +34,12 @@ struct EventSymbols {
             auto& si = StringInterner::global();
             return EventSymbols{
                 si.intern("place"),
-                si.intern("break"),
+                si.intern("destroy"),
                 si.intern("tick"),
-                si.intern("neighbor_changed"),
+                si.intern("neighbor_updated"),
                 si.intern("block_update"),
-                si.intern("use"),
-                si.intern("hit"),
+                si.intern("interact"),
+                si.intern("strike"),
                 si.intern("repaint"),
                 si.intern("face"),
                 si.intern("tick_type"),
@@ -103,8 +103,8 @@ void ScriptBlockHandler::onPlace(BlockContext& ctx) {
     invokeHandler(EventSymbols::instance().place, ctx);
 }
 
-void ScriptBlockHandler::onBreak(BlockContext& ctx) {
-    invokeHandler(EventSymbols::instance().break_, ctx);
+void ScriptBlockHandler::onDestroy(BlockContext& ctx) {
+    invokeHandler(EventSymbols::instance().destroy, ctx);
 }
 
 void ScriptBlockHandler::onTick(BlockContext& ctx, TickType type) {
@@ -113,27 +113,27 @@ void ScriptBlockHandler::onTick(BlockContext& ctx, TickType type) {
     invokeHandler(s.tick, ctx);
 }
 
-void ScriptBlockHandler::onNeighborChanged(BlockContext& ctx, Face changedFace) {
+void ScriptBlockHandler::onNeighborUpdated(BlockContext& ctx, Face changedFace) {
     const auto& s = EventSymbols::instance();
     ctx_->set("face", finescript::Value::symbol(faceToSymbol(changedFace)));
-    invokeHandler(s.neighbor_changed, ctx);
+    invokeHandler(s.neighbor_updated, ctx);
 }
 
 void ScriptBlockHandler::onBlockUpdate(BlockContext& ctx) {
     invokeHandler(EventSymbols::instance().block_update, ctx);
 }
 
-bool ScriptBlockHandler::onUse(BlockContext& ctx, Face face) {
+bool ScriptBlockHandler::onInteract(BlockContext& ctx, Face face) {
     const auto& s = EventSymbols::instance();
     ctx_->set("face", finescript::Value::symbol(faceToSymbol(face)));
-    auto result = invokeHandler(s.use, ctx);
+    auto result = invokeHandler(s.interact, ctx);
     return result.truthy();
 }
 
-bool ScriptBlockHandler::onHit(BlockContext& ctx, Face face) {
+bool ScriptBlockHandler::onStrike(BlockContext& ctx, Face face) {
     const auto& s = EventSymbols::instance();
     ctx_->set("face", finescript::Value::symbol(faceToSymbol(face)));
-    auto result = invokeHandler(s.hit, ctx);
+    auto result = invokeHandler(s.strike, ctx);
     return result.truthy();
 }
 

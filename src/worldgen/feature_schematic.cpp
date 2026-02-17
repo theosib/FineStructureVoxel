@@ -41,9 +41,9 @@ FeatureResult SchematicFeature::place(FeaturePlacementContext& ctx) {
     return placed > 0 ? FeatureResult::Placed : FeatureResult::Skipped;
 }
 
-BlockPos SchematicFeature::maxExtent() const {
-    if (!schematic_) return BlockPos(0, 0, 0);
-    return BlockPos(schematic_->sizeX(), schematic_->sizeY(), schematic_->sizeZ());
+BlockCoord SchematicFeature::maxExtent() const {
+    if (!schematic_) return BlockCoord(0, 0, 0);
+    return BlockCoord(schematic_->sizeX(), schematic_->sizeY(), schematic_->sizeZ());
 }
 
 }  // namespace finevox::worldgen

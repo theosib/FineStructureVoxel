@@ -194,7 +194,7 @@ world/
 {
   "version": 1,
   "columns": [
-    {"pos": [x, z], "reasons": ["spawn", "chunk_loader:blockgame:chunk_loader"]},
+    {"pos": [x, z], "reasons": ["spawn", "chunk_loader:finevox:chunk_loader"]},
     {"pos": [x2, z2], "reasons": ["chunk_loader:mymod:advanced_loader"]}
   ]
 }
@@ -433,7 +433,7 @@ class BlockUpdateScheduler {
 public:
     // Schedule an update for a block position
     // Returns a ticket that can be used to cancel
-    UpdateTicket scheduleUpdate(BlockPos pos, int tickDelay, int priority = 0);
+    UpdateTicket scheduleUpdate(BlockCoord pos, int tickDelay, int priority = 0);
 
     // Cancel a scheduled update
     void cancelUpdate(UpdateTicket ticket);
@@ -443,7 +443,7 @@ public:
     void processPendingUpdates(const glm::dvec3& referencePoint, float maxDistance);
 
     // Callback for when updates are processed
-    using UpdateHandler = std::function<void(BlockPos pos)>;
+    using UpdateHandler = std::function<void(BlockCoord pos)>;
     void setUpdateHandler(UpdateHandler handler);
 
     // Persistence
@@ -481,7 +481,7 @@ public:
     virtual Action onCrossChunkUpdate(
         ChunkPos sourceChunk,
         ChunkPos targetChunk,
-        BlockPos targetBlock,
+        BlockCoord targetBlock,
         const BlockUpdate& update
     ) = 0;
 
@@ -500,11 +500,11 @@ The scenario you described: connected blocks across chunks preventing unload.
 class BlockNetworkManager {
 public:
     // Register that blocks are connected (e.g., redstone network)
-    void registerConnection(BlockPos a, BlockPos b);
-    void unregisterConnection(BlockPos a, BlockPos b);
+    void registerConnection(BlockCoord a, BlockCoord b);
+    void unregisterConnection(BlockCoord a, BlockCoord b);
 
     // Get all chunks in a network
-    std::vector<ChunkPos> getNetworkChunks(BlockPos anyBlock) const;
+    std::vector<ChunkPos> getNetworkChunks(BlockCoord anyBlock) const;
 
     // Called by chunk lifecycle to check if safe to unload
     // Returns true if the network can be safely suspended
@@ -657,7 +657,7 @@ void MyGameModule::registerContent(ModuleLoader& loader) {
    **Resolved:** World-level registry with append-only journal for crash protection. See §2.4.
 
 2. **Spawn chunks**: Are spawn chunks always loaded, or only when players are online?
-   - Minecraft: Always loaded in singleplayer, configurable in multiplayer
+   - Standard in voxel games: Always loaded in singleplayer, configurable in multiplayer
    - Recommendation: Game-configurable, default to always-loaded
 
 3. **Cross-dimension loading**: Can machinery in one dimension cause loading in another?

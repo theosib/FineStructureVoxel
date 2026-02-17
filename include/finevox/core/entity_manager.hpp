@@ -10,6 +10,7 @@
 #include "finevox/core/entity.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/physics.hpp"
+#include "finevox/core/position.hpp"
 
 #include <functional>
 #include <memory>
@@ -21,6 +22,7 @@ namespace finevox {
 // Forward declarations
 class World;
 class UpdateScheduler;
+class ChunkColumn;
 
 // ============================================================================
 // PlayerAuthority - Server-side tracking of player state for validation
@@ -189,6 +191,40 @@ public:
      * @brief Handle player sneak start/stop
      */
     void handlePlayerSneak(const BlockEvent& event, bool starting);
+
+    // ========================================================================
+    // Persistence (Column-based save/load)
+    // ========================================================================
+
+    /**
+     * @brief Save entities in a column to its DataContainer
+     *
+     * Gathers all non-player entities whose position falls within
+     * the column's XZ range, serializes them, and stores the CBOR
+     * bytes in the column's DataContainer under "entity_data".
+     *
+     * @param column The column to save entity data into
+     */
+    void saveColumnEntities(ChunkColumn& column);
+
+    /**
+     * @brief Load entities from a column's DataContainer
+     *
+     * Extracts serialized entity data from the column's DataContainer,
+     * deserializes them, assigns fresh IDs, and spawns them.
+     *
+     * @param column The column to load entity data from
+     * @return Number of entities loaded
+     */
+    size_t loadColumnEntities(ChunkColumn& column);
+
+    /**
+     * @brief Get entities in a specific column
+     * @param colPos Column position (XZ)
+     * @return Vector of non-owning pointers to entities in the column
+     */
+    std::vector<Entity*> getEntitiesInColumn(ColumnPos colPos);
+    std::vector<const Entity*> getEntitiesInColumn(ColumnPos colPos) const;
 
     // ========================================================================
     // Configuration

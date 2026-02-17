@@ -2,14 +2,14 @@
 
 namespace finevox {
 
-// BlockPos packing: 64 bits total
+// BlockCoord packing: 64 bits total
 // We use offset binary encoding to handle negative values
 //
 // Layout: [x:26][y:12][z:26]
 // - X, Z: 26 bits each = +/- 33,554,432 blocks (~33M, plenty for any world)
 // - Y: 12 bits = +/- 2,048 blocks (4096 total range, far more than needed)
 //
-// For reference, Minecraft uses Y range of -64 to 320 (384 blocks)
+// For reference, our Y range far exceeds what's needed for typical gameplay
 
 static constexpr int32_t XZ_BITS = 26;
 static constexpr int32_t Y_BITS = 12;
@@ -20,7 +20,7 @@ static constexpr int32_t Y_OFFSET = 1 << (Y_BITS - 1);    // 2,048
 static constexpr uint64_t XZ_MASK = (1ULL << XZ_BITS) - 1;
 static constexpr uint64_t Y_MASK = (1ULL << Y_BITS) - 1;
 
-uint64_t BlockPos::pack() const {
+uint64_t BlockCoord::pack() const {
     // Add offset to make values positive, then pack
     uint64_t px = static_cast<uint64_t>(x + XZ_OFFSET) & XZ_MASK;
     uint64_t py = static_cast<uint64_t>(y + Y_OFFSET) & Y_MASK;
@@ -29,7 +29,7 @@ uint64_t BlockPos::pack() const {
     return (px << 38) | (py << 26) | pz;
 }
 
-BlockPos BlockPos::unpack(uint64_t packed) {
+BlockCoord BlockCoord::unpack(uint64_t packed) {
     int32_t px = static_cast<int32_t>((packed >> 38) & XZ_MASK) - XZ_OFFSET;
     int32_t py = static_cast<int32_t>((packed >> 26) & Y_MASK) - Y_OFFSET;
     int32_t pz = static_cast<int32_t>(packed & XZ_MASK) - XZ_OFFSET;

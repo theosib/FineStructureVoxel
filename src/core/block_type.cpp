@@ -377,7 +377,7 @@ std::string BlockRegistry::makeQualifiedName(std::string_view ns, std::string_vi
 // ============================================================================
 
 BlockShapeProvider createBlockShapeProvider(World& world) {
-    return [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+    return [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
         // Get block type at position
         BlockTypeId blockType = world.getBlock(pos);
 

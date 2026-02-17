@@ -177,7 +177,7 @@ private:
  * - Handler factories: For lazy loading of handler code
  *
  * Namespace convention: Block names use "namespace:localname" format.
- * Example: "blockgame:stone", "mymod:custom_ore"
+ * Example: "finevox:stone", "mymod:custom_ore"
  */
 class BlockRegistry {
 public:

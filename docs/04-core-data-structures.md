@@ -12,30 +12,30 @@ namespace finevox {
 // Block position in world coordinates
 // Packed: X(26 bits) | Z(26 bits) | Y(12 bits) = 64 bits
 // Range: +/-33M blocks in X/Z, +/-2K blocks in Y
-struct BlockPos {
+struct BlockCoord {
     int32_t x, y, z;
 
     uint64_t pack() const;
-    static BlockPos unpack(uint64_t packed);
+    static BlockCoord unpack(uint64_t packed);
 
     ChunkPos toChunkPos() const;
     int toLocalIndex() const;  // Index within subchunk (0-4095)
 
-    BlockPos neighbor(Face face) const;
+    BlockCoord neighbor(Face face) const;
 
     // Operators
-    bool operator==(const BlockPos& other) const;
-    BlockPos operator+(const BlockPos& offset) const;
+    bool operator==(const BlockCoord& other) const;
+    BlockCoord operator+(const BlockCoord& offset) const;
 };
 
-// SubChunk position (BlockPos >> 4 for all axes)
+// SubChunk position (BlockCoord >> 4 for all axes)
 struct ChunkPos {
     int32_t x, y, z;
 
     uint64_t pack() const;
     static ChunkPos unpack(uint64_t packed);
 
-    BlockPos cornerBlockPos() const;  // Block at (0,0,0) of subchunk
+    BlockCoord cornerBlockCoord() const;  // Block at (0,0,0) of subchunk
     ColumnPos toColumnPos() const { return {x, z}; }
 
     bool operator==(const ChunkPos& other) const;
@@ -48,7 +48,7 @@ struct ColumnPos {
     uint64_t pack() const;
     static ColumnPos unpack(uint64_t packed);
 
-    static ColumnPos fromBlockPos(BlockPos pos) {
+    static ColumnPos fromBlock(BlockCoord pos) {
         return {pos.x >> 4, pos.z >> 4};
     }
 
@@ -89,7 +89,7 @@ Before diving into the data structures, here's the strategy for pointer types:
 
 ## 4.3 String Interning for Block Type Names
 
-Block types are identified by name (e.g., `"blockgame:stone"`), but comparing strings everywhere is expensive. We use **string interning** to get the best of both worlds:
+Block types are identified by name (e.g., `"finevox:stone"`), but comparing strings everywhere is expensive. We use **string interning** to get the best of both worlds:
 
 ```cpp
 namespace finevox {
@@ -203,7 +203,7 @@ We choose **word-aligned packing** for serialization:
 - Simpler bit manipulation (no cross-word masking)
 - Better for zlib/lz4 compression: straddling creates high-entropy bit patterns that compress poorly
 - Minor space overhead (few wasted bits per word) is acceptable for disk storage
-- Lesson from Minecraft: word-straddling was a performance bottleneck and didn't help compression
+- Lesson from prior voxel engines: word-straddling was a performance bottleneck and didn't help compression
 
 Example for 5-bit indices (17-32 palette entries):
 ```
@@ -245,7 +245,7 @@ class BlockType;
 // Cheap to create for short-lived operations
 struct Block {
     std::shared_ptr<SubChunk> subchunk;
-    BlockPos pos;
+    BlockCoord pos;
     uint16_t localIndex;  // Index in subchunk's block storage (0-4095)
 
     // Convenience accessors
@@ -280,7 +280,7 @@ struct Block {
 // - Precomputed 24-rotation collision/hit shapes for O(1) lookup
 //
 // The virtual method design below will be needed when we implement:
-// - Custom block behaviors (events: onPlace, onBreak, onTick)
+// - Custom block behaviors (events: onPlace, onDestroy, onTick)
 // - Per-block custom meshes
 // - Scripted block types
 //
@@ -314,8 +314,8 @@ public:
 
     // Events (called by world)
     virtual void onPlace(Block& block) {}
-    virtual void onBreak(Block& block) {}
-    virtual void onNeighborChange(Block& block, Face face) {}
+    virtual void onDestroy(Block& block) {}
+    virtual void onNeighborUpdated(Block& block, Face face) {}
     virtual void onTick(Block& block) {}
     virtual void onInteract(Block& block, Entity& entity) {}
 
@@ -427,7 +427,7 @@ public:
 
     // Position
     ChunkPos pos() const { return pos_; }
-    BlockPos cornerBlockPos() const;
+    BlockCoord cornerBlockCoord() const;
 
     // Parent column (raw pointer - column outlives subchunks)
     ChunkColumn* column() const { return parent_; }

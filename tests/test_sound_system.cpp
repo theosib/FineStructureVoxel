@@ -57,7 +57,7 @@ TEST(SoundSetIdTest, Hashable) {
 
 TEST(SoundEventTest, BlockPlaceFactory) {
     auto id = SoundSetId::fromName("stone_place_test");
-    auto event = SoundEvent::blockPlace(id, BlockPos(10, 20, 30));
+    auto event = SoundEvent::blockPlace(id, BlockCoord(10, 20, 30));
 
     EXPECT_EQ(event.soundSet, id);
     EXPECT_EQ(event.action, SoundAction::Place);
@@ -70,7 +70,7 @@ TEST(SoundEventTest, BlockPlaceFactory) {
 
 TEST(SoundEventTest, BlockBreakFactory) {
     auto id = SoundSetId::fromName("stone_break_test");
-    auto event = SoundEvent::blockBreak(id, BlockPos(-5, 64, 100));
+    auto event = SoundEvent::blockBreak(id, BlockCoord(-5, 64, 100));
 
     EXPECT_EQ(event.soundSet, id);
     EXPECT_EQ(event.action, SoundAction::Break);
@@ -141,8 +141,8 @@ TEST(SoundEventTest, PositionHelpers) {
     EXPECT_FLOAT_EQ(pos.y, 2.5f);
     EXPECT_FLOAT_EQ(pos.z, 3.5f);
 
-    // Set from BlockPos (centers on block)
-    event.setPosition(BlockPos(10, 20, 30));
+    // Set from BlockCoord (centers on block)
+    event.setPosition(BlockCoord(10, 20, 30));
     EXPECT_FLOAT_EQ(event.posX, 10.5f);
     EXPECT_FLOAT_EQ(event.posY, 20.5f);
     EXPECT_FLOAT_EQ(event.posZ, 30.5f);
@@ -156,8 +156,8 @@ TEST(SoundEventQueueTest, PushAndDrain) {
     SoundEventQueue queue;
 
     auto id = SoundSetId::fromName("queue_test_sound");
-    queue.push(SoundEvent::blockPlace(id, BlockPos(0, 0, 0)));
-    queue.push(SoundEvent::blockBreak(id, BlockPos(1, 1, 1)));
+    queue.push(SoundEvent::blockPlace(id, BlockCoord(0, 0, 0)));
+    queue.push(SoundEvent::blockBreak(id, BlockCoord(1, 1, 1)));
 
     auto events = queue.drainAll();
     EXPECT_EQ(events.size(), 2u);
@@ -175,8 +175,8 @@ TEST(SoundEventQueueTest, TryPopOrder) {
     SoundEventQueue queue;
 
     auto id = SoundSetId::fromName("queue_pop_test");
-    queue.push(SoundEvent::blockPlace(id, BlockPos(0, 0, 0)));
-    queue.push(SoundEvent::blockBreak(id, BlockPos(1, 1, 1)));
+    queue.push(SoundEvent::blockPlace(id, BlockCoord(0, 0, 0)));
+    queue.push(SoundEvent::blockBreak(id, BlockCoord(1, 1, 1)));
 
     auto first = queue.tryPop();
     ASSERT_TRUE(first.has_value());

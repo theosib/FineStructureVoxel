@@ -12,12 +12,15 @@
 #include "finevox/script/finevox_interner.hpp"
 #include "finevox/script/script_cache.hpp"
 #include "finevox/script/script_block_handler.hpp"
+#include "finevox/script/script_entity_handler.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
 
 namespace finevox {
 class World;
+class MobEntity;
+class EntityManager;
 }
 
 namespace finevox::script {
@@ -26,6 +29,8 @@ namespace finevox::script {
 struct ScriptUserData {
     BlockContext* blockCtx = nullptr;
     World* world = nullptr;
+    MobEntity* entityCtx = nullptr;
+    EntityManager* entityManager = nullptr;
 };
 
 class GameScriptEngine {
@@ -36,10 +41,18 @@ public:
     /// Access the underlying finescript engine
     finescript::ScriptEngine& engine() { return *engine_; }
 
-    /// Load a script file and create a persistent handler.
+    /// Load a script file and create a persistent block handler.
     /// Returns nullptr if the script doesn't register any event handlers.
     ScriptBlockHandler* loadBlockScript(const std::string& scriptPath,
                                          const std::string& blockName);
+
+    /// Load a script file and create a persistent entity handler.
+    /// Returns nullptr if the script doesn't register any event handlers.
+    ScriptEntityHandler* loadEntityScript(const std::string& scriptPath,
+                                           const std::string& entityName);
+
+    /// Get an entity handler by name
+    ScriptEntityHandler* getEntityHandler(const std::string& entityName);
 
     /// Hot-reload: check all loaded scripts for changes.
     void reloadChangedScripts();
@@ -47,8 +60,12 @@ public:
     /// Access cache for direct script use outside block handlers.
     ScriptCache& cache() { return cache_; }
 
+    /// Set entity manager reference (for mob.spawn etc.)
+    void setEntityManager(EntityManager* em);
+
 private:
     void registerNativeFunctions();
+    void registerMobNativeFunctions();
 
     std::unique_ptr<finescript::ScriptEngine> engine_;
     FineVoxInterner interner_;
@@ -58,6 +75,9 @@ private:
 
     // Owns all script block handlers (keyed by block name)
     std::unordered_map<std::string, std::unique_ptr<ScriptBlockHandler>> handlers_;
+
+    // Owns all script entity handlers (keyed by entity name)
+    std::unordered_map<std::string, std::unique_ptr<ScriptEntityHandler>> entityHandlers_;
 };
 
 }  // namespace finevox::script

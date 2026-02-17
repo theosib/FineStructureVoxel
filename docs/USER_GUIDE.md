@@ -86,17 +86,17 @@ GLM and LZ4 are fetched automatically via CMake `FetchContent`.
 
 The world is divided into:
 
-- **Blocks** -- the basic unit. Each has a position (`BlockPos { int32_t x, y, z }`).
+- **Blocks** -- the basic unit. Each has a position (`BlockCoord { int32_t x, y, z }`).
 - **SubChunks** -- 16x16x16 cubes of blocks. Position: `ChunkPos { int32_t x, y, z }`.
 - **Columns** -- full-height stacks of subchunks at an (X, Z) position. Position: `ColumnPos { int32_t x, z }`.
 
 Conversions:
 ```cpp
-BlockPos block(100, 64, -200);
+BlockCoord block(100, 64, -200);
 ChunkPos chunk = ChunkPos::fromBlock(block);     // (6, 4, -13)
 ColumnPos col = ColumnPos::fromBlock(block);      // (6, -13)
-LocalBlockPos local = block.local();              // (4, 0, 8)
-BlockPos back = chunk.toWorld(local);             // (100, 64, -200)
+LocalBlockCoord local = block.local();            // (4, 0, 8)
+BlockCoord back = chunk.toWorld(local);           // (100, 64, -200)
 ```
 
 Block index within a subchunk: `y * 256 + z * 16 + x` (Y-major layout).
@@ -129,15 +129,15 @@ World world;
 
 // Create a column and place blocks
 auto& col = world.getOrCreateColumn(ColumnPos(0, 0));
-world.setBlock(BlockPos(0, 0, 0), stoneId);
+world.setBlock(BlockCoord(0, 0, 0), stoneId);
 
 // Read blocks
-BlockTypeId type = world.getBlock(BlockPos(0, 0, 0));
+BlockTypeId type = world.getBlock(BlockCoord(0, 0, 0));
 ```
 
 **Important distinction:**
 - `setBlock()` -- Direct block placement. No events, no lighting updates, no handler callbacks. Use for terrain generation, chunk loading, and bulk initialization.
-- `placeBlock()` / `breakBlock()` -- Event-driven. Triggers handler callbacks (`onPlace`, `onBreak`), neighbor updates, and lighting recalculation. Use for gameplay actions. Requires an `UpdateScheduler` to be set.
+- `placeBlock()` / `breakBlock()` -- Event-driven. Triggers handler callbacks (`onPlace`, `onDestroy`), neighbor updates, and lighting recalculation. Use for gameplay actions. Requires an `UpdateScheduler` to be set.
 
 ---
 
@@ -164,7 +164,7 @@ public:
             BlockType().setOpaque(true).setHardness(2.0f));
 
         // Register a light-emitting block
-        registry.blocks().registerType("mygame:glowstone",
+        registry.blocks().registerType("mygame:luminite",
             BlockType().setOpaque(true).setLightEmission(15));
 
         // Register a transparent block
@@ -246,7 +246,7 @@ class TNTHandler : public BlockHandler {
 public:
     void onPlace(BlockContext& ctx) override {
         // Start a fuse timer when placed
-        ctx.scheduleTick(40);  // 40 ticks = 2 seconds at 20 TPS
+        ctx.scheduleTick(60);  // 60 ticks = 2 seconds at 30 TPS
     }
 
     void onTick(BlockContext& ctx, TickType type) override {
@@ -258,7 +258,7 @@ public:
         }
     }
 
-    bool onUse(BlockContext& ctx, Face face) override {
+    bool onInteract(BlockContext& ctx, Face face) override {
         // Right-click to defuse
         ctx.scheduleTick(0);  // Cancel by setting to 0
         return true;
@@ -280,20 +280,20 @@ When a handler callback fires, `BlockContext` gives you access to:
 - **Modification**: `setBlock(type)`, `setRotation(r)`, `requestMeshRebuild()`, `markDirty()`
 - **Scheduling**: `scheduleTick(delay)`, `setRepeatTickInterval(interval)`
 - **Extra data**: `data()` (returns `DataContainer*`, null if none), `getOrCreateData()`
-- **Previous state**: `previousType()` (available in `onPlace`/`onBreak`)
+- **Previous state**: `previousType()` (available in `onPlace`/`onDestroy`)
 
 ### Tick Types
 
 - **Scheduled** -- `scheduleTick(delay)` fires once after N ticks
 - **Repeat** -- `setRepeatTickInterval(interval)` fires every N ticks
-- **Random** -- Random blocks in each subchunk get ticked periodically (like Minecraft's random tick for grass spread)
+- **Random** -- Random blocks in each subchunk get ticked periodically (standard random tick for grass spread, crop growth, etc.)
 
 ### Setting Up the Event System
 
 ```cpp
 UpdateScheduler scheduler(world);
 TickConfig config;
-config.gameTickIntervalMs = 50;      // 20 TPS
+config.gameTickIntervalMs = 33;      // 30 TPS
 config.randomTicksPerSubchunk = 3;
 scheduler.setTickConfig(config);
 
@@ -569,10 +569,10 @@ RaycastResult result = physics.raycast(
 );
 
 if (result.hit) {
-    BlockPos target = result.blockPos;
+    BlockCoord target = result.blockPos;
     Face hitFace = result.face;
     // Place a block on the face the player clicked
-    BlockPos placePos = target.neighbor(hitFace);
+    BlockCoord placePos = target.neighbor(hitFace);
     world.placeBlock(placePos, stoneId);
 }
 ```
@@ -596,7 +596,7 @@ bool onGround = physics.checkOnGround(player);
 
 Persistence is mostly automatic. The engine provides:
 
-- **RegionFile** -- stores 32x32 columns per file using CBOR serialization
+- **RegionFile** -- stores 64x64 columns per file using CBOR serialization
 - **IOManager** -- async save/load on a background thread
 - **ColumnManager** -- handles the lifecycle state machine (Active -> SaveQueue -> Saving -> Unloaded)
 

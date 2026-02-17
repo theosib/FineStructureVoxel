@@ -44,11 +44,11 @@ public:
     BatchBuilder() = default;
 
     // Queue a block change
-    void setBlock(BlockPos pos, BlockTypeId type);
+    void setBlock(BlockCoord pos, BlockTypeId type);
     void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type);
 
     // Remove a pending change (set back to no-op for that position)
-    void cancel(BlockPos pos);
+    void cancel(BlockCoord pos);
 
     // Check if there are any pending changes
     [[nodiscard]] bool empty() const { return changes_.empty(); }
@@ -60,15 +60,15 @@ public:
     void clear();
 
     // Get the change for a specific position (nullopt if no change)
-    [[nodiscard]] std::optional<BlockTypeId> getChange(BlockPos pos) const;
+    [[nodiscard]] std::optional<BlockTypeId> getChange(BlockCoord pos) const;
 
     // Check if a position has a pending change
-    [[nodiscard]] bool hasChange(BlockPos pos) const;
+    [[nodiscard]] bool hasChange(BlockCoord pos) const;
 
     // Get bounding box of all changes (nullopt if empty)
     struct Bounds {
-        BlockPos min;
-        BlockPos max;
+        BlockCoord min;
+        BlockCoord max;
     };
     [[nodiscard]] std::optional<Bounds> getBounds() const;
 
@@ -80,10 +80,10 @@ public:
     size_t commit(World& world);
 
     // Apply changes and get list of positions that actually changed
-    std::vector<BlockPos> commitAndGetChanged(World& world);
+    std::vector<BlockCoord> commitAndGetChanged(World& world);
 
     // Iterate over pending changes
-    using ChangeCallback = void(BlockPos pos, BlockTypeId type);
+    using ChangeCallback = void(BlockCoord pos, BlockTypeId type);
     void forEach(const std::function<ChangeCallback>& callback) const;
 
     // Merge another batch into this one (other's changes override)
@@ -95,7 +95,7 @@ private:
 
 // BlockChange represents a single block change for events/undo
 struct BlockChange {
-    BlockPos pos;
+    BlockCoord pos;
     BlockTypeId oldType;
     BlockTypeId newType;
 };

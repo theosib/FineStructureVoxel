@@ -30,7 +30,7 @@ constexpr InternedId UNKNOWN_INTERNED_ID = 2;  // Unknown - unrecognized block t
 //
 // Usage:
 //   auto& interner = StringInterner::global();
-//   InternedId id = interner.intern("blockgame:stone");
+//   InternedId id = interner.intern("finevox:stone");
 //   std::string_view name = interner.lookup(id);
 //
 class StringInterner {

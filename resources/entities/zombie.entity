@@ -1,0 +1,18 @@
+# Zombie entity type definition
+name: zombie
+half_extents: 0.3 0.9 0.3
+max_speed: 4.0
+max_health: 20
+armor: 2
+ai: hostile
+follow_range: 35
+attack_damage: 3
+attack_range: 1.5
+attack_cooldown: 1.0
+model: zombie
+default_animation: idle
+spawn_weight: 1.0
+spawn_group_min: 1
+spawn_group_max: 4
+loot: zombie
+sounds: zombie

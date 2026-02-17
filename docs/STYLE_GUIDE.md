@@ -102,7 +102,7 @@ The project uses three namespaces corresponding to the three shared libraries:
 ```cpp
 // Core library (include/finevox/core/, src/core/)
 namespace finevox {
-// BlockPos, World, BlockType, MeshBuilder, etc.
+// BlockCoord, World, BlockType, MeshBuilder, etc.
 }  // namespace finevox
 
 // World generation library (include/finevox/worldgen/, src/worldgen/)
@@ -264,7 +264,7 @@ Finevox uses a layered error strategy:
 ### std::optional for queries
 
 ```cpp
-[[nodiscard]] std::optional<LocalBlockPos> neighbor(Face face) const;
+[[nodiscard]] std::optional<LocalBlockCoord> neighbor(Face face) const;
 [[nodiscard]] std::optional<ConfigDocument> parseFile(const std::string& path) const;
 [[nodiscard]] std::optional<BlockModel> load(const std::string& logicalPath);
 ```
@@ -272,7 +272,7 @@ Finevox uses a layered error strategy:
 ### Bool for operations
 
 ```cpp
-bool placeBlock(BlockPos pos, BlockTypeId type);
+bool placeBlock(BlockCoord pos, BlockTypeId type);
 bool save();
 bool canUnloadChunk(ChunkPos pos) const;
 ```
@@ -345,7 +345,7 @@ Block change → Event queue → Handler → Lighting queue → Mesh rebuild que
 Applied to all getters, queries, and factory methods:
 ```cpp
 [[nodiscard]] bool isEmpty() const;
-[[nodiscard]] BlockTypeId getBlock(BlockPos pos) const;
+[[nodiscard]] BlockTypeId getBlock(BlockCoord pos) const;
 [[nodiscard]] std::optional<BlockModel> load(const std::string& path);
 ```
 
@@ -354,8 +354,8 @@ Applied to all getters, queries, and factory methods:
 Used for position types, face utilities, and compile-time data:
 ```cpp
 constexpr Face oppositeFace(Face f);
-[[nodiscard]] constexpr BlockPos apply(BlockPos pos) const;
-constexpr LocalBlockPos() = default;
+[[nodiscard]] constexpr BlockCoord apply(BlockCoord pos) const;
+constexpr LocalBlockCoord() = default;
 ```
 
 ### `auto`
@@ -389,8 +389,8 @@ std::optional<InternedId> find(std::string_view str) const;
 
 Use C++20 defaulted spaceship operator where applicable:
 ```cpp
-constexpr auto operator<=>(const LocalBlockPos& other) const = default;
-constexpr bool operator==(const LocalBlockPos& other) const = default;
+constexpr auto operator<=>(const LocalBlockCoord& other) const = default;
+constexpr bool operator==(const LocalBlockCoord& other) const = default;
 ```
 
 ---
@@ -410,7 +410,7 @@ using CanUnloadCallback = std::function<bool(ColumnPos)>;
 ### Callback setters
 
 ```cpp
-void setBlockChangeCallback(std::function<void(BlockPos, BlockTypeId, BlockTypeId)> cb);
+void setBlockChangeCallback(std::function<void(BlockCoord, BlockTypeId, BlockTypeId)> cb);
 void setChunkLoadCallback(std::function<void(ChunkPos, std::shared_ptr<SubChunk>)> cb);
 ```
 

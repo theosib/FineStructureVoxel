@@ -36,7 +36,7 @@ namespace finevox {
  * Design: [24-event-system.md] §24.8
  */
 struct LightingUpdate {
-    BlockPos pos;
+    BlockCoord pos;
     BlockTypeId oldType;
     BlockTypeId newType;
 
@@ -139,7 +139,7 @@ private:
 
     // Consolidates by position - newer updates overwrite older
     mutable std::mutex mutex_;
-    std::unordered_map<BlockPos, LightingUpdate> pending_;
+    std::unordered_map<BlockCoord, LightingUpdate> pending_;
     std::condition_variable cv_;
     std::atomic<bool> stopped_{false};
 
@@ -203,13 +203,13 @@ public:
     // ========================================================================
 
     /// Get sky light at world position (0-15)
-    [[nodiscard]] uint8_t getSkyLight(const BlockPos& pos) const;
+    [[nodiscard]] uint8_t getSkyLight(const BlockCoord& pos) const;
 
     /// Get block light at world position (0-15)
-    [[nodiscard]] uint8_t getBlockLight(const BlockPos& pos) const;
+    [[nodiscard]] uint8_t getBlockLight(const BlockCoord& pos) const;
 
     /// Get combined light (max of sky and block) at world position
-    [[nodiscard]] uint8_t getCombinedLight(const BlockPos& pos) const;
+    [[nodiscard]] uint8_t getCombinedLight(const BlockCoord& pos) const;
 
     /// Get subchunk containing light data at position (may be null if chunk not loaded)
     [[nodiscard]] SubChunk* getSubChunkForLight(const ChunkPos& chunkPos);
@@ -223,22 +223,22 @@ public:
     /// @param pos Position where block was placed
     /// @param oldType Previous block type (for light removal)
     /// @param newType New block type (for light emission)
-    void onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockTypeId newType);
+    void onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, BlockTypeId newType);
 
     /// Update lighting after a block is removed (set to air)
     /// @param pos Position where block was removed
     /// @param oldType Previous block type
-    void onBlockRemoved(const BlockPos& pos, BlockTypeId oldType);
+    void onBlockRemoved(const BlockCoord& pos, BlockTypeId oldType);
 
     /// Propagate block light from a light source
     /// @param pos Position of the light source
     /// @param lightLevel Light level to emit (0-15)
-    void propagateBlockLight(const BlockPos& pos, uint8_t lightLevel);
+    void propagateBlockLight(const BlockCoord& pos, uint8_t lightLevel);
 
     /// Remove block light from a position and update surrounding area
     /// @param pos Position where light source was removed
     /// @param oldLevel Previous light level at this position
-    void removeBlockLight(const BlockPos& pos, uint8_t oldLevel);
+    void removeBlockLight(const BlockCoord& pos, uint8_t oldLevel);
 
     // ========================================================================
     // Sky Light Updates
@@ -253,12 +253,12 @@ public:
     /// @param pos Position where block was placed/removed affecting sky
     /// @param oldHeight Previous height at this X,Z
     /// @param newHeight New height at this X,Z
-    void updateSkyLight(const BlockPos& pos, int32_t oldHeight, int32_t newHeight);
+    void updateSkyLight(const BlockCoord& pos, int32_t oldHeight, int32_t newHeight);
 
     /// Propagate sky light from a position
     /// @param pos Starting position
     /// @param lightLevel Light level to propagate
-    void propagateSkyLight(const BlockPos& pos, uint8_t lightLevel);
+    void propagateSkyLight(const BlockCoord& pos, uint8_t lightLevel);
 
     // ========================================================================
     // Batch Operations
@@ -274,7 +274,7 @@ public:
 
     /// Mark a region as needing light recalculation
     /// Light updates will be processed on next processUpdates() call
-    void markDirty(const BlockPos& pos);
+    void markDirty(const BlockCoord& pos);
 
     /// Process pending light updates
     /// Call periodically to batch light updates for efficiency
@@ -369,14 +369,14 @@ private:
     std::unordered_map<BlockTypeId, LightAttenuationCallback> attenuationCallbacks_;
 
     // Pending updates for batch processing
-    std::unordered_set<BlockPos> pendingUpdates_;
+    std::unordered_set<BlockCoord> pendingUpdates_;
 
     // Configuration
     int32_t maxPropagationDistance_ = 256;  // Max blocks to propagate per update
 
     // BFS queue entry for light propagation
     struct LightNode {
-        BlockPos pos;
+        BlockCoord pos;
         uint8_t light;
 
         bool operator<(const LightNode& other) const {
@@ -398,14 +398,14 @@ private:
     SubChunk* getOrCreateSubChunkForLight(const ChunkPos& chunkPos);
 
     // Convert world position to chunk position and local position
-    [[nodiscard]] static ChunkPos toChunkPos(const BlockPos& pos);
-    [[nodiscard]] static int32_t toLocalIndex(const BlockPos& pos);
+    [[nodiscard]] static ChunkPos toChunkPos(const BlockCoord& pos);
+    [[nodiscard]] static int32_t toLocalIndex(const BlockCoord& pos);
 
     // BFS light propagation implementation
-    void propagateLightBFS(const BlockPos& start, uint8_t startLevel, bool isSkyLight);
+    void propagateLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight);
 
     // Light removal with re-propagation
-    void removeLightBFS(const BlockPos& start, uint8_t startLevel, bool isSkyLight);
+    void removeLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight);
 
     // Process a single lighting update (called by lighting thread)
     void processLightingUpdate(const LightingUpdate& update);
@@ -432,7 +432,7 @@ private:
     // Record a chunk as affected by light changes (for batch mesh rebuild)
     // Also marks adjacent chunks if position is at a subchunk boundary,
     // since faces in neighboring chunks may sample light from this position.
-    void recordAffectedChunk(const BlockPos& pos);
+    void recordAffectedChunk(const BlockCoord& pos);
 
     // Push mesh rebuild requests for all affected chunks and clear the set
     void flushAffectedChunks();

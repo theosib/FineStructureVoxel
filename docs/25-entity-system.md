@@ -296,7 +296,7 @@ struct GraphicsEvent {
     // Helpers
     Vec3 position() const { return Vec3(posX, posY, posZ); }
     Vec3 velocity() const { return Vec3(velX, velY, velZ); }
-    BlockPos blockPos() const { return BlockPos(blockX, blockY, blockZ); }
+    BlockCoord blockPos() const { return BlockCoord(blockX, blockY, blockZ); }
 
     // Factory methods
     static GraphicsEvent entitySnapshot(const Entity& entity, uint64_t tick);
@@ -304,7 +304,7 @@ struct GraphicsEvent {
     static GraphicsEvent entityDespawn(EntityId id);
     static GraphicsEvent playerCorrection(EntityId id, Vec3 pos, Vec3 vel, bool ground,
                                            uint64_t seq, CorrectionReason reason);
-    static GraphicsEvent blockCorrection(BlockPos pos, BlockTypeId correct, BlockTypeId expected);
+    static GraphicsEvent blockCorrection(BlockCoord pos, BlockTypeId correct, BlockTypeId expected);
     static GraphicsEvent animation(EntityId id, uint8_t animId, float time);
 };
 
@@ -1017,7 +1017,7 @@ enum class EntityType : uint16_t {
     Pig, Cow, Sheep, Chicken,
 
     // Hostile mobs
-    Zombie, Skeleton, Creeper, Spider,
+    Zombie, Skeleton, Spider,
 
     // Items and projectiles
     ItemDrop, Arrow, Fireball,

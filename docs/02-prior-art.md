@@ -81,7 +81,7 @@ The Java `Mesh.loadMesh()` parses block configuration files defining:
 6. **Font/text rendering** - Complete TrueType atlas with kerning support
 
 **Issues Found:**
-- Bug in BlockPos.fromVector() - uses `x` instead of `z` for Z coordinate
+- Bug in BlockCoord.fromVector() - uses `x` instead of `z` for Z coordinate
 - Perlin noise array initialization bug
 - Entity frustum check always returns true (disabled)
 - No chunk unloading - memory grows unbounded

@@ -43,7 +43,7 @@ enum class FeatureResult {
 /// Context passed to Feature::place() with all information needed for placement
 struct FeaturePlacementContext {
     World& world;
-    BlockPos origin;                ///< Placement origin (usually surface position)
+    BlockCoord origin;                ///< Placement origin (usually surface position)
     BiomeId biome;
     uint64_t seed;                  ///< Per-placement deterministic seed
     GenerationContext* genCtx;      ///< Null for runtime placement
@@ -65,7 +65,7 @@ public:
     [[nodiscard]] virtual FeatureResult place(FeaturePlacementContext& ctx) = 0;
 
     /// Maximum extent this feature can reach from its origin (for cross-column checks)
-    [[nodiscard]] virtual BlockPos maxExtent() const { return BlockPos(1, 1, 1); }
+    [[nodiscard]] virtual BlockCoord maxExtent() const { return BlockCoord(1, 1, 1); }
 };
 
 }  // namespace finevox::worldgen

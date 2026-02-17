@@ -63,7 +63,7 @@ float calculateFog(float distance) {
     return clamp((distance - chunk.fogStart) / (chunk.fogEnd - chunk.fogStart), 0.0, 1.0);
 }
 
-// Per-face brightness (Minecraft-style)
+// Per-face brightness
 // Top faces are brightest, bottom darkest, sides in between
 float getFaceShade(vec3 normal) {
     if (normal.y > 0.5) return 1.0;        // Top: full brightness

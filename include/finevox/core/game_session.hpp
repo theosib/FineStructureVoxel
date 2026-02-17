@@ -25,8 +25,8 @@ struct GameSessionConfig {
     bool enableLighting = true;
     bool enableSound = true;
     float gravity = -14.0f;
-    uint32_t tickRate = 20;           // TPS
-    uint32_t randomTicksPerChunk = 3;
+    uint32_t tickRate = 30;           // TPS
+    uint32_t randomTicksPerChunk = 4;
 };
 
 /// Owns all game state and provides the session boundary.

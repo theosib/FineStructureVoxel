@@ -29,7 +29,7 @@ public:
     LocalGameActions(World& world, SoundEventQueue& soundQueue, GameCommandQueue& commandQueue)
         : world_(world), soundQueue_(soundQueue), commandQueue_(commandQueue) {}
 
-    bool breakBlock(BlockPos pos) override {
+    bool breakBlock(BlockCoord pos) override {
         BlockTypeId oldType = world_.getBlock(pos);
         if (oldType.isAir()) return false;
 
@@ -44,7 +44,7 @@ public:
         return true;
     }
 
-    bool placeBlock(BlockPos pos, BlockTypeId type) override {
+    bool placeBlock(BlockCoord pos, BlockTypeId type) override {
         // Sound eagerly
         auto soundSet = BlockRegistry::global().getType(type).soundSet();
         if (soundSet.isValid()) {
@@ -56,7 +56,7 @@ public:
         return true;
     }
 
-    bool useBlock(BlockPos pos, Face face) override {
+    bool useBlock(BlockCoord pos, Face face) override {
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 
@@ -64,7 +64,7 @@ public:
         return true;
     }
 
-    bool hitBlock(BlockPos pos, Face face) override {
+    bool hitBlock(BlockCoord pos, Face face) override {
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 

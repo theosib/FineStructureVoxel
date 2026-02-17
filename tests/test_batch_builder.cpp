@@ -18,11 +18,11 @@ TEST(BatchBuilderTest, SetBlock) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:stone");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
 
     EXPECT_FALSE(batch.empty());
     EXPECT_EQ(batch.size(), 1);
-    EXPECT_TRUE(batch.hasChange(BlockPos(0, 0, 0)));
+    EXPECT_TRUE(batch.hasChange(BlockCoord(0, 0, 0)));
 }
 
 TEST(BatchBuilderTest, SetBlockCoordinates) {
@@ -31,23 +31,23 @@ TEST(BatchBuilderTest, SetBlockCoordinates) {
 
     batch.setBlock(5, 10, 15, stone);
 
-    EXPECT_TRUE(batch.hasChange(BlockPos(5, 10, 15)));
+    EXPECT_TRUE(batch.hasChange(BlockCoord(5, 10, 15)));
 }
 
 TEST(BatchBuilderTest, GetChange) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:stone3");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
 
-    auto change = batch.getChange(BlockPos(0, 0, 0));
+    auto change = batch.getChange(BlockCoord(0, 0, 0));
     ASSERT_TRUE(change.has_value());
     EXPECT_EQ(*change, stone);
 }
 
 TEST(BatchBuilderTest, GetChangeNonexistent) {
     BatchBuilder batch;
-    auto change = batch.getChange(BlockPos(999, 999, 999));
+    auto change = batch.getChange(BlockCoord(999, 999, 999));
     EXPECT_FALSE(change.has_value());
 }
 
@@ -60,12 +60,12 @@ TEST(BatchBuilderTest, CoalescesChanges) {
     auto stone = BlockTypeId::fromName("batch:coalesce_stone");
     auto dirt = BlockTypeId::fromName("batch:coalesce_dirt");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(0, 0, 0), dirt);  // Overwrites previous
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), dirt);  // Overwrites previous
 
     EXPECT_EQ(batch.size(), 1);
 
-    auto change = batch.getChange(BlockPos(0, 0, 0));
+    auto change = batch.getChange(BlockCoord(0, 0, 0));
     EXPECT_EQ(*change, dirt);
 }
 
@@ -73,22 +73,22 @@ TEST(BatchBuilderTest, Cancel) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:cancel");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(1, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(1, 0, 0), stone);
 
-    batch.cancel(BlockPos(0, 0, 0));
+    batch.cancel(BlockCoord(0, 0, 0));
 
     EXPECT_EQ(batch.size(), 1);
-    EXPECT_FALSE(batch.hasChange(BlockPos(0, 0, 0)));
-    EXPECT_TRUE(batch.hasChange(BlockPos(1, 0, 0)));
+    EXPECT_FALSE(batch.hasChange(BlockCoord(0, 0, 0)));
+    EXPECT_TRUE(batch.hasChange(BlockCoord(1, 0, 0)));
 }
 
 TEST(BatchBuilderTest, Clear) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:clear");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(1, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(1, 0, 0), stone);
 
     batch.clear();
 
@@ -109,26 +109,26 @@ TEST(BatchBuilderTest, GetBoundsSingle) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:bounds1");
 
-    batch.setBlock(BlockPos(5, 10, 15), stone);
+    batch.setBlock(BlockCoord(5, 10, 15), stone);
 
     auto bounds = batch.getBounds();
     ASSERT_TRUE(bounds.has_value());
-    EXPECT_EQ(bounds->min, BlockPos(5, 10, 15));
-    EXPECT_EQ(bounds->max, BlockPos(5, 10, 15));
+    EXPECT_EQ(bounds->min, BlockCoord(5, 10, 15));
+    EXPECT_EQ(bounds->max, BlockCoord(5, 10, 15));
 }
 
 TEST(BatchBuilderTest, GetBoundsMultiple) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:bounds2");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(10, 20, 30), stone);
-    batch.setBlock(BlockPos(-5, -10, -15), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(10, 20, 30), stone);
+    batch.setBlock(BlockCoord(-5, -10, -15), stone);
 
     auto bounds = batch.getBounds();
     ASSERT_TRUE(bounds.has_value());
-    EXPECT_EQ(bounds->min, BlockPos(-5, -10, -15));
-    EXPECT_EQ(bounds->max, BlockPos(10, 20, 30));
+    EXPECT_EQ(bounds->min, BlockCoord(-5, -10, -15));
+    EXPECT_EQ(bounds->max, BlockCoord(10, 20, 30));
 }
 
 // ============================================================================
@@ -139,10 +139,10 @@ TEST(BatchBuilderTest, GetAffectedColumns) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:affected");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);     // Column (0, 0)
-    batch.setBlock(BlockPos(15, 0, 15), stone);   // Column (0, 0)
-    batch.setBlock(BlockPos(16, 0, 0), stone);    // Column (1, 0)
-    batch.setBlock(BlockPos(0, 0, 16), stone);    // Column (0, 1)
+    batch.setBlock(BlockCoord(0, 0, 0), stone);     // Column (0, 0)
+    batch.setBlock(BlockCoord(15, 0, 15), stone);   // Column (0, 0)
+    batch.setBlock(BlockCoord(16, 0, 0), stone);    // Column (1, 0)
+    batch.setBlock(BlockCoord(0, 0, 16), stone);    // Column (0, 1)
 
     auto columns = batch.getAffectedColumns();
 
@@ -158,9 +158,9 @@ TEST(BatchBuilderTest, CommitToWorld) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:commit");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(1, 0, 0), stone);
-    batch.setBlock(BlockPos(2, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(1, 0, 0), stone);
+    batch.setBlock(BlockCoord(2, 0, 0), stone);
 
     size_t changed = batch.commit(world);
 
@@ -177,11 +177,11 @@ TEST(BatchBuilderTest, CommitSkipsNoOps) {
     auto stone = BlockTypeId::fromName("batch:noop");
 
     // Pre-set a block
-    world.setBlock(BlockPos(0, 0, 0), stone);
+    world.setBlock(BlockCoord(0, 0, 0), stone);
 
     BatchBuilder batch;
-    batch.setBlock(BlockPos(0, 0, 0), stone);  // Same value - no-op
-    batch.setBlock(BlockPos(1, 0, 0), stone);  // New block
+    batch.setBlock(BlockCoord(0, 0, 0), stone);  // Same value - no-op
+    batch.setBlock(BlockCoord(1, 0, 0), stone);  // New block
 
     size_t changed = batch.commit(world);
 
@@ -193,9 +193,9 @@ TEST(BatchBuilderTest, CommitAndGetChanged) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:getchanged");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(1, 0, 0), stone);
-    batch.setBlock(BlockPos(2, 0, 0), AIR_BLOCK_TYPE);  // No-op (already air)
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(1, 0, 0), stone);
+    batch.setBlock(BlockCoord(2, 0, 0), AIR_BLOCK_TYPE);  // No-op (already air)
 
     auto changed = batch.commitAndGetChanged(world);
 
@@ -210,12 +210,12 @@ TEST(BatchBuilderTest, ForEach) {
     BatchBuilder batch;
     auto stone = BlockTypeId::fromName("batch:foreach");
 
-    batch.setBlock(BlockPos(0, 0, 0), stone);
-    batch.setBlock(BlockPos(1, 0, 0), stone);
-    batch.setBlock(BlockPos(2, 0, 0), stone);
+    batch.setBlock(BlockCoord(0, 0, 0), stone);
+    batch.setBlock(BlockCoord(1, 0, 0), stone);
+    batch.setBlock(BlockCoord(2, 0, 0), stone);
 
     int count = 0;
-    batch.forEach([&count](BlockPos, BlockTypeId) {
+    batch.forEach([&count](BlockCoord, BlockTypeId) {
         ++count;
     });
 
@@ -232,18 +232,18 @@ TEST(BatchBuilderTest, Merge) {
     auto stone = BlockTypeId::fromName("batch:merge_stone");
     auto dirt = BlockTypeId::fromName("batch:merge_dirt");
 
-    batch1.setBlock(BlockPos(0, 0, 0), stone);
-    batch1.setBlock(BlockPos(1, 0, 0), stone);
+    batch1.setBlock(BlockCoord(0, 0, 0), stone);
+    batch1.setBlock(BlockCoord(1, 0, 0), stone);
 
-    batch2.setBlock(BlockPos(1, 0, 0), dirt);  // Overrides batch1
-    batch2.setBlock(BlockPos(2, 0, 0), dirt);
+    batch2.setBlock(BlockCoord(1, 0, 0), dirt);  // Overrides batch1
+    batch2.setBlock(BlockCoord(2, 0, 0), dirt);
 
     batch1.merge(batch2);
 
     EXPECT_EQ(batch1.size(), 3);
-    EXPECT_EQ(*batch1.getChange(BlockPos(0, 0, 0)), stone);
-    EXPECT_EQ(*batch1.getChange(BlockPos(1, 0, 0)), dirt);  // Overridden
-    EXPECT_EQ(*batch1.getChange(BlockPos(2, 0, 0)), dirt);
+    EXPECT_EQ(*batch1.getChange(BlockCoord(0, 0, 0)), stone);
+    EXPECT_EQ(*batch1.getChange(BlockCoord(1, 0, 0)), dirt);  // Overridden
+    EXPECT_EQ(*batch1.getChange(BlockCoord(2, 0, 0)), dirt);
 }
 
 // ============================================================================
@@ -256,11 +256,11 @@ TEST(BatchBuilderTest, CommitWithHistory) {
     auto dirt = BlockTypeId::fromName("batch:history_dirt");
 
     // Pre-set some blocks
-    world.setBlock(BlockPos(0, 0, 0), stone);
+    world.setBlock(BlockCoord(0, 0, 0), stone);
 
     BatchBuilder batch;
-    batch.setBlock(BlockPos(0, 0, 0), dirt);  // Change stone -> dirt
-    batch.setBlock(BlockPos(1, 0, 0), stone); // Set new block
+    batch.setBlock(BlockCoord(0, 0, 0), dirt);  // Change stone -> dirt
+    batch.setBlock(BlockCoord(1, 0, 0), stone); // Set new block
 
     auto result = commitBatchWithHistory(batch, world);
 
@@ -270,7 +270,7 @@ TEST(BatchBuilderTest, CommitWithHistory) {
     // Find the stone->dirt change
     bool foundChange = false;
     for (const auto& change : result.changes) {
-        if (change.pos == BlockPos(0, 0, 0)) {
+        if (change.pos == BlockCoord(0, 0, 0)) {
             EXPECT_EQ(change.oldType, stone);
             EXPECT_EQ(change.newType, dirt);
             foundChange = true;

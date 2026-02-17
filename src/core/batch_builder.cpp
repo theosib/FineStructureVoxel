@@ -5,15 +5,15 @@
 
 namespace finevox {
 
-void BatchBuilder::setBlock(BlockPos pos, BlockTypeId type) {
+void BatchBuilder::setBlock(BlockCoord pos, BlockTypeId type) {
     changes_[pos.pack()] = type;
 }
 
 void BatchBuilder::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-    setBlock(BlockPos(x, y, z), type);
+    setBlock(BlockCoord(x, y, z), type);
 }
 
-void BatchBuilder::cancel(BlockPos pos) {
+void BatchBuilder::cancel(BlockCoord pos) {
     changes_.erase(pos.pack());
 }
 
@@ -21,7 +21,7 @@ void BatchBuilder::clear() {
     changes_.clear();
 }
 
-std::optional<BlockTypeId> BatchBuilder::getChange(BlockPos pos) const {
+std::optional<BlockTypeId> BatchBuilder::getChange(BlockCoord pos) const {
     auto it = changes_.find(pos.pack());
     if (it != changes_.end()) {
         return it->second;
@@ -29,7 +29,7 @@ std::optional<BlockTypeId> BatchBuilder::getChange(BlockPos pos) const {
     return std::nullopt;
 }
 
-bool BatchBuilder::hasChange(BlockPos pos) const {
+bool BatchBuilder::hasChange(BlockCoord pos) const {
     return changes_.contains(pos.pack());
 }
 
@@ -47,7 +47,7 @@ std::optional<BatchBuilder::Bounds> BatchBuilder::getBounds() const {
     bounds.max.z = std::numeric_limits<int32_t>::min();
 
     for (const auto& [packed, type] : changes_) {
-        BlockPos pos = BlockPos::unpack(packed);
+        BlockCoord pos = BlockCoord::unpack(packed);
         bounds.min.x = std::min(bounds.min.x, pos.x);
         bounds.min.y = std::min(bounds.min.y, pos.y);
         bounds.min.z = std::min(bounds.min.z, pos.z);
@@ -63,7 +63,7 @@ std::vector<ColumnPos> BatchBuilder::getAffectedColumns() const {
     std::unordered_set<uint64_t> columnSet;
 
     for (const auto& [packed, type] : changes_) {
-        BlockPos pos = BlockPos::unpack(packed);
+        BlockCoord pos = BlockCoord::unpack(packed);
         ColumnPos colPos = ColumnPos::fromBlock(pos);
         columnSet.insert(colPos.pack());
     }
@@ -80,7 +80,7 @@ size_t BatchBuilder::commit(World& world) {
     size_t changed = 0;
 
     for (const auto& [packed, newType] : changes_) {
-        BlockPos pos = BlockPos::unpack(packed);
+        BlockCoord pos = BlockCoord::unpack(packed);
         BlockTypeId oldType = world.getBlock(pos);
 
         if (oldType != newType) {
@@ -93,11 +93,11 @@ size_t BatchBuilder::commit(World& world) {
     return changed;
 }
 
-std::vector<BlockPos> BatchBuilder::commitAndGetChanged(World& world) {
-    std::vector<BlockPos> changedPositions;
+std::vector<BlockCoord> BatchBuilder::commitAndGetChanged(World& world) {
+    std::vector<BlockCoord> changedPositions;
 
     for (const auto& [packed, newType] : changes_) {
-        BlockPos pos = BlockPos::unpack(packed);
+        BlockCoord pos = BlockCoord::unpack(packed);
         BlockTypeId oldType = world.getBlock(pos);
 
         if (oldType != newType) {
@@ -112,7 +112,7 @@ std::vector<BlockPos> BatchBuilder::commitAndGetChanged(World& world) {
 
 void BatchBuilder::forEach(const std::function<ChangeCallback>& callback) const {
     for (const auto& [packed, type] : changes_) {
-        callback(BlockPos::unpack(packed), type);
+        callback(BlockCoord::unpack(packed), type);
     }
 }
 
@@ -126,7 +126,7 @@ BatchResult commitBatchWithHistory(BatchBuilder& batch, World& world) {
     BatchResult result;
     result.bounds = batch.getBounds();
 
-    batch.forEach([&](BlockPos pos, BlockTypeId newType) {
+    batch.forEach([&](BlockCoord pos, BlockTypeId newType) {
         BlockTypeId oldType = world.getBlock(pos);
 
         if (oldType != newType) {

@@ -235,7 +235,7 @@ void OrePass::generate(GenerationContext& ctx) {
 
             FeaturePlacementContext fctx{
                 ctx.world,
-                BlockPos(worldX + lx, ly, worldZ + lz),
+                BlockCoord(worldX + lx, ly, worldZ + lz),
                 centerBiome,
                 z,  // per-vein seed
                 &ctx
@@ -307,7 +307,7 @@ void StructurePass::generate(GenerationContext& ctx) {
 
                 FeaturePlacementContext fctx{
                     ctx.world,
-                    BlockPos(worldX + lx, surfaceY + 1, worldZ + lz),
+                    BlockCoord(worldX + lx, surfaceY + 1, worldZ + lz),
                     biome,
                     z,
                     &ctx

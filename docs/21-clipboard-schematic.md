@@ -37,7 +37,7 @@ namespace finevox {
 
 /// Complete snapshot of a block's state (portable format)
 struct BlockSnapshot {
-    std::string typeName;           // Block type name (e.g., "blockgame:oak_stairs")
+    std::string typeName;           // Block type name (e.g., "finevox:oak_stairs")
     Rotation rotation;              // 24-state rotation
     glm::vec3 displacement{0.0f};   // Sub-block offset (usually zero)
     std::optional<DataContainer> extraData;  // Tile entity data, custom properties
@@ -144,15 +144,15 @@ namespace finevox {
 /// Extract a region from the world into a schematic
 Schematic extractRegion(
     World& world,
-    BlockPos min,
-    BlockPos max
+    BlockCoord min,
+    BlockCoord max
 );
 
 /// Extract with block filter (e.g., skip air, only certain types)
 Schematic extractRegion(
     World& world,
-    BlockPos min,
-    BlockPos max,
+    BlockCoord min,
+    BlockCoord max,
     std::function<bool(BlockTypeId)> filter
 );
 
@@ -162,14 +162,14 @@ Schematic extractRegion(
 **Implementation sketch:**
 
 ```cpp
-Schematic extractRegion(World& world, BlockPos min, BlockPos max) {
-    auto size = max - min + BlockPos(1, 1, 1);
+Schematic extractRegion(World& world, BlockCoord min, BlockCoord max) {
+    auto size = max - min + BlockCoord(1, 1, 1);
     Schematic result(size.x, size.y, size.z);
 
     for (int32_t x = min.x; x <= max.x; ++x) {
         for (int32_t z = min.z; z <= max.z; ++z) {
             for (int32_t y = min.y; y <= max.y; ++y) {
-                BlockPos worldPos(x, y, z);
+                BlockCoord worldPos(x, y, z);
                 glm::ivec3 localPos = worldPos - min;
 
                 BlockSnapshot& snap = result.at(localPos);
@@ -215,7 +215,7 @@ struct PlaceOptions {
 int32_t placeSchematic(
     World& world,
     const Schematic& schematic,
-    BlockPos origin,
+    BlockCoord origin,
     const PlaceOptions& options = {}
 );
 
@@ -223,7 +223,7 @@ int32_t placeSchematic(
 int32_t placeSchematic(
     World& world,
     const Schematic& schematic,
-    BlockPos origin,
+    BlockCoord origin,
     const PlaceOptions& options,
     std::function<BlockSnapshot(const BlockSnapshot&)> transformer
 );
@@ -235,7 +235,7 @@ int32_t placeSchematic(
 
 ```cpp
 int32_t placeSchematic(World& world, const Schematic& schematic,
-                       BlockPos origin, const PlaceOptions& options) {
+                       BlockCoord origin, const PlaceOptions& options) {
     BatchBuilder batch(world);
     int32_t placed = 0;
 
@@ -245,7 +245,7 @@ int32_t placeSchematic(World& world, const Schematic& schematic,
         // Apply rotation/mirror to position
         glm::ivec3 transformedPos = transformPosition(localPos, schematic.size(),
                                                        options.rotation, options.mirror);
-        BlockPos worldPos = origin + BlockPos(transformedPos.x, transformedPos.y, transformedPos.z);
+        BlockCoord worldPos = origin + BlockCoord(transformedPos.x, transformedPos.y, transformedPos.z);
 
         // Check if we should replace existing block
         if (!options.replaceNonAir && world.getBlock(worldPos) != AIR_BLOCK_TYPE) {
@@ -299,8 +299,8 @@ Schematics serialize to CBOR for file storage:
 
     "palette": [                         // Block type palette
         "air",
-        "blockgame:stone",
-        "blockgame:oak_planks",
+        "finevox:stone",
+        "finevox:oak_planks",
         ...
     ],
 

@@ -118,7 +118,7 @@ LightEngine::~LightEngine() {
 // Position Helpers
 // ============================================================================
 
-ChunkPos LightEngine::toChunkPos(const BlockPos& pos) {
+ChunkPos LightEngine::toChunkPos(const BlockCoord& pos) {
     // Floor division for negative coordinates
     auto floorDiv = [](int32_t a, int32_t b) -> int32_t {
         return a >= 0 ? a / b : (a - b + 1) / b;
@@ -131,7 +131,7 @@ ChunkPos LightEngine::toChunkPos(const BlockPos& pos) {
     };
 }
 
-int32_t LightEngine::toLocalIndex(const BlockPos& pos) {
+int32_t LightEngine::toLocalIndex(const BlockCoord& pos) {
     // Proper modulo for negative numbers
     int32_t localX = pos.x & 15;
     int32_t localY = pos.y & 15;
@@ -170,7 +170,7 @@ SubChunk* LightEngine::getOrCreateSubChunkForLight(const ChunkPos& chunkPos) {
 // Light Access
 // ============================================================================
 
-uint8_t LightEngine::getSkyLight(const BlockPos& pos) const {
+uint8_t LightEngine::getSkyLight(const BlockCoord& pos) const {
     ChunkPos chunkPos = toChunkPos(pos);
     const SubChunk* subChunk = getSubChunkForLight(chunkPos);
     if (!subChunk) {
@@ -180,7 +180,7 @@ uint8_t LightEngine::getSkyLight(const BlockPos& pos) const {
     return subChunk->getSkyLight(toLocalIndex(pos));
 }
 
-uint8_t LightEngine::getBlockLight(const BlockPos& pos) const {
+uint8_t LightEngine::getBlockLight(const BlockCoord& pos) const {
     ChunkPos chunkPos = toChunkPos(pos);
     const SubChunk* subChunk = getSubChunkForLight(chunkPos);
     if (!subChunk) {
@@ -189,7 +189,7 @@ uint8_t LightEngine::getBlockLight(const BlockPos& pos) const {
     return subChunk->getBlockLight(toLocalIndex(pos));
 }
 
-uint8_t LightEngine::getCombinedLight(const BlockPos& pos) const {
+uint8_t LightEngine::getCombinedLight(const BlockCoord& pos) const {
     ChunkPos chunkPos = toChunkPos(pos);
     const SubChunk* subChunk = getSubChunkForLight(chunkPos);
     if (!subChunk) {
@@ -238,7 +238,7 @@ uint8_t LightEngine::getLightEmission(BlockTypeId blockType) const {
 // Block Light Updates
 // ============================================================================
 
-void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockTypeId newType) {
+void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, BlockTypeId newType) {
     // Get light emissions
     uint8_t oldEmission = getLightEmission(oldType);
     uint8_t newEmission = getLightEmission(newType);
@@ -284,7 +284,7 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
 
             // Propagate darkness down
             for (int32_t y = pos.y - 1; y >= pos.y - 16; --y) {
-                BlockPos belowPos{pos.x, y, pos.z};
+                BlockCoord belowPos{pos.x, y, pos.z};
                 uint8_t belowLight = getSkyLight(belowPos);
                 if (belowLight == 0) break;
 
@@ -302,21 +302,21 @@ void LightEngine::onBlockPlaced(const BlockPos& pos, BlockTypeId oldType, BlockT
     }
 }
 
-void LightEngine::onBlockRemoved(const BlockPos& pos, BlockTypeId oldType) {
+void LightEngine::onBlockRemoved(const BlockCoord& pos, BlockTypeId oldType) {
     onBlockPlaced(pos, oldType, AIR_BLOCK_TYPE);
 
     // If this block was blocking light, light can now flow through
     uint8_t oldAttenuation = getAttenuation(oldType);
     if (oldAttenuation >= 15) {
         // Was fully opaque - find the highest light from neighbors and propagate from here
-        static const std::array<BlockPos, 6> offsets = {{
+        static const std::array<BlockCoord, 6> offsets = {{
             {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
         }};
 
         // Find the maximum light from all neighbors (minus attenuation)
         uint8_t maxNeighborLight = 0;
         for (const auto& offset : offsets) {
-            BlockPos neighborPos{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+            BlockCoord neighborPos{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
             uint8_t neighborLight = getBlockLight(neighborPos);
             if (neighborLight > 1) {
                 // Light entering this position would be neighborLight - 1 (air attenuation)
@@ -335,7 +335,7 @@ void LightEngine::onBlockRemoved(const BlockPos& pos, BlockTypeId oldType) {
 
     // If this block was blocking sky light, re-propagate from above
     if (blocksSkyLight(oldType)) {
-        BlockPos abovePos{pos.x, pos.y + 1, pos.z};
+        BlockCoord abovePos{pos.x, pos.y + 1, pos.z};
         uint8_t aboveSkyLight = getSkyLight(abovePos);
         if (aboveSkyLight > 0) {
             propagateSkyLight(pos, aboveSkyLight > 1 ? aboveSkyLight - 1 : 0);
@@ -343,7 +343,7 @@ void LightEngine::onBlockRemoved(const BlockPos& pos, BlockTypeId oldType) {
     }
 }
 
-void LightEngine::propagateBlockLight(const BlockPos& pos, uint8_t lightLevel) {
+void LightEngine::propagateBlockLight(const BlockCoord& pos, uint8_t lightLevel) {
     if (lightLevel == 0) return;
 
     SubChunk* subChunk = getOrCreateSubChunkForLight(toChunkPos(pos));
@@ -361,7 +361,7 @@ void LightEngine::propagateBlockLight(const BlockPos& pos, uint8_t lightLevel) {
     propagateLightBFS(pos, lightLevel, false);
 }
 
-void LightEngine::removeBlockLight(const BlockPos& pos, uint8_t oldLevel) {
+void LightEngine::removeBlockLight(const BlockCoord& pos, uint8_t oldLevel) {
     if (oldLevel == 0) return;
     removeLightBFS(pos, oldLevel, false);
 }
@@ -422,20 +422,20 @@ void LightEngine::initializeSkyLight(const ColumnPos& columnPos) {
 
             // Now propagate sky light horizontally at the surface
             if (height != std::numeric_limits<int32_t>::min()) {
-                BlockPos surfacePos{worldX, height, worldZ};
+                BlockCoord surfacePos{worldX, height, worldZ};
                 propagateSkyLight(surfacePos, SubChunk::MAX_LIGHT);
             }
         }
     }
 }
 
-void LightEngine::updateSkyLight(const BlockPos& pos, int32_t oldHeight, int32_t newHeight) {
+void LightEngine::updateSkyLight(const BlockCoord& pos, int32_t oldHeight, int32_t newHeight) {
     if (oldHeight == newHeight) return;
 
     if (newHeight > oldHeight) {
         // Height increased - remove sky light from newly shaded area
         for (int32_t y = oldHeight; y < newHeight; ++y) {
-            BlockPos shadePos{pos.x, y, pos.z};
+            BlockCoord shadePos{pos.x, y, pos.z};
             uint8_t currentLight = getSkyLight(shadePos);
             if (currentLight > 0) {
                 removeLightBFS(shadePos, currentLight, true);
@@ -444,13 +444,13 @@ void LightEngine::updateSkyLight(const BlockPos& pos, int32_t oldHeight, int32_t
     } else {
         // Height decreased - add sky light to newly exposed area
         for (int32_t y = newHeight; y < oldHeight; ++y) {
-            BlockPos exposePos{pos.x, y, pos.z};
+            BlockCoord exposePos{pos.x, y, pos.z};
             propagateSkyLight(exposePos, SubChunk::MAX_LIGHT);
         }
     }
 }
 
-void LightEngine::propagateSkyLight(const BlockPos& pos, uint8_t lightLevel) {
+void LightEngine::propagateSkyLight(const BlockCoord& pos, uint8_t lightLevel) {
     if (lightLevel == 0) return;
 
     SubChunk* subChunk = getOrCreateSubChunkForLight(toChunkPos(pos));
@@ -472,14 +472,14 @@ void LightEngine::propagateSkyLight(const BlockPos& pos, uint8_t lightLevel) {
 // BFS Light Propagation
 // ============================================================================
 
-void LightEngine::propagateLightBFS(const BlockPos& start, uint8_t startLevel, bool isSkyLight) {
+void LightEngine::propagateLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight) {
     if (startLevel == 0) return;
 
     // Use priority queue to process higher light levels first
     std::priority_queue<LightNode> queue;
     queue.push({start, startLevel});
 
-    static const std::array<BlockPos, 6> offsets = {{
+    static const std::array<BlockCoord, 6> offsets = {{
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     }};
 
@@ -505,7 +505,7 @@ void LightEngine::propagateLightBFS(const BlockPos& start, uint8_t startLevel, b
 
         // Propagate to neighbors
         for (const auto& offset : offsets) {
-            BlockPos neighborPos{
+            BlockCoord neighborPos{
                 node.pos.x + offset.x,
                 node.pos.y + offset.y,
                 node.pos.z + offset.z
@@ -553,7 +553,7 @@ void LightEngine::propagateLightBFS(const BlockPos& start, uint8_t startLevel, b
     }
 }
 
-void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool isSkyLight) {
+void LightEngine::removeLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight) {
     if (startLevel == 0) return;
 
     // Two-phase algorithm:
@@ -561,7 +561,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
     // 2. Re-propagate from light sources at the boundary
 
     struct RemovalNode {
-        BlockPos pos;
+        BlockCoord pos;
         uint8_t oldLight;
     };
 
@@ -570,7 +570,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
 
     removalQueue.push({start, startLevel});
 
-    static const std::array<BlockPos, 6> offsets = {{
+    static const std::array<BlockCoord, 6> offsets = {{
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     }};
 
@@ -579,7 +579,7 @@ void LightEngine::removeLightBFS(const BlockPos& start, uint8_t startLevel, bool
         removalQueue.pop();
 
         for (const auto& offset : offsets) {
-            BlockPos neighborPos{
+            BlockCoord neighborPos{
                 node.pos.x + offset.x,
                 node.pos.y + offset.y,
                 node.pos.z + offset.z
@@ -649,7 +649,7 @@ void LightEngine::recalculateSubChunk(const ChunkPos& chunkPos) {
                 BlockTypeId block = subChunk->getBlock(x, y, z);
                 uint8_t emission = getLightEmission(block);
                 if (emission > 0) {
-                    BlockPos worldPos{
+                    BlockCoord worldPos{
                         chunkPos.x * 16 + x,
                         chunkPos.y * 16 + y,
                         chunkPos.z * 16 + z
@@ -690,13 +690,13 @@ void LightEngine::recalculateColumn(const ColumnPos& columnPos) {
     }
 }
 
-void LightEngine::markDirty(const BlockPos& pos) {
+void LightEngine::markDirty(const BlockCoord& pos) {
     pendingUpdates_.insert(pos);
 }
 
 void LightEngine::processUpdates() {
     // Process pending updates
-    for (const BlockPos& pos : pendingUpdates_) {
+    for (const BlockCoord& pos : pendingUpdates_) {
         // Re-propagate light from this position if it's a light source
         BlockTypeId block = world_.getBlock(pos);
         uint8_t emission = getLightEmission(block);
@@ -789,7 +789,7 @@ void LightEngine::lightingThreadLoop() {
     }
 }
 
-void LightEngine::recordAffectedChunk(const BlockPos& pos) {
+void LightEngine::recordAffectedChunk(const BlockCoord& pos) {
     ChunkPos chunkPos = toChunkPos(pos);
     batchAffectedChunks_.insert(chunkPos);
 

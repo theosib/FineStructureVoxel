@@ -3,7 +3,7 @@
 
 namespace finevox {
 
-BlockEvent BlockEvent::blockPlaced(BlockPos pos, BlockTypeId newType,
+BlockEvent BlockEvent::blockPlaced(BlockCoord pos, BlockTypeId newType,
                                    BlockTypeId oldType, Rotation rot) {
     BlockEvent event;
     event.type = EventType::BlockPlaced;
@@ -16,7 +16,7 @@ BlockEvent BlockEvent::blockPlaced(BlockPos pos, BlockTypeId newType,
     return event;
 }
 
-BlockEvent BlockEvent::blockBroken(BlockPos pos, BlockTypeId oldType) {
+BlockEvent BlockEvent::blockBroken(BlockCoord pos, BlockTypeId oldType) {
     BlockEvent event;
     event.type = EventType::BlockBroken;
     event.pos = pos;
@@ -27,7 +27,7 @@ BlockEvent BlockEvent::blockBroken(BlockPos pos, BlockTypeId oldType) {
     return event;
 }
 
-BlockEvent BlockEvent::blockChanged(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+BlockEvent BlockEvent::blockChanged(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
     BlockEvent event;
     event.type = EventType::BlockChanged;
     event.pos = pos;
@@ -38,9 +38,9 @@ BlockEvent BlockEvent::blockChanged(BlockPos pos, BlockTypeId oldType, BlockType
     return event;
 }
 
-BlockEvent BlockEvent::neighborChanged(BlockPos pos, Face changedFace) {
+BlockEvent BlockEvent::neighborUpdated(BlockCoord pos, Face changedFace) {
     BlockEvent event;
-    event.type = EventType::NeighborChanged;
+    event.type = EventType::NeighborUpdated;
     event.pos = pos;
     event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
@@ -48,7 +48,7 @@ BlockEvent BlockEvent::neighborChanged(BlockPos pos, Face changedFace) {
     return event;
 }
 
-BlockEvent BlockEvent::tick(BlockPos pos, TickType tickType) {
+BlockEvent BlockEvent::tick(BlockCoord pos, TickType tickType) {
     BlockEvent event;
     switch (tickType) {
         case TickType::Scheduled:
@@ -71,7 +71,7 @@ BlockEvent BlockEvent::tick(BlockPos pos, TickType tickType) {
     return event;
 }
 
-BlockEvent BlockEvent::playerUse(BlockPos pos, Face face) {
+BlockEvent BlockEvent::playerUse(BlockCoord pos, Face face) {
     BlockEvent event;
     event.type = EventType::PlayerUse;
     event.pos = pos;
@@ -81,7 +81,7 @@ BlockEvent BlockEvent::playerUse(BlockPos pos, Face face) {
     return event;
 }
 
-BlockEvent BlockEvent::playerHit(BlockPos pos, Face face) {
+BlockEvent BlockEvent::playerHit(BlockCoord pos, Face face) {
     BlockEvent event;
     event.type = EventType::PlayerHit;
     event.pos = pos;
@@ -91,7 +91,7 @@ BlockEvent BlockEvent::playerHit(BlockPos pos, Face face) {
     return event;
 }
 
-BlockEvent BlockEvent::blockUpdate(BlockPos pos) {
+BlockEvent BlockEvent::blockUpdate(BlockCoord pos) {
     BlockEvent event;
     event.type = EventType::BlockUpdate;
     event.pos = pos;

@@ -207,7 +207,7 @@ AABB CollisionShape::bounds() const {
     return result;
 }
 
-std::vector<AABB> CollisionShape::atPosition(const BlockPos& pos) const {
+std::vector<AABB> CollisionShape::atPosition(const BlockCoord& pos) const {
     return atPosition(pos.x, pos.y, pos.z);
 }
 
@@ -380,7 +380,7 @@ RaycastResult raycastBlocks(
     float currentT = 0.0f;
 
     // Check starting block first (we might be inside a block)
-    BlockPos startPos(x, y, z);
+    BlockCoord startPos(x, y, z);
     const CollisionShape* startShape = shapeProvider(startPos, mode);
     if (startShape && !startShape->isEmpty()) {
         auto boxes = startShape->atPosition(startPos);
@@ -443,7 +443,7 @@ RaycastResult raycastBlocks(
         }
 
         // Check this block for collision
-        BlockPos blockPos(x, y, z);
+        BlockCoord blockPos(x, y, z);
         const CollisionShape* shape = shapeProvider(blockPos, mode);
 
         if (shape && !shape->isEmpty()) {
@@ -497,7 +497,7 @@ std::vector<AABB> PhysicsSystem::collectColliders(const AABB& region) const {
     for (int32_t y = minY; y <= maxY; ++y) {
         for (int32_t z = minZ; z <= maxZ; ++z) {
             for (int32_t x = minX; x <= maxX; ++x) {
-                BlockPos pos(x, y, z);
+                BlockCoord pos(x, y, z);
                 const CollisionShape* shape = shapeProvider_(pos, RaycastMode::Collision);
 
                 if (shape && !shape->isEmpty()) {

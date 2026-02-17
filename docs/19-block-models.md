@@ -509,9 +509,9 @@ Custom mesh blocks are then rendered via `buildSimpleMesh()` or a dedicated cust
 
 ---
 
-## 19.9 Comparison with Minecraft VoxelShapes
+## 19.9 Comparison with VoxelShape Systems
 
-Minecraft's `VoxelShape` system:
+Traditional voxel engines sometimes use a `VoxelShape` approach:
 - Represents shapes as boolean voxel grids
 - Supports set operations (union, intersection, subtraction)
 - Can simplify complex shapes to AABB lists

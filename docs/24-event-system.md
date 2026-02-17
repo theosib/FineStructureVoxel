@@ -110,8 +110,8 @@ struct BlockEvent {
     EventType type = EventType::None;
 
     // Location (always valid)
-    BlockPos pos{0, 0, 0};
-    BlockPos localPos{0, 0, 0};  // Position within subchunk
+    BlockCoord pos{0, 0, 0};
+    BlockCoord localPos{0, 0, 0};  // Position within subchunk
     ChunkPos chunkPos{0, 0, 0};
 
     // Block information (valid for block events)
@@ -136,14 +136,14 @@ struct BlockEvent {
     // Factory Methods
     // ========================================================================
 
-    static BlockEvent blockPlaced(BlockPos pos, BlockTypeId newType,
+    static BlockEvent blockPlaced(BlockCoord pos, BlockTypeId newType,
                                   BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
-    static BlockEvent blockBroken(BlockPos pos, BlockTypeId oldType);
-    static BlockEvent blockChanged(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
-    static BlockEvent neighborChanged(BlockPos pos, Face changedFace);
-    static BlockEvent tick(BlockPos pos, TickType type);
-    static BlockEvent playerUse(BlockPos pos, Face face);
-    static BlockEvent playerHit(BlockPos pos, Face face);
+    static BlockEvent blockBroken(BlockCoord pos, BlockTypeId oldType);
+    static BlockEvent blockChanged(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType);
+    static BlockEvent neighborChanged(BlockCoord pos, Face changedFace);
+    static BlockEvent tick(BlockCoord pos, TickType type);
+    static BlockEvent playerUse(BlockCoord pos, Face face);
+    static BlockEvent playerHit(BlockCoord pos, Face face);
 
     // ========================================================================
     // Sentinel Checks
@@ -204,13 +204,13 @@ struct BlockEvent {
 class BlockContext {
 public:
     BlockContext(World& world, SubChunk& subChunk,
-                 BlockPos pos, BlockPos localPos);
+                 BlockCoord pos, BlockCoord localPos);
 
     // Location
     [[nodiscard]] World& world() { return world_; }
     [[nodiscard]] SubChunk& subChunk() { return subChunk_; }
-    [[nodiscard]] BlockPos pos() const { return pos_; }
-    [[nodiscard]] BlockPos localPos() const { return localPos_; }
+    [[nodiscard]] BlockCoord pos() const { return pos_; }
+    [[nodiscard]] BlockCoord localPos() const { return localPos_; }
 
     // Current block state
     [[nodiscard]] BlockTypeId blockType() const;
@@ -231,8 +231,8 @@ public:
 private:
     World& world_;
     SubChunk& subChunk_;
-    BlockPos pos_;
-    BlockPos localPos_;
+    BlockCoord pos_;
+    BlockCoord localPos_;
     BlockTypeId previousType_;
     std::unique_ptr<DataContainer> previousData_;
 };
@@ -297,7 +297,7 @@ void UpdateScheduler::processBlockBreakEvent(BlockEvent& event) {
 
     // 3. Call handler BEFORE removal (can cancel by returning false)
     BlockHandler* handler = getHandler(oldType);
-    if (handler && !handler->onBreak(ctx)) {
+    if (handler && !handler->onDestroy(ctx)) {
         // Cancelled - restore extra data if we moved it
         if (ctx.previousData()) {
             subchunk->setExtraData(localIdx, /* restore */);
@@ -347,7 +347,7 @@ void UpdateScheduler::processEvents() {
 
 ## 24.7 Handler Semantics
 
-### onBreak (called BEFORE removal)
+### onDestroy (called BEFORE removal)
 
 ```cpp
 // Handler can:
@@ -355,7 +355,7 @@ void UpdateScheduler::processEvents() {
 // - Access extra data (ctx.data())
 // - Drop items
 // - Return false to cancel the break
-bool BlockHandler::onBreak(BlockContext& ctx) {
+bool BlockHandler::onDestroy(BlockContext& ctx) {
     // Drop item
     dropItem(ctx.pos(), getDropFor(ctx.blockType()));
 
@@ -398,7 +398,7 @@ The lighting thread has its own consolidating queue that can lag behind game log
  * @brief Lighting update event (lightweight)
  */
 struct LightingUpdate {
-    BlockPos pos;
+    BlockCoord pos;
     BlockTypeId oldType;
     BlockTypeId newType;
 };
@@ -420,7 +420,7 @@ public:
 
 private:
     // Consolidates by position - newer updates overwrite older
-    std::unordered_map<BlockPos, LightingUpdate> pending_;
+    std::unordered_map<BlockCoord, LightingUpdate> pending_;
     std::mutex mutex_;
     std::condition_variable cv_;
 };
@@ -516,7 +516,7 @@ public:
     [[nodiscard]] LightEngine* lightEngine() { return lightEngine_.get(); }
 
     // Called by event processor
-    void enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+    void enqueueLightingUpdate(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
         if (lightEngine_) {
             lightEngine_->enqueue({pos, oldType, newType});
         }
@@ -565,7 +565,7 @@ private:
 };
 
 // In mesh builder's light provider:
-uint8_t getLightForMeshing(BlockPos pos) {
+uint8_t getLightForMeshing(BlockCoord pos) {
     ChunkColumn* col = world.getColumn(ColumnPos::fromBlock(pos));
     if (!col) return 0;
 
@@ -668,10 +668,10 @@ public:
     void clear() { pending_.clear(); }
 
 private:
-    // Key for outbox: (BlockPos, EventType)
+    // Key for outbox: (BlockCoord, EventType)
     // Different event types at same position are kept separate
     struct EventKey {
-        BlockPos pos;
+        BlockCoord pos;
         EventType type;
 
         bool operator==(const EventKey& other) const {
@@ -796,7 +796,7 @@ void processGameTick(World& world) {
         column.forEachSubChunk([&](int32_t y, SubChunk& subchunk) {
             // Game ticks to registered blocks
             for (uint16_t idx : subchunk.gameTickBlocks()) {
-                BlockPos blockPos = toWorldPos(pos, y, idx);
+                BlockCoord blockPos = toWorldPos(pos, y, idx);
                 outbox_.push(BlockEvent::tick(blockPos, TickType::GameTick));
             }
 
@@ -804,7 +804,7 @@ void processGameTick(World& world) {
             if (config_.randomTicksPerSubchunk > 0) {
                 for (int i = 0; i < config_.randomTicksPerSubchunk; ++i) {
                     uint16_t idx = randomBlockIndex();
-                    BlockPos blockPos = toWorldPos(pos, y, idx);
+                    BlockCoord blockPos = toWorldPos(pos, y, idx);
                     outbox_.push(BlockEvent::tick(blockPos, TickType::RandomTick));
                 }
             }
@@ -831,7 +831,7 @@ void BlockContext::scheduleTick(int ticksFromNow, TickType type) {
 
 // In World - priority queue of scheduled ticks
 struct ScheduledTick {
-    BlockPos pos;
+    BlockCoord pos;
     uint64_t targetTick;
     TickType type;
 
@@ -850,8 +850,8 @@ class World {
 
 ```cpp
 struct TickConfig {
-    // Game tick interval (default: 50ms = 20 ticks/sec like Minecraft)
-    std::chrono::milliseconds gameTickInterval{50};
+    // Game tick interval (default: 33ms = 30 ticks/sec)
+    std::chrono::milliseconds gameTickInterval{33};
 
     // Random ticks per subchunk per game tick (0 = disabled)
     int randomTicksPerSubchunk = 3;

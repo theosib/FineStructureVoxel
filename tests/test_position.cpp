@@ -27,29 +27,29 @@ TEST(FaceTest, FaceNormals) {
 }
 
 // ============================================================================
-// BlockPos tests
+// BlockCoord tests
 // ============================================================================
 
-TEST(BlockPosTest, DefaultConstruction) {
-    BlockPos pos;
+TEST(BlockCoordTest, DefaultConstruction) {
+    BlockCoord pos;
     EXPECT_EQ(pos.x, 0);
     EXPECT_EQ(pos.y, 0);
     EXPECT_EQ(pos.z, 0);
 }
 
-TEST(BlockPosTest, Construction) {
-    BlockPos pos(10, 64, -30);
+TEST(BlockCoordTest, Construction) {
+    BlockCoord pos(10, 64, -30);
     EXPECT_EQ(pos.x, 10);
     EXPECT_EQ(pos.y, 64);
     EXPECT_EQ(pos.z, -30);
 }
 
-TEST(BlockPosTest, PackUnpackRoundTrip) {
+TEST(BlockCoordTest, PackUnpackRoundTrip) {
     // Test various positions including edge cases
     // Layout: [x:26][y:12][z:26]
     // X, Z range: +/- 33,554,432
     // Y range: +/- 2,048
-    std::vector<BlockPos> positions = {
+    std::vector<BlockCoord> positions = {
         {0, 0, 0},
         {1, 2, 3},
         {-1, -2, -3},
@@ -63,65 +63,65 @@ TEST(BlockPosTest, PackUnpackRoundTrip) {
 
     for (const auto& original : positions) {
         uint64_t packed = original.pack();
-        BlockPos unpacked = BlockPos::unpack(packed);
+        BlockCoord unpacked = BlockCoord::unpack(packed);
         EXPECT_EQ(unpacked, original) << "Failed for pos: "
             << original.x << ", " << original.y << ", " << original.z;
     }
 }
 
-TEST(BlockPosTest, Neighbor) {
-    BlockPos pos(10, 20, 30);
+TEST(BlockCoordTest, Neighbor) {
+    BlockCoord pos(10, 20, 30);
 
-    EXPECT_EQ(pos.neighbor(Face::NegX), BlockPos(9, 20, 30));
-    EXPECT_EQ(pos.neighbor(Face::PosX), BlockPos(11, 20, 30));
-    EXPECT_EQ(pos.neighbor(Face::NegY), BlockPos(10, 19, 30));
-    EXPECT_EQ(pos.neighbor(Face::PosY), BlockPos(10, 21, 30));
-    EXPECT_EQ(pos.neighbor(Face::NegZ), BlockPos(10, 20, 29));
-    EXPECT_EQ(pos.neighbor(Face::PosZ), BlockPos(10, 20, 31));
+    EXPECT_EQ(pos.neighbor(Face::NegX), BlockCoord(9, 20, 30));
+    EXPECT_EQ(pos.neighbor(Face::PosX), BlockCoord(11, 20, 30));
+    EXPECT_EQ(pos.neighbor(Face::NegY), BlockCoord(10, 19, 30));
+    EXPECT_EQ(pos.neighbor(Face::PosY), BlockCoord(10, 21, 30));
+    EXPECT_EQ(pos.neighbor(Face::NegZ), BlockCoord(10, 20, 29));
+    EXPECT_EQ(pos.neighbor(Face::PosZ), BlockCoord(10, 20, 31));
 }
 
-TEST(BlockPosTest, LocalCoordinates) {
+TEST(BlockCoordTest, LocalCoordinates) {
     // Positive coordinates
-    BlockPos pos(35, 67, 49);
-    LocalBlockPos local = pos.local();
+    BlockCoord pos(35, 67, 49);
+    LocalBlockCoord local = pos.local();
     EXPECT_EQ(local.x, 3);   // 35 % 16 = 3
     EXPECT_EQ(local.y, 3);   // 67 % 16 = 3
     EXPECT_EQ(local.z, 1);   // 49 % 16 = 1
 
     // Negative coordinates - should still give 0-15
-    BlockPos negPos(-1, -1, -1);
-    LocalBlockPos negLocal = negPos.local();
+    BlockCoord negPos(-1, -1, -1);
+    LocalBlockCoord negLocal = negPos.local();
     EXPECT_EQ(negLocal.x, 15);  // -1 & 0xF = 15
     EXPECT_EQ(negLocal.y, 15);
     EXPECT_EQ(negLocal.z, 15);
 }
 
-TEST(BlockPosTest, LocalIndex) {
+TEST(BlockCoordTest, LocalIndex) {
     // Index layout: y*256 + z*16 + x
-    BlockPos pos(3, 5, 7);
+    BlockCoord pos(3, 5, 7);
     EXPECT_EQ(pos.localIndex(), 5*256 + 7*16 + 3);
 
     // Corner cases
-    BlockPos origin(0, 0, 0);
+    BlockCoord origin(0, 0, 0);
     EXPECT_EQ(origin.localIndex(), 0);
 
-    BlockPos max(15, 15, 15);
+    BlockCoord max(15, 15, 15);
     EXPECT_EQ(max.localIndex(), 15*256 + 15*16 + 15);
 }
 
-TEST(BlockPosTest, FromLocalIndex) {
+TEST(BlockCoordTest, FromLocalIndex) {
     // Chunk at (2, 4, 6), local index corresponds to (3, 5, 7)
     uint16_t index = 5*256 + 7*16 + 3;
     ChunkPos chunk(2, 4, 6);
-    BlockPos pos = chunk.toWorld(index);
+    BlockCoord pos = chunk.toWorld(index);
 
     EXPECT_EQ(pos.x, 2*16 + 3);  // 35
     EXPECT_EQ(pos.y, 4*16 + 5);  // 69
     EXPECT_EQ(pos.z, 6*16 + 7);  // 103
 }
 
-TEST(BlockPosTest, HashableInUnorderedSet) {
-    std::unordered_set<BlockPos> positions;
+TEST(BlockCoordTest, HashableInUnorderedSet) {
+    std::unordered_set<BlockCoord> positions;
     positions.insert({0, 0, 0});
     positions.insert({1, 2, 3});
     positions.insert({-1, -2, -3});
@@ -132,10 +132,10 @@ TEST(BlockPosTest, HashableInUnorderedSet) {
     EXPECT_FALSE(positions.contains({4, 5, 6}));
 }
 
-TEST(BlockPosTest, Comparison) {
-    BlockPos a(1, 2, 3);
-    BlockPos b(1, 2, 3);
-    BlockPos c(1, 2, 4);
+TEST(BlockCoordTest, Comparison) {
+    BlockCoord a(1, 2, 3);
+    BlockCoord b(1, 2, 3);
+    BlockCoord c(1, 2, 4);
 
     EXPECT_TRUE(a == b);
     EXPECT_FALSE(a == c);
@@ -158,9 +158,9 @@ TEST(ChunkPosTest, FromBlock) {
     EXPECT_EQ(ChunkPos::fromBlock({-17, -17, -17}), ChunkPos(-2, -2, -2));
 }
 
-TEST(ChunkPosTest, CornerBlockPos) {
+TEST(ChunkPosTest, CornerBlockCoord) {
     ChunkPos chunk(2, 3, 4);
-    BlockPos block = chunk.cornerBlockPos();
+    BlockCoord block = chunk.cornerBlockCoord();
 
     EXPECT_EQ(block.x, 32);
     EXPECT_EQ(block.y, 48);

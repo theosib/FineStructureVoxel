@@ -32,21 +32,21 @@ using IVec3 = glm::ivec3;
 // Utility functions for Vec3
 // ============================================================================
 
-// Convert BlockPos to Vec3 (corner of block)
-inline Vec3 toVec3(const BlockPos& pos) {
+// Convert BlockCoord to Vec3 (corner of block)
+inline Vec3 toVec3(const BlockCoord& pos) {
     return Vec3(static_cast<float>(pos.x), static_cast<float>(pos.y), static_cast<float>(pos.z));
 }
 
-// Convert BlockPos to Vec3 (center of block)
-inline Vec3 toVec3Center(const BlockPos& pos) {
+// Convert BlockCoord to Vec3 (center of block)
+inline Vec3 toVec3Center(const BlockCoord& pos) {
     return Vec3(static_cast<float>(pos.x) + 0.5f,
                 static_cast<float>(pos.y) + 0.5f,
                 static_cast<float>(pos.z) + 0.5f);
 }
 
-// Convert Vec3 to BlockPos (floor)
-inline BlockPos toBlockPos(const Vec3& v) {
-    return BlockPos(
+// Convert Vec3 to BlockCoord (floor)
+inline BlockCoord toBlockCoord(const Vec3& v) {
+    return BlockCoord(
         static_cast<int32_t>(std::floor(v.x)),
         static_cast<int32_t>(std::floor(v.y)),
         static_cast<int32_t>(std::floor(v.z))
@@ -74,7 +74,7 @@ struct AABB {
         );
     }
 
-    [[nodiscard]] static AABB forBlock(const BlockPos& pos) {
+    [[nodiscard]] static AABB forBlock(const BlockCoord& pos) {
         return forBlock(pos.x, pos.y, pos.z);
     }
 
@@ -188,7 +188,7 @@ public:
     [[nodiscard]] AABB bounds() const;
 
     // Transform shape to world coordinates at given block position
-    [[nodiscard]] std::vector<AABB> atPosition(const BlockPos& pos) const;
+    [[nodiscard]] std::vector<AABB> atPosition(const BlockCoord& pos) const;
     [[nodiscard]] std::vector<AABB> atPosition(int32_t x, int32_t y, int32_t z) const;
 
     // Transform shape by rotation (rotates around [0.5, 0.5, 0.5] center)
@@ -239,7 +239,7 @@ enum class RaycastMode {
 
 struct RaycastResult {
     bool hit = false;
-    BlockPos blockPos;        // Block that was hit
+    BlockCoord blockPos;        // Block that was hit
     Face face = Face::PosY;   // Face of the block that was hit
     Vec3 hitPoint{0.0f};      // Exact hit point in world coordinates
     float distance = 0.0f;    // Distance from origin to hit point
@@ -259,7 +259,7 @@ struct RaycastResult {
 constexpr float COLLISION_MARGIN = 0.001f;
 
 // Maximum step height for step-climbing (slightly over half a block)
-constexpr float MAX_STEP_HEIGHT = 0.625f;
+constexpr float MAX_STEP_HEIGHT = 0.6f;
 
 // Default gravity in blocks per second squared
 constexpr float DEFAULT_GRAVITY = 20.0f;
@@ -270,7 +270,7 @@ constexpr float DEFAULT_GRAVITY = 20.0f;
 
 // Callback type for getting collision shape at a block position
 // Returns the collision shape for the block, or nullptr/empty if no collision
-using BlockShapeProvider = std::function<const CollisionShape*(const BlockPos& pos, RaycastMode mode)>;
+using BlockShapeProvider = std::function<const CollisionShape*(const BlockCoord& pos, RaycastMode mode)>;
 
 // ============================================================================
 // PhysicsBody - Interface for entities that participate in physics
@@ -307,8 +307,8 @@ public:
     [[nodiscard]] virtual bool canStepUp() const { return true; }
 
     // Maximum step height for this body (can be overridden per-entity)
-    // Different games use different step heights (e.g., Hytale steps full blocks,
-    // Minecraft steps ~0.625 blocks). This can also depend on entity enhancements
+    // Different games use different step heights (e.g., half a block, full blocks).
+    // This can also depend on entity enhancements
     // like special armor or abilities.
     [[nodiscard]] virtual float maxStepHeight() const { return MAX_STEP_HEIGHT; }
 };
@@ -440,7 +440,7 @@ enum class BlockPlacementMode {
  * @param entityBox Entity's current bounding box
  * @return true if the block would intersect the entity
  */
-[[nodiscard]] inline bool wouldBlockIntersectEntity(const BlockPos& blockPos, const AABB& entityBox) {
+[[nodiscard]] inline bool wouldBlockIntersectEntity(const BlockCoord& blockPos, const AABB& entityBox) {
     // Block AABB shrunk by margin to allow entities at exact boundaries
     AABB blockBox(
         static_cast<float>(blockPos.x) + COLLISION_MARGIN,
@@ -458,7 +458,7 @@ enum class BlockPlacementMode {
  *
  * Convenience overload that extracts the bounding box from a PhysicsBody.
  */
-[[nodiscard]] inline bool wouldBlockIntersectBody(const BlockPos& blockPos, const PhysicsBody& body) {
+[[nodiscard]] inline bool wouldBlockIntersectBody(const BlockCoord& blockPos, const PhysicsBody& body) {
     return wouldBlockIntersectEntity(blockPos, body.boundingBox());
 }
 

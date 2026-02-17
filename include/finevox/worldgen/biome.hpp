@@ -65,7 +65,7 @@ struct BiomeProperties {
     float humidityMax = 1.0f;
 
     // ---- Terrain shaping ----
-    float baseHeight = 64.0f;
+    float baseHeight = 80.0f;
     float heightVariation = 16.0f;
     float heightScale = 1.0f;
 

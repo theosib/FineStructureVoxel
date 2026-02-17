@@ -27,7 +27,7 @@ public:
 
     [[nodiscard]] std::string_view name() const override;
     [[nodiscard]] FeatureResult place(FeaturePlacementContext& ctx) override;
-    [[nodiscard]] BlockPos maxExtent() const override;
+    [[nodiscard]] BlockCoord maxExtent() const override;
 
 private:
     std::string name_;

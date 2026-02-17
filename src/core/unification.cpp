@@ -129,7 +129,7 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
     std::unique_lock lock(mutex_);
 
     // ====================================================================
-    // Phase 1: Group by shared community tags (c:xxx)
+    // Phase 1: Group by shared community tags (common:xxx)
     // ====================================================================
 
     // Collect all community tags and their members
@@ -139,8 +139,8 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
 
     for (auto& tagId : allTags) {
         auto tagName = tagId.name();
-        // Only consider community tags (start with "c:")
-        if (tagName.size() < 2 || tagName.substr(0, 2) != "c:") continue;
+        // Only consider community tags (start with "common:")
+        if (tagName.size() < 7 || tagName.substr(0, 7) != "common:") continue;
 
         auto members = tags.getMembersOf(tagId);
         if (members.size() <= 1) continue;
@@ -219,7 +219,7 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
                     auto otherTags = tags.getTagsFor(other.id);
                     for (auto& otherTag : otherTags) {
                         auto otherTagName = otherTag.name();
-                        if (otherTagName.substr(0, 2) == "c:" &&
+                        if (otherTagName.substr(0, 7) == "common:" &&
                             !itemTagSet.contains(otherTag)) {
                             std::cerr << "[Unification] Warning: '"
                                       << item.name() << "' lacks tag '"
@@ -270,7 +270,7 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
         if (namespaces.size() <= 1) continue;
 
         // Check for conflicting tag families
-        // Collect the "tag families" (c:xxx prefix before last /) for each item
+        // Collect the "tag families" (common:xxx prefix before last /) for each item
         bool conflict = false;
         std::unordered_map<ItemTypeId, std::unordered_set<std::string>> itemFamilies;
 
@@ -278,8 +278,8 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
             auto itemTags = tags.getTagsFor(item.id);
             for (auto& t : itemTags) {
                 auto tName = t.name();
-                if (tName.size() >= 2 && tName.substr(0, 2) == "c:") {
-                    // Extract family: c:ingots/iron → c:ingots
+                if (tName.size() >= 7 && tName.substr(0, 7) == "common:") {
+                    // Extract family: common:ingots/iron → common:ingots
                     auto slash = tName.rfind('/');
                     std::string family;
                     if (slash != std::string_view::npos) {
@@ -306,7 +306,7 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
                     if (!families.contains(f)) {
                         // Items have non-overlapping tag families
                         // Only flag as conflict if families are truly incompatible
-                        // (e.g., one is c:dusts, another is c:gems)
+                        // (e.g., one is common:dusts, another is common:gems)
                         bool hasOverlap = false;
                         for (auto& myFamily : families) {
                             if (allFamilies.contains(myFamily)) {
@@ -365,7 +365,7 @@ void UnificationRegistry::autoResolve(const TagRegistry& tags) {
 
         // Warn about inference
         std::cerr << "[Unification] Warning: Inferring equivalence for '"
-                  << base << "' without shared c: tags\n";
+                  << base << "' without shared common: tags\n";
 
         std::ostringstream oss;
         oss << "[Unification] Unified '" << canonical.name() << "': {";

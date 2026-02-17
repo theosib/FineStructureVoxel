@@ -86,6 +86,22 @@ add_library(finevox SHARED
     src/core/loot_table.cpp
     src/core/loot_registry.cpp
     src/core/loot_table_loader.cpp
+    src/core/entity_type_def.cpp
+    src/core/entity_type_registry.cpp
+    src/core/entity_type_loader.cpp
+    src/core/ai_brain.cpp
+    src/core/mob_entity.cpp
+    src/core/pathfinder.cpp
+    src/core/entity_senses.cpp
+    src/core/ai_goals.cpp
+    src/core/skeleton.cpp
+    src/core/animation_clip.cpp
+    src/core/animation_controller.cpp
+    src/core/skeleton_loader.cpp
+    src/core/entity_mesh.cpp
+    src/core/entity_render_state.cpp
+    src/core/spawn_manager.cpp
+    src/core/entity_serializer.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -117,6 +133,8 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/data_container_proxy.cpp
         src/script/script_block_handler.cpp
         src/script/game_script_engine.cpp
+        src/script/entity_context_proxy.cpp
+        src/script/script_entity_handler.cpp
     )
 
     target_include_directories(finevox_script PUBLIC
@@ -217,6 +235,7 @@ if(FINEVOX_BUILD_RENDER)
         src/render/block_atlas.cpp
         src/render/texture_manager.cpp
         src/render/frame_fence_waiter.cpp
+        src/render/entity_renderer.cpp
     )
 
     target_include_directories(finevox_render PUBLIC
@@ -461,6 +480,12 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_game_session.cpp
         tests/test_game_thread.cpp
         tests/test_loot_system.cpp
+        tests/test_entity_types.cpp
+        tests/test_entity_ai.cpp
+        tests/test_animation.cpp
+        tests/test_entity_render.cpp
+        tests/test_spawning.cpp
+        tests/test_entity_persistence.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -475,6 +500,7 @@ if(FINEVOX_BUILD_TESTS)
     if(TARGET finevox_script)
         add_executable(finevox_script_tests
             tests/test_script_integration.cpp
+            tests/test_script_entity.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

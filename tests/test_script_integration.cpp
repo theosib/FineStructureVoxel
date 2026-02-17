@@ -221,7 +221,7 @@ on :place do
     set data.placed true
 end
 
-on :break do
+on :destroy do
     set data.broken true
 end
 )");

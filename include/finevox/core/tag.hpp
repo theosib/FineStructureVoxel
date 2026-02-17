@@ -10,10 +10,10 @@
  * same pattern as ItemTypeId and BlockTypeId.
  *
  * Tag naming convention:
- *   c:ingots/iron      — community tag (cross-mod interop)
- *   c:planks            — community tag (broad category)
- *   finevox:fuel        — engine-defined tag
- *   mymod:magic_metals  — mod-specific tag
+ *   common:ingots/iron      — community tag (cross-mod interop)
+ *   common:planks            — community tag (broad category)
+ *   finevox:fuel             — engine-defined tag
+ *   mymod:magic_metals       — mod-specific tag
  */
 
 #include "finevox/core/string_interner.hpp"

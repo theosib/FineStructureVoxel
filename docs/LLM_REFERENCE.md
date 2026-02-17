@@ -14,7 +14,7 @@ Dense API reference for AI assistants building on finevox. Maximum signal per to
 
 Dependency: `finevox_worldgen` and `finevox_render` both link `finevox` PUBLIC. They do NOT depend on each other.
 
-Nested namespace lookup: code in `finevox::worldgen` can use core types (`BlockPos`, `World`, etc.) unqualified.
+Nested namespace lookup: code in `finevox::worldgen` can use core types (`BlockCoord`, `World`, etc.) unqualified.
 
 ---
 
@@ -22,25 +22,25 @@ Nested namespace lookup: code in `finevox::worldgen` can use core types (`BlockP
 
 | Type | Fields | Meaning |
 |------|--------|---------|
-| `BlockPos` | `int32_t x, y, z` | World-space block position |
-| `LocalBlockPos` | `uint8_t x, y, z` | Position within subchunk (0-15) |
+| `BlockCoord` | `int32_t x, y, z` | World-space block position |
+| `LocalBlockCoord` | `uint8_t x, y, z` | Position within subchunk (0-15) |
 | `ChunkPos` | `int32_t x, y, z` | 16x16x16 subchunk position |
 | `ColumnPos` | `int32_t x, z` | Column position (no Y) |
-| `RegionPos` | `int32_t x, z` | 32x32-column region for persistence |
+| `RegionPos` | `int32_t x, z` | 64x64-column region for persistence |
 
 **Conversions:**
-- `ChunkPos::fromBlock(blockPos)` -- block to subchunk
-- `ColumnPos::fromBlock(blockPos)` -- block to column
+- `ChunkPos::fromBlock(blockCoord)` -- block to subchunk
+- `ColumnPos::fromBlock(blockCoord)` -- block to column
 - `ColumnPos::fromChunk(chunkPos)` -- subchunk to column
-- `chunkPos.cornerBlockPos()` -- subchunk origin in world coords
+- `chunkPos.cornerBlockCoord()` -- subchunk origin in world coords
 - `chunkPos.toWorld(localPos)` -- local to world
-- `blockPos.local()` -- world to local within subchunk
-- `blockPos.localIndex()` -- Y-major index: `y*256 + z*16 + x`
+- `blockCoord.local()` -- world to local within subchunk
+- `blockCoord.localIndex()` -- Y-major index: `y*256 + z*16 + x`
 
 **Face enum:** `NegX(0)=West, PosX(1)=East, NegY(2)=Down, PosY(3)=Up, NegZ(4)=North, PosZ(5)=South`
 - `oppositeFace(f)` -- flip direction
 - `faceNormal(f)` -- `array<int32_t, 3>` offset
-- `blockPos.neighbor(face)` -- adjacent block
+- `blockCoord.neighbor(face)` -- adjacent block
 
 All position types are hashable (`std::hash<>` specialized).
 
@@ -101,7 +101,7 @@ Singleton: `BlockRegistry::global()`
 | `defaultType()` | `static const BlockType&` | Full solid block |
 | `airType()` | `static const BlockType&` | No collision, no hit |
 
-**Name format:** `"namespace:localname"` (e.g., `"blockgame:stone"`)
+**Name format:** `"namespace:localname"` (e.g., `"finevox:stone"`)
 
 Static helpers: `isValidNamespacedName()`, `getNamespace()`, `getLocalName()`, `makeQualifiedName(ns, local)`
 
@@ -113,12 +113,12 @@ Static helpers: `isValidNamespacedName()`, `getNamespace()`, `getLocalName()`, `
 
 | Method | When to Use |
 |--------|-------------|
-| `getBlock(BlockPos) -> BlockTypeId` | Read block (returns AIR if unloaded) |
+| `getBlock(BlockCoord) -> BlockTypeId` | Read block (returns AIR if unloaded) |
 | `setBlock(pos, type)` | Direct set, NO events/lighting/handler callbacks. For bulk init, terrain gen, chunk loading. |
 | `placeBlock(pos, type)` | Event-driven placement. Triggers handlers, neighbor updates, lighting. Requires UpdateScheduler. |
 | `breakBlock(pos)` | Event-driven breaking. Same as above. |
-| `placeBlocks(vector<pair<BlockPos,BlockTypeId>>)` | Bulk event-driven placement |
-| `breakBlocks(vector<BlockPos>)` | Bulk event-driven breaking |
+| `placeBlocks(vector<pair<BlockCoord,BlockTypeId>>)` | Bulk event-driven placement |
+| `breakBlocks(vector<BlockCoord>)` | Bulk event-driven breaking |
 
 ### Column Management
 
@@ -162,12 +162,12 @@ All methods have default no-op implementations. Override what you need.
 | Virtual Method | When Called | Context |
 |----------------|------------|---------|
 | `onPlace(BlockContext&)` | Block placed via `placeBlock()` | `previousType()` available |
-| `onBreak(BlockContext&)` | Block broken via `breakBlock()` | `previousType()` = broken type |
+| `onDestroy(BlockContext&)` | Block broken via `breakBlock()` | `previousType()` = broken type |
 | `onTick(BlockContext&, TickType)` | Scheduled/repeat/random tick fires | |
-| `onNeighborChanged(BlockContext&, Face)` | Adjacent block changed | `face` = which neighbor |
+| `onNeighborUpdated(BlockContext&, Face)` | Adjacent block changed | `face` = which neighbor |
 | `onBlockUpdate(BlockContext&)` | Redstone-like propagation | |
-| `onUse(BlockContext&, Face) -> bool` | Right-click interaction | Return true if handled |
-| `onHit(BlockContext&, Face) -> bool` | Left-click | Return true if handled |
+| `onInteract(BlockContext&, Face) -> bool` | Right-click interaction | Return true if handled |
+| `onStrike(BlockContext&, Face) -> bool` | Left-click | Return true if handled |
 | `onRepaint(BlockContext&)` | Mesh update requested | |
 
 ### BlockContext (`core/block_handler.hpp`)
@@ -176,8 +176,8 @@ Ephemeral context passed to all handler callbacks.
 
 | Category | Method | Returns |
 |----------|--------|---------|
-| Position | `pos()` | `BlockPos` |
-| | `localPos()` | `LocalBlockPos` |
+| Position | `pos()` | `BlockCoord` |
+| | `localPos()` | `LocalBlockCoord` |
 | | `chunkPos()` | `ChunkPos` |
 | World | `world()` | `World&` |
 | | `subChunk()` | `SubChunk&` |
@@ -237,7 +237,7 @@ Ephemeral context passed to all handler callbacks.
 
 | Field | Default | Meaning |
 |-------|---------|---------|
-| `gameTickIntervalMs` | `50` | ms between game ticks |
+| `gameTickIntervalMs` | `33` | ms between game ticks |
 | `randomTicksPerSubchunk` | `3` | Random ticks per subchunk per game tick |
 | `randomSeed` | `0` (=system) | RNG seed |
 | `gameTicksEnabled` | `true` | |
@@ -273,7 +273,7 @@ Collection of AABBs in [0,1] local space. Static presets:
 | `CollisionShape::FENCE_POST` | Thin center post |
 | `CollisionShape::THIN_FLOOR` | Carpet-like |
 
-Methods: `addBox(aabb)`, `atPosition(BlockPos)`, `transformed(Rotation)`, `computeRotations(base)`
+Methods: `addBox(aabb)`, `atPosition(BlockCoord)`, `transformed(Rotation)`, `computeRotations(base)`
 
 ### PhysicsSystem
 
@@ -289,7 +289,7 @@ Constructor: `PhysicsSystem(BlockShapeProvider provider)` or `PhysicsSystem(Worl
 
 ### RaycastResult
 
-Fields: `bool hit`, `BlockPos blockPos`, `Face face`, `glm::vec3 hitPoint`, `float distance`
+Fields: `bool hit`, `BlockCoord blockPos`, `Face face`, `glm::vec3 hitPoint`, `float distance`
 
 ### RaycastMode
 
@@ -353,7 +353,7 @@ NoiseHash::hash2D(x, z, seed)         // Position hash
 | `displayName` | `string` | | |
 | `temperatureMin/Max` | `float` | 0.0/1.0 | Climate range |
 | `humidityMin/Max` | `float` | 0.0/1.0 | Climate range |
-| `baseHeight` | `float` | 64.0 | Terrain height |
+| `baseHeight` | `float` | 80.0 | Terrain height |
 | `heightVariation` | `float` | 16.0 | Height noise amplitude |
 | `heightScale` | `float` | 1.0 | Height multiplier |
 | `surfaceBlock` | `string` | "grass" | Top layer block name |
@@ -431,12 +431,12 @@ pipeline.generateColumn(column, world, biomeMap);
 ```cpp
 virtual string_view name() const = 0;
 virtual FeatureResult place(FeaturePlacementContext& ctx) = 0;
-virtual BlockPos maxExtent() const { return {1,1,1}; }
+virtual BlockCoord maxExtent() const { return {1,1,1}; }
 ```
 
 **FeatureResult enum:** `Placed`, `Skipped`, `Failed`
 
-**FeaturePlacementContext:** `World& world`, `BlockPos origin`, `BiomeId biome`, `uint64_t seed`, `GenerationContext* genCtx`
+**FeaturePlacementContext:** `World& world`, `BlockCoord origin`, `BiomeId biome`, `uint64_t seed`, `GenerationContext* genCtx`
 
 ### Built-in Features
 
@@ -475,7 +475,7 @@ temperature_min: 0.4
 temperature_max: 0.7
 humidity_min: 0.2
 humidity_max: 0.6
-base_height: 64
+base_height: 80
 height_variation: 6
 surface: grass
 filler: dirt
@@ -558,7 +558,7 @@ CBOR (RFC 8949) format. `SubChunkSerializer::serialize()/deserialize()`, `Column
 
 ### RegionFile (`core/region_file.hpp`)
 
-32x32 columns per region file. `RegionFile(path)`, `readColumn(localX, localZ)`, `writeColumn(localX, localZ, data)`.
+64x64 columns per region file. `RegionFile(path)`, `readColumn(localX, localZ)`, `writeColumn(localX, localZ, data)`.
 
 ### IOManager (`core/io_manager.hpp`)
 
@@ -606,7 +606,7 @@ First-person controller with fly and physics modes. finevk-independent — calle
 | `isOnGround()` | Physics ground state |
 | `flyPositionDelta() -> dvec3` | Fly mode: frame delta for camera |
 
-**Config:** `setMoveSpeed(10.0f)`, `setLookSensitivity(0.002f)`, `setJumpVelocity(8.0f)`, `setEyeHeight(1.62f)`
+**Config:** `setMoveSpeed(10.0f)`, `setLookSensitivity(0.002f)`, `setJumpVelocity(8.0f)`, `setEyeHeight(1.65f)`
 
 ### Key Bindings (`core/key_bindings.hpp`)
 

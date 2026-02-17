@@ -24,7 +24,7 @@ TEST(Vec3Test, ValueConstruction) {
 }
 
 TEST(Vec3Test, ToVec3Center) {
-    BlockPos pos(10, 20, 30);
+    BlockCoord pos(10, 20, 30);
     Vec3 v = toVec3Center(pos);
     // Center of block
     EXPECT_FLOAT_EQ(v.x, 10.5f);
@@ -33,7 +33,7 @@ TEST(Vec3Test, ToVec3Center) {
 }
 
 TEST(Vec3Test, ToVec3Corner) {
-    BlockPos pos(10, 20, 30);
+    BlockCoord pos(10, 20, 30);
     Vec3 v = toVec3(pos);
     // Corner of block
     EXPECT_FLOAT_EQ(v.x, 10.0f);
@@ -110,9 +110,9 @@ TEST(Vec3Test, MinMax) {
     EXPECT_FLOAT_EQ(maxV.z, 3.0f);
 }
 
-TEST(Vec3Test, ToBlockPos) {
+TEST(Vec3Test, ToBlockCoord) {
     Vec3 v(1.5f, 2.9f, -0.1f);
-    BlockPos pos = toBlockPos(v);
+    BlockCoord pos = toBlockCoord(v);
     EXPECT_EQ(pos.x, 1);
     EXPECT_EQ(pos.y, 2);
     EXPECT_EQ(pos.z, -1);  // floor(-0.1) = -1
@@ -661,7 +661,7 @@ TEST(RayAABBTest, HitBottomFace) {
 // Helper: simple shape provider that returns FULL_BLOCK for specific positions
 class SimpleBlockWorld {
 public:
-    void setBlock(const BlockPos& pos, bool solid) {
+    void setBlock(const BlockCoord& pos, bool solid) {
         if (solid) {
             solidBlocks_.insert(pos.pack());
         } else {
@@ -669,7 +669,7 @@ public:
         }
     }
 
-    const CollisionShape* getShape(const BlockPos& pos, RaycastMode /*mode*/) const {
+    const CollisionShape* getShape(const BlockCoord& pos, RaycastMode /*mode*/) const {
         if (solidBlocks_.count(pos.pack())) {
             return &CollisionShape::FULL_BLOCK;
         }
@@ -682,9 +682,9 @@ private:
 
 TEST(RaycastBlocksTest, HitSingleBlock) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(5, 0, 0), true);
+    world.setBlock(BlockCoord(5, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -704,7 +704,7 @@ TEST(RaycastBlocksTest, HitSingleBlock) {
 TEST(RaycastBlocksTest, MissEmptyWorld) {
     SimpleBlockWorld world;  // No blocks
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -718,9 +718,9 @@ TEST(RaycastBlocksTest, MissEmptyWorld) {
 
 TEST(RaycastBlocksTest, MaxDistanceRespected) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(50, 0, 0), true);  // Far block
+    world.setBlock(BlockCoord(50, 0, 0), true);  // Far block
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -734,10 +734,10 @@ TEST(RaycastBlocksTest, MaxDistanceRespected) {
 
 TEST(RaycastBlocksTest, HitClosestBlock) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(5, 0, 0), true);
-    world.setBlock(BlockPos(10, 0, 0), true);
+    world.setBlock(BlockCoord(5, 0, 0), true);
+    world.setBlock(BlockCoord(10, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -752,9 +752,9 @@ TEST(RaycastBlocksTest, HitClosestBlock) {
 
 TEST(RaycastBlocksTest, DiagonalRay) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(5, 5, 5), true);
+    world.setBlock(BlockCoord(5, 5, 5), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -771,9 +771,9 @@ TEST(RaycastBlocksTest, DiagonalRay) {
 
 TEST(RaycastBlocksTest, DownwardRay) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(0, 0, 0), true);  // Ground block
+    world.setBlock(BlockCoord(0, 0, 0), true);  // Ground block
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -792,9 +792,9 @@ TEST(RaycastBlocksTest, DownwardRay) {
 
 TEST(RaycastBlocksTest, NegativeCoordinates) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(-5, -3, -2), true);
+    world.setBlock(BlockCoord(-5, -3, -2), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -811,9 +811,9 @@ TEST(RaycastBlocksTest, NegativeCoordinates) {
 
 TEST(RaycastBlocksTest, StartInsideBlock) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(0, 0, 0), true);
+    world.setBlock(BlockCoord(0, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -833,7 +833,7 @@ TEST(RaycastBlocksTest, HalfSlabTop) {
     // Test with non-full block shape
     SimpleBlockWorld world;
     // Use a custom provider for half slabs
-    auto shapeProvider = [](const BlockPos& pos, RaycastMode /*mode*/) -> const CollisionShape* {
+    auto shapeProvider = [](const BlockCoord& pos, RaycastMode /*mode*/) -> const CollisionShape* {
         if (pos.x == 5 && pos.y == 0 && pos.z == 0) {
             return &CollisionShape::HALF_SLAB_TOP;  // y: 0.5 to 1.0
         }
@@ -859,9 +859,9 @@ TEST(RaycastBlocksTest, HalfSlabTop) {
 
 TEST(RaycastBlocksTest, HitPointAccuracy) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(5, 0, 0), true);
+    world.setBlock(BlockCoord(5, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -942,7 +942,7 @@ TEST(PhysicsBodyTest, GroundState) {
 // ============================================================================
 
 TEST(PhysicsSystemTest, MoveInEmptyWorld) {
-    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    auto shapeProvider = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;  // No blocks
     };
 
@@ -957,9 +957,9 @@ TEST(PhysicsSystemTest, MoveInEmptyWorld) {
 
 TEST(PhysicsSystemTest, BlocksMovement) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(2, 5, 0), true);  // Block in the way
+    world.setBlock(BlockCoord(2, 5, 0), true);  // Block in the way
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -975,7 +975,7 @@ TEST(PhysicsSystemTest, BlocksMovement) {
 }
 
 TEST(PhysicsSystemTest, FallsWithGravity) {
-    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    auto shapeProvider = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;  // No blocks
     };
 
@@ -995,11 +995,11 @@ TEST(PhysicsSystemTest, LandsOnGround) {
     // Create a floor
     for (int x = -2; x <= 2; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1020,11 +1020,11 @@ TEST(PhysicsSystemTest, WalksOnGround) {
     // Create a floor
     for (int x = -5; x <= 10; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1045,13 +1045,13 @@ TEST(PhysicsSystemTest, StepClimbing) {
     // Create a floor at y=0
     for (int x = -2; x <= 5; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
     // Create a half-block step at x=3 (using bottom slab shape)
     // Since we only have FULL_BLOCK in SimpleBlockWorld, use a custom provider
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
         // Step block at x=3, y=1 - make it a half slab (0.5 blocks high)
         if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
             return &CollisionShape::HALF_SLAB_BOTTOM;  // 0 to 0.5 height
@@ -1078,14 +1078,14 @@ TEST(PhysicsSystemTest, CantClimbTooHigh) {
     // Create a floor
     for (int x = -2; x <= 5; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
     // Create a wall (too high to step over)
-    world.setBlock(BlockPos(3, 1, 0), true);
-    world.setBlock(BlockPos(3, 2, 0), true);
+    world.setBlock(BlockCoord(3, 1, 0), true);
+    world.setBlock(BlockCoord(3, 2, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1103,9 +1103,9 @@ TEST(PhysicsSystemTest, CantClimbTooHigh) {
 
 TEST(PhysicsSystemTest, CheckOnGround) {
     SimpleBlockWorld world;
-    world.setBlock(BlockPos(0, 0, 0), true);
+    world.setBlock(BlockCoord(0, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1121,7 +1121,7 @@ TEST(PhysicsSystemTest, CheckOnGround) {
 }
 
 TEST(PhysicsSystemTest, GravityConfiguration) {
-    auto shapeProvider = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    auto shapeProvider = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
 
@@ -1136,11 +1136,11 @@ TEST(PhysicsSystemTest, GravityConfiguration) {
 TEST(PhysicsSystemTest, UpdateIntegration) {
     SimpleBlockWorld world;
     // Create a floor
-    world.setBlock(BlockPos(0, 0, 0), true);
-    world.setBlock(BlockPos(1, 0, 0), true);
-    world.setBlock(BlockPos(-1, 0, 0), true);
+    world.setBlock(BlockCoord(0, 0, 0), true);
+    world.setBlock(BlockCoord(1, 0, 0), true);
+    world.setBlock(BlockCoord(-1, 0, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1184,13 +1184,13 @@ TEST(PhysicsSystemTest, PerBodyStepHeightHigherAllowsHigherStep) {
     // Create a floor at y=0
     for (int x = -2; x <= 10; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
 
     // Use a half slab (0.5 tall) at x=3, y=1 - this is climbable with default step height
     // This is the same setup as the passing StepClimbing test
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
         if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
             return &CollisionShape::HALF_SLAB_BOTTOM;  // 0 to 0.5 height
         }
@@ -1231,13 +1231,13 @@ TEST(PhysicsSystemTest, PerBodyStepHeightLimited) {
     // Create a floor at y=0
     for (int x = -2; x <= 5; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
     // Create a full block step at x=3, y=1
-    world.setBlock(BlockPos(3, 1, 0), true);
+    world.setBlock(BlockCoord(3, 1, 0), true);
 
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
         return world.getShape(pos, mode);
     };
 
@@ -1260,12 +1260,12 @@ TEST(PhysicsSystemTest, PerBodyStepHeightZeroDisablesStep) {
     // Create a floor at y=0
     for (int x = -2; x <= 5; ++x) {
         for (int z = -2; z <= 2; ++z) {
-            world.setBlock(BlockPos(x, 0, z), true);
+            world.setBlock(BlockCoord(x, 0, z), true);
         }
     }
 
     // Use a custom shape provider for half-slab
-    auto shapeProvider = [&world](const BlockPos& pos, RaycastMode mode) -> const CollisionShape* {
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
         // Half slab step at x=3, y=1
         if (pos.x == 3 && pos.y == 1 && pos.z == 0) {
             return &CollisionShape::HALF_SLAB_BOTTOM;

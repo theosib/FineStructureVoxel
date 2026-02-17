@@ -61,10 +61,10 @@ FeatureResult OreFeature::place(FeaturePlacementContext& ctx) {
     return placed > 0 ? FeatureResult::Placed : FeatureResult::Skipped;
 }
 
-BlockPos OreFeature::maxExtent() const {
+BlockCoord OreFeature::maxExtent() const {
     // Ore veins are small and stay near origin
     int32_t r = config_.veinSize;
-    return BlockPos(r, r, r);
+    return BlockCoord(r, r, r);
 }
 
 }  // namespace finevox::worldgen

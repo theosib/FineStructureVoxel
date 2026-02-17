@@ -40,7 +40,7 @@ public:
      *
      * Currently just tracks the name for validation purposes.
      *
-     * @param name Fully-qualified entity name (e.g., "blockgame:zombie")
+     * @param name Fully-qualified entity name (e.g., "finevox:zombie")
      * @return true if registered, false if name already exists
      */
     bool registerType(std::string_view name);

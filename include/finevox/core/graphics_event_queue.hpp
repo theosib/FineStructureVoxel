@@ -93,7 +93,7 @@ struct GraphicsEvent {
     // Helpers
     // ========================================================================
 
-    [[nodiscard]] BlockPos blockPos() const { return BlockPos(blockX, blockY, blockZ); }
+    [[nodiscard]] BlockCoord blockPos() const { return BlockCoord(blockX, blockY, blockZ); }
 
     // ========================================================================
     // Factory Methods
@@ -125,7 +125,7 @@ struct GraphicsEvent {
     /**
      * @brief Create block correction event
      */
-    static GraphicsEvent blockCorrection(BlockPos pos, BlockTypeId correct,
+    static GraphicsEvent blockCorrection(BlockCoord pos, BlockTypeId correct,
                                           BlockTypeId expected);
 
     /**

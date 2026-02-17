@@ -6,13 +6,13 @@
 
 ## Goals
 
-FineStructure Voxel (finevox) is a voxel game engine designed to support games similar to Minecraft, Roblox, and 7 Days to Die. The engine will provide:
+FineStructure Voxel (finevox) is a voxel game engine designed to support block-based sandbox games. The engine will provide:
 
 - **Infinite worlds** with chunk-based streaming (full-height column loading)
 - **Flexible block system** with rotation, custom meshes, per-block data, and text rendering
 - **High-performance rendering** via Vulkan, greedy meshing, and multi-level LOD
 - **Robust physics** with AABB collision and step-climbing
-- **Batch operations API** for efficient bulk block changes (avoiding Minecraft's per-block overhead)
+- **Batch operations API** for efficient bulk block changes (avoiding per-block overhead common in voxel engines)
 - **Scripting integration points** for game logic and command language
 - **Multiplayer-ready design** (single-player first, but architected for networking)
 

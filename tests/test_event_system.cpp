@@ -14,26 +14,26 @@ using namespace finevox;
 TEST(EventOutboxTest, PushSingleEvent) {
     EventOutbox outbox;
 
-    BlockEvent event = BlockEvent::neighborChanged({10, 20, 30}, Face::PosX);
+    BlockEvent event = BlockEvent::neighborUpdated({10, 20, 30}, Face::PosX);
     outbox.push(event);
 
     EXPECT_EQ(outbox.size(), 1);
     EXPECT_FALSE(outbox.empty());
 }
 
-TEST(EventOutboxTest, ConsolidateNeighborChangedEvents) {
+TEST(EventOutboxTest, ConsolidateNeighborUpdatedEvents) {
     EventOutbox outbox;
 
-    BlockPos pos{10, 20, 30};
+    BlockCoord pos{10, 20, 30};
 
-    // Push multiple NeighborChanged events for the same position
-    BlockEvent event1 = BlockEvent::neighborChanged(pos, Face::PosX);
+    // Push multiple NeighborUpdated events for the same position
+    BlockEvent event1 = BlockEvent::neighborUpdated(pos, Face::PosX);
     event1.addNeighborFace(Face::PosX);
 
-    BlockEvent event2 = BlockEvent::neighborChanged(pos, Face::NegY);
+    BlockEvent event2 = BlockEvent::neighborUpdated(pos, Face::NegY);
     event2.addNeighborFace(Face::NegY);
 
-    BlockEvent event3 = BlockEvent::neighborChanged(pos, Face::PosZ);
+    BlockEvent event3 = BlockEvent::neighborUpdated(pos, Face::PosZ);
     event3.addNeighborFace(Face::PosZ);
 
     outbox.push(event1);
@@ -48,18 +48,18 @@ TEST(EventOutboxTest, ConsolidateNeighborChangedEvents) {
     outbox.swapTo(inbox);
 
     EXPECT_EQ(inbox.size(), 1);
-    EXPECT_EQ(inbox[0].type, EventType::NeighborChanged);
-    EXPECT_TRUE(inbox[0].hasNeighborChanged(Face::PosX));
-    EXPECT_TRUE(inbox[0].hasNeighborChanged(Face::NegY));
-    EXPECT_TRUE(inbox[0].hasNeighborChanged(Face::PosZ));
+    EXPECT_EQ(inbox[0].type, EventType::NeighborUpdated);
+    EXPECT_TRUE(inbox[0].hasNeighborUpdated(Face::PosX));
+    EXPECT_TRUE(inbox[0].hasNeighborUpdated(Face::NegY));
+    EXPECT_TRUE(inbox[0].hasNeighborUpdated(Face::PosZ));
     EXPECT_EQ(inbox[0].changedNeighborCount(), 3);
 }
 
 TEST(EventOutboxTest, SwapClearsOutbox) {
     EventOutbox outbox;
 
-    outbox.push(BlockEvent::neighborChanged({1, 2, 3}, Face::PosX));
-    outbox.push(BlockEvent::neighborChanged({4, 5, 6}, Face::NegY));
+    outbox.push(BlockEvent::neighborUpdated({1, 2, 3}, Face::PosX));
+    outbox.push(BlockEvent::neighborUpdated({4, 5, 6}, Face::NegY));
 
     EXPECT_EQ(outbox.size(), 2);
 
@@ -73,9 +73,9 @@ TEST(EventOutboxTest, SwapClearsOutbox) {
 TEST(EventOutboxTest, DifferentPositionsNotConsolidated) {
     EventOutbox outbox;
 
-    outbox.push(BlockEvent::neighborChanged({1, 2, 3}, Face::PosX));
-    outbox.push(BlockEvent::neighborChanged({4, 5, 6}, Face::PosX));
-    outbox.push(BlockEvent::neighborChanged({7, 8, 9}, Face::PosX));
+    outbox.push(BlockEvent::neighborUpdated({1, 2, 3}, Face::PosX));
+    outbox.push(BlockEvent::neighborUpdated({4, 5, 6}, Face::PosX));
+    outbox.push(BlockEvent::neighborUpdated({7, 8, 9}, Face::PosX));
 
     EXPECT_EQ(outbox.size(), 3);
 }
@@ -83,10 +83,10 @@ TEST(EventOutboxTest, DifferentPositionsNotConsolidated) {
 TEST(EventOutboxTest, DifferentEventTypesKeptSeparate) {
     EventOutbox outbox;
 
-    BlockPos pos{10, 20, 30};
+    BlockCoord pos{10, 20, 30};
 
     // Push two different event types at the same position
-    outbox.push(BlockEvent::neighborChanged(pos, Face::PosX));
+    outbox.push(BlockEvent::neighborUpdated(pos, Face::PosX));
 
     auto stone = BlockTypeId::fromName("eventtest:stone");
     outbox.push(BlockEvent::blockPlaced(pos, stone, AIR_BLOCK_TYPE));
@@ -100,13 +100,13 @@ TEST(EventOutboxTest, DifferentEventTypesKeptSeparate) {
     EXPECT_EQ(inbox.size(), 2);
 
     // Check both event types are present
-    bool hasNeighborChanged = false;
+    bool hasNeighborUpdated = false;
     bool hasBlockPlaced = false;
     for (const auto& event : inbox) {
-        if (event.type == EventType::NeighborChanged) hasNeighborChanged = true;
+        if (event.type == EventType::NeighborUpdated) hasNeighborUpdated = true;
         if (event.type == EventType::BlockPlaced) hasBlockPlaced = true;
     }
-    EXPECT_TRUE(hasNeighborChanged);
+    EXPECT_TRUE(hasNeighborUpdated);
     EXPECT_TRUE(hasBlockPlaced);
 }
 
@@ -115,23 +115,23 @@ TEST(EventOutboxTest, DifferentEventTypesKeptSeparate) {
 // ============================================================================
 
 TEST(BlockEventTest, FaceMaskHelpers) {
-    BlockEvent event = BlockEvent::neighborChanged({0, 0, 0}, Face::PosX);
+    BlockEvent event = BlockEvent::neighborUpdated({0, 0, 0}, Face::PosX);
 
     // Initial state
     EXPECT_EQ(event.neighborFaceMask, 0);
-    EXPECT_FALSE(event.hasNeighborChanged(Face::PosX));
+    EXPECT_FALSE(event.hasNeighborUpdated(Face::PosX));
 
     // Add faces
     event.addNeighborFace(Face::PosX);
     event.addNeighborFace(Face::NegY);
     event.addNeighborFace(Face::PosZ);
 
-    EXPECT_TRUE(event.hasNeighborChanged(Face::PosX));
-    EXPECT_TRUE(event.hasNeighborChanged(Face::NegY));
-    EXPECT_TRUE(event.hasNeighborChanged(Face::PosZ));
-    EXPECT_FALSE(event.hasNeighborChanged(Face::NegX));
-    EXPECT_FALSE(event.hasNeighborChanged(Face::PosY));
-    EXPECT_FALSE(event.hasNeighborChanged(Face::NegZ));
+    EXPECT_TRUE(event.hasNeighborUpdated(Face::PosX));
+    EXPECT_TRUE(event.hasNeighborUpdated(Face::NegY));
+    EXPECT_TRUE(event.hasNeighborUpdated(Face::PosZ));
+    EXPECT_FALSE(event.hasNeighborUpdated(Face::NegX));
+    EXPECT_FALSE(event.hasNeighborUpdated(Face::PosY));
+    EXPECT_FALSE(event.hasNeighborUpdated(Face::NegZ));
 
     EXPECT_EQ(event.changedNeighborCount(), 3);
 }
@@ -162,8 +162,8 @@ TEST(BlockEventTest, ForEachChangedNeighbor) {
 TEST(TickConfigTest, DefaultValues) {
     TickConfig config;
 
-    EXPECT_EQ(config.gameTickIntervalMs, 50);
-    EXPECT_EQ(config.randomTicksPerSubchunk, 3);
+    EXPECT_EQ(config.gameTickIntervalMs, 33);
+    EXPECT_EQ(config.randomTicksPerSubchunk, 4);
     EXPECT_EQ(config.randomSeed, 0);
     EXPECT_TRUE(config.gameTicksEnabled);
     EXPECT_TRUE(config.randomTicksEnabled);
@@ -297,7 +297,7 @@ TEST(UpdateSchedulerTest, ScheduleTick) {
     World world;
     UpdateScheduler scheduler(world);
 
-    BlockPos pos{10, 20, 30};
+    BlockCoord pos{10, 20, 30};
     scheduler.scheduleTick(pos, 5, TickType::Scheduled);
 
     EXPECT_EQ(scheduler.scheduledTickCount(), 1);
@@ -308,7 +308,7 @@ TEST(UpdateSchedulerTest, ScheduledTickFires) {
     World world;
     UpdateScheduler scheduler(world);
 
-    BlockPos pos{10, 20, 30};
+    BlockCoord pos{10, 20, 30};
     scheduler.scheduleTick(pos, 3, TickType::Scheduled);
 
     // Advance ticks - tick should not fire yet
@@ -332,8 +332,8 @@ TEST(UpdateSchedulerTest, CancelScheduledTicks) {
     World world;
     UpdateScheduler scheduler(world);
 
-    BlockPos pos1{10, 20, 30};
-    BlockPos pos2{40, 50, 60};
+    BlockCoord pos1{10, 20, 30};
+    BlockCoord pos2{40, 50, 60};
 
     scheduler.scheduleTick(pos1, 10, TickType::Scheduled);
     scheduler.scheduleTick(pos2, 10, TickType::Scheduled);
@@ -373,7 +373,7 @@ TEST(UpdateSchedulerTest, TickConfigSeedDeterminism) {
     // Set same seed
     TickConfig config;
     config.randomSeed = 12345;
-    config.randomTicksPerSubchunk = 3;
+    config.randomTicksPerSubchunk = 4;
 
     scheduler1.setTickConfig(config);
     scheduler2.setTickConfig(config);
@@ -402,7 +402,7 @@ TEST(UpdateSchedulerTest, ScheduleTickMinimumDelay) {
     World world;
     UpdateScheduler scheduler(world);
 
-    BlockPos pos{10, 20, 30};
+    BlockCoord pos{10, 20, 30};
 
     // Schedule with 0 delay should become 1
     scheduler.scheduleTick(pos, 0, TickType::Scheduled);
@@ -421,9 +421,9 @@ TEST(UpdateSchedulerTest, ScheduleTickMinimumDelay) {
 // ============================================================================
 
 TEST(ScheduledTickTest, Ordering) {
-    ScheduledTick tick1{BlockPos{0, 0, 0}, 100, TickType::Scheduled};
-    ScheduledTick tick2{BlockPos{1, 1, 1}, 50, TickType::Scheduled};
-    ScheduledTick tick3{BlockPos{2, 2, 2}, 200, TickType::Scheduled};
+    ScheduledTick tick1{BlockCoord{0, 0, 0}, 100, TickType::Scheduled};
+    ScheduledTick tick2{BlockCoord{1, 1, 1}, 50, TickType::Scheduled};
+    ScheduledTick tick3{BlockCoord{2, 2, 2}, 200, TickType::Scheduled};
 
     // Min-heap ordering: earlier ticks should have lower priority (come first)
     EXPECT_TRUE(tick1 > tick2);   // 100 > 50
@@ -444,13 +444,13 @@ TEST(UpdateSchedulerTest, AutoRegisterOnPlace) {
 
     // Create world with a subchunk
     World world;
-    world.setBlock(BlockPos{5, 5, 5}, tickingId);
+    world.setBlock(BlockCoord{5, 5, 5}, tickingId);
 
     // Create scheduler and simulate block placed event
     UpdateScheduler scheduler(world);
 
     BlockEvent placeEvent = BlockEvent::blockPlaced(
-        BlockPos{5, 5, 5}, tickingId, AIR_BLOCK_TYPE);
+        BlockCoord{5, 5, 5}, tickingId, AIR_BLOCK_TYPE);
     scheduler.pushExternalEvent(placeEvent);
     scheduler.processEvents();
 
@@ -459,7 +459,7 @@ TEST(UpdateSchedulerTest, AutoRegisterOnPlace) {
     ASSERT_NE(subchunk, nullptr);
 
     // Calculate local index for (5, 5, 5)
-    int32_t localIndex = BlockPos{5, 5, 5}.localIndex();
+    int32_t localIndex = BlockCoord{5, 5, 5}.localIndex();
     EXPECT_TRUE(subchunk->isRegisteredForGameTicks(localIndex));
 }
 
@@ -478,30 +478,30 @@ TEST(UpdateSchedulerTest, AutoUnregisterOnBreak) {
     // Create world with a ticking block AND a normal block
     // (We need the normal block to keep the subchunk alive after breaking the ticking block)
     World world;
-    world.setBlock(BlockPos{7, 7, 7}, tickingId);
-    world.setBlock(BlockPos{8, 8, 8}, normalId);  // Keep subchunk alive
+    world.setBlock(BlockCoord{7, 7, 7}, tickingId);
+    world.setBlock(BlockCoord{8, 8, 8}, normalId);  // Keep subchunk alive
 
     // Create scheduler
     UpdateScheduler scheduler(world);
 
     // First place the block to register it
     BlockEvent placeEvent = BlockEvent::blockPlaced(
-        BlockPos{7, 7, 7}, tickingId, AIR_BLOCK_TYPE);
+        BlockCoord{7, 7, 7}, tickingId, AIR_BLOCK_TYPE);
     scheduler.pushExternalEvent(placeEvent);
     scheduler.processEvents();
 
     // Verify registered
     SubChunk* subchunk = world.getSubChunk(ChunkPos{0, 0, 0});
     ASSERT_NE(subchunk, nullptr);
-    int32_t localIndex = BlockPos{7, 7, 7}.localIndex();
+    int32_t localIndex = BlockCoord{7, 7, 7}.localIndex();
     EXPECT_TRUE(subchunk->isRegisteredForGameTicks(localIndex));
 
     // Schedule a tick for this block
-    scheduler.scheduleTick(BlockPos{7, 7, 7}, 10, TickType::Scheduled);
-    EXPECT_TRUE(scheduler.hasScheduledTick(BlockPos{7, 7, 7}));
+    scheduler.scheduleTick(BlockCoord{7, 7, 7}, 10, TickType::Scheduled);
+    EXPECT_TRUE(scheduler.hasScheduledTick(BlockCoord{7, 7, 7}));
 
     // Now break the block
-    BlockEvent breakEvent = BlockEvent::blockBroken(BlockPos{7, 7, 7}, tickingId);
+    BlockEvent breakEvent = BlockEvent::blockBroken(BlockCoord{7, 7, 7}, tickingId);
     scheduler.pushExternalEvent(breakEvent);
     scheduler.processEvents();
 
@@ -511,7 +511,7 @@ TEST(UpdateSchedulerTest, AutoUnregisterOnBreak) {
 
     // Should be unregistered and scheduled ticks cancelled
     EXPECT_FALSE(subchunk->isRegisteredForGameTicks(localIndex));
-    EXPECT_FALSE(scheduler.hasScheduledTick(BlockPos{7, 7, 7}));
+    EXPECT_FALSE(scheduler.hasScheduledTick(BlockCoord{7, 7, 7}));
 }
 
 // ============================================================================
@@ -536,11 +536,11 @@ TEST(ChunkColumnGameTickTest, RebuildGameTickRegistries) {
 
     // Place blocks in different subchunks
     // Subchunk 0 (y=0-15)
-    column.setBlock(BlockPos{5, 5, 5}, tickingId);    // Should register
-    column.setBlock(BlockPos{10, 10, 10}, normalId);  // Should not register
+    column.setBlock(BlockCoord{5, 5, 5}, tickingId);    // Should register
+    column.setBlock(BlockCoord{10, 10, 10}, normalId);  // Should not register
 
     // Subchunk 1 (y=16-31)
-    column.setBlock(BlockPos{3, 20, 3}, tickingId);   // Should register
+    column.setBlock(BlockCoord{3, 20, 3}, tickingId);   // Should register
 
     // Rebuild game tick registries (simulating load from disk)
     column.rebuildGameTickRegistries();
@@ -548,12 +548,12 @@ TEST(ChunkColumnGameTickTest, RebuildGameTickRegistries) {
     // Check subchunk 0
     SubChunk* sc0 = column.getSubChunk(0);
     ASSERT_NE(sc0, nullptr);
-    EXPECT_TRUE(sc0->isRegisteredForGameTicks(BlockPos{5, 5, 5}.localIndex()));
-    EXPECT_FALSE(sc0->isRegisteredForGameTicks(BlockPos{10, 10, 10}.localIndex()));
+    EXPECT_TRUE(sc0->isRegisteredForGameTicks(BlockCoord{5, 5, 5}.localIndex()));
+    EXPECT_FALSE(sc0->isRegisteredForGameTicks(BlockCoord{10, 10, 10}.localIndex()));
 
     // Check subchunk 1
     SubChunk* sc1 = column.getSubChunk(1);
     ASSERT_NE(sc1, nullptr);
     // (3, 20, 3) world -> (3, 4, 3) local within subchunk 1
-    EXPECT_TRUE(sc1->isRegisteredForGameTicks(BlockPos{3, 4, 3}.localIndex()));
+    EXPECT_TRUE(sc1->isRegisteredForGameTicks(BlockCoord{3, 4, 3}.localIndex()));
 }

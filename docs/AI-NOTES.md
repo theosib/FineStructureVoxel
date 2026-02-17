@@ -36,7 +36,7 @@
 | Topic | File |
 |-------|------|
 | Full index | [INDEX.md](INDEX.md) |
-| Core types (BlockPos, Block, SubChunk) | [04-core-data-structures.md](04-core-data-structures.md) |
+| Core types (BlockCoord, Block, SubChunk) | [04-core-data-structures.md](04-core-data-structures.md) |
 | Subchunk lifecycle & caching | [05-world-management.md](05-world-management.md) Section 5.4 |
 | Collision/Hit box distinction | [08-physics.md](08-physics.md) Section 8.2 |
 | Block model spec format | [19-block-models.md](19-block-models.md) |
@@ -130,7 +130,7 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 
 ### Phase 0: VK-Independent Foundation
 *No graphics, pure data structures*
-- BlockPos, ChunkPos, ColumnPos
+- BlockCoord, ChunkPos, ColumnPos
 - StringInterner, BlockTypeId
 - SubChunkPalette
 - Block, SubChunk, ChunkColumn structures
@@ -228,7 +228,7 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - .tag file format (tag/unify/separate directives)
 
 ### Phase 15: Sky + Day/Night Cycle ✓
-- WorldTime: tick-based time (24000 ticks/day, 20 tps default)
+- WorldTime: tick-based time (36000 ticks/day, 30 tps default)
   - advance(), timeOfDay(), isDaytime(), skyBrightness(), persistence
 - SkyParameters: pure computation from time of day
   - Sky color gradients (dawn/day/sunset/dusk/night), fog color, sun arc
@@ -252,7 +252,7 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
 - DataContainerProxy: ProxyMap wrapping DataContainer (zero-overhead uint32_t keys)
 - ScriptCache: file-mtime aware hot-reloadable script loading
 - .model files support `script:` field for referencing .fsc script files
-- Event symbols: :place, :break, :tick, :neighbor_changed, :block_update, :use, :hit, :repaint
+- Event symbols: :place, :destroy, :tick, :neighbor_updated, :block_update, :interact, :strike, :repaint
 
 ### Phase 18: Game Session & Game Thread ✓
 - **GameSession**: Owns all game state (World, UpdateScheduler, LightEngine, EntityManager, WorldTime)
@@ -265,7 +265,7 @@ Based on analysis (see [16-finestructurevk-critique.md](16-finestructurevk-criti
   - Replaces `PlayerEventData` in BlockEvent and scattered fields in GraphicsEvent
   - Used for game→graphics communication, player state updates, future network packets
   - `EntityState::fromEntity()` factory handles float→double conversion
-- **Game thread**: Dedicated thread for game logic at fixed tick rate (20 TPS default)
+- **Game thread**: Dedicated thread for game logic at fixed tick rate (30 TPS default)
   - Uses `Queue<BlockEvent>` with alarm support: wakes on command arrival OR tick alarm
   - Commands processed immediately (not waiting for next tick)
   - Ticks drive: `worldTime.advance()`, `scheduler.advanceGameTick()`, `entityManager.tick()`
@@ -402,7 +402,7 @@ items[0]                # Array indexing (brackets - future)
 
 ### Future: Smart Block Placement (Design Notes)
 
-Context-aware placement like Hytale/Minecraft:
+Context-aware placement like Hytale:
 1. **Player facing** + **target surface** → suggested rotation
 2. Constrain to block's `allowedRotations()`
 3. **R-key cycling** through valid rotations with ghost preview
@@ -421,12 +421,12 @@ See plan file: `.claude/plans/abundant-pondering-hollerith.md`
 // Phase 0 APIs will go here after implementation
 // Example format:
 //
-// struct BlockPos {
+// struct BlockCoord {
 //     int32_t x, y, z;
 //     uint64_t pack() const;
-//     static BlockPos unpack(uint64_t);
+//     static BlockCoord unpack(uint64_t);
 //     int toLocalIndex() const;
-//     BlockPos neighbor(Face) const;
+//     BlockCoord neighbor(Face) const;
 // };
 ```
 

@@ -26,41 +26,41 @@ TEST(WorldTimeTest, DefaultState) {
 
 TEST(WorldTimeTest, AdvanceOneTick) {
     WorldTime wt;
-    // At 20 ticks/sec, 0.05 seconds = 1 tick
-    wt.advance(0.05f);
+    // At 30 ticks/sec, 1/30 seconds = 1 tick
+    wt.advance(1.0f / 30.0f);
     EXPECT_EQ(wt.totalTicks(), 1);
 }
 
 TEST(WorldTimeTest, AdvanceMultipleTicks) {
     WorldTime wt;
-    // 1 second at 20 tps = 20 ticks
+    // 1 second at 30 tps = 30 ticks
     wt.advance(1.0f);
-    EXPECT_EQ(wt.totalTicks(), 20);
+    EXPECT_EQ(wt.totalTicks(), 30);
 }
 
 TEST(WorldTimeTest, AdvanceAccumulates) {
     WorldTime wt;
-    // 0.03 seconds * 20 tps = 0.6 ticks (rounds down to 0)
-    wt.advance(0.03f);
+    // 0.02 seconds * 30 tps = 0.6 ticks (rounds down to 0)
+    wt.advance(0.02f);
     EXPECT_EQ(wt.totalTicks(), 0);
 
-    // Another 0.03 = total 0.06 * 20 = 1.2, should have 1 tick now
-    wt.advance(0.03f);
+    // Another 0.02 = total 0.04 * 30 = 1.2, should have 1 tick now
+    wt.advance(0.02f);
     EXPECT_EQ(wt.totalTicks(), 1);
 }
 
 TEST(WorldTimeTest, AdvanceNegativeDeltaIgnored) {
     WorldTime wt;
-    wt.advance(1.0f);  // 20 ticks
+    wt.advance(1.0f);  // 30 ticks
     wt.advance(-1.0f); // Should be ignored
-    EXPECT_EQ(wt.totalTicks(), 20);
+    EXPECT_EQ(wt.totalTicks(), 30);
 }
 
 TEST(WorldTimeTest, AdvanceZeroDeltaIgnored) {
     WorldTime wt;
     wt.advance(1.0f);
     wt.advance(0.0f);
-    EXPECT_EQ(wt.totalTicks(), 20);
+    EXPECT_EQ(wt.totalTicks(), 30);
 }
 
 TEST(WorldTimeTest, FrozenDoesNotAdvance) {
@@ -71,7 +71,7 @@ TEST(WorldTimeTest, FrozenDoesNotAdvance) {
 
     wt.setFrozen(false);
     wt.advance(1.0f);
-    EXPECT_EQ(wt.totalTicks(), 20);
+    EXPECT_EQ(wt.totalTicks(), 30);
 }
 
 // ============================================================================
@@ -167,8 +167,8 @@ TEST(WorldTimeTest, SkyBrightnessDawnTransition) {
     wt.setTime(0);
     EXPECT_NEAR(wt.skyBrightness(), 0.2f, 0.05f);
 
-    // After dawn transition (tick ~960 = 0.04 * 24000), brightness should be full
-    wt.setTime(960);
+    // After dawn transition (tick ~1440 = 0.04 * 36000), brightness should be full
+    wt.setTime(1440);
     EXPECT_NEAR(wt.skyBrightness(), 1.0f, 0.05f);
 }
 
@@ -199,7 +199,7 @@ TEST(WorldTimeTest, TimeSpeed) {
     WorldTime wt;
     wt.setTimeSpeed(2.0f);
     wt.advance(1.0f);
-    EXPECT_EQ(wt.totalTicks(), 40);  // 20 tps * 2x speed = 40
+    EXPECT_EQ(wt.totalTicks(), 60);  // 30 tps * 2x speed = 60
 }
 
 TEST(WorldTimeTest, SetTime) {

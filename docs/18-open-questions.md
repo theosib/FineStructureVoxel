@@ -194,7 +194,7 @@ See [19 - Block Models](19-block-models.md) §19.4 for atlas format specificatio
 
 ### Target Games
 
-- Minecraft-style survival? Roblox-style building? 7DTD-style destruction?
+- Survival sandbox? Creative building? Destructible world?
 - Different games may need different physics/destruction models
 - **Note:** With module-based architecture, the engine is game-agnostic - games define their own rules
 
@@ -215,11 +215,11 @@ class Block {
 public:
     // Called when player left-clicks on block
     // Returns true to cancel default action (breaking)
-    virtual bool onHit(World& world, BlockPos pos, Player& player) { return false; }
+    virtual bool onStrike(World& world, BlockCoord pos, Player& player) { return false; }
 
     // Called when player right-clicks on block
     // Returns true to indicate interaction was handled
-    virtual bool onUse(World& world, BlockPos pos, Player& player) { return false; }
+    virtual bool onInteract(World& world, BlockCoord pos, Player& player) { return false; }
 };
 ```
 

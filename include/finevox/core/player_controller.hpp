@@ -148,7 +148,7 @@ private:
     float moveSpeed_ = 10.0f;
     float lookSensitivity_ = 0.002f;
     float jumpVelocity_ = 8.0f;
-    float eyeHeight_ = 1.62f;
+    float eyeHeight_ = 1.65f;
 
     // Mode
     bool flyMode_ = true;

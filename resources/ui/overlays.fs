@@ -8,7 +8,7 @@ set debug_overlay {ui.window "##debug"
         {ui.text_colored [1 1 0.4 0.9] "FPS: 0" =id "fps"}
         {ui.text_colored [1 1 1 0.85] "Chunks: 0/0 (culled 0)" =id "chunks"}
         {ui.text_colored [1 1 1 0.85] "Tris: 0" =id "tris"}
-        {ui.text_colored [1 1 1 0.85] "Time: Day 0/24000" =id "time"}
+        {ui.text_colored [1 1 1 0.85] "Time: Day 0/36000" =id "time"}
         {ui.text_colored [1 1 1 0.85] "Mode: Fly" =id "mode"}
         {ui.text_colored [1 1 1 0.85] "LOD: ON  Greedy: ON" =id "lod"}
     ]

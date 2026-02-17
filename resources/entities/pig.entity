@@ -1,0 +1,14 @@
+# Pig entity type definition
+name: pig
+half_extents: 0.45 0.45 0.45
+max_speed: 2.5
+max_health: 10
+ai: passive
+follow_range: 10
+model: pig
+default_animation: idle
+spawn_weight: 2.0
+spawn_group_min: 2
+spawn_group_max: 4
+loot: pig
+sounds: pig

@@ -11,19 +11,19 @@
 namespace finevox {
 
 // ============================================================================
-// FortuneCountModifier — multiply count by fortune level
-// Formula: count * (1 + random(0, fortune * multiplier))
+// BountyModifier — multiply count by bounty level
+// Formula: count * (1 + random(0, bounty * multiplier))
 // ============================================================================
 
-class FortuneCountModifier : public LootModifier {
+class BountyModifier : public LootModifier {
 public:
-    explicit FortuneCountModifier(float multiplier = 1.0f)
+    explicit BountyModifier(float multiplier = 1.0f)
         : multiplier_(multiplier) {}
 
     void apply(std::vector<ItemStack>& items, const LootContext& ctx) const override {
-        if (ctx.fortuneLevel <= 0) return;
+        if (ctx.bountyLevel <= 0) return;
         auto& rng = getLootRng(ctx);
-        int32_t maxBonus = static_cast<int32_t>(ctx.fortuneLevel * multiplier_);
+        int32_t maxBonus = static_cast<int32_t>(ctx.bountyLevel * multiplier_);
         if (maxBonus <= 0) return;
         std::uniform_int_distribution<int32_t> dist(0, maxBonus);
         for (auto& item : items) {
@@ -32,7 +32,7 @@ public:
     }
 
     [[nodiscard]] std::unique_ptr<LootModifier> clone() const override {
-        return std::make_unique<FortuneCountModifier>(multiplier_);
+        return std::make_unique<BountyModifier>(multiplier_);
     }
 
     [[nodiscard]] float multiplier() const { return multiplier_; }
@@ -70,19 +70,19 @@ private:
 };
 
 // ============================================================================
-// LootingBonusModifier — add count per looting level (mob drops)
-// count += random(0, lootingLevel * bonusPerLevel)
+// PlunderModifier — add count per plunder level (mob drops)
+// count += random(0, plunderLevel * bonusPerLevel)
 // ============================================================================
 
-class LootingBonusModifier : public LootModifier {
+class PlunderModifier : public LootModifier {
 public:
-    explicit LootingBonusModifier(int32_t bonusPerLevel = 1)
+    explicit PlunderModifier(int32_t bonusPerLevel = 1)
         : bonusPerLevel_(bonusPerLevel) {}
 
     void apply(std::vector<ItemStack>& items, const LootContext& ctx) const override {
-        if (ctx.lootingLevel <= 0) return;
+        if (ctx.plunderLevel <= 0) return;
         auto& rng = getLootRng(ctx);
-        int32_t maxBonus = ctx.lootingLevel * bonusPerLevel_;
+        int32_t maxBonus = ctx.plunderLevel * bonusPerLevel_;
         if (maxBonus <= 0) return;
         std::uniform_int_distribution<int32_t> dist(0, maxBonus);
         for (auto& item : items) {
@@ -91,7 +91,7 @@ public:
     }
 
     [[nodiscard]] std::unique_ptr<LootModifier> clone() const override {
-        return std::make_unique<LootingBonusModifier>(bonusPerLevel_);
+        return std::make_unique<PlunderModifier>(bonusPerLevel_);
     }
 
 private:

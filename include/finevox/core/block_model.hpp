@@ -136,8 +136,8 @@ private:
  *
  * Not all 24 rotations make sense for every block:
  * - Slabs: top/bottom only (2 states)
- * - Stairs: horizontal + upside-down (8 states)
- * - Furnaces: horizontal only (4 states)
+ * - Slope blocks: horizontal + inverted (8 states)
+ * - Directional blocks: horizontal only (4 states)
  */
 enum class RotationSet {
     None,            // 1 orientation (identity only)

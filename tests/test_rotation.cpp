@@ -13,7 +13,7 @@ TEST(RotationTest, IdentityIsIdentity) {
 }
 
 TEST(RotationTest, IdentityDoesNotChangePosition) {
-    BlockPos pos(5, 10, 15);
+    BlockCoord pos(5, 10, 15);
     EXPECT_EQ(Rotation::IDENTITY.apply(pos), pos);
 }
 
@@ -30,35 +30,35 @@ TEST(RotationTest, IdentityDoesNotChangeFace) {
 
 TEST(RotationTest, RotateY90) {
     // Rotating 90 degrees around Y: X+ becomes Z+, Z+ becomes X-
-    BlockPos pos(1, 0, 0);  // Point on X+ axis
+    BlockCoord pos(1, 0, 0);  // Point on X+ axis
     auto rotated = Rotation::ROTATE_Y_90.apply(pos);
-    EXPECT_EQ(rotated, BlockPos(0, 0, -1));  // Should be on Z- axis
+    EXPECT_EQ(rotated, BlockCoord(0, 0, -1));  // Should be on Z- axis
 }
 
 TEST(RotationTest, RotateY180) {
-    BlockPos pos(1, 0, 0);
+    BlockCoord pos(1, 0, 0);
     auto rotated = Rotation::ROTATE_Y_180.apply(pos);
-    EXPECT_EQ(rotated, BlockPos(-1, 0, 0));
+    EXPECT_EQ(rotated, BlockCoord(-1, 0, 0));
 }
 
 TEST(RotationTest, RotateY270) {
-    BlockPos pos(1, 0, 0);
+    BlockCoord pos(1, 0, 0);
     auto rotated = Rotation::ROTATE_Y_270.apply(pos);
-    EXPECT_EQ(rotated, BlockPos(0, 0, 1));
+    EXPECT_EQ(rotated, BlockCoord(0, 0, 1));
 }
 
 TEST(RotationTest, RotateX90) {
     // Rotating 90 degrees around X: Y+ becomes Z+
-    BlockPos pos(0, 1, 0);
+    BlockCoord pos(0, 1, 0);
     auto rotated = Rotation::ROTATE_X_90.apply(pos);
-    EXPECT_EQ(rotated, BlockPos(0, 0, 1));
+    EXPECT_EQ(rotated, BlockCoord(0, 0, 1));
 }
 
 TEST(RotationTest, RotateZ90) {
     // Rotating 90 degrees around Z: X+ becomes Y+
-    BlockPos pos(1, 0, 0);
+    BlockCoord pos(1, 0, 0);
     auto rotated = Rotation::ROTATE_Z_90.apply(pos);
-    EXPECT_EQ(rotated, BlockPos(0, 1, 0));
+    EXPECT_EQ(rotated, BlockCoord(0, 1, 0));
 }
 
 // ============================================================================
@@ -122,7 +122,7 @@ TEST(RotationTest, InverseOfY90) {
 }
 
 TEST(RotationTest, InverseUndoesRotation) {
-    BlockPos pos(3, 7, 11);
+    BlockCoord pos(3, 7, 11);
     auto rotated = Rotation::ROTATE_Y_90.apply(pos);
     auto restored = Rotation::ROTATE_Y_90.inverse().apply(rotated);
     EXPECT_EQ(restored, pos);

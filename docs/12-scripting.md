@@ -9,7 +9,7 @@
 The engine supports two levels of scripting, both implemented as an **external project** that integrates via well-defined hooks:
 
 1. **Game Logic Scripting** - For block interactions, programmatic meshes, entity AI
-2. **Command Language** - For in-game commands (like Minecraft's `/` commands)
+2. **Command Language** - For in-game commands (e.g., `/` commands)
 
 Both use the same underlying interpreter, with the command language being a simplified surface syntax.
 
@@ -40,7 +40,7 @@ public:
 struct ScriptResult {
     bool success;
     std::string error;
-    std::variant<std::monostate, int64_t, double, std::string, BlockPos> value;
+    std::variant<std::monostate, int64_t, double, std::string, BlockCoord> value;
 };
 
 // Context provided to scripts for accessing game state
@@ -49,12 +49,12 @@ public:
     explicit ScriptContext(World& world, Entity* executor = nullptr);
 
     // Block operations
-    Block getBlock(BlockPos pos) const;
-    void setBlock(BlockPos pos, uint16_t typeId, uint8_t rotation = 0);
+    Block getBlock(BlockCoord pos) const;
+    void setBlock(BlockCoord pos, uint16_t typeId, uint8_t rotation = 0);
 
     // Position queries (return values for script expressions)
-    BlockPos getExecutorPos() const;
-    BlockPos getTargetPos() const;  // Block being looked at
+    BlockCoord getExecutorPos() const;
+    BlockCoord getTargetPos() const;  // Block being looked at
 
     // Entity access
     Entity* getExecutor() const { return executor_; }

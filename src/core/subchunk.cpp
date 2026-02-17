@@ -13,7 +13,7 @@ SubChunk::SubChunk() {
 
 SubChunk::~SubChunk() = default;
 
-BlockTypeId SubChunk::getBlock(LocalBlockPos pos) const {
+BlockTypeId SubChunk::getBlock(LocalBlockCoord pos) const {
     return getBlock(pos.toIndex());
 }
 
@@ -22,7 +22,7 @@ BlockTypeId SubChunk::getBlock(uint16_t index) const {
     return palette_.getGlobalId(localIdx);
 }
 
-void SubChunk::setBlock(LocalBlockPos pos, BlockTypeId type) {
+void SubChunk::setBlock(LocalBlockCoord pos, BlockTypeId type) {
     uint16_t index = pos.toIndex();
     LocalIndex oldIndex = blocks_[index];
     BlockTypeId oldType = palette_.getGlobalId(oldIndex);
@@ -59,9 +59,9 @@ void SubChunk::setBlock(uint16_t index, BlockTypeId type) {
     // Increment block version (signals mesh needs rebuild)
     blockVersion_.fetch_add(1, std::memory_order_release);
 
-    // Notify callback if set (convert index to LocalBlockPos)
+    // Notify callback if set (convert index to LocalBlockCoord)
     if (blockChangeCallback_) {
-        blockChangeCallback_(position_, LocalBlockPos::fromIndex(index), oldType, type);
+        blockChangeCallback_(position_, LocalBlockCoord::fromIndex(index), oldType, type);
     }
 }
 
@@ -368,7 +368,7 @@ Rotation SubChunk::getRotation(int32_t index) const {
     return Rotation::byIndex(rotIdx);
 }
 
-Rotation SubChunk::getRotation(LocalBlockPos pos) const {
+Rotation SubChunk::getRotation(LocalBlockCoord pos) const {
     return getRotation(pos.toIndex());
 }
 
@@ -381,7 +381,7 @@ uint8_t SubChunk::getRotationIndex(int32_t index) const {
     return rotations_[index];
 }
 
-uint8_t SubChunk::getRotationIndex(LocalBlockPos pos) const {
+uint8_t SubChunk::getRotationIndex(LocalBlockCoord pos) const {
     return getRotationIndex(pos.toIndex());
 }
 
@@ -399,7 +399,7 @@ void SubChunk::setRotation(int32_t index, const Rotation& rotation) {
     }
 }
 
-void SubChunk::setRotation(LocalBlockPos pos, const Rotation& rotation) {
+void SubChunk::setRotation(LocalBlockCoord pos, const Rotation& rotation) {
     setRotation(pos.toIndex(), rotation);
 }
 
@@ -417,7 +417,7 @@ void SubChunk::setRotationIndex(int32_t index, uint8_t rotationIndex) {
     }
 }
 
-void SubChunk::setRotationIndex(LocalBlockPos pos, uint8_t rotationIndex) {
+void SubChunk::setRotationIndex(LocalBlockCoord pos, uint8_t rotationIndex) {
     setRotationIndex(pos.toIndex(), rotationIndex);
 }
 

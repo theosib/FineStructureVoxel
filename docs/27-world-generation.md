@@ -8,7 +8,7 @@
 
 The world generation system provides engine-level infrastructure for procedural terrain creation. Following finevox's design philosophy, the engine provides tools and a pipeline framework while game modules define specific terrain, biomes, and features.
 
-**Namespace:** `finevox::worldgen` (nested inside `finevox`, so core types like `BlockPos`, `World`, `BlockTypeId` are accessible without qualification).
+**Namespace:** `finevox::worldgen` (nested inside `finevox`, so core types like `BlockCoord`, `World`, `BlockTypeId` are accessible without qualification).
 
 **Headers:** `include/finevox/worldgen/`
 **Sources:** `src/worldgen/`
@@ -162,7 +162,7 @@ struct BiomeProperties {
     float humidityMin = 0.0f, humidityMax = 1.0f;
 
     // Terrain shaping
-    float baseHeight = 64.0f;
+    float baseHeight = 80.0f;
     float heightVariation = 16.0f;
     float heightScale = 1.0f;
 
@@ -211,15 +211,15 @@ temperature_max: 0.7
 humidity_min: 0.2
 humidity_max: 0.6
 
-base_height: 64
+base_height: 80
 height_variation: 6
 height_scale: 1.0
 
-surface: blockgame:grass
-filler: blockgame:dirt
+surface: finevox:grass
+filler: finevox:dirt
 filler_depth: 3
-stone: blockgame:stone
-underwater: blockgame:sand
+stone: finevox:stone
+underwater: finevox:sand
 
 tree_density: 0.02
 ore_density: 1.0
@@ -341,7 +341,7 @@ enum class FeatureResult { Placed, Skipped, Failed };
 
 struct FeaturePlacementContext {
     World& world;
-    BlockPos origin;
+    BlockCoord origin;
     BiomeId biome;
     uint64_t seed;              // Per-placement deterministic seed
     GenerationContext* genCtx;  // Null for runtime placement
@@ -352,7 +352,7 @@ public:
     virtual ~Feature() = default;
     [[nodiscard]] virtual std::string_view name() const = 0;
     [[nodiscard]] virtual FeatureResult place(FeaturePlacementContext& ctx) = 0;
-    [[nodiscard]] virtual BlockPos maxExtent() const { return BlockPos(1, 1, 1); }
+    [[nodiscard]] virtual BlockCoord maxExtent() const { return BlockCoord(1, 1, 1); }
 };
 ```
 
@@ -403,8 +403,8 @@ Global singleton. Features registered during module `onRegister()`. Placement ru
 ```
 # oak_tree.feature
 type: tree
-trunk: blockgame:oak_log
-leaves: blockgame:oak_leaves
+trunk: finevox:oak_log
+leaves: finevox:oak_leaves
 min_trunk_height: 4
 max_trunk_height: 7
 leaf_radius: 2
@@ -414,8 +414,8 @@ requires_soil: true
 **`.ore` files** (ore veins):
 ```
 # iron_ore.ore
-block: blockgame:iron_ore
-replace: blockgame:stone
+block: finevox:iron_ore
+replace: finevox:stone
 vein_size: 8
 min_height: 0
 max_height: 64
@@ -468,7 +468,7 @@ Column generation runs on background threads (via ColumnManager). The generation
 
 ### 27.8.1 Lighting
 
-After generation, the LightEngine initializes sky light for the column. The `ChunkColumn::recalculateHeightmap()` method updates the heightmap used for sky light propagation. Light-emitting blocks placed during generation (glowstone, lava) trigger block light propagation.
+After generation, the LightEngine initializes sky light for the column. The `ChunkColumn::recalculateHeightmap()` method updates the heightmap used for sky light propagation. Light-emitting blocks placed during generation (luminite, lava) trigger block light propagation.
 
 ### 27.8.2 Persistence
 

@@ -36,10 +36,10 @@ TEST(ChunkColumnTest, SetAndGetBlock) {
     EXPECT_EQ(column.subChunkCount(), 1);
 }
 
-TEST(ChunkColumnTest, SetBlockWithBlockPos) {
+TEST(ChunkColumnTest, SetBlockWithBlockCoord) {
     ChunkColumn column(ColumnPos(0, 0));
     auto stone = BlockTypeId::fromName("column:stone2");
-    BlockPos pos(3, 20, 7);
+    BlockCoord pos(3, 20, 7);
 
     column.setBlock(pos, stone);
 

@@ -159,13 +159,13 @@ int main() {
 
     // Test 1: Play a simple "place" sound
     std::cout << "[Test 1] Playing 'place' sound (440 Hz, 0.5s)...\n";
-    eventQueue.push(SoundEvent::blockPlace(soundSetId, BlockPos{0, 0, 0}));
+    eventQueue.push(SoundEvent::blockPlace(soundSetId, BlockCoord{0, 0, 0}));
     engine.update(glm::dvec3(0), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
     std::this_thread::sleep_for(std::chrono::milliseconds(700));
 
     // Test 2: Play a "break" sound
     std::cout << "[Test 2] Playing 'break' sound (880 Hz, 0.3s)...\n";
-    eventQueue.push(SoundEvent::blockBreak(soundSetId, BlockPos{0, 0, 0}));
+    eventQueue.push(SoundEvent::blockBreak(soundSetId, BlockCoord{0, 0, 0}));
     engine.update(glm::dvec3(0), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 

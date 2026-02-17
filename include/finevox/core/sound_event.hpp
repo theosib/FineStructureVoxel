@@ -85,15 +85,15 @@ struct SoundEvent {
     // Helpers
     [[nodiscard]] glm::vec3 position() const { return {posX, posY, posZ}; }
     void setPosition(glm::vec3 p) { posX = p.x; posY = p.y; posZ = p.z; }
-    void setPosition(const BlockPos& p) {
+    void setPosition(const BlockCoord& p) {
         posX = static_cast<float>(p.x) + 0.5f;
         posY = static_cast<float>(p.y) + 0.5f;
         posZ = static_cast<float>(p.z) + 0.5f;
     }
 
     // Factory methods
-    static SoundEvent blockPlace(SoundSetId set, BlockPos pos);
-    static SoundEvent blockBreak(SoundSetId set, BlockPos pos);
+    static SoundEvent blockPlace(SoundSetId set, BlockCoord pos);
+    static SoundEvent blockBreak(SoundSetId set, BlockCoord pos);
     static SoundEvent footstep(SoundSetId set, glm::vec3 pos);
     static SoundEvent fall(SoundSetId set, glm::vec3 pos, float fallDistance);
     static SoundEvent music(SoundSetId trackId);

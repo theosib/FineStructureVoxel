@@ -2,7 +2,7 @@
 
 /**
  * @file region_file.hpp
- * @brief 32x32 chunk region file I/O
+ * @brief 64x64 chunk region file I/O
  *
  * Design: [11-persistence.md] §11.4 Region Files
  */
@@ -21,8 +21,8 @@
 
 namespace finevox {
 
-// Region = 32x32 column area (1024 columns per region)
-constexpr int32_t REGION_SIZE = 32;
+// Region = 64x64 column area (4096 columns per region)
+constexpr int32_t REGION_SIZE = 64;
 constexpr int32_t COLUMNS_PER_REGION = REGION_SIZE * REGION_SIZE;
 
 // Chunk data flags (stored in chunk header)
@@ -48,7 +48,7 @@ struct RegionPos {
         };
     }
 
-    // Get local coordinates within region (0-31)
+    // Get local coordinates within region (0-63)
     [[nodiscard]] static std::pair<int32_t, int32_t> toLocal(ColumnPos col) {
         int32_t lx = col.x % REGION_SIZE;
         int32_t lz = col.z % REGION_SIZE;
@@ -74,8 +74,8 @@ namespace finevox {
 
 // Entry in the Table of Contents
 struct TocEntry {
-    int32_t localX = 0;      // 0-31
-    int32_t localZ = 0;      // 0-31
+    int32_t localX = 0;      // 0-63
+    int32_t localZ = 0;      // 0-63
     uint64_t offset = 0;     // Offset in .dat file
     uint32_t size = 0;       // Compressed size in bytes
     uint64_t timestamp = 0;  // For conflict resolution (newer wins)
@@ -99,7 +99,7 @@ struct FreeSpan {
     }
 };
 
-// Region file manager - handles one 32x32 region
+// Region file manager - handles one 64x64 region
 //
 // File structure:
 //   r.{rx}.{rz}.dat - Chunk data (append-mostly)

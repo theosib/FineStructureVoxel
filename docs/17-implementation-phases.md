@@ -35,7 +35,7 @@
 *No graphics, pure data structures. All unit-testable.*
 
 ### 0.1 Position Types
-- [x] `BlockPos` - 32-bit x/y/z with packing/unpacking
+- [x] `BlockCoord` - 32-bit x/y/z with packing/unpacking
 - [x] `ChunkPos` - Chunk coordinates (x, y, z for subchunks)
 - [x] `ColumnPos` - Column coordinates (x, z only)
 - [x] `Face` enum and neighbor lookup
@@ -417,9 +417,9 @@ See [23 - Distance and Loading](23-distance-and-loading.md) for full design.
 
 ### 7.3 Block Handler System
 - [x] `BlockHandler` - Stateless block behavior interface
-  - Lifecycle: onPlace, onBreak
+  - Lifecycle: onPlace, onDestroy
   - Ticks: onTick (scheduled, repeating, random)
-  - Events: onNeighborChanged, onUse, onHit
+  - Events: onNeighborUpdated, onInteract, onStrike
   - Visual: onRepaint
 - [x] `BlockContext` - Ephemeral context passed to handlers
   - Access to world, subchunk, block position
@@ -476,7 +476,7 @@ Modules are loaded **eagerly at world startup**, not lazily on block encounter.
 **World config example:**
 ```toml
 [world]
-modules = ["blockgame:core", "blockgame:redstone", "mymod:machines"]
+modules = ["finevox:core", "finevox:redstone", "mymod:machines"]
 ```
 
 ---
@@ -569,7 +569,7 @@ auto inventory = std::make_unique<DataContainer>();
 inventory->set("slots", 27);  // 27 slots
 data.set("inventory", std::move(inventory));
 
-// In onUse handler:
+// In onInteract handler:
 DataContainer* data = ctx.data();
 if (data && data->has("inventory")) {
     // Open inventory UI
@@ -593,7 +593,7 @@ When storing `BlockTypeId` in extra data, use the helpers from `block_data_helpe
 #include "finevox/block_data_helpers.hpp"
 
 // Store a block type reference (serializes by name, not numeric ID)
-setBlockType(data, "material", BlockTypeId::fromName("minecraft:stone"));
+setBlockType(data, "material", BlockTypeId::fromName("finevox:stone"));
 
 // Retrieve with default
 BlockTypeId mat = getBlockType(data, "material", AIR_BLOCK_TYPE);

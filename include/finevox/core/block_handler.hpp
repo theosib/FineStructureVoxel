@@ -74,7 +74,7 @@ public:
      *
      * Must match the name used to register the handler.
      *
-     * @return Block name (e.g., "blockgame:redstone_torch")
+     * @return Block name (e.g., "finevox:signal_torch")
      */
     [[nodiscard]] virtual std::string_view name() const = 0;
 
@@ -101,7 +101,7 @@ public:
      *
      * @param ctx Context providing access to block state and world
      */
-    virtual void onBreak(BlockContext& ctx) { (void)ctx; }
+    virtual void onDestroy(BlockContext& ctx) { (void)ctx; }
 
     // ========================================================================
     // Tick Events
@@ -126,12 +126,12 @@ public:
      * @brief Called when a neighboring block changes
      *
      * Use for blocks that react to neighbors: torches falling off walls,
-     * redstone updating, sand falling, etc.
+     * signal updating, sand falling, etc.
      *
      * @param ctx Context providing access to block state and world
      * @param changedFace Which face's neighbor changed (relative to this block)
      */
-    virtual void onNeighborChanged(BlockContext& ctx, Face changedFace) {
+    virtual void onNeighborUpdated(BlockContext& ctx, Face changedFace) {
         (void)ctx;
         (void)changedFace;
     }
@@ -139,8 +139,8 @@ public:
     /**
      * @brief Called when a block update event is received
      *
-     * Use for redstone-like propagation where a block needs to re-evaluate
-     * its state. Unlike onNeighborChanged, this doesn't specify which
+     * Use for signal-like propagation where a block needs to re-evaluate
+     * its state. Unlike onNeighborUpdated, this doesn't specify which
      * neighbor triggered the update.
      *
      * Handlers can push BlockUpdate events to the outbox to propagate
@@ -161,7 +161,7 @@ public:
      * @param face Which face was clicked
      * @return true if the interaction was handled (prevents further processing)
      */
-    virtual bool onUse(BlockContext& ctx, Face face) {
+    virtual bool onInteract(BlockContext& ctx, Face face) {
         (void)ctx;
         (void)face;
         return false;
@@ -177,7 +177,7 @@ public:
      * @param face Which face was clicked
      * @return true if the interaction was handled
      */
-    virtual bool onHit(BlockContext& ctx, Face face) {
+    virtual bool onStrike(BlockContext& ctx, Face face) {
         (void)ctx;
         (void)face;
         return false;
@@ -224,7 +224,7 @@ public:
      * @param localPos Position within subchunk (0-15 on each axis)
      */
     BlockContext(World& world, SubChunk& subChunk,
-                 BlockPos pos, LocalBlockPos localPos);
+                 BlockCoord pos, LocalBlockCoord localPos);
 
     // ========================================================================
     // Location
@@ -245,12 +245,12 @@ public:
     /**
      * @brief Get block position in world coordinates
      */
-    [[nodiscard]] BlockPos pos() const { return pos_; }
+    [[nodiscard]] BlockCoord pos() const { return pos_; }
 
     /**
      * @brief Get block position within subchunk (0-15 on each axis)
      */
-    [[nodiscard]] LocalBlockPos localPos() const { return localPos_; }
+    [[nodiscard]] LocalBlockCoord localPos() const { return localPos_; }
 
     /**
      * @brief Get the block type ID at this position
@@ -419,7 +419,7 @@ public:
     /**
      * @brief Notify neighbors that this block changed
      *
-     * Triggers onNeighborChanged for all 6 adjacent blocks.
+     * Triggers onNeighborUpdated for all 6 adjacent blocks.
      */
     void notifyNeighbors();
 
@@ -430,7 +430,7 @@ public:
     /**
      * @brief Get the previous block type (before place/break)
      *
-     * Only valid during onPlace/onBreak handlers.
+     * Only valid during onPlace/onDestroy handlers.
      */
     [[nodiscard]] BlockTypeId previousType() const { return previousType_; }
 
@@ -477,9 +477,9 @@ public:
      *
      * Fills in brokenBlock and position from this context, then merges
      * with any additional context fields provided by the caller (tool,
-     * fortune, silk touch, etc.).
+     * bounty, precise break, etc.).
      *
-     * @param extraCtx Additional context (tool, fortune, etc.)
+     * @param extraCtx Additional context (tool, bounty, etc.)
      * @return Vector of ItemStacks produced by the loot table (empty if no loot)
      */
     [[nodiscard]] std::vector<ItemStack> rollBlockLoot(const LootContext& extraCtx = {}) const;
@@ -501,8 +501,8 @@ public:
 private:
     World& world_;
     SubChunk& subChunk_;
-    BlockPos pos_;
-    LocalBlockPos localPos_;
+    BlockCoord pos_;
+    LocalBlockCoord localPos_;
 
     // Previous state (set by EventProcessor for place/break events)
     BlockTypeId previousType_;

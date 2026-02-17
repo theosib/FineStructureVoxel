@@ -11,7 +11,7 @@
 
 We target a **smart client** architecture - thin on game logic, rich on graphics:
 
-| Aspect | Minecraft Client | FineVox Client |
+| Aspect | Traditional Voxel Client | FineVox Client |
 |--------|------------------|----------------|
 | World storage | Full block data | Voxel appearance data |
 | Block logic | Duplicate handlers | None - server authority |
@@ -121,9 +121,9 @@ CacheManifest:
 
 ## 26.3 The Quantization Problem
 
-### 26.3.1 Minecraft's Bug
+### 26.3.1 The Classic Quantization Bug
 
-Minecraft quantizes entity positions to 12 fractional bits (1/4096 block precision):
+A well-known bug in traditional voxel games: quantizing entity positions to 12 fractional bits (1/4096 block precision):
 ```
 Server: entity at Y = 5.00001 (standing on block Y=4..5)
 Quantized: Y = 5.0 (rounds down)
@@ -173,7 +173,7 @@ struct AnchoredPosition {
         OnWall,           // Climbing
         AttachedToEntity, // Riding
         OnConveyor,       // Moving with conveyor belt
-        OnRail,           // Minecart on rail
+        OnRail,           // Cart on rail
     };
 
     AnchorType type;
@@ -181,7 +181,7 @@ struct AnchoredPosition {
     // Anchor-specific data
     union {
         struct { int32_t x, y, z; } absolute;
-        struct { BlockPos block; uint8_t face; uint16_t offset; } surface;
+        struct { BlockCoord block; uint8_t face; uint16_t offset; } surface;
         struct { EntityId parent; uint8_t seat; } attached;
     };
 };
@@ -381,7 +381,7 @@ For blocks near the player, server sends interaction metadata:
 ```cpp
 struct NearbyBlockInfo {
     // Sparse map: only blocks with non-default interaction
-    std::map<BlockPos, BlockInteraction> blocks;
+    std::map<BlockCoord, BlockInteraction> blocks;
 };
 
 struct BlockInteraction {
@@ -840,21 +840,21 @@ class OptimisticWorld {
     std::map<ChunkPos, ChunkVoxelData> confirmed_;
 
     // Pending local changes (awaiting server confirmation)
-    std::map<BlockPos, PendingChange> pending_;
+    std::map<BlockCoord, PendingChange> pending_;
 
-    VoxelAppearance getVoxel(BlockPos pos) {
+    VoxelAppearance getVoxel(BlockCoord pos) {
         if (auto it = pending_.find(pos); it != pending_.end()) {
             return it->second.optimistic_appearance;
         }
         return confirmed_[chunkOf(pos)].getVoxel(localPos(pos));
     }
 
-    void applyConfirmation(BlockPos pos, VoxelAppearance confirmed) {
+    void applyConfirmation(BlockCoord pos, VoxelAppearance confirmed) {
         pending_.erase(pos);
         confirmed_[chunkOf(pos)].setVoxel(localPos(pos), confirmed);
     }
 
-    void applyRejection(BlockPos pos) {
+    void applyRejection(BlockCoord pos) {
         // Revert to confirmed state
         pending_.erase(pos);
         // Client will re-mesh with original voxel
@@ -867,7 +867,7 @@ class OptimisticWorld {
 Before server confirms lighting:
 
 ```cpp
-uint8_t estimateBlockLight(BlockPos pos, VoxelAppearance voxel) {
+uint8_t estimateBlockLight(BlockCoord pos, VoxelAppearance voxel) {
     // Simple heuristic: if block emits light, use that
     // Otherwise, average neighbors' light
     if (voxel.emission > 0) return voxel.emission;

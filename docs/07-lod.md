@@ -152,7 +152,7 @@ public:
     // Groups chunks by region (e.g., 4x4 chunk areas)
     void collectForBatching(
         const std::vector<std::shared_ptr<ChunkColumn>>& columns,
-        BlockPos viewCenter,
+        BlockCoord viewCenter,
         float minDistance
     );
 

@@ -29,10 +29,10 @@ TEST(WorldTest, SetAndGetBlock) {
     EXPECT_EQ(world.columnCount(), 1);
 }
 
-TEST(WorldTest, SetBlockWithBlockPos) {
+TEST(WorldTest, SetBlockWithBlockCoord) {
     World world;
     auto dirt = BlockTypeId::fromName("world:dirt");
-    BlockPos pos(5, 32, 15);
+    BlockCoord pos(5, 32, 15);
 
     world.setBlock(pos, dirt);
 
@@ -243,7 +243,7 @@ TEST(WorldTest, GetAffectedSubChunks_InteriorBlock) {
     World world;
 
     // Block at (5, 5, 5) is interior to subchunk (0, 0, 0)
-    auto affected = world.getAffectedSubChunks(BlockPos(5, 5, 5));
+    auto affected = world.getAffectedSubChunks(BlockCoord(5, 5, 5));
 
     EXPECT_EQ(affected.size(), 1);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
@@ -253,14 +253,14 @@ TEST(WorldTest, GetAffectedSubChunks_XBoundary) {
     World world;
 
     // Block at x=0 affects neighboring subchunk at x-1
-    auto affected = world.getAffectedSubChunks(BlockPos(0, 5, 5));
+    auto affected = world.getAffectedSubChunks(BlockCoord(0, 5, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
     EXPECT_EQ(affected[1], ChunkPos(-1, 0, 0));
 
     // Block at x=15 affects neighboring subchunk at x+1
-    affected = world.getAffectedSubChunks(BlockPos(15, 5, 5));
+    affected = world.getAffectedSubChunks(BlockCoord(15, 5, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
@@ -271,14 +271,14 @@ TEST(WorldTest, GetAffectedSubChunks_YBoundary) {
     World world;
 
     // Block at y=0 in subchunk (0, 0, 0) affects subchunk (0, -1, 0)
-    auto affected = world.getAffectedSubChunks(BlockPos(5, 0, 5));
+    auto affected = world.getAffectedSubChunks(BlockCoord(5, 0, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
     EXPECT_EQ(affected[1], ChunkPos(0, -1, 0));
 
     // Block at y=15 affects subchunk (0, 1, 0)
-    affected = world.getAffectedSubChunks(BlockPos(5, 15, 5));
+    affected = world.getAffectedSubChunks(BlockCoord(5, 15, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
@@ -289,14 +289,14 @@ TEST(WorldTest, GetAffectedSubChunks_ZBoundary) {
     World world;
 
     // Block at z=0 affects neighboring subchunk at z-1
-    auto affected = world.getAffectedSubChunks(BlockPos(5, 5, 0));
+    auto affected = world.getAffectedSubChunks(BlockCoord(5, 5, 0));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
     EXPECT_EQ(affected[1], ChunkPos(0, 0, -1));
 
     // Block at z=15 affects neighboring subchunk at z+1
-    affected = world.getAffectedSubChunks(BlockPos(5, 5, 15));
+    affected = world.getAffectedSubChunks(BlockCoord(5, 5, 15));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
@@ -307,7 +307,7 @@ TEST(WorldTest, GetAffectedSubChunks_Corner) {
     World world;
 
     // Block at corner (0, 0, 0) affects 3 neighboring subchunks
-    auto affected = world.getAffectedSubChunks(BlockPos(0, 0, 0));
+    auto affected = world.getAffectedSubChunks(BlockCoord(0, 0, 0));
 
     EXPECT_EQ(affected.size(), 4);
     EXPECT_EQ(affected[0], ChunkPos(0, 0, 0));
@@ -320,14 +320,14 @@ TEST(WorldTest, GetAffectedSubChunks_NegativeCoordinates) {
     World world;
 
     // Block at (-1, 5, 5) is at x=15 in subchunk (-1, 0, 0)
-    auto affected = world.getAffectedSubChunks(BlockPos(-1, 5, 5));
+    auto affected = world.getAffectedSubChunks(BlockCoord(-1, 5, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(-1, 0, 0));
     EXPECT_EQ(affected[1], ChunkPos(0, 0, 0));  // Affects +X neighbor
 
     // Block at (-16, 5, 5) is at x=0 in subchunk (-1, 0, 0)
-    affected = world.getAffectedSubChunks(BlockPos(-16, 5, 5));
+    affected = world.getAffectedSubChunks(BlockCoord(-16, 5, 5));
 
     EXPECT_EQ(affected.size(), 2);
     EXPECT_EQ(affected[0], ChunkPos(-1, 0, 0));
@@ -345,7 +345,7 @@ TEST(WorldForceLoadTest, InitiallyEmpty) {
 
 TEST(WorldForceLoadTest, RegisterForceLoader) {
     World world;
-    BlockPos pos(100, 64, 200);
+    BlockCoord pos(100, 64, 200);
 
     world.registerForceLoader(pos, 0);
 
@@ -355,7 +355,7 @@ TEST(WorldForceLoadTest, RegisterForceLoader) {
 
 TEST(WorldForceLoadTest, UnregisterForceLoader) {
     World world;
-    BlockPos pos(100, 64, 200);
+    BlockCoord pos(100, 64, 200);
 
     world.registerForceLoader(pos, 0);
     EXPECT_TRUE(world.isForceLoader(pos));
@@ -367,7 +367,7 @@ TEST(WorldForceLoadTest, UnregisterForceLoader) {
 
 TEST(WorldForceLoadTest, UnregisterNonexistentIsNoOp) {
     World world;
-    BlockPos pos(100, 64, 200);
+    BlockCoord pos(100, 64, 200);
 
     // Should not throw or cause issues
     world.unregisterForceLoader(pos);
@@ -384,7 +384,7 @@ TEST(WorldForceLoadTest, CanUnloadChunk_NoForceLoaders) {
 
 TEST(WorldForceLoadTest, CanUnloadChunk_SameChunk) {
     World world;
-    BlockPos pos(100, 64, 200);  // Chunk (6, 4, 12)
+    BlockCoord pos(100, 64, 200);  // Chunk (6, 4, 12)
 
     world.registerForceLoader(pos, 0);
 
@@ -399,7 +399,7 @@ TEST(WorldForceLoadTest, CanUnloadChunk_SameChunk) {
 
 TEST(WorldForceLoadTest, CanUnloadChunk_WithRadius) {
     World world;
-    BlockPos pos(32, 32, 32);  // Chunk (2, 2, 2)
+    BlockCoord pos(32, 32, 32);  // Chunk (2, 2, 2)
 
     world.registerForceLoader(pos, 1);  // Keep 3x3 area loaded
 
@@ -428,8 +428,8 @@ TEST(WorldForceLoadTest, CanUnloadChunk_WithRadius) {
 
 TEST(WorldForceLoadTest, MultipleForceLoaders) {
     World world;
-    BlockPos pos1(32, 32, 32);   // Chunk (2, 2, 2)
-    BlockPos pos2(160, 32, 32);  // Chunk (10, 2, 2)
+    BlockCoord pos1(32, 32, 32);   // Chunk (2, 2, 2)
+    BlockCoord pos2(160, 32, 32);  // Chunk (10, 2, 2)
 
     world.registerForceLoader(pos1, 0);
     world.registerForceLoader(pos2, 0);
@@ -449,8 +449,8 @@ TEST(WorldForceLoadTest, MultipleForceLoaders) {
 
 TEST(WorldForceLoadTest, OverlappingRadii) {
     World world;
-    BlockPos pos1(32, 32, 32);  // Chunk (2, 2, 2)
-    BlockPos pos2(64, 32, 32);  // Chunk (4, 2, 2)
+    BlockCoord pos1(32, 32, 32);  // Chunk (2, 2, 2)
+    BlockCoord pos2(64, 32, 32);  // Chunk (4, 2, 2)
 
     world.registerForceLoader(pos1, 1);  // Covers chunks 1-3
     world.registerForceLoader(pos2, 1);  // Covers chunks 3-5
@@ -467,20 +467,20 @@ TEST(WorldForceLoadTest, OverlappingRadii) {
 TEST(WorldForceLoadTest, SetForceLoaders) {
     World world;
 
-    std::unordered_map<BlockPos, int32_t> loaders;
-    loaders[BlockPos(0, 0, 0)] = 0;
-    loaders[BlockPos(100, 64, 100)] = 2;
+    std::unordered_map<BlockCoord, int32_t> loaders;
+    loaders[BlockCoord(0, 0, 0)] = 0;
+    loaders[BlockCoord(100, 64, 100)] = 2;
 
     world.setForceLoaders(std::move(loaders));
 
     EXPECT_EQ(world.forceLoaders().size(), 2);
-    EXPECT_TRUE(world.isForceLoader(BlockPos(0, 0, 0)));
-    EXPECT_TRUE(world.isForceLoader(BlockPos(100, 64, 100)));
+    EXPECT_TRUE(world.isForceLoader(BlockCoord(0, 0, 0)));
+    EXPECT_TRUE(world.isForceLoader(BlockCoord(100, 64, 100)));
 }
 
 TEST(WorldForceLoadTest, UpdateRadius) {
     World world;
-    BlockPos pos(32, 32, 32);  // Chunk (2, 2, 2)
+    BlockCoord pos(32, 32, 32);  // Chunk (2, 2, 2)
 
     world.registerForceLoader(pos, 0);
 
@@ -497,7 +497,7 @@ TEST(WorldForceLoadTest, UpdateRadius) {
 
 TEST(WorldForceLoadTest, CanUnloadColumn) {
     World world;
-    BlockPos pos(32, 64, 32);  // Chunk (2, 4, 2), Column (2, 2)
+    BlockCoord pos(32, 64, 32);  // Chunk (2, 4, 2), Column (2, 2)
 
     world.registerForceLoader(pos, 0);
 

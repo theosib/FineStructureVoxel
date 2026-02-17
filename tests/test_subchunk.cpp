@@ -272,15 +272,15 @@ TEST(SubChunkTest, AllCornersAccessible) {
     EXPECT_EQ(chunk.getBlock(15, 15, 15), stone);
 }
 
-TEST(SubChunkTest, IndexLayoutMatchesBlockPos) {
+TEST(SubChunkTest, IndexLayoutMatchesBlockCoord) {
     SubChunk chunk;
     auto stone = BlockTypeId::fromName("layouttest:stone");
 
-    // Test that our index calculation matches BlockPos::localIndex
+    // Test that our index calculation matches BlockCoord::localIndex
     for (int y = 0; y < 16; y += 5) {
         for (int z = 0; z < 16; z += 5) {
             for (int x = 0; x < 16; x += 5) {
-                BlockPos pos(x, y, z);
+                BlockCoord pos(x, y, z);
                 uint16_t index = pos.localIndex();
 
                 chunk.setBlock(x, y, z, stone);
@@ -375,10 +375,10 @@ TEST(SubChunkTest, BlockChangeCallback) {
     // Track callback invocations
     int callbackCount = 0;
     ChunkPos lastPos;
-    LocalBlockPos lastLocal;
+    LocalBlockCoord lastLocal;
     BlockTypeId lastOldType, lastNewType;
 
-    chunk.setBlockChangeCallback([&](ChunkPos pos, LocalBlockPos local,
+    chunk.setBlockChangeCallback([&](ChunkPos pos, LocalBlockCoord local,
                                      BlockTypeId oldType, BlockTypeId newType) {
         ++callbackCount;
         lastPos = pos;

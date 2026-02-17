@@ -78,9 +78,9 @@ FeatureResult TreeFeature::place(FeaturePlacementContext& ctx) {
     return FeatureResult::Placed;
 }
 
-BlockPos TreeFeature::maxExtent() const {
+BlockCoord TreeFeature::maxExtent() const {
     int32_t r = config_.leafRadius;
-    return BlockPos(r, config_.maxTrunkHeight + 2, r);
+    return BlockCoord(r, config_.maxTrunkHeight + 2, r);
 }
 
 int32_t TreeFeature::trunkHeight(uint64_t seed) const {
@@ -90,13 +90,13 @@ int32_t TreeFeature::trunkHeight(uint64_t seed) const {
            static_cast<int32_t>(seed % static_cast<uint64_t>(range + 1));
 }
 
-bool TreeFeature::checkSoil(World& world, BlockPos origin) const {
+bool TreeFeature::checkSoil(World& world, BlockCoord origin) const {
     // Check that the block below origin is a solid (non-air) block
     BlockTypeId below = world.getBlock(origin.x, origin.y - 1, origin.z);
     return !below.isAir();
 }
 
-bool TreeFeature::checkClearance(World& world, BlockPos origin, int32_t height) const {
+bool TreeFeature::checkClearance(World& world, BlockCoord origin, int32_t height) const {
     // Check trunk column is clear
     for (int32_t y = 0; y < height; ++y) {
         BlockTypeId block = world.getBlock(origin.x, origin.y + y, origin.z);

@@ -16,7 +16,7 @@ ChunkColumn::~ChunkColumn() = default;
 ChunkColumn::ChunkColumn(ChunkColumn&&) noexcept = default;
 ChunkColumn& ChunkColumn::operator=(ChunkColumn&&) noexcept = default;
 
-BlockTypeId ChunkColumn::getBlock(BlockPos pos) const {
+BlockTypeId ChunkColumn::getBlock(BlockCoord pos) const {
     return getBlock(pos.x, pos.y, pos.z);
 }
 
@@ -34,7 +34,7 @@ BlockTypeId ChunkColumn::getBlock(int32_t x, int32_t y, int32_t z) const {
     return it->second->getBlock(localX, localY, localZ);
 }
 
-void ChunkColumn::setBlock(BlockPos pos, BlockTypeId type) {
+void ChunkColumn::setBlock(BlockCoord pos, BlockTypeId type) {
     setBlock(pos.x, pos.y, pos.z, type);
 }
 

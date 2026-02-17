@@ -18,7 +18,7 @@ TEST(PlayerControllerTest, DefaultConstruction) {
     EXPECT_FLOAT_EQ(pc.moveSpeed(), 10.0f);
     EXPECT_FLOAT_EQ(pc.lookSensitivity(), 0.002f);
     EXPECT_FLOAT_EQ(pc.jumpVelocity(), 8.0f);
-    EXPECT_FLOAT_EQ(pc.eyeHeight(), 1.62f);
+    EXPECT_FLOAT_EQ(pc.eyeHeight(), 1.65f);
     EXPECT_EQ(pc.physicsBody(), nullptr);
 }
 
@@ -215,7 +215,7 @@ TEST(PlayerControllerTest, FlyPositionDelta) {
 
 TEST(PlayerControllerTest, PhysicsMovementSetsVelocity) {
     // No-collision shape provider (empty world)
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -234,7 +234,7 @@ TEST(PlayerControllerTest, PhysicsMovementSetsVelocity) {
 }
 
 TEST(PlayerControllerTest, PhysicsJumpOnGround) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -258,7 +258,7 @@ TEST(PlayerControllerTest, PhysicsJumpOnGround) {
 }
 
 TEST(PlayerControllerTest, PhysicsJumpNotOnGround) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -278,7 +278,7 @@ TEST(PlayerControllerTest, PhysicsJumpNotOnGround) {
 }
 
 TEST(PlayerControllerTest, PhysicsFriction) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -337,7 +337,7 @@ TEST(PlayerControllerTest, EyePositionFlyMode) {
 }
 
 TEST(PlayerControllerTest, EyePositionPhysicsMode) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -346,14 +346,14 @@ TEST(PlayerControllerTest, EyePositionPhysicsMode) {
     PlayerController pc;
     pc.setPhysics(&body, &physics);
     pc.setFlyMode(false);
-    pc.setEyeHeight(1.62f);
+    pc.setEyeHeight(1.65f);
 
     // Set body position after mode switch (transition syncs from flyPosition)
     body.setPosition(Vec3(5, 10, 15));
 
     glm::dvec3 eye = pc.eyePosition();
     EXPECT_NEAR(eye.x, 5.0, 0.001);
-    EXPECT_NEAR(eye.y, 11.62, 0.001);
+    EXPECT_NEAR(eye.y, 11.65, 0.001);
     EXPECT_NEAR(eye.z, 15.0, 0.001);
 }
 
@@ -362,7 +362,7 @@ TEST(PlayerControllerTest, EyePositionPhysicsMode) {
 // ============================================================================
 
 TEST(PlayerControllerTest, SwitchToFlyFromPhysics) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -384,7 +384,7 @@ TEST(PlayerControllerTest, SwitchToFlyFromPhysics) {
 }
 
 TEST(PlayerControllerTest, SwitchToPhysicsFromFly) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);
@@ -412,7 +412,7 @@ TEST(PlayerControllerTest, IsOnGroundNoBody) {
 }
 
 TEST(PlayerControllerTest, IsOnGroundDelegates) {
-    BlockShapeProvider noCollision = [](const BlockPos&, RaycastMode) -> const CollisionShape* {
+    BlockShapeProvider noCollision = [](const BlockCoord&, RaycastMode) -> const CollisionShape* {
         return nullptr;
     };
     PhysicsSystem physics(noCollision);

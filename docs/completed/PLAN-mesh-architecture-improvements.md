@@ -254,7 +254,7 @@ Add a `deferred` flag to lighting requests:
 
 ```cpp
 struct LightingRequest {
-    BlockPos pos;
+    BlockCoord pos;
     // ... existing fields ...
 
     bool deferred = false;  // NEW

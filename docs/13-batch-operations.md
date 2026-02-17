@@ -22,13 +22,13 @@ This pattern applies throughout the engine:
 | Repaint requests | Visual updates | Set semantics per position |
 | Save requests | Column saves | Latest version wins |
 
-**Game-Level Note:** This pattern also applies to game logic systems like Minecraft's redstone. Block update propagation (neighbor notifications, signal changes) benefits enormously from batching with coalescing - if a block receives 5 update signals before the tick processes, only 1 update should execute. While block update mechanics belong in the game layer, not the engine, the engine should provide the infrastructure patterns.
+**Game-Level Note:** This pattern also applies to game logic systems like redstone-style circuits. Block update propagation (neighbor notifications, signal changes) benefits enormously from batching with coalescing - if a block receives 5 update signals before the tick processes, only 1 update should execute. While block update mechanics belong in the game layer, not the engine, the engine should provide the infrastructure patterns.
 
 ---
 
 ## 13.2 Problem Statement
 
-Minecraft suffers from significant performance issues when making many block changes, because each change:
+Traditional voxel engines suffer from significant performance issues when making many block changes, because each change:
 1. Acquires locks
 2. Triggers neighbor updates
 3. Triggers mesh rebuilds
@@ -50,12 +50,12 @@ public:
     explicit BatchBuilder(World& world);
 
     // Queue block changes (no immediate effect)
-    BatchBuilder& setBlock(BlockPos pos, uint16_t typeId, uint8_t rotation = 0);
+    BatchBuilder& setBlock(BlockCoord pos, uint16_t typeId, uint8_t rotation = 0);
     BatchBuilder& setBlocks(std::span<const BlockChange> changes);
-    BatchBuilder& fillRegion(BlockPos min, BlockPos max, uint16_t typeId);
+    BatchBuilder& fillRegion(BlockCoord min, BlockCoord max, uint16_t typeId);
 
     // Queue block data changes
-    BatchBuilder& setBlockData(BlockPos pos, std::string_view key, DataValue value);
+    BatchBuilder& setBlockData(BlockCoord pos, std::string_view key, DataValue value);
 
     // Execute all queued changes efficiently
     BatchResult execute();
@@ -71,7 +71,7 @@ private:
 };
 
 struct BlockChange {
-    BlockPos pos;
+    BlockCoord pos;
     uint16_t typeId;
     uint8_t rotation;
     std::optional<DataContainer> data;
@@ -166,7 +166,7 @@ BatchBuilder batch(world);
 for (int x = 0; x < 10; x++) {
     for (int y = 0; y < 10; y++) {
         for (int z = 0; z < 10; z++) {
-            batch.setBlock(BlockPos(baseX + x, baseY + y, baseZ + z), STONE_ID);
+            batch.setBlock(BlockCoord(baseX + x, baseY + y, baseZ + z), STONE_ID);
         }
     }
 }
@@ -178,7 +178,7 @@ auto result = batch.execute();
 Or using the fill helper:
 ```cpp
 BatchBuilder batch(world);
-batch.fillRegion(BlockPos(0, 64, 0), BlockPos(99, 64, 99), GRASS_ID);
+batch.fillRegion(BlockCoord(0, 64, 0), BlockCoord(99, 64, 99), GRASS_ID);
 batch.execute();  // Places 10,000 blocks efficiently
 ```
 
@@ -260,17 +260,17 @@ private:
 ```cpp
 // In game code, not engine
 class BlockUpdateSystem {
-    finevox::CoalescingQueue<BlockPos> updateQueue_;
+    finevox::CoalescingQueue<BlockCoord> updateQueue_;
 
 public:
     // Called when a block changes and neighbors need notification
-    void scheduleUpdate(BlockPos pos) {
+    void scheduleUpdate(BlockCoord pos) {
         updateQueue_.enqueue(pos);
     }
 
     // Called when neighbors of a changed block need updates
-    void scheduleNeighborUpdates(BlockPos pos) {
-        std::array<BlockPos, 6> neighbors = {
+    void scheduleNeighborUpdates(BlockCoord pos) {
+        std::array<BlockCoord, 6> neighbors = {
             pos.neighbor(Face::NegX), pos.neighbor(Face::PosX),
             pos.neighbor(Face::NegY), pos.neighbor(Face::PosY),
             pos.neighbor(Face::NegZ), pos.neighbor(Face::PosZ)
@@ -283,17 +283,17 @@ public:
         // Get all pending updates (coalesced - each position only once)
         auto updates = updateQueue_.drain();
 
-        for (BlockPos pos : updates) {
+        for (BlockCoord pos : updates) {
             Block block = world.getBlock(pos);
             if (block.type()) {
-                block.type()->onNeighborChange(block, ...);
+                block.type()->onNeighborUpdated(block, ...);
             }
         }
     }
 };
 ```
 
-If a redstone signal change causes 50 update signals to the same block, the queue holds only 1 entry - that block gets one `onNeighborChange` call per tick, not 50.
+If a redstone signal change causes 50 update signals to the same block, the queue holds only 1 entry - that block gets one `onNeighborUpdated` call per tick, not 50.
 
 ---
 

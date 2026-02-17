@@ -39,7 +39,6 @@ enum class EntityType : uint16_t {
     // Hostile mobs
     Zombie = 200,
     Skeleton,
-    Creeper,
     Spider,
 
     // Items and projectiles
@@ -84,6 +83,7 @@ public:
     // ========================================================================
 
     [[nodiscard]] EntityId id() const { return id_; }
+    void setId(EntityId id) { id_ = id; }
     [[nodiscard]] EntityType type() const { return type_; }
 
     // Human-readable type name (for debugging)
@@ -214,7 +214,7 @@ protected:
     // Position/motion
     Vec3 position_{0.0f};
     Vec3 velocity_{0.0f};
-    Vec3 halfExtents_{0.3f, 0.9f, 0.3f};  // Default player-like size
+    Vec3 halfExtents_{0.35f, 0.925f, 0.35f};  // Default player-like size
 
     // Ground state
     bool onGround_ = false;
@@ -224,7 +224,7 @@ protected:
     // Look direction
     float yaw_ = 0.0f;
     float pitch_ = 0.0f;
-    float eyeHeight_ = 1.62f;  // Default player eye height
+    float eyeHeight_ = 1.65f;  // Default player eye height
 
     // Animation
     float animationTime_ = 0.0f;

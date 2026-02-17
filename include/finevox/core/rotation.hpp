@@ -18,7 +18,7 @@ namespace finevox {
 // We represent rotations as which face points "up" (Y+) and which points "forward" (Z+)
 //
 // For voxel games, rotations are used for:
-// - Block orientation (stairs, logs, pistons)
+// - Block orientation (directional and rotatable blocks)
 // - Structure rotation during copy/paste
 // - Transform local coordinates to world coordinates
 
@@ -63,8 +63,8 @@ public:
     constexpr Rotation(std::array<std::array<int8_t, 3>, 3> m) : matrix_(m) {}
 
     // Apply rotation to a position (relative to origin)
-    [[nodiscard]] constexpr BlockPos apply(BlockPos pos) const {
-        return BlockPos(
+    [[nodiscard]] constexpr BlockCoord apply(BlockCoord pos) const {
+        return BlockCoord(
             matrix_[0][0] * pos.x + matrix_[0][1] * pos.y + matrix_[0][2] * pos.z,
             matrix_[1][0] * pos.x + matrix_[1][1] * pos.y + matrix_[1][2] * pos.z,
             matrix_[2][0] * pos.x + matrix_[2][1] * pos.y + matrix_[2][2] * pos.z

@@ -17,7 +17,7 @@ FineStructureVoxel/
 │   ├── 01-executive-summary.md      # Goals, non-goals
 │   ├── 02-prior-art.md              # Lessons from prior implementations
 │   ├── 03-architecture.md           # Architecture overview
-│   ├── 04-core-data-structures.md   # BlockPos, SubChunk, Palette, etc.
+│   ├── 04-core-data-structures.md   # BlockCoord, SubChunk, Palette, etc.
 │   ├── 05-world-management.md       # ChunkColumn, World, ColumnManager
 │   ├── 06-rendering.md              # Mesh generation, view-relative rendering
 │   ├── 07-lod.md                    # Level of detail
@@ -48,7 +48,7 @@ FineStructureVoxel/
 │   └── appendix-b-differences.md
 ├── include/finevox/
 │   ├── core/                        # Core engine (namespace finevox)
-│   │   ├── position.hpp             # BlockPos, ChunkPos, ColumnPos, Face
+│   │   ├── position.hpp             # BlockCoord, ChunkPos, ColumnPos, Face
 │   │   ├── subchunk.hpp             # 16³ block storage with palette
 │   │   ├── palette.hpp              # SubChunkPalette
 │   │   ├── string_interner.hpp      # String→ID interning
@@ -82,7 +82,7 @@ FineStructureVoxel/
 │   │   ├── resource_locator.hpp     # Asset path resolution
 │   │   ├── serialization.hpp        # SubChunk/Column CBOR serialization
 │   │   ├── cbor.hpp                 # CBOR encoder/decoder
-│   │   ├── region_file.hpp          # 32×32 region file I/O
+│   │   ├── region_file.hpp          # 64×64 region file I/O
 │   │   ├── io_manager.hpp           # Async save/load
 │   │   ├── data_container.hpp       # Key-value extra data storage
 │   │   ├── batch_builder.hpp        # Block operation batching

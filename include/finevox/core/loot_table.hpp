@@ -56,10 +56,10 @@ constexpr LootTableId EMPTY_LOOT_TABLE{};
 struct LootContext {
     BlockTypeId brokenBlock;                        // Block broken (empty if N/A)
     ItemTypeId toolUsed;                            // Tool held (empty if bare hand)
-    int32_t fortuneLevel = 0;                       // Fortune enchantment level
-    int32_t lootingLevel = 0;                       // Looting enchantment level
-    bool silkTouch = false;                         // Silk touch on tool?
-    BlockPos position{0, 0, 0};                     // World position
+    int32_t bountyLevel = 0;                        // Bounty enchantment level
+    int32_t plunderLevel = 0;                       // Plunder enchantment level
+    bool preciseBreak = false;                      // Precise break on tool?
+    BlockCoord position{0, 0, 0};                     // World position
     EntityId killerEntity = INVALID_ENTITY_ID;      // Who caused this
     EntityId sourceEntity = INVALID_ENTITY_ID;      // Entity dropping loot
     DataContainer* extraData = nullptr;             // Script-extensible data

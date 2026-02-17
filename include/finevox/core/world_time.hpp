@@ -6,8 +6,8 @@
  *
  * Design: Phase 15 Sky + Day/Night Cycle
  *
- * Tracks in-game time using tick-based progression (Minecraft convention:
- * 24000 ticks = 1 day, 20 ticks/sec default). Provides time-of-day queries
+ * Tracks in-game time using tick-based progression (
+ * 36000 ticks = 1 day, 30 ticks/sec default). Provides time-of-day queries
  * for sky rendering, gameplay decisions (spawning, crop growth), and
  * persistence via DataContainer.
  *
@@ -49,11 +49,11 @@ public:
     // Constants
     // ========================================================================
 
-    static constexpr int64_t TICKS_PER_DAY = 24000;
+    static constexpr int64_t TICKS_PER_DAY = 36000;
     static constexpr int64_t DAWN     = 0;
-    static constexpr int64_t NOON     = 6000;
-    static constexpr int64_t SUNSET   = 12000;
-    static constexpr int64_t MIDNIGHT = 18000;
+    static constexpr int64_t NOON     = 9000;
+    static constexpr int64_t SUNSET   = 18000;
+    static constexpr int64_t MIDNIGHT = 27000;
 
     // ========================================================================
     // Advancement
@@ -95,7 +95,7 @@ public:
     // Configuration
     // ========================================================================
 
-    /// Set real-time ticks per second (default 20.0)
+    /// Set real-time ticks per second (default 30.0)
     void setTicksPerSecond(float tps);
     [[nodiscard]] float ticksPerSecond() const { return ticksPerSecond_; }
 
@@ -123,7 +123,7 @@ public:
 private:
     std::atomic<int64_t> totalTicks_{0};
     float accumulator_ = 0.0f;   // Sub-tick fractional accumulator
-    float ticksPerSecond_ = 20.0f;
+    float ticksPerSecond_ = 30.0f;
     float timeSpeed_ = 1.0f;
     bool frozen_ = false;
 };

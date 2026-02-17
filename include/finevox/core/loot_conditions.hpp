@@ -25,16 +25,16 @@ public:
 };
 
 // ============================================================================
-// SilkTouchCondition — requires silk touch on tool
+// PreciseBreakCondition — requires precise break on tool
 // ============================================================================
 
-class SilkTouchCondition : public LootCondition {
+class PreciseBreakCondition : public LootCondition {
 public:
     [[nodiscard]] bool test(const LootContext& ctx) const override {
-        return ctx.silkTouch;
+        return ctx.preciseBreak;
     }
     [[nodiscard]] std::unique_ptr<LootCondition> clone() const override {
-        return std::make_unique<SilkTouchCondition>();
+        return std::make_unique<PreciseBreakCondition>();
     }
 };
 
@@ -62,16 +62,16 @@ private:
 };
 
 // ============================================================================
-// RandomChanceCondition — probability with optional fortune bonus
+// RandomChanceCondition — probability with optional bounty bonus
 // ============================================================================
 
 class RandomChanceCondition : public LootCondition {
 public:
-    explicit RandomChanceCondition(float chance, float fortuneBonus = 0.0f)
-        : chance_(chance), fortuneBonus_(fortuneBonus) {}
+    explicit RandomChanceCondition(float chance, float bountyBonus = 0.0f)
+        : chance_(chance), bountyBonus_(bountyBonus) {}
 
     [[nodiscard]] bool test(const LootContext& ctx) const override {
-        float effective = chance_ + fortuneBonus_ * ctx.fortuneLevel;
+        float effective = chance_ + bountyBonus_ * ctx.bountyLevel;
         if (effective >= 1.0f) return true;
         if (effective <= 0.0f) return false;
         auto& rng = getLootRng(ctx);
@@ -80,15 +80,15 @@ public:
     }
 
     [[nodiscard]] std::unique_ptr<LootCondition> clone() const override {
-        return std::make_unique<RandomChanceCondition>(chance_, fortuneBonus_);
+        return std::make_unique<RandomChanceCondition>(chance_, bountyBonus_);
     }
 
     [[nodiscard]] float chance() const { return chance_; }
-    [[nodiscard]] float fortuneBonus() const { return fortuneBonus_; }
+    [[nodiscard]] float bountyBonus() const { return bountyBonus_; }
 
 private:
     float chance_;
-    float fortuneBonus_;
+    float bountyBonus_;
 };
 
 // ============================================================================

@@ -114,13 +114,13 @@ TEST_F(LootEntryTest, EligibilityWithNoConditions) {
 
 TEST_F(LootEntryTest, EligibilityWithCondition) {
     LootEntry entry;
-    entry.conditions.push_back(std::make_unique<SilkTouchCondition>());
+    entry.conditions.push_back(std::make_unique<PreciseBreakCondition>());
 
     LootContext ctx;
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     EXPECT_FALSE(entry.isEligible(ctx));
 
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     EXPECT_TRUE(entry.isEligible(ctx));
 }
 
@@ -131,7 +131,7 @@ TEST_F(LootEntryTest, Clone) {
     entry.countMin = 2;
     entry.countMax = 5;
     entry.weight = 3.0f;
-    entry.conditions.push_back(std::make_unique<SilkTouchCondition>());
+    entry.conditions.push_back(std::make_unique<PreciseBreakCondition>());
 
     auto copy = entry.clone();
     EXPECT_EQ(copy.type, entry.type);
@@ -193,7 +193,7 @@ TEST_F(LootPoolTest, PoolConditionFails) {
     LootPool pool;
     pool.rollsMin = 1;
     pool.rollsMax = 1;
-    pool.conditions.push_back(std::make_unique<SilkTouchCondition>());
+    pool.conditions.push_back(std::make_unique<PreciseBreakCondition>());
 
     LootEntry entry;
     entry.type = LootEntry::Type::Item;
@@ -202,7 +202,7 @@ TEST_F(LootPoolTest, PoolConditionFails) {
 
     LootContext ctx;
     ctx.seed = 42;
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     auto& rng = getLootRng(ctx);
 
     auto items = pool.roll(ctx, rng);
@@ -382,19 +382,19 @@ TEST_F(LootConditionTest, Always) {
     EXPECT_TRUE(cond.test(ctx));
 }
 
-TEST_F(LootConditionTest, SilkTouch) {
-    SilkTouchCondition cond;
+TEST_F(LootConditionTest, PreciseBreak) {
+    PreciseBreakCondition cond;
     LootContext ctx;
 
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     EXPECT_FALSE(cond.test(ctx));
 
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     EXPECT_TRUE(cond.test(ctx));
 }
 
 TEST_F(LootConditionTest, ToolTag) {
-    auto tag = TagId::fromName("c:loot_test_pickaxes");
+    auto tag = TagId::fromName("common:loot_test_pickaxes");
     auto tool = ItemTypeId::fromName("loot_test_iron_pick");
 
     // Register the tag membership and rebuild
@@ -428,12 +428,12 @@ TEST_F(LootConditionTest, RandomChance) {
     EXPECT_FALSE(never.test(ctx));
 }
 
-TEST_F(LootConditionTest, RandomChanceFortuneBonus) {
-    // Base chance 0.0, but fortune bonus 0.5 * level 3 = 1.5 → always pass
+TEST_F(LootConditionTest, RandomChanceBountyBonus) {
+    // Base chance 0.0, but bounty bonus 0.5 * level 3 = 1.5 → always pass
     RandomChanceCondition cond(0.0f, 0.5f);
     LootContext ctx;
     ctx.seed = 42;
-    ctx.fortuneLevel = 3;
+    ctx.bountyLevel = 3;
     EXPECT_TRUE(cond.test(ctx));
 }
 
@@ -452,14 +452,14 @@ TEST_F(LootConditionTest, BlockType) {
 }
 
 TEST_F(LootConditionTest, Inverted) {
-    InvertedCondition cond(std::make_unique<SilkTouchCondition>());
+    InvertedCondition cond(std::make_unique<PreciseBreakCondition>());
     LootContext ctx;
 
-    ctx.silkTouch = false;
-    EXPECT_TRUE(cond.test(ctx));   // NOT silk-touch → true
+    ctx.preciseBreak = false;
+    EXPECT_TRUE(cond.test(ctx));   // NOT precise-break → true
 
-    ctx.silkTouch = true;
-    EXPECT_FALSE(cond.test(ctx));  // NOT silk-touch → false
+    ctx.preciseBreak = true;
+    EXPECT_FALSE(cond.test(ctx));  // NOT precise-break → false
 }
 
 TEST_F(LootConditionTest, Callback) {
@@ -495,11 +495,11 @@ TEST_F(LootConditionTest, ConditionClone) {
 
 class LootModifierTest : public ::testing::Test {};
 
-TEST_F(LootModifierTest, FortuneCount) {
-    FortuneCountModifier mod(1.0f);
+TEST_F(LootModifierTest, BountyCount) {
+    BountyModifier mod(1.0f);
     LootContext ctx;
     ctx.seed = 42;
-    ctx.fortuneLevel = 3;
+    ctx.bountyLevel = 3;
 
     std::vector<ItemStack> items;
     ItemStack stack;
@@ -512,10 +512,10 @@ TEST_F(LootModifierTest, FortuneCount) {
     EXPECT_LE(items[0].count, 4);
 }
 
-TEST_F(LootModifierTest, FortuneCountNoFortune) {
-    FortuneCountModifier mod(1.0f);
+TEST_F(LootModifierTest, BountyCountNoBounty) {
+    BountyModifier mod(1.0f);
     LootContext ctx;
-    ctx.fortuneLevel = 0;
+    ctx.bountyLevel = 0;
 
     std::vector<ItemStack> items;
     ItemStack stack;
@@ -524,7 +524,7 @@ TEST_F(LootModifierTest, FortuneCountNoFortune) {
     items.push_back(std::move(stack));
 
     mod.apply(items, ctx);
-    EXPECT_EQ(items[0].count, 5);  // No change when fortune=0
+    EXPECT_EQ(items[0].count, 5);  // No change when bounty=0
 }
 
 TEST_F(LootModifierTest, SetCount) {
@@ -557,15 +557,15 @@ TEST_F(LootModifierTest, SetCountRange) {
     EXPECT_LE(items[0].count, 5);
 }
 
-TEST_F(LootModifierTest, LootingBonus) {
-    LootingBonusModifier mod(1);
+TEST_F(LootModifierTest, PlunderBonus) {
+    PlunderModifier mod(1);
     LootContext ctx;
     ctx.seed = 42;
-    ctx.lootingLevel = 2;
+    ctx.plunderLevel = 2;
 
     std::vector<ItemStack> items;
     ItemStack stack;
-    stack.type = ItemTypeId::fromName("loot_looting_test");
+    stack.type = ItemTypeId::fromName("loot_plunder_test");
     stack.count = 1;
     items.push_back(std::move(stack));
 
@@ -574,14 +574,14 @@ TEST_F(LootModifierTest, LootingBonus) {
     EXPECT_LE(items[0].count, 3);
 }
 
-TEST_F(LootModifierTest, LootingBonusNoLooting) {
-    LootingBonusModifier mod(1);
+TEST_F(LootModifierTest, PlunderBonusNoPlunder) {
+    PlunderModifier mod(1);
     LootContext ctx;
-    ctx.lootingLevel = 0;
+    ctx.plunderLevel = 0;
 
     std::vector<ItemStack> items;
     ItemStack stack;
-    stack.type = ItemTypeId::fromName("loot_looting_noop");
+    stack.type = ItemTypeId::fromName("loot_plunder_noop");
     stack.count = 5;
     items.push_back(std::move(stack));
 
@@ -788,7 +788,7 @@ count: 1
     EXPECT_EQ(table->pools()[0].rollsMax, 5);
 }
 
-TEST_F(LootTableLoaderTest, SilkTouchCondition) {
+TEST_F(LootTableLoaderTest, PreciseBreakCondition) {
     auto table = LootTableLoader::loadFromString(R"(
 pool:default:
 rolls: 1
@@ -796,28 +796,28 @@ entry:silk:
 type: item
 item: loot_silk_stone
 count: 1
-condition: silk-touch
+condition: precise-break
 entry:normal:
 type: item
 item: loot_silk_cobble
 count: 1
-condition: not silk-touch
+condition: not precise-break
 )");
 
     ASSERT_TRUE(table.has_value());
     EXPECT_EQ(table->pools()[0].entries.size(), 2u);
 
-    // Without silk touch
+    // Without precise break
     LootContext ctx;
     ctx.seed = 42;
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     auto items = table->roll(ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].type, ItemTypeId::fromName("loot_silk_cobble"));
 
-    // With silk touch
+    // With precise break
     ctx.seed = 42;
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     items = table->roll(ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].type, ItemTypeId::fromName("loot_silk_stone"));
@@ -827,7 +827,7 @@ TEST_F(LootTableLoaderTest, PoolLevelCondition) {
     auto table = LootTableLoader::loadFromString(R"(
 pool:rare:
 rolls: 1
-condition: silk-touch
+condition: precise-break
 entry:diamond:
 type: item
 item: loot_pool_cond
@@ -836,57 +836,57 @@ count: 1
 
     ASSERT_TRUE(table.has_value());
 
-    // Without silk touch — pool condition fails
+    // Without precise break — pool condition fails
     LootContext ctx;
     ctx.seed = 42;
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     auto items = table->roll(ctx);
     EXPECT_TRUE(items.empty());
 
-    // With silk touch — pool condition passes
+    // With precise break — pool condition passes
     ctx.seed = 42;
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     items = table->roll(ctx);
     EXPECT_EQ(items.size(), 1u);
 }
 
-TEST_F(LootTableLoaderTest, FortuneModifier) {
+TEST_F(LootTableLoaderTest, BountyModifier) {
     auto table = LootTableLoader::loadFromString(R"(
 pool:default:
 rolls: 1
 entry:ore:
 type: item
-item: loot_fortune_ore
+item: loot_bounty_ore
 count: 1
-modifier: fortune-count 1.0
+modifier: bounty 1.0
 )");
 
     ASSERT_TRUE(table.has_value());
 
     LootContext ctx;
     ctx.seed = 42;
-    ctx.fortuneLevel = 3;
+    ctx.bountyLevel = 3;
     auto items = table->roll(ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_GE(items[0].count, 1);
 }
 
-TEST_F(LootTableLoaderTest, LootingModifier) {
+TEST_F(LootTableLoaderTest, PlunderModifier) {
     auto table = LootTableLoader::loadFromString(R"(
 pool:default:
 rolls: 1
 entry:meat:
 type: item
-item: loot_looting_meat
+item: loot_plunder_meat
 count: 1
-modifier: looting-bonus 1
+modifier: plunder-bonus 1
 )");
 
     ASSERT_TRUE(table.has_value());
 
     LootContext ctx;
     ctx.seed = 42;
-    ctx.lootingLevel = 2;
+    ctx.plunderLevel = 2;
     auto items = table->roll(ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_GE(items[0].count, 1);
@@ -1030,29 +1030,29 @@ condition: random-chance 1.0
     EXPECT_EQ(items.size(), 1u);  // 100% chance
 }
 
-TEST_F(LootTableLoaderTest, RandomChanceWithFortuneBonus) {
+TEST_F(LootTableLoaderTest, RandomChanceWithBountyBonus) {
     auto table = LootTableLoader::loadFromString(R"(
 pool:default:
 rolls: 1
 entry:rare:
 type: item
-item: loot_rng_fortune
+item: loot_rng_bounty
 count: 1
 condition: random-chance 0.0 0.5
 )");
 
     ASSERT_TRUE(table.has_value());
 
-    // Without fortune — 0% chance
+    // Without bounty — 0% chance
     LootContext ctx;
     ctx.seed = 42;
-    ctx.fortuneLevel = 0;
+    ctx.bountyLevel = 0;
     auto items = table->roll(ctx);
     EXPECT_TRUE(items.empty());
 
-    // With fortune 3 → 1.5 effective chance → always passes
+    // With bounty 3 → 1.5 effective chance → always passes
     ctx.seed = 42;
-    ctx.fortuneLevel = 3;
+    ctx.bountyLevel = 3;
     items = table->roll(ctx);
     EXPECT_EQ(items.size(), 1u);
 }
@@ -1082,24 +1082,24 @@ weight: 0.5
 
 class LootParserTest : public ::testing::Test {};
 
-TEST_F(LootParserTest, ParseConditionSilkTouch) {
-    auto cond = LootTableLoader::parseCondition("silk-touch");
+TEST_F(LootParserTest, ParseConditionPreciseBreak) {
+    auto cond = LootTableLoader::parseCondition("precise-break");
     ASSERT_NE(cond, nullptr);
 
     LootContext ctx;
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     EXPECT_TRUE(cond->test(ctx));
 }
 
-TEST_F(LootParserTest, ParseConditionNotSilkTouch) {
-    auto cond = LootTableLoader::parseCondition("not silk-touch");
+TEST_F(LootParserTest, ParseConditionNotPreciseBreak) {
+    auto cond = LootTableLoader::parseCondition("not precise-break");
     ASSERT_NE(cond, nullptr);
 
     LootContext ctx;
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     EXPECT_FALSE(cond->test(ctx));
 
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     EXPECT_TRUE(cond->test(ctx));
 }
 
@@ -1121,7 +1121,7 @@ TEST_F(LootParserTest, ParseConditionBlockType) {
 }
 
 TEST_F(LootParserTest, ParseConditionToolTag) {
-    auto cond = LootTableLoader::parseCondition("tool-tag c:test_axes");
+    auto cond = LootTableLoader::parseCondition("tool-tag common:test_axes");
     ASSERT_NE(cond, nullptr);
 }
 
@@ -1130,13 +1130,13 @@ TEST_F(LootParserTest, ParseConditionUnknown) {
     EXPECT_EQ(cond, nullptr);
 }
 
-TEST_F(LootParserTest, ParseModifierFortuneCount) {
-    auto mod = LootTableLoader::parseModifier("fortune-count 2.0");
+TEST_F(LootParserTest, ParseModifierBountyCount) {
+    auto mod = LootTableLoader::parseModifier("bounty 2.0");
     ASSERT_NE(mod, nullptr);
 }
 
-TEST_F(LootParserTest, ParseModifierFortuneCountDefault) {
-    auto mod = LootTableLoader::parseModifier("fortune-count");
+TEST_F(LootParserTest, ParseModifierBountyCountDefault) {
+    auto mod = LootTableLoader::parseModifier("bounty");
     ASSERT_NE(mod, nullptr);
 }
 
@@ -1145,13 +1145,13 @@ TEST_F(LootParserTest, ParseModifierSetCount) {
     ASSERT_NE(mod, nullptr);
 }
 
-TEST_F(LootParserTest, ParseModifierLootingBonus) {
-    auto mod = LootTableLoader::parseModifier("looting-bonus 2");
+TEST_F(LootParserTest, ParseModifierPlunderBonus) {
+    auto mod = LootTableLoader::parseModifier("plunder-bonus 2");
     ASSERT_NE(mod, nullptr);
 }
 
-TEST_F(LootParserTest, ParseModifierLootingBonusDefault) {
-    auto mod = LootTableLoader::parseModifier("looting-bonus");
+TEST_F(LootParserTest, ParseModifierPlunderBonusDefault) {
+    auto mod = LootTableLoader::parseModifier("plunder-bonus");
     ASSERT_NE(mod, nullptr);
 }
 
@@ -1161,7 +1161,7 @@ TEST_F(LootParserTest, ParseModifierUnknown) {
 }
 
 // ============================================================================
-// Integration: LootTableRef (nested table) + silk-touch stone pattern
+// Integration: LootTableRef (nested table) + precise-break stone pattern
 // ============================================================================
 
 class LootIntegrationTest : public ::testing::Test {
@@ -1175,7 +1175,7 @@ protected:
 };
 
 TEST_F(LootIntegrationTest, StoneLikeDropPattern) {
-    // Stone: silk touch → stone, else → cobblestone
+    // Stone: precise break → stone, else → cobblestone
     auto table = LootTableLoader::loadFromString(R"(
 pool:default:
 rolls: 1
@@ -1183,28 +1183,28 @@ entry:silk:
 type: item
 item: loot_int_stone
 count: 1
-condition: silk-touch
+condition: precise-break
 entry:normal:
 type: item
 item: loot_int_cobblestone
 count: 1
-condition: not silk-touch
+condition: not precise-break
 )");
 
     ASSERT_TRUE(table.has_value());
     LootRegistry::global().registerTable("integration_stone", std::move(*table));
 
-    // Mine without silk touch
+    // Mine without precise break
     LootContext ctx;
     ctx.seed = 42;
-    ctx.silkTouch = false;
+    ctx.preciseBreak = false;
     auto items = LootRegistry::global().roll("integration_stone", ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].type, ItemTypeId::fromName("loot_int_cobblestone"));
 
-    // Mine with silk touch
+    // Mine with precise break
     ctx.seed = 42;
-    ctx.silkTouch = true;
+    ctx.preciseBreak = true;
     items = LootRegistry::global().roll("integration_stone", ctx);
     ASSERT_EQ(items.size(), 1u);
     EXPECT_EQ(items[0].type, ItemTypeId::fromName("loot_int_stone"));
@@ -1219,7 +1219,7 @@ entry:rotten_flesh:
 type: item
 item: loot_int_rotten_flesh
 count: 1-3
-modifier: looting-bonus 1
+modifier: plunder-bonus 1
 pool:rare:
 rolls: 1
 condition: random-chance 1.0
@@ -1238,7 +1238,7 @@ weight: 1
 
     LootContext ctx;
     ctx.seed = 42;
-    ctx.lootingLevel = 0;
+    ctx.plunderLevel = 0;
     auto items = table->roll(ctx);
 
     // Should get at least 2 items (1 from each pool)

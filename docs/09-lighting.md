@@ -23,18 +23,18 @@ public:
     explicit LightingSystem(World& world);
 
     // Get light level at a block (combined sky + block light)
-    int getLightLevel(BlockPos pos) const;
-    int getSkyLight(BlockPos pos) const;
-    int getBlockLight(BlockPos pos) const;
+    int getLightLevel(BlockCoord pos) const;
+    int getSkyLight(BlockCoord pos) const;
+    int getBlockLight(BlockCoord pos) const;
 
     // Update lighting after block change
-    void onBlockChange(BlockPos pos);
+    void onBlockChange(BlockCoord pos);
 
     // Queue-based light propagation
     void processLightQueue();
 
     // Get ambient occlusion for a vertex
-    float getAmbientOcclusion(BlockPos block, Face face, int cornerU, int cornerV) const;
+    float getAmbientOcclusion(BlockCoord block, Face face, int cornerU, int cornerV) const;
 
 private:
     World& world_;
@@ -47,12 +47,12 @@ private:
     std::unordered_map<uint64_t, ChunkLighting> chunkLighting_;
 
     // BFS queues for light propagation
-    std::queue<BlockPos> lightIncreaseQueue_;
-    std::queue<BlockPos> lightDecreaseQueue_;
+    std::queue<BlockCoord> lightIncreaseQueue_;
+    std::queue<BlockCoord> lightDecreaseQueue_;
 
     void propagateSkyLight(ChunkPos chunkPos);
-    void propagateBlockLight(BlockPos source, int level);
-    void removeLightSource(BlockPos pos);
+    void propagateBlockLight(BlockCoord source, int level);
+    void removeLightSource(BlockCoord pos);
 };
 
 }  // namespace finevox
@@ -65,12 +65,12 @@ private:
 Per-vertex AO based on adjacent block occupancy:
 
 ```cpp
-float LightingSystem::getAmbientOcclusion(BlockPos block, Face face, int cornerU, int cornerV) const {
+float LightingSystem::getAmbientOcclusion(BlockCoord block, Face face, int cornerU, int cornerV) const {
     // Get positions of 3 neighbors that affect this corner
     // (side1, side2, and corner)
-    BlockPos side1Pos = /* ... based on face and cornerU */;
-    BlockPos side2Pos = /* ... based on face and cornerV */;
-    BlockPos cornerPos = /* ... diagonal */;
+    BlockCoord side1Pos = /* ... based on face and cornerU */;
+    BlockCoord side2Pos = /* ... based on face and cornerV */;
+    BlockCoord cornerPos = /* ... diagonal */;
 
     bool side1 = world_.getBlock(side1Pos).isSolid();
     bool side2 = world_.getBlock(side2Pos).isSolid();

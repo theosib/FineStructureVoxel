@@ -28,7 +28,7 @@ class DataContainer;
 
 // Callback type for block change notifications
 // Parameters: subchunk position, local block position, old block type, new block type
-using BlockChangeCallback = std::function<void(ChunkPos pos, LocalBlockPos local,
+using BlockChangeCallback = std::function<void(ChunkPos pos, LocalBlockCoord local,
                                                BlockTypeId oldType, BlockTypeId newType)>;
 
 // A 16x16x16 block volume
@@ -37,7 +37,7 @@ using BlockChangeCallback = std::function<void(ChunkPos pos, LocalBlockPos local
 // - At save time, can compact the palette and use exact bit-width serialization
 // - Also stores per-block light data (4096 bytes)
 //
-// Index layout: y*256 + z*16 + x (same as BlockPos::toLocalIndex)
+// Index layout: y*256 + z*16 + x (same as BlockCoord::toLocalIndex)
 // This groups blocks along X axis for better cache locality during horizontal iteration
 //
 class SubChunk {
@@ -61,20 +61,20 @@ public:
     SubChunk& operator=(SubChunk&&) = delete;
 
     // Get block type at local position
-    [[nodiscard]] BlockTypeId getBlock(LocalBlockPos pos) const;
+    [[nodiscard]] BlockTypeId getBlock(LocalBlockCoord pos) const;
     [[nodiscard]] BlockTypeId getBlock(uint16_t index) const;
     // Convenience overload for int32_t coordinates
     [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const {
-        return getBlock(LocalBlockPos{x, y, z});
+        return getBlock(LocalBlockCoord{x, y, z});
     }
 
     // Set block type at local position
     // Handles palette management and reference counting automatically
-    void setBlock(LocalBlockPos pos, BlockTypeId type);
+    void setBlock(LocalBlockCoord pos, BlockTypeId type);
     void setBlock(uint16_t index, BlockTypeId type);
     // Convenience overload for int32_t coordinates
     void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-        setBlock(LocalBlockPos{x, y, z}, type);
+        setBlock(LocalBlockCoord{x, y, z}, type);
     }
 
     // Check if subchunk is entirely air (for optimization/culling)
@@ -187,27 +187,27 @@ public:
     // ========================================================================
     // Each block stores a rotation index (0-23) representing one of 24 cube rotations.
     // Default is 0 (identity = no rotation).
-    // Used for oriented blocks like stairs, logs, pistons, etc.
+    // Used for oriented blocks like slopes, beams, etc.
 
     /// Get rotation for block at local coordinates
     [[nodiscard]] Rotation getRotation(int32_t x, int32_t y, int32_t z) const;
     [[nodiscard]] Rotation getRotation(int32_t index) const;
-    [[nodiscard]] Rotation getRotation(LocalBlockPos pos) const;
+    [[nodiscard]] Rotation getRotation(LocalBlockCoord pos) const;
 
     /// Get raw rotation index (0-23) for block at local coordinates
     [[nodiscard]] uint8_t getRotationIndex(int32_t x, int32_t y, int32_t z) const;
     [[nodiscard]] uint8_t getRotationIndex(int32_t index) const;
-    [[nodiscard]] uint8_t getRotationIndex(LocalBlockPos pos) const;
+    [[nodiscard]] uint8_t getRotationIndex(LocalBlockCoord pos) const;
 
     /// Set rotation for block at local coordinates
     void setRotation(int32_t x, int32_t y, int32_t z, const Rotation& rotation);
     void setRotation(int32_t index, const Rotation& rotation);
-    void setRotation(LocalBlockPos pos, const Rotation& rotation);
+    void setRotation(LocalBlockCoord pos, const Rotation& rotation);
 
     /// Set rotation by index (0-23) for block at local coordinates
     void setRotationIndex(int32_t x, int32_t y, int32_t z, uint8_t rotationIndex);
     void setRotationIndex(int32_t index, uint8_t rotationIndex);
-    void setRotationIndex(LocalBlockPos pos, uint8_t rotationIndex);
+    void setRotationIndex(LocalBlockCoord pos, uint8_t rotationIndex);
 
     /// Clear all rotations to identity (0)
     void clearRotations();
@@ -317,12 +317,12 @@ public:
     // ========================================================================
 
     // Convert local block position to world block position
-    [[nodiscard]] BlockPos toWorld(LocalBlockPos local) const {
+    [[nodiscard]] BlockCoord toWorld(LocalBlockCoord local) const {
         return position_.toWorld(local);
     }
 
     // Convert local block index to world block position
-    [[nodiscard]] BlockPos toWorld(uint16_t localIndex) const {
+    [[nodiscard]] BlockCoord toWorld(uint16_t localIndex) const {
         return position_.toWorld(localIndex);
     }
 

@@ -31,7 +31,7 @@ public:
 
     [[nodiscard]] std::string_view name() const override;
     [[nodiscard]] FeatureResult place(FeaturePlacementContext& ctx) override;
-    [[nodiscard]] BlockPos maxExtent() const override;
+    [[nodiscard]] BlockCoord maxExtent() const override;
 
 private:
     std::string name_;
@@ -41,10 +41,10 @@ private:
     [[nodiscard]] int32_t trunkHeight(uint64_t seed) const;
 
     /// Check that the origin has suitable ground below
-    [[nodiscard]] bool checkSoil(World& world, BlockPos origin) const;
+    [[nodiscard]] bool checkSoil(World& world, BlockCoord origin) const;
 
     /// Check that the trunk area is clear (air)
-    [[nodiscard]] bool checkClearance(World& world, BlockPos origin, int32_t height) const;
+    [[nodiscard]] bool checkClearance(World& world, BlockCoord origin, int32_t height) const;
 };
 
 }  // namespace finevox::worldgen

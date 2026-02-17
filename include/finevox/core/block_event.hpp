@@ -47,8 +47,8 @@ enum class EventType : uint8_t {
     TickRandom,         // Random tick fired
 
     // Neighbor events
-    NeighborChanged,    // Adjacent block changed
-    BlockUpdate,        // Block should re-evaluate state (redstone-like propagation)
+    NeighborUpdated,    // Adjacent block changed
+    BlockUpdate,        // Block should re-evaluate state (signal-like propagation)
 
     // Interaction events (block-targeted)
     PlayerUse,          // Player right-clicked a block
@@ -93,8 +93,8 @@ struct BlockEvent {
     EventType type = EventType::None;
 
     // Location (always valid)
-    BlockPos pos{0, 0, 0};
-    LocalBlockPos localPos{0, 0, 0};  // Position within subchunk
+    BlockCoord pos{0, 0, 0};
+    LocalBlockCoord localPos{0, 0, 0};  // Position within subchunk
     ChunkPos chunkPos{0, 0, 0};
 
     // Block information (valid for block events)
@@ -105,7 +105,7 @@ struct BlockEvent {
     // Interaction data (valid for PlayerUse/PlayerHit)
     Face face = Face::PosY;       // Which face was interacted with
 
-    // For NeighborChanged (supports consolidation via bitmask)
+    // For NeighborUpdated (supports consolidation via bitmask)
     Face changedFace = Face::PosY;  // Primary face that changed (for single-face events)
     uint8_t neighborFaceMask = 0;   // Bitmask of all changed faces (1 << Face value)
 
@@ -130,7 +130,7 @@ struct BlockEvent {
      * @param oldType Type of block being replaced (usually air)
      * @param rot Rotation of the new block
      */
-    static BlockEvent blockPlaced(BlockPos pos, BlockTypeId newType,
+    static BlockEvent blockPlaced(BlockCoord pos, BlockTypeId newType,
                                   BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
 
     /**
@@ -138,7 +138,7 @@ struct BlockEvent {
      * @param pos World position
      * @param oldType Type of block being broken
      */
-    static BlockEvent blockBroken(BlockPos pos, BlockTypeId oldType);
+    static BlockEvent blockBroken(BlockCoord pos, BlockTypeId oldType);
 
     /**
      * @brief Create a block changed event (state change, not place/break)
@@ -146,45 +146,45 @@ struct BlockEvent {
      * @param oldType Previous block type
      * @param newType New block type
      */
-    static BlockEvent blockChanged(BlockPos pos, BlockTypeId oldType, BlockTypeId newType);
+    static BlockEvent blockChanged(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType);
 
     /**
      * @brief Create a neighbor changed event
      * @param pos World position of the block being notified
      * @param changedFace Which face's neighbor changed
      */
-    static BlockEvent neighborChanged(BlockPos pos, Face changedFace);
+    static BlockEvent neighborUpdated(BlockCoord pos, Face changedFace);
 
     /**
      * @brief Create a tick event
      * @param pos World position
      * @param tickType Type of tick (Scheduled, Repeat, or Random)
      */
-    static BlockEvent tick(BlockPos pos, TickType tickType);
+    static BlockEvent tick(BlockCoord pos, TickType tickType);
 
     /**
      * @brief Create a player use (right-click) event
      * @param pos World position
      * @param face Which face was clicked
      */
-    static BlockEvent playerUse(BlockPos pos, Face face);
+    static BlockEvent playerUse(BlockCoord pos, Face face);
 
     /**
      * @brief Create a player hit (left-click) event
      * @param pos World position
      * @param face Which face was clicked
      */
-    static BlockEvent playerHit(BlockPos pos, Face face);
+    static BlockEvent playerHit(BlockCoord pos, Face face);
 
     /**
-     * @brief Create a block update event (redstone-like propagation)
+     * @brief Create a block update event (signal-like propagation)
      *
      * Used by handlers to notify a block that it should re-evaluate its state.
-     * Unlike NeighborChanged, this doesn't specify which neighbor changed.
+     * Unlike NeighborUpdated, this doesn't specify which neighbor changed.
      *
      * @param pos World position of block to update
      */
-    static BlockEvent blockUpdate(BlockPos pos);
+    static BlockEvent blockUpdate(BlockCoord pos);
 
     // ========================================================================
     // Player Event Factory Methods
@@ -306,7 +306,7 @@ struct BlockEvent {
      * @brief Check if this is a neighbor/update event
      */
     [[nodiscard]] bool isNeighborEvent() const {
-        return type == EventType::NeighborChanged || type == EventType::BlockUpdate;
+        return type == EventType::NeighborUpdated || type == EventType::BlockUpdate;
     }
 
     /**
@@ -315,13 +315,13 @@ struct BlockEvent {
     [[nodiscard]] bool isValid() const { return type != EventType::None; }
 
     // ========================================================================
-    // Face Mask Helpers (for NeighborChanged consolidation)
+    // Face Mask Helpers (for NeighborUpdated consolidation)
     // ========================================================================
 
     /**
      * @brief Check if a specific neighbor face is marked as changed
      */
-    [[nodiscard]] bool hasNeighborChanged(Face f) const {
+    [[nodiscard]] bool hasNeighborUpdated(Face f) const {
         return neighborFaceMask & (1 << static_cast<uint8_t>(f));
     }
 
@@ -369,13 +369,13 @@ struct BlockEvent {
  */
 struct TickConfig {
     /// Interval between game ticks in milliseconds
-    /// Default: 50ms (20 ticks per second, like Minecraft)
-    uint32_t gameTickIntervalMs = 50;
+    /// Default: 33ms (30 ticks per second)
+    uint32_t gameTickIntervalMs = 33;
 
     /// Number of random tick attempts per subchunk per game tick
     /// Each attempt selects a random block position
-    /// Default: 3 (like Minecraft's randomTickSpeed)
-    uint32_t randomTicksPerSubchunk = 3;
+    /// Default: 4
+    uint32_t randomTicksPerSubchunk = 4;
 
     /// Optional RNG seed for random ticks (0 = use system random)
     /// Useful for deterministic testing

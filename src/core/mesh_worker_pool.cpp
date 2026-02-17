@@ -160,7 +160,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             lodData.downsampleFrom(*subchunk, lodMergeMode_);
 
             // Use merge-mode-aware mesh building
-            BlockOpaqueProvider alwaysTransparent = [](const BlockPos&) { return false; };
+            BlockOpaqueProvider alwaysTransparent = [](const BlockCoord&) { return false; };
             meshData = builder.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider, lodMergeMode_);
         }
         success = true;

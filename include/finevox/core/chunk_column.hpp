@@ -68,12 +68,12 @@ public:
 
     // Get block at absolute world coordinates
     // Returns AIR_BLOCK_TYPE if position is outside loaded subchunks
-    [[nodiscard]] BlockTypeId getBlock(BlockPos pos) const;
+    [[nodiscard]] BlockTypeId getBlock(BlockCoord pos) const;
     [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const;
 
     // Set block at absolute world coordinates
     // Creates SubChunk if needed, removes it if it becomes all air
-    void setBlock(BlockPos pos, BlockTypeId type);
+    void setBlock(BlockCoord pos, BlockTypeId type);
     void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type);
 
     // Check if a subchunk exists at the given chunk Y coordinate
@@ -196,7 +196,7 @@ public:
     // When a block update event is delivered to this column, the activity
     // timer is touched. The chunk loading system respects this timer and
     // won't unload the column until the timer expires, preventing premature
-    // unload during redstone-like propagation across chunk boundaries.
+    // unload during signal-like propagation across chunk boundaries.
 
     /// Touch the activity timer (call when delivering BlockUpdate events)
     void touchActivity();

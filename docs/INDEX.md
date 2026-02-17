@@ -35,7 +35,7 @@
 
 | Document | Key Contents |
 |----------|--------------|
-| [04 - Core Data Structures](04-core-data-structures.md) | BlockPos, ChunkPos, Block, SubChunk, StringInterner, SubChunkPalette, pointer strategy |
+| [04 - Core Data Structures](04-core-data-structures.md) | BlockCoord, ChunkPos, Block, SubChunk, StringInterner, SubChunkPalette, pointer strategy |
 | [05 - World Management](05-world-management.md) | ChunkColumn, World, SubChunkManager, lifecycle states, LRU caching |
 | [13 - Batch Operations](13-batch-operations.md) | BatchBuilder, CoalescingQueue, collect-coalesce-execute pattern |
 
@@ -201,7 +201,7 @@
 
 | Phase | VK-Dependent? | Status | Focus |
 |-------|---------------|--------|-------|
-| 0 | No | Complete | Data structures (BlockPos, SubChunk, Palette, StringInterner) |
+| 0 | No | Complete | Data structures (BlockCoord, SubChunk, Palette, StringInterner) |
 | 1 | No | Complete | World management (World, ColumnManager, BatchBuilder) |
 | 2 | No | Complete | Persistence (CBOR, region files, save/load threads) |
 | 3 | No | Complete | Physics (AABB, collision, raycasting, step-climbing) |

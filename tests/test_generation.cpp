@@ -55,7 +55,7 @@ protected:
         plains.temperatureMax = 0.7f;
         plains.humidityMin = 0.2f;
         plains.humidityMax = 0.6f;
-        plains.baseHeight = 64.0f;
+        plains.baseHeight = 80.0f;
         plains.heightVariation = 8.0f;
         plains.surfaceBlock = "grass";
         plains.fillerBlock = "dirt";
@@ -69,7 +69,7 @@ protected:
         desert.temperatureMax = 1.0f;
         desert.humidityMin = 0.0f;
         desert.humidityMax = 0.3f;
-        desert.baseHeight = 62.0f;
+        desert.baseHeight = 78.0f;
         desert.heightVariation = 4.0f;
         desert.surfaceBlock = "sand";
         desert.fillerBlock = "sand";
@@ -435,7 +435,7 @@ TEST_F(GenerationTest, FullPipelineProducesPlayableColumn) {
     for (int32_t lx = 0; lx < 16; ++lx) {
         for (int32_t lz = 0; lz < 16; ++lz) {
             // Check blocks around expected surface height
-            for (int32_t y = 55; y <= 75; ++y) {
+            for (int32_t y = 71; y <= 91; ++y) {
                 BlockTypeId b = col.getBlock(lx, y, lz);
                 if (!b.isAir() && b != stoneId_) {
                     ++nonStoneCount;
@@ -474,7 +474,7 @@ TEST_F(GenerationTest, FullPipelineDeterministic) {
     // Verify identical results
     for (int32_t lx = 0; lx < 16; ++lx) {
         for (int32_t lz = 0; lz < 16; ++lz) {
-            for (int32_t y = 0; y < 80; ++y) {
+            for (int32_t y = 0; y < 96; ++y) {
                 EXPECT_EQ(col1.getBlock(lx, y, lz), col2.getBlock(lx, y, lz))
                     << "Mismatch at (" << lx << "," << y << "," << lz << ")";
             }

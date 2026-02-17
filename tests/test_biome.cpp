@@ -71,14 +71,14 @@ TEST_F(BiomeRegistryTest, InitiallyEmpty) {
 TEST_F(BiomeRegistryTest, RegisterAndRetrieveById) {
     BiomeProperties props;
     props.displayName = "Plains";
-    props.baseHeight = 64.0f;
+    props.baseHeight = 80.0f;
     registry().registerBiome("plains", props);
 
     auto id = BiomeId::fromName("plains");
     const BiomeProperties* result = registry().getBiome(id);
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(result->displayName, "Plains");
-    EXPECT_FLOAT_EQ(result->baseHeight, 64.0f);
+    EXPECT_FLOAT_EQ(result->baseHeight, 80.0f);
     EXPECT_EQ(result->id, id);
 }
 
@@ -225,7 +225,7 @@ protected:
         plains.temperatureMax = 0.7f;
         plains.humidityMin = 0.2f;
         plains.humidityMax = 0.6f;
-        plains.baseHeight = 64.0f;
+        plains.baseHeight = 80.0f;
         plains.heightVariation = 8.0f;
         registry().registerBiome("plains", plains);
 
@@ -234,7 +234,7 @@ protected:
         desert.temperatureMax = 1.0f;
         desert.humidityMin = 0.0f;
         desert.humidityMax = 0.2f;
-        desert.baseHeight = 60.0f;
+        desert.baseHeight = 76.0f;
         desert.heightVariation = 4.0f;
         registry().registerBiome("desert", desert);
 
@@ -243,7 +243,7 @@ protected:
         forest.temperatureMax = 0.7f;
         forest.humidityMin = 0.5f;
         forest.humidityMax = 0.9f;
-        forest.baseHeight = 68.0f;
+        forest.baseHeight = 84.0f;
         forest.heightVariation = 12.0f;
         registry().registerBiome("forest", forest);
     }
@@ -309,8 +309,8 @@ TEST_F(BiomeMapTest, GetTerrainParamsReturnsValidValues) {
 
     auto [baseHeight, heightVar] = map.getTerrainParams(100, 100);
     // Should be within the range of our biome definitions
-    EXPECT_GE(baseHeight, 50.0f);
-    EXPECT_LE(baseHeight, 80.0f);
+    EXPECT_GE(baseHeight, 66.0f);
+    EXPECT_LE(baseHeight, 96.0f);
     EXPECT_GE(heightVar, 0.0f);
     EXPECT_LE(heightVar, 20.0f);
 }
@@ -376,7 +376,7 @@ temperature_min: 0.3
 temperature_max: 0.7
 humidity_min: 0.2
 humidity_max: 0.6
-base_height: 64.0
+base_height: 80.0
 height_variation: 8.0
 height_scale: 1.2
 surface: grass_block
@@ -396,7 +396,7 @@ decoration_density: 0.8
     EXPECT_FLOAT_EQ(props->temperatureMax, 0.7f);
     EXPECT_FLOAT_EQ(props->humidityMin, 0.2f);
     EXPECT_FLOAT_EQ(props->humidityMax, 0.6f);
-    EXPECT_FLOAT_EQ(props->baseHeight, 64.0f);
+    EXPECT_FLOAT_EQ(props->baseHeight, 80.0f);
     EXPECT_FLOAT_EQ(props->heightVariation, 8.0f);
     EXPECT_FLOAT_EQ(props->heightScale, 1.2f);
     EXPECT_EQ(props->surfaceBlock, "grass_block");
@@ -419,7 +419,7 @@ TEST_F(BiomeLoaderTest, LoadFromConfigMinimal) {
     // Defaults
     EXPECT_FLOAT_EQ(props->temperatureMin, 0.0f);
     EXPECT_FLOAT_EQ(props->temperatureMax, 1.0f);
-    EXPECT_FLOAT_EQ(props->baseHeight, 64.0f);
+    EXPECT_FLOAT_EQ(props->baseHeight, 80.0f);
     EXPECT_EQ(props->surfaceBlock, "grass");
 }
 
@@ -436,14 +436,14 @@ TEST_F(BiomeLoaderTest, LoadFromFile) {
     writeFile("test.biome", R"(
 name: Test Biome
 temperature_min: 0.5
-base_height: 72.0
+base_height: 88.0
 )");
 
     auto props = BiomeLoader::loadFromFile("test", (testDir_ / "test.biome").string());
     ASSERT_TRUE(props.has_value());
     EXPECT_EQ(props->displayName, "Test Biome");
     EXPECT_FLOAT_EQ(props->temperatureMin, 0.5f);
-    EXPECT_FLOAT_EQ(props->baseHeight, 72.0f);
+    EXPECT_FLOAT_EQ(props->baseHeight, 88.0f);
 }
 
 TEST_F(BiomeLoaderTest, LoadFromFileMissing) {

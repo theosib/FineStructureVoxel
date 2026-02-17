@@ -57,7 +57,7 @@ void FootstepTracker::update(float /*dt*/, const PlayerController& player, glm::
 
 SoundSetId FootstepTracker::getSurfaceSoundSet(glm::dvec3 feetPos) const {
     // Look at the block directly below the feet
-    BlockPos blockBelow(
+    BlockCoord blockBelow(
         static_cast<int32_t>(std::floor(feetPos.x)),
         static_cast<int32_t>(std::floor(feetPos.y)) - 1,
         static_cast<int32_t>(std::floor(feetPos.z))

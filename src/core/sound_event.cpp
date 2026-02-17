@@ -21,7 +21,7 @@ std::string_view SoundSetId::name() const {
 // SoundEvent Factory Methods
 // ============================================================================
 
-SoundEvent SoundEvent::blockPlace(SoundSetId set, BlockPos pos) {
+SoundEvent SoundEvent::blockPlace(SoundSetId set, BlockCoord pos) {
     SoundEvent event;
     event.soundSet = set;
     event.action = SoundAction::Place;
@@ -30,7 +30,7 @@ SoundEvent SoundEvent::blockPlace(SoundSetId set, BlockPos pos) {
     return event;
 }
 
-SoundEvent SoundEvent::blockBreak(SoundSetId set, BlockPos pos) {
+SoundEvent SoundEvent::blockBreak(SoundSetId set, BlockCoord pos) {
     SoundEvent event;
     event.soundSet = set;
     event.action = SoundAction::Break;

@@ -13,16 +13,16 @@ namespace finevox {
 World::World() = default;
 World::~World() = default;
 
-ColumnPos World::blockToColumn(BlockPos pos) {
+ColumnPos World::blockToColumn(BlockCoord pos) {
     return ColumnPos::fromBlock(pos);
 }
 
-BlockTypeId World::getBlock(BlockPos pos) const {
+BlockTypeId World::getBlock(BlockCoord pos) const {
     return getBlock(pos.x, pos.y, pos.z);
 }
 
 BlockTypeId World::getBlock(int32_t x, int32_t y, int32_t z) const {
-    ColumnPos colPos = blockToColumn(BlockPos(x, y, z));
+    ColumnPos colPos = blockToColumn(BlockCoord(x, y, z));
 
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(colPos.pack());
@@ -32,12 +32,12 @@ BlockTypeId World::getBlock(int32_t x, int32_t y, int32_t z) const {
     return it->second->getBlock(x, y, z);
 }
 
-void World::setBlock(BlockPos pos, BlockTypeId type) {
+void World::setBlock(BlockCoord pos, BlockTypeId type) {
     setBlock(pos.x, pos.y, pos.z, type);
 }
 
 void World::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
-    ColumnPos colPos = blockToColumn(BlockPos(x, y, z));
+    ColumnPos colPos = blockToColumn(BlockCoord(x, y, z));
 
     std::unique_lock lock(columnMutex_);
 
@@ -185,7 +185,7 @@ void World::clear() {
 // Mesh Utilities
 // ============================================================================
 
-std::vector<ChunkPos> World::getAffectedSubChunks(BlockPos blockPos) const {
+std::vector<ChunkPos> World::getAffectedSubChunks(BlockCoord blockPos) const {
     std::vector<ChunkPos> affected;
     affected.reserve(4);  // At most 1 + 3 adjacent (corner case)
 
@@ -229,12 +229,12 @@ std::vector<ChunkPos> World::getAffectedSubChunks(BlockPos blockPos) const {
 // Force-Loading
 // ============================================================================
 
-void World::registerForceLoader(BlockPos pos, int32_t radius) {
+void World::registerForceLoader(BlockCoord pos, int32_t radius) {
     std::unique_lock lock(forceLoaderMutex_);
     forceLoaders_[pos] = radius;
 }
 
-void World::unregisterForceLoader(BlockPos pos) {
+void World::unregisterForceLoader(BlockCoord pos) {
     std::unique_lock lock(forceLoaderMutex_);
     forceLoaders_.erase(pos);
 }
@@ -259,17 +259,17 @@ bool World::canUnloadChunk(ChunkPos pos) const {
     return true;  // No force-loader is keeping this chunk loaded
 }
 
-bool World::isForceLoader(BlockPos pos) const {
+bool World::isForceLoader(BlockCoord pos) const {
     std::shared_lock lock(forceLoaderMutex_);
     return forceLoaders_.contains(pos);
 }
 
-const std::unordered_map<BlockPos, int32_t>& World::forceLoaders() const {
+const std::unordered_map<BlockCoord, int32_t>& World::forceLoaders() const {
     // Note: Caller must ensure thread safety if iterating
     return forceLoaders_;
 }
 
-void World::setForceLoaders(std::unordered_map<BlockPos, int32_t> loaders) {
+void World::setForceLoaders(std::unordered_map<BlockCoord, int32_t> loaders) {
     std::unique_lock lock(forceLoaderMutex_);
     forceLoaders_ = std::move(loaders);
 }
@@ -302,13 +302,13 @@ void World::setLightEngine(LightEngine* engine) {
     lightEngine_ = engine;
 }
 
-void World::enqueueLightingUpdate(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+void World::enqueueLightingUpdate(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
     if (lightEngine_) {
         lightEngine_->enqueue(LightingUpdate{pos, oldType, newType});
     }
 }
 
-void World::processLightingUpdateSync(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+void World::processLightingUpdateSync(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
     if (lightEngine_) {
         if (newType.isAir() && !oldType.isAir()) {
             // Block was removed - use onBlockRemoved which has logic to restore light
@@ -323,7 +323,7 @@ void World::setMeshRebuildQueue(MeshRebuildQueue* queue) {
     meshRebuildQueue_ = queue;
 }
 
-void World::enqueueLightingUpdateWithRemesh(BlockPos pos, BlockTypeId oldType, BlockTypeId newType) {
+void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
     if (!lightEngine_) {
         return;
     }
@@ -366,7 +366,7 @@ void World::setUpdateScheduler(UpdateScheduler* scheduler) {
 // External Block API (Event-Driven)
 // ============================================================================
 
-bool World::placeBlock(BlockPos pos, BlockTypeId type) {
+bool World::placeBlock(BlockCoord pos, BlockTypeId type) {
     if (!updateScheduler_) {
         return false;
     }
@@ -376,7 +376,7 @@ bool World::placeBlock(BlockPos pos, BlockTypeId type) {
     return true;
 }
 
-bool World::breakBlock(BlockPos pos) {
+bool World::breakBlock(BlockCoord pos) {
     if (!updateScheduler_) {
         return false;
     }
@@ -402,7 +402,7 @@ size_t World::placeBlocks(const std::vector<BlockChange>& changes) {
     return changes.size();
 }
 
-size_t World::breakBlocks(const std::vector<BlockPos>& positions) {
+size_t World::breakBlocks(const std::vector<BlockCoord>& positions) {
     if (!updateScheduler_ || positions.empty()) {
         return 0;
     }

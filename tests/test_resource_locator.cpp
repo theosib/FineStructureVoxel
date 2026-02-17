@@ -142,36 +142,36 @@ TEST_F(ResourceLocatorTest, RegisteredWorldsList) {
 // Dimension tests
 // ============================================================================
 
-TEST_F(ResourceLocatorTest, OverworldDimensionAutoRegistered) {
+TEST_F(ResourceLocatorTest, SurfaceDimensionAutoRegistered) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
 
-    // Overworld is auto-registered
-    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "overworld"));
+    // Surface dimension is auto-registered
+    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "surface"));
 }
 
 TEST_F(ResourceLocatorTest, RegisterDimension) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
 
-    ResourceLocator::instance().registerDimension("MyWorld", "nether");
-    ResourceLocator::instance().registerDimension("MyWorld", "the_end");
+    ResourceLocator::instance().registerDimension("MyWorld", "underground");
+    ResourceLocator::instance().registerDimension("MyWorld", "void_realm");
 
-    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "nether"));
-    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "the_end"));
+    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "underground"));
+    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "void_realm"));
     EXPECT_FALSE(ResourceLocator::instance().hasDimension("MyWorld", "unknown"));
 }
 
 TEST_F(ResourceLocatorTest, ResolveDimensionPaths) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
-    ResourceLocator::instance().registerDimension("MyWorld", "nether");
+    ResourceLocator::instance().registerDimension("MyWorld", "underground");
 
     // Dimension path uses dim/<name> by default
-    EXPECT_EQ(ResourceLocator::instance().resolve("world/MyWorld/dim/nether"),
-              worldPath / "dim" / "nether");
-    EXPECT_EQ(ResourceLocator::instance().resolve("world/MyWorld/dim/nether/regions"),
-              worldPath / "dim" / "nether" / "regions");
+    EXPECT_EQ(ResourceLocator::instance().resolve("world/MyWorld/dim/underground"),
+              worldPath / "dim" / "underground");
+    EXPECT_EQ(ResourceLocator::instance().resolve("world/MyWorld/dim/underground/regions"),
+              worldPath / "dim" / "underground" / "regions");
 }
 
 TEST_F(ResourceLocatorTest, RegisterDimensionWithCustomSubpath) {
@@ -188,39 +188,39 @@ TEST_F(ResourceLocatorTest, RegisterDimensionWithCustomSubpath) {
 TEST_F(ResourceLocatorTest, DimensionPath) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
-    ResourceLocator::instance().registerDimension("MyWorld", "nether");
+    ResourceLocator::instance().registerDimension("MyWorld", "underground");
 
-    EXPECT_EQ(ResourceLocator::instance().dimensionPath("MyWorld", "nether"),
-              worldPath / "dim" / "nether");
+    EXPECT_EQ(ResourceLocator::instance().dimensionPath("MyWorld", "underground"),
+              worldPath / "dim" / "underground");
 }
 
 TEST_F(ResourceLocatorTest, RegionPath) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
-    ResourceLocator::instance().registerDimension("MyWorld", "nether");
+    ResourceLocator::instance().registerDimension("MyWorld", "underground");
 
-    // Overworld regions are in world root
+    // Surface dimension regions are in world root
     EXPECT_EQ(ResourceLocator::instance().regionPath("MyWorld"),
               worldPath / "regions");
-    EXPECT_EQ(ResourceLocator::instance().regionPath("MyWorld", "overworld"),
+    EXPECT_EQ(ResourceLocator::instance().regionPath("MyWorld", "surface"),
               worldPath / "regions");
 
     // Other dimensions use dim/<name>/regions
-    EXPECT_EQ(ResourceLocator::instance().regionPath("MyWorld", "nether"),
-              worldPath / "dim" / "nether" / "regions");
+    EXPECT_EQ(ResourceLocator::instance().regionPath("MyWorld", "underground"),
+              worldPath / "dim" / "underground" / "regions");
 }
 
 TEST_F(ResourceLocatorTest, UnregisterWorldRemovesDimensions) {
     auto worldPath = tempDir / "saves" / "MyWorld";
     ResourceLocator::instance().registerWorld("MyWorld", worldPath);
-    ResourceLocator::instance().registerDimension("MyWorld", "nether");
+    ResourceLocator::instance().registerDimension("MyWorld", "underground");
 
-    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "nether"));
+    EXPECT_TRUE(ResourceLocator::instance().hasDimension("MyWorld", "underground"));
 
     ResourceLocator::instance().unregisterWorld("MyWorld");
 
-    EXPECT_FALSE(ResourceLocator::instance().hasDimension("MyWorld", "nether"));
-    EXPECT_FALSE(ResourceLocator::instance().hasDimension("MyWorld", "overworld"));
+    EXPECT_FALSE(ResourceLocator::instance().hasDimension("MyWorld", "underground"));
+    EXPECT_FALSE(ResourceLocator::instance().hasDimension("MyWorld", "surface"));
 }
 
 // ============================================================================

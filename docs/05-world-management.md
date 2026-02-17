@@ -12,7 +12,7 @@
 namespace finevox {
 
 // A ChunkColumn contains all subchunks for a 16x16 XZ area
-// Height range is configurable (e.g., -64 to 319 like modern Minecraft)
+// Height range is configurable (e.g., -64 to 319)
 class ChunkColumn {
 public:
     static constexpr int MIN_Y = -64;   // Configurable
@@ -29,8 +29,8 @@ public:
     Chunk& getOrCreateSubchunk(int subchunkY);      // Creates empty if needed
 
     // Block access (delegates to appropriate subchunk)
-    Block getBlock(BlockPos pos);
-    void setBlock(BlockPos pos, uint16_t typeId, uint8_t rotation = 0);
+    Block getBlock(BlockCoord pos);
+    void setBlock(BlockCoord pos, uint16_t typeId, uint8_t rotation = 0);
 
     // Column-level state
     enum class State { Unloaded, Loading, Loaded, Generated };
@@ -53,7 +53,7 @@ struct ColumnPos {
     uint64_t pack() const;
     static ColumnPos unpack(uint64_t packed);
 
-    static ColumnPos fromBlockPos(BlockPos pos) {
+    static ColumnPos fromBlock(BlockCoord pos) {
         return {pos.x >> 4, pos.z >> 4};
     }
 
@@ -81,17 +81,17 @@ public:
 
     // Subchunk access (for rendering, derived from columns)
     Chunk* getChunk(ChunkPos pos);
-    Chunk* getChunkContaining(BlockPos pos);
+    Chunk* getChunkContaining(BlockCoord pos);
 
     // Block access (convenience, wraps column/chunk access)
-    Block getBlock(BlockPos pos);                     // Returns air if not loaded
-    void setBlock(BlockPos pos, uint16_t typeId, uint8_t rotation = 0);
-    void breakBlock(BlockPos pos);                    // Triggers events
-    void placeBlock(BlockPos pos, uint16_t typeId, uint8_t rotation = 0);
+    Block getBlock(BlockCoord pos);                     // Returns air if not loaded
+    void setBlock(BlockCoord pos, uint16_t typeId, uint8_t rotation = 0);
+    void breakBlock(BlockCoord pos);                    // Triggers events
+    void placeBlock(BlockCoord pos, uint16_t typeId, uint8_t rotation = 0);
 
     // Column lifecycle (load/unload in full columns)
-    void loadColumnsAround(BlockPos center, int radiusInChunks);
-    void unloadDistantColumns(BlockPos center, int keepRadiusInChunks);
+    void loadColumnsAround(BlockCoord center, int radiusInChunks);
+    void unloadDistantColumns(BlockCoord center, int keepRadiusInChunks);
     void tickWorld();  // Process pending updates
 
     // Entities
@@ -100,15 +100,15 @@ public:
     const std::vector<std::shared_ptr<Entity>>& entities() const;
 
     // Queues for deferred updates (see Batch Operations)
-    void queueBlockUpdate(BlockPos pos);
-    void queueRepaint(BlockPos pos);
+    void queueBlockUpdate(BlockCoord pos);
+    void queueRepaint(BlockCoord pos);
     void processUpdateQueue();
     void processRepaintQueue();
 
     // Raycasting
     struct RaycastResult {
         bool hit;
-        BlockPos blockPos;
+        BlockCoord blockPos;
         Face hitFace;
         float distance;
     };
@@ -130,8 +130,8 @@ private:
 
     // Update queues (thread-safe)
     std::mutex updateMutex_;
-    std::unordered_set<BlockPos> blockUpdateQueue_;
-    std::unordered_set<BlockPos> repaintQueue_;
+    std::unordered_set<BlockCoord> blockUpdateQueue_;
+    std::unordered_set<BlockCoord> repaintQueue_;
 
     // Entities (shared_ptr for safe references across threads)
     std::vector<std::shared_ptr<Entity>> entities_;

@@ -182,6 +182,68 @@ void World::clear() {
 }
 
 // ============================================================================
+// Fluid Access
+// ============================================================================
+
+FluidTypeId World::getFluid(BlockCoord pos) const {
+    ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+    const SubChunk* sub = getSubChunk(chunkPos);
+    if (!sub) return EMPTY_FLUID_TYPE;
+
+    auto local = pos.local();
+    return sub->getFluid(local.x, local.y, local.z);
+}
+
+uint8_t World::getFluidLevel(BlockCoord pos) const {
+    ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+    const SubChunk* sub = getSubChunk(chunkPos);
+    if (!sub) return 0;
+
+    auto local = pos.local();
+    return sub->getFluidLevel(local.x, local.y, local.z);
+}
+
+bool World::hasFluid(BlockCoord pos) const {
+    ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+    const SubChunk* sub = getSubChunk(chunkPos);
+    if (!sub) return false;
+
+    auto local = pos.local();
+    return sub->hasFluid(local.x, local.y, local.z);
+}
+
+bool World::setFluid(BlockCoord pos, FluidTypeId type, uint8_t level) {
+    ColumnPos colPos = blockToColumn(pos);
+
+    std::unique_lock lock(columnMutex_);
+    auto it = columns_.find(colPos.pack());
+    if (it == columns_.end()) {
+        // Create new column for fluid
+        auto column = std::make_unique<ChunkColumn>(colPos);
+        if (columnGenerator_) {
+            columnGenerator_(*column);
+        }
+        it = columns_.emplace(colPos.pack(), std::move(column)).first;
+    }
+
+    // Get or create the subchunk
+    ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+    SubChunk& sub = it->second->getOrCreateSubChunk(chunkPos.y);
+
+    auto local = pos.local();
+    return sub.setFluid(local.x, local.y, local.z, type, level);
+}
+
+bool World::removeFluid(BlockCoord pos) {
+    ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+    SubChunk* sub = getSubChunk(chunkPos);
+    if (!sub) return false;
+
+    auto local = pos.local();
+    return sub->removeFluid(local.x, local.y, local.z);
+}
+
+// ============================================================================
 // Mesh Utilities
 // ============================================================================
 

@@ -1,0 +1,47 @@
+# Water - transparent, common fluid
+name: water
+
+# Flow
+spread_decay: 1
+flow_speed: 5
+source_formation: true
+source_formation_count: 2
+slope_preference: 1.0
+max_level: 14
+
+# Infiltration
+infiltrates_non_full: true
+infiltrates_below: true
+
+# Physics
+density: 1000.0
+viscosity: 1.0
+buoyancy_factor: 1.0
+flow_force: 0.5
+can_displace: true
+
+# Visual
+opaque: false
+tint_color: 0.2 0.4 0.9 0.6
+texture: water_still
+surface_tex_speed: 1.0
+
+# Light
+light_emission: 0
+light_attenuation: 2
+custom_attenuation: true
+attenuation_base: 0.85
+
+# Sound
+sounds: water
+
+# Damage
+contact_damage: 0.0
+submersion_damage: 0.0
+
+# Fog
+underwater_fog_color: 0.1 0.2 0.4 1.0
+underwater_fog_density: 0.04
+
+# Container
+units_per_source: 1000

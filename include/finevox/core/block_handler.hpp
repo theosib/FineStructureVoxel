@@ -13,6 +13,7 @@
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/loot_table.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <memory>
 #include <string_view>
 #include <cstdint>
@@ -198,6 +199,53 @@ public:
      * @param ctx Context providing access to block state and world
      */
     virtual void onRepaint(BlockContext& ctx) { (void)ctx; }
+
+    // ========================================================================
+    // Fluid Events
+    // ========================================================================
+
+    /**
+     * @brief Called when fluid enters or changes level at this block's position
+     *
+     * The fluid layer is independent of the block layer. This callback lets
+     * blocks control whether fluid can coexist with them.
+     *
+     * Examples:
+     * - A sponge block returns false to prevent fluid entry
+     * - A cauldron captures fluid instead of letting it pass
+     * - Most blocks return true (allow fluid)
+     *
+     * @param ctx Context providing access to block state and world
+     * @param fluid The fluid type entering/changing
+     * @param newLevel The proposed new fluid level
+     * @return true to allow the fluid, false to reject it
+     */
+    virtual bool onFluidUpdate(BlockContext& ctx, FluidTypeId fluid, uint8_t newLevel) {
+        (void)ctx;
+        (void)fluid;
+        (void)newLevel;
+        return true;  // Default: allow fluid
+    }
+
+    /**
+     * @brief Called when fluid changes at a neighboring position
+     *
+     * Use for blocks that react to nearby fluid:
+     * - Farmland detecting nearby water for irrigation
+     * - Concrete powder hardening on contact with water
+     *
+     * @param ctx Context providing access to block state and world
+     * @param face Which face's neighbor has fluid changes
+     * @param fluid The fluid type at the neighbor
+     * @param level The fluid level at the neighbor (0 = removed)
+     */
+    virtual void onNeighborFluidUpdate(BlockContext& ctx, Face face,
+                                        FluidTypeId fluid, uint8_t level) {
+        (void)ctx;
+        (void)face;
+        (void)fluid;
+        (void)level;
+    }
 };
 
 // ============================================================================

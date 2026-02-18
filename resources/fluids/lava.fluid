@@ -1,0 +1,47 @@
+# Lava - opaque, light-emitting, slow-flowing fluid
+name: lava
+
+# Flow (much slower than water)
+spread_decay: 2
+flow_speed: 30
+source_formation: false
+source_formation_count: 0
+slope_preference: 0.5
+max_level: 14
+
+# Infiltration (lava does not enter non-full blocks)
+infiltrates_non_full: false
+infiltrates_below: false
+
+# Physics
+density: 3100.0
+viscosity: 4.0
+buoyancy_factor: 0.8
+flow_force: 0.2
+can_displace: true
+
+# Visual
+opaque: true
+tint_color: 1.0 0.4 0.1 1.0
+texture: lava_still
+surface_tex_speed: 0.3
+
+# Light
+light_emission: 15
+light_attenuation: 15
+custom_attenuation: false
+attenuation_base: 0.0
+
+# Sound
+sounds: lava
+
+# Damage
+contact_damage: 4.0
+submersion_damage: 8.0
+
+# Fog
+underwater_fog_color: 0.6 0.15 0.0 1.0
+underwater_fog_density: 0.5
+
+# Container
+units_per_source: 1000

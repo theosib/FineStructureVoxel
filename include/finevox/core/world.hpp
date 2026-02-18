@@ -125,6 +125,28 @@ public:
     void clear();
 
     // ========================================================================
+    // Fluid Access
+    // ========================================================================
+    // Fluid layer is independent of block layer — any fluid can coexist with any block.
+
+    /// Get fluid type at world position (returns EMPTY_FLUID_TYPE if not loaded or no fluid)
+    [[nodiscard]] FluidTypeId getFluid(BlockCoord pos) const;
+
+    /// Get fluid level at world position (0 if not loaded or no fluid)
+    [[nodiscard]] uint8_t getFluidLevel(BlockCoord pos) const;
+
+    /// Check if a world position has fluid
+    [[nodiscard]] bool hasFluid(BlockCoord pos) const;
+
+    /// Set fluid at world position (creates column/subchunk/layer as needed)
+    /// @return true if the cell changed
+    bool setFluid(BlockCoord pos, FluidTypeId type, uint8_t level);
+
+    /// Remove fluid at world position
+    /// @return true if there was fluid to remove
+    bool removeFluid(BlockCoord pos);
+
+    // ========================================================================
     // Mesh Utilities
     // ========================================================================
 

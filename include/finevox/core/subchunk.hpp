@@ -8,11 +8,13 @@
  * Light storage: [09-lighting.md] §9.1
  * Rotation storage: [04-core-data-structures.md] §4.6
  * Block extra data: [17-implementation-phases.md] §9.1 Extra Data
+ * Fluid storage: Lazy FluidLayer via unique_ptr (null until first fluid)
  */
 
 #include "finevox/core/position.hpp"
 #include "finevox/core/palette.hpp"
 #include "finevox/core/rotation.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -23,8 +25,9 @@
 
 namespace finevox {
 
-// Forward declaration
+// Forward declarations
 class DataContainer;
+class FluidLayer;
 
 // Callback type for block change notifications
 // Parameters: subchunk position, local block position, old block type, new block type
@@ -305,6 +308,52 @@ public:
     [[nodiscard]] bool isRegisteredForGameTicks(int32_t index) const;
 
     // ========================================================================
+    // Fluid Layer (lazy allocation)
+    // ========================================================================
+    // Fluid data is stored in a separate layer, independent of the block layer.
+    // Any fluid can coexist with any block (stairs, fences, slabs, etc.).
+    // The FluidLayer is lazily allocated: null until the first fluid is placed.
+
+    /// Get the fluid layer (may be null if no fluid has ever been placed)
+    [[nodiscard]] FluidLayer* fluidLayer();
+    [[nodiscard]] const FluidLayer* fluidLayer() const;
+
+    /// Get or create the fluid layer (allocates on first call)
+    FluidLayer& getOrCreateFluidLayer();
+
+    /// Check if a fluid layer exists
+    [[nodiscard]] bool hasFluidLayer() const;
+
+    /// Remove the fluid layer entirely (e.g., after clearing all fluid)
+    void removeFluidLayer();
+
+    /// Get fluid type at local coordinates (returns EMPTY_FLUID_TYPE if no layer or no fluid)
+    [[nodiscard]] FluidTypeId getFluid(int32_t x, int32_t y, int32_t z) const;
+    [[nodiscard]] FluidTypeId getFluid(int32_t index) const;
+
+    /// Get fluid level at local coordinates (0 = none)
+    [[nodiscard]] uint8_t getFluidLevel(int32_t x, int32_t y, int32_t z) const;
+    [[nodiscard]] uint8_t getFluidLevel(int32_t index) const;
+
+    /// Check if position has fluid
+    [[nodiscard]] bool hasFluid(int32_t x, int32_t y, int32_t z) const;
+    [[nodiscard]] bool hasFluid(int32_t index) const;
+
+    /// Set fluid at local coordinates. Creates layer if needed.
+    /// Returns true if the cell changed.
+    bool setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uint8_t level);
+    bool setFluid(int32_t index, FluidTypeId type, uint8_t level);
+
+    /// Remove fluid at local coordinates.
+    /// Returns true if there was fluid to remove.
+    bool removeFluid(int32_t x, int32_t y, int32_t z);
+    bool removeFluid(int32_t index);
+
+    /// Get fluid version (incremented on any fluid change)
+    /// Returns 0 if no fluid layer exists.
+    [[nodiscard]] uint64_t fluidVersion() const;
+
+    // ========================================================================
     // Change Notifications
     // ========================================================================
 
@@ -364,6 +413,9 @@ private:
 
     // SubChunk-level extra data (game state, caches, etc.)
     std::unique_ptr<DataContainer> data_;
+
+    // Fluid layer: lazily allocated, null until first fluid placed (~4.1KB when allocated)
+    std::unique_ptr<FluidLayer> fluidLayer_;
 
     // Game tick registry: local indices of blocks that want game ticks
     // O(1) insert/remove/lookup via hash set

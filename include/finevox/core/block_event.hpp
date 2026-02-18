@@ -70,6 +70,10 @@ enum class EventType : uint8_t {
     // Visual events
     RepaintRequested,   // Block needs visual update
 
+    // Fluid events
+    FluidPlaced,        // Fluid was placed/changed at a position
+    FluidRemoved,       // Fluid was removed from a position
+
     // Console/admin commands
     SetWorldTime,       // Set world time (ticks in entityState.inputSequence)
 };

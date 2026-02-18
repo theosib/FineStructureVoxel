@@ -1,6 +1,7 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/fluid_layer.hpp"
 
 namespace finevox {
 
@@ -568,6 +569,94 @@ void SubChunk::rebuildGameTickRegistry() {
             gameTickBlocks_.insert(static_cast<uint16_t>(i));
         }
     }
+}
+
+// ============================================================================
+// Fluid Layer Implementation
+// ============================================================================
+
+FluidLayer* SubChunk::fluidLayer() {
+    return fluidLayer_.get();
+}
+
+const FluidLayer* SubChunk::fluidLayer() const {
+    return fluidLayer_.get();
+}
+
+FluidLayer& SubChunk::getOrCreateFluidLayer() {
+    if (!fluidLayer_) {
+        fluidLayer_ = std::make_unique<FluidLayer>();
+    }
+    return *fluidLayer_;
+}
+
+bool SubChunk::hasFluidLayer() const {
+    return fluidLayer_ != nullptr;
+}
+
+void SubChunk::removeFluidLayer() {
+    fluidLayer_.reset();
+}
+
+FluidTypeId SubChunk::getFluid(int32_t x, int32_t y, int32_t z) const {
+    return getFluid(toIndex(x, y, z));
+}
+
+FluidTypeId SubChunk::getFluid(int32_t index) const {
+    if (!fluidLayer_ || index < 0 || index >= VOLUME) return EMPTY_FLUID_TYPE;
+    return fluidLayer_->getFluidType(index);
+}
+
+uint8_t SubChunk::getFluidLevel(int32_t x, int32_t y, int32_t z) const {
+    return getFluidLevel(toIndex(x, y, z));
+}
+
+uint8_t SubChunk::getFluidLevel(int32_t index) const {
+    if (!fluidLayer_ || index < 0 || index >= VOLUME) return 0;
+    return fluidLayer_->getLevel(index);
+}
+
+bool SubChunk::hasFluid(int32_t x, int32_t y, int32_t z) const {
+    return hasFluid(toIndex(x, y, z));
+}
+
+bool SubChunk::hasFluid(int32_t index) const {
+    if (!fluidLayer_ || index < 0 || index >= VOLUME) return false;
+    return fluidLayer_->hasFluid(index);
+}
+
+bool SubChunk::setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uint8_t level) {
+    return setFluid(toIndex(x, y, z), type, level);
+}
+
+bool SubChunk::setFluid(int32_t index, FluidTypeId type, uint8_t level) {
+    if (index < 0 || index >= VOLUME) return false;
+
+    // If setting to empty and no layer exists, nothing to do
+    if ((type.isEmpty() || level == 0) && !fluidLayer_) return false;
+
+    auto& layer = getOrCreateFluidLayer();
+    return layer.setFluid(index, type, level);
+}
+
+bool SubChunk::removeFluid(int32_t x, int32_t y, int32_t z) {
+    return removeFluid(toIndex(x, y, z));
+}
+
+bool SubChunk::removeFluid(int32_t index) {
+    if (!fluidLayer_ || index < 0 || index >= VOLUME) return false;
+    bool removed = fluidLayer_->removeFluid(index);
+
+    // Auto-deallocate if layer is now completely empty
+    if (removed && fluidLayer_->isEmpty()) {
+        fluidLayer_.reset();
+    }
+    return removed;
+}
+
+uint64_t SubChunk::fluidVersion() const {
+    if (!fluidLayer_) return 0;
+    return fluidLayer_->version();
 }
 
 }  // namespace finevox

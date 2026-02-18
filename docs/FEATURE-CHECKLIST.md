@@ -40,24 +40,28 @@ Tracks what's built, what's partially done, and what's still needed for a playab
 - [x] Fly mode with toggle
 - [x] Mouse look, WASD movement, jump
 - [x] Mode switching with keybindings
-- [ ] Sprint/crouch/sneak (speed modifiers, hitbox changes)
-- [ ] Swimming (buoyancy in fluid blocks)
+- [ ] Sprint/crouch/sneak (event plumbing exists — PlayerStartSprint, PlayerStopSprint, PlayerStartSneak, PlayerStopSneak — but speed modifiers and hitbox changes not in PlayerController)
+- [ ] Swimming (EntityTypeDef has `swims` flag but no buoyancy physics yet)
 - [ ] Fall damage (velocity-based health reduction)
-- [ ] Health/hunger system (basic survival stats)
+- [ ] Health/hunger system (MobEntity has health; player needs equivalent)
 - [ ] Death/respawn (spawn point, inventory drop)
 
-## 5. Entity AI & Behavior (Priority: HIGH) - NOT STARTED
+## 5. Entity AI & Behavior (Priority: HIGH) - COMPLETE
 
 - [x] Entity infrastructure (EntityManager, EntityRegistry, GraphicsEventQueue)
 - [x] Entity base class with DataContainer for per-entity data
-- [ ] Mob AI (pathfinding, target selection, attack patterns)
-- [ ] Spawn system (light-level and biome-based spawning rules)
-- [ ] Mob types (passive, hostile, ambient)
-- [ ] Entity rendering (WorldRenderer has no entity draw path)
-- [ ] Skeletal animation system (bone hierarchies, keyframe animation, blending)
-- [ ] Entity models and model loading
-- [ ] Loot tables (what mobs drop on death)
-- [ ] Entity scripting (finescript handlers for mob behavior)
+- [x] Mob AI (AIBrain priority-based goal selector, A* Pathfinder, EntitySenses)
+- [x] Built-in AI goals: Idle, Wander, LookAtPlayer, Chase, Attack, Flee, Panic
+- [x] Spawn system (SpawnManager with light-level and biome-based rules, mob cap, player proximity)
+- [x] Mob types (EntityTypeDef with AIType: Passive, Hostile, Neutral, None; loaded from .entity files)
+- [x] Entity rendering (EntityRenderer on graphics thread, processes GraphicsEventQueue, interpolation)
+- [x] Skeletal animation (Skeleton bone hierarchies, AnimationClip keyframes, AnimationController with crossfade blending)
+- [x] Entity models and model loading (EntityTypeLoader parses .entity files, EntityTypeRegistry singleton)
+- [x] Loot tables (LootTable/LootPool/LootEntry, LootRegistry, conditions + modifiers, .loot files)
+- [x] Entity scripting (ScriptEntityHandler: onSpawn/onTick/onDamage/onDeath/onInteract/onStrike)
+- [x] Entity persistence (EntitySerializer CBOR-based, EntityManager save/load per ChunkColumn)
+- [x] SpawnerBlockHandler for spawner blocks
+- [x] MobEntity with health/combat system (damage, heal, armor, attack cooldown)
 
 ## 6. Fluid System (Priority: HIGH) - NOT STARTED
 
@@ -69,7 +73,7 @@ Tracks what's built, what's partially done, and what's still needed for a playab
 
 ## 7. Sky & Day/Night Cycle (Priority: MEDIUM) - COMPLETE
 
-- [x] WorldTime (tick-based, 24000 ticks/day, 20 tps)
+- [x] WorldTime (tick-based, 36000 ticks/day, 30 tps)
 - [x] SkyParameters (dynamic sky color gradients, fog color, sun arc)
 - [x] Separate sky light and block light in ChunkVertex
 - [x] Shader integration (sun direction, sky brightness multiplier)
@@ -107,17 +111,18 @@ Tracks what's built, what's partially done, and what's still needed for a playab
 - [x] Debug stats overlay (F7 toggle, upper-right with pivot positioning)
 - [x] Coordinates overlay (always visible, upper-left)
 
-## 10. Scripting System (Priority: LOW-MEDIUM) - PARTIALLY COMPLETE
+## 10. Scripting System (Priority: LOW-MEDIUM) - MOSTLY COMPLETE
 
 - [x] finescript integration (shared interner, ScriptEngine)
 - [x] Block handler scripting (ScriptBlockHandler, on :event closures)
 - [x] BlockContextProxy (read block state from scripts)
 - [x] DataContainerProxy (per-block persistent data from scripts)
-- [x] Native functions (ctx.*, world.*)
+- [x] Native functions (ctx.*, world.*, mob_*)
 - [x] ScriptCache with hot-reload
 - [x] .model file `script:` field
 - [x] In-game command console (backtick key, finescript REPL with game state)
-- [ ] Entity/mob AI scripting
+- [x] Entity/mob scripting (ScriptEntityHandler with onSpawn/onTick/onDamage/onDeath/onInteract/onStrike)
+- [x] EntityContextProxy (ProxyMap wrapping MobEntity for script field access)
 - [ ] User chat commands
 - [x] Script sandboxing / security restrictions (inherent: finescript per-engine function isolation)
 - [x] Script error reporting UI (errors shown in red in console)
@@ -137,6 +142,14 @@ Design docs exist (25-entity-system.md, 26-network-protocol.md) but no implement
 ---
 
 ## Infrastructure & Polish
+
+### Game Session & Threading (Phase 18) - COMPLETE
+
+- [x] GameSession (owns World, UpdateScheduler, LightEngine, EntityManager, WorldTime)
+- [x] GameActions abstract command interface (breakBlock, placeBlock, interactBlock, strikeBlock)
+- [x] LocalGameActions routes commands through Queue<BlockEvent>
+- [x] Game thread with alarm-based ticking (30 TPS default)
+- [x] Thread-safe WorldTime (atomic totalTicks for graphics thread reads)
 
 ### Block Events (Phase 9) - Deferred Items
 
@@ -170,7 +183,7 @@ Design docs exist (25-entity-system.md, 26-network-protocol.md) but no implement
 - [x] Greedy meshing, LOD 0-4, view-relative coordinates
 - [x] Non-cube block geometry (.model/.geom files)
 - [x] Ambient occlusion
-- [ ] Entity rendering pipeline
+- [x] Entity rendering pipeline (EntityRenderer with interpolation and skeletal pose)
 - [ ] Translucent block rendering (water, glass) with proper sorting
 - [ ] Particle system
 - [ ] Block break animation
@@ -184,16 +197,13 @@ Design docs exist (25-entity-system.md, 26-network-protocol.md) but no implement
 |-------|--------|-----------|
 | 1 | Crafting & Recipes | Turns gathered resources into progression |
 | 2 | Tool properties | Mining speed, durability — core gameplay loop |
-| 3 | Player survival (health/hunger/sprint) | Core gameplay feel |
-| 4 | Fluid system | Water/lava add terrain interest |
-| 5 | Entity AI & spawning | Populates world with life/danger |
-| 6 | Entity rendering | See the mobs |
-| 7 | UI screens (inventory, crafting, HUD) | Interface for all the above |
-| 8 | Sky visuals (skybox, sun/moon, clouds) | Visual atmosphere |
-| 9 | Music & ambient audio | Game feel polish |
-| 10 | In-game commands & console | Debug and modding |
-| 11 | Multiplayer | Last — requires all other systems stable |
+| 3 | Fluid system | Water/lava add terrain interest |
+| 4 | Player survival (health/hunger/sprint) | Core gameplay feel |
+| 5 | UI screens (inventory, crafting, HUD) | Interface for all the above |
+| 6 | Sky visuals (skybox, sun/moon, clouds) | Visual atmosphere |
+| 7 | Music & ambient audio | Game feel polish |
+| 8 | Multiplayer | Last — requires all other systems stable |
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-16*

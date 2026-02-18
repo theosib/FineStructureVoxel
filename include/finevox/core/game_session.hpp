@@ -12,6 +12,7 @@ class LightEngine;
 class EntityManager;
 class WorldTime;
 class PhysicsSystem;
+class FluidTickManager;
 struct SoundEvent;
 template<typename T> class Queue;
 using SoundEventQueue = Queue<SoundEvent>;
@@ -24,6 +25,7 @@ using GameCommandQueue = Queue<BlockEvent>;
 struct GameSessionConfig {
     bool enableLighting = true;
     bool enableSound = true;
+    bool enableFluidSimulation = true;
     float gravity = -14.0f;
     uint32_t tickRate = 30;           // TPS
     uint32_t randomTicksPerChunk = 4;
@@ -60,6 +62,7 @@ public:
     LightEngine& lightEngine();
     EntityManager& entities();
     WorldTime& worldTime();
+    FluidTickManager& fluidTicks();
 
     // === Event Channels (events come OUT) ===
     SoundEventQueue& soundEvents();

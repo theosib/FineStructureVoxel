@@ -8,6 +8,7 @@
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/block_event.hpp"
+#include "finevox/core/fluid_tick_manager.hpp"
 
 #include <thread>
 #include <atomic>
@@ -107,6 +108,12 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
             world.placeBlock(cmd.pos, cmd.blockType);
             break;
 
+        case EventType::FluidPlaced:
+        case EventType::FluidRemoved:
+            // Fluid events are handled by FluidTickManager directly
+            // (via notifyFluidChanged/notifyBlockChanged)
+            break;
+
         case EventType::PlayerUse:
         case EventType::PlayerHit:
             scheduler.pushExternalEvent(cmd);
@@ -160,6 +167,7 @@ struct GameSession::Impl {
     std::unique_ptr<GraphicsEventQueue> graphicsQueue;
     std::unique_ptr<EntityManager> entityManager;
     std::unique_ptr<WorldTime> worldTime;
+    std::unique_ptr<FluidTickManager> fluidTickManager;
 
     // Command queue (graphics thread → game thread)
     std::unique_ptr<GameCommandQueue> commandQueue;
@@ -208,6 +216,7 @@ struct GameSession::Impl {
                 scheduler->advanceGameTick();
                 scheduler->processEvents();
                 entityManager->tick(tickDt);
+                if (fluidTickManager) fluidTickManager->tick();
 
                 nextTickTime += tickInterval;
                 ++catchup;
@@ -269,6 +278,11 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     impl.worldTime = std::make_unique<WorldTime>();
     impl.worldTime->setTicksPerSecond(static_cast<float>(config.tickRate));
 
+    // Fluid simulation
+    if (config.enableFluidSimulation) {
+        impl.fluidTickManager = std::make_unique<FluidTickManager>(*impl.world);
+    }
+
     // Command interface
     impl.actions = std::make_unique<LocalGameActions>(
         *impl.world, *impl.soundQueue, *impl.commandQueue);
@@ -285,6 +299,7 @@ UpdateScheduler& GameSession::scheduler() { return *impl_->scheduler; }
 LightEngine& GameSession::lightEngine() { return *impl_->lightEngine; }
 EntityManager& GameSession::entities() { return *impl_->entityManager; }
 WorldTime& GameSession::worldTime() { return *impl_->worldTime; }
+FluidTickManager& GameSession::fluidTicks() { return *impl_->fluidTickManager; }
 
 SoundEventQueue& GameSession::soundEvents() { return *impl_->soundQueue; }
 GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue; }
@@ -340,6 +355,9 @@ void GameSession::tick(float dt) {
 
     // Tick entities (publishes snapshots to graphics queue)
     impl_->entityManager->tick(dt);
+
+    // Tick fluid simulation
+    if (impl_->fluidTickManager) impl_->fluidTickManager->tick();
 }
 
 }  // namespace finevox

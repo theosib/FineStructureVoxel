@@ -102,6 +102,12 @@ add_library(finevox SHARED
     src/core/entity_render_state.cpp
     src/core/spawn_manager.cpp
     src/core/entity_serializer.cpp
+    src/core/fluid_registry.cpp
+    src/core/fluid_layer.cpp
+    src/core/fluid_interaction.cpp
+    src/core/fluid_loader.cpp
+    src/core/fluid_simulator.cpp
+    src/core/fluid_tick_manager.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -486,6 +492,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_entity_render.cpp
         tests/test_spawning.cpp
         tests/test_entity_persistence.cpp
+        tests/test_fluid_core.cpp
+        tests/test_fluid_simulator.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

@@ -576,6 +576,7 @@ int main(int argc, char* argv[]) {
 
         // Load shaders (from build output directory)
         worldRenderer.loadShaders("shaders/chunk.vert.spv", "shaders/chunk.frag.spv");
+        worldRenderer.loadFluidShader("shaders/fluid.frag.spv");
 
         // Create a simple placeholder atlas (16x16 tiles of solid colors)
         BlockAtlas atlas;

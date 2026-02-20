@@ -11,6 +11,7 @@
 #include "finevox/core/light_data.hpp"  // Keep for utility functions (packLightValue, etc.)
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/lod.hpp"
 #include <functional>
 #include <queue>
@@ -39,6 +40,11 @@ struct LightingUpdate {
     BlockCoord pos;
     BlockTypeId oldType;
     BlockTypeId newType;
+
+    /// Optional fluid change at this position (only set when fluid type changes).
+    /// Empty IDs mean no fluid change (or no fluid present).
+    FluidTypeId oldFluid;
+    FluidTypeId newFluid;
 
     /// If true, trigger a mesh rebuild for the affected subchunk after lighting completes.
     /// Use this to defer mesh generation until lighting is calculated, avoiding double rebuilds.
@@ -292,6 +298,18 @@ public:
     void clearAttenuationCallback(BlockTypeId blockType);
 
     // ========================================================================
+    // Fluid Light Updates
+    // ========================================================================
+
+    /// Update lighting when fluid is placed at a position
+    /// Handles emission (lava) and attenuation (water blocks light)
+    void onFluidPlaced(const BlockCoord& pos, FluidTypeId fluidType);
+
+    /// Update lighting when fluid is removed from a position
+    /// Re-propagates light that was previously attenuated
+    void onFluidRemoved(const BlockCoord& pos, FluidTypeId fluidType);
+
+    // ========================================================================
     // Async Lighting Thread
     // ========================================================================
 
@@ -387,6 +405,13 @@ private:
 
     // Get light attenuation for a block type
     [[nodiscard]] uint8_t getAttenuation(BlockTypeId blockType) const;
+
+    // Compute attenuation at a position considering both block and fluid
+    // For custom (logarithmic) fluid attenuation, returns the block attenuation
+    // and sets outFluidMult to the logarithmic base; caller applies multiplicatively.
+    // Returns total fixed attenuation; outFluidMult is 0.0f when no logarithmic fluid present.
+    [[nodiscard]] uint8_t getAttenuationWithFluid(const BlockCoord& pos, BlockTypeId blockType,
+                                                   float& outFluidMult) const;
 
     // Check if a block type blocks sky light
     [[nodiscard]] bool blocksSkyLight(BlockTypeId blockType) const;

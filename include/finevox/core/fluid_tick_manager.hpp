@@ -59,6 +59,7 @@ public:
 
 private:
     FluidSimulator simulator_;
+    World& world_;
 
     /// Set of subchunks that have non-static fluid (need ticking)
     std::unordered_set<ChunkPos> activeSubChunks_;

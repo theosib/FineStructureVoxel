@@ -1,10 +1,14 @@
 #include "finevox/render/world_renderer.hpp"
+#include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
 
 #include <finevk/device/logical_device.hpp>
 #include <finevk/device/command.hpp>
 #include <finevk/device/sampler.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace finevox::render {
 
@@ -40,6 +44,10 @@ WorldRenderer::~WorldRenderer() {
 void WorldRenderer::loadShaders(const std::string& vertPath, const std::string& fragPath) {
     vertexShader_ = finevk::ShaderModule::fromFile(device_, vertPath);
     fragmentShader_ = finevk::ShaderModule::fromFile(device_, fragPath);
+}
+
+void WorldRenderer::loadFluidShader(const std::string& fragPath) {
+    fluidFragmentShader_ = finevk::ShaderModule::fromFile(device_, fragPath);
 }
 
 void WorldRenderer::setBlockAtlas(finevk::Texture* atlas) {
@@ -156,6 +164,31 @@ void WorldRenderer::createPipeline() {
         .samples(renderer_->msaaSamples())
         .dynamicViewportAndScissor()
         .build();
+
+    // Create fluid pipeline (alpha-blended, depth-write OFF, no backface cull)
+    // Only if fluid fragment shader was loaded
+    if (fluidFragmentShader_) {
+        auto fluidBuilder = finevk::GraphicsPipeline::create(
+            device_, renderer_->renderPass(), pipelineLayout_.get());
+
+        fluidBuilder.vertexShader(vertexShader_.get())
+                    .fragmentShader(fluidFragmentShader_.get())
+                    .vertexBinding(binding.binding, binding.stride, binding.inputRate);
+
+        for (const auto& attr : attributes) {
+            fluidBuilder.vertexAttribute(attr.location, attr.binding, attr.format, attr.offset);
+        }
+
+        fluidPipeline_ = fluidBuilder
+            .enableDepth()
+            .depthWrite(false)  // Test against opaque depth, don't write fluid depth
+            .alphaBlending()    // SRC_ALPHA, ONE_MINUS_SRC_ALPHA
+            .cullNone()         // See fluid from both sides (underwater)
+            .frontFace(VK_FRONT_FACE_CLOCKWISE)
+            .samples(renderer_->msaaSamples())
+            .dynamicViewportAndScissor()
+            .build();
+    }
 }
 
 void WorldRenderer::updateCamera(const finevk::CameraState& cameraState) {
@@ -202,6 +235,23 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
     uniform.position = renderCameraPos_;  // Pass position for lighting/effects
 
     cameraUniform_->update(renderer_->currentFrame(), uniform);
+
+    // Detect if camera is underwater (inside a fluid block)
+    BlockCoord cameraBlock{
+        static_cast<int32_t>(std::floor(highPrecisionPos.x)),
+        static_cast<int32_t>(std::floor(highPrecisionPos.y)),
+        static_cast<int32_t>(std::floor(highPrecisionPos.z))
+    };
+    FluidTypeId cameraFluid = world_.getFluid(cameraBlock);
+    isUnderwater_ = !cameraFluid.isEmpty();
+    if (isUnderwater_) {
+        const FluidType* ft = FluidRegistry::global().getType(cameraFluid);
+        if (ft) {
+            underwaterFogColor_ = glm::vec3(ft->underwaterFogColor);
+            underwaterFogEnd_ = 1.0f / std::max(ft->underwaterFogDensity, 0.001f);
+            underwaterFogStart_ = 0.0f;
+        }
+    }
 }
 
 void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
@@ -229,6 +279,18 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             view->update(*renderer_->commandPool(), uploadData->mesh);
         } else {
             view->upload(*device_, *renderer_->commandPool(), uploadData->mesh, config_.meshCapacityMultiplier);
+        }
+
+        // Handle fluid mesh
+        if (!uploadData->fluidMesh.isEmpty()) {
+            if (view->canUpdateFluidInPlace(uploadData->fluidMesh)) {
+                view->updateFluid(*renderer_->commandPool(), uploadData->fluidMesh);
+            } else {
+                view->uploadFluid(*device_, *renderer_->commandPool(),
+                                  uploadData->fluidMesh, config_.meshCapacityMultiplier);
+            }
+        } else {
+            view->releaseFluid();
         }
 
         view->setLastBuiltLOD(uploadData->lodLevel);
@@ -341,6 +403,69 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
         lastRenderedVertices_ += view->vertexCount();
         lastRenderedTriangles_ += view->triangleCount();
     }
+
+    // ====================================================================
+    // Fluid pass (alpha-blended, depth-write OFF, back-to-front)
+    // ====================================================================
+    if (fluidPipeline_) {
+        fluidPipeline_->bind(cmd.handle());
+        cmd.setViewportAndScissor(extent.width, extent.height);
+        pipelineLayout_->bindDescriptorSet(cmd.handle(), currentSet);
+
+        // Collect visible fluid subchunks and sort back-to-front
+        struct FluidDrawEntry {
+            ChunkPos pos;
+            SubChunkView* view;
+            float dist;
+        };
+        std::vector<FluidDrawEntry> fluidDrawList;
+
+        for (auto& [pos, view] : views_) {
+            if (!view->hasFluidGeometry()) continue;
+            if (!config_.disableFrustumCulling && !isInFrustum(pos)) continue;
+            if (!isInViewDistance(pos)) continue;
+
+            float dist = glm::length(
+                glm::vec3(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f) - cameraChunkPos_);
+            fluidDrawList.push_back({pos, view.get(), dist});
+        }
+
+        std::sort(fluidDrawList.begin(), fluidDrawList.end(),
+            [](const FluidDrawEntry& a, const FluidDrawEntry& b) {
+                return a.dist > b.dist;
+            });
+
+        for (const auto& entry : fluidDrawList) {
+            ChunkPushConstants pushConstants{};
+            pushConstants.chunkOffset = calculateViewRelativeOffset(entry.pos);
+
+            if (isUnderwater_) {
+                pushConstants.fogStart = underwaterFogStart_;
+                pushConstants.fogEnd = underwaterFogEnd_;
+                pushConstants.fogColor = underwaterFogColor_;
+            } else {
+                pushConstants.fogStart = config_.fog.enabled ? config_.fog.startDistance : 0.0f;
+                pushConstants.fogColor = config_.fog.enabled
+                    ? config_.fog.color : glm::vec3(skyParams_.fogColor);
+                pushConstants.fogEnd = config_.fog.enabled ? config_.fog.endDistance : 0.0f;
+            }
+
+            pushConstants.sunDirection = skyParams_.sunDirection;
+            pushConstants.skyBrightness = skyParams_.skyBrightness;
+            pushConstants.ambientLevel = skyParams_.ambientLevel;
+
+            pipelineLayout_->pushConstants(
+                cmd.handle(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                pushConstants);
+
+            entry.view->bindFluid(cmd);
+            entry.view->drawFluid(cmd);
+
+            lastRenderedVertices_ += entry.view->fluidVertexCount();
+            lastRenderedTriangles_ += entry.view->fluidIndexCount() / 3;
+        }
+    }
 }
 
 SubChunkView* WorldRenderer::getOrCreateView(ChunkPos pos) {
@@ -444,6 +569,7 @@ size_t WorldRenderer::gpuMemoryUsed() const {
     size_t total = 0;
     for (const auto& [pos, view] : views_) {
         total += view->gpuMemoryBytes();
+        total += view->fluidGpuMemoryBytes();
     }
     return total;
 }

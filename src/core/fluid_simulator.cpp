@@ -6,6 +6,7 @@
 #include "finevox/core/fluid_interaction.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/physics.hpp"  // CollisionShape::FULL_BLOCK
+#include "finevox/core/light_engine.hpp"
 
 #include <queue>
 #include <algorithm>
@@ -300,6 +301,8 @@ void FluidSimulator::equalizeNeighbors(BlockCoord pos, FluidTypeId type, uint8_t
 
             world_.setFluid(pos, type, newLevel);
             world_.setFluid(neighbor, type, newNeighborLevel);
+            dirtySubChunks_.insert(ChunkPos::fromBlock(pos));
+            dirtySubChunks_.insert(ChunkPos::fromBlock(neighbor));
 
             scheduleUpdate(pos, EMPTY_FLUID_TYPE, 0, fluidType.flowSpeed);
             scheduleUpdate(neighbor, EMPTY_FLUID_TYPE, 0, fluidType.flowSpeed);
@@ -443,6 +446,8 @@ bool FluidSimulator::handleFluidInteraction(BlockCoord pos, FluidTypeId flowing,
     const auto* interaction = FluidInteractionRegistry::global().getInteraction(flowing, existing);
     if (!interaction) return false;
 
+    dirtySubChunks_.insert(ChunkPos::fromBlock(pos));
+
     if (interaction->resultBlock.isValid() && !interaction->resultBlock.isAir()) {
         world_.setBlock(pos, interaction->resultBlock);
         world_.removeFluid(pos);
@@ -458,8 +463,25 @@ bool FluidSimulator::handleFluidInteraction(BlockCoord pos, FluidTypeId flowing,
 }
 
 void FluidSimulator::setFluidAndNotify(BlockCoord pos, FluidTypeId type, uint8_t level, const FluidType& /*fluidType*/) {
+    // Capture old fluid type before the change (for lighting)
+    FluidTypeId oldFluid = lightEngine_ ? world_.getFluid(pos) : EMPTY_FLUID_TYPE;
+
     bool changed = world_.setFluid(pos, type, level);
     if (changed) {
+        dirtySubChunks_.insert(ChunkPos::fromBlock(pos));
+
+        // Enqueue lighting update if fluid type changed at this position
+        if (lightEngine_ && oldFluid != type) {
+            LightingUpdate lu;
+            lu.pos = pos;
+            lu.oldType = world_.getBlock(pos);
+            lu.newType = lu.oldType;  // Block didn't change
+            lu.oldFluid = oldFluid;
+            lu.newFluid = type;
+            lu.triggerMeshRebuild = false;
+            lightEngine_->enqueue(lu);
+        }
+
         // Schedule neighbors for re-evaluation next tick
         for (int i = 0; i < 6; ++i) {
             Face face = static_cast<Face>(i);
@@ -476,8 +498,25 @@ void FluidSimulator::setFluidAndNotify(BlockCoord pos, FluidTypeId type, uint8_t
 }
 
 void FluidSimulator::removeFluidAndNotify(BlockCoord pos) {
+    // Capture old fluid type before the change (for lighting)
+    FluidTypeId oldFluid = lightEngine_ ? world_.getFluid(pos) : EMPTY_FLUID_TYPE;
+
     bool had = world_.removeFluid(pos);
     if (had) {
+        dirtySubChunks_.insert(ChunkPos::fromBlock(pos));
+
+        // Enqueue lighting update if old fluid affected light
+        if (lightEngine_ && !oldFluid.isEmpty()) {
+            LightingUpdate lu;
+            lu.pos = pos;
+            lu.oldType = world_.getBlock(pos);
+            lu.newType = lu.oldType;  // Block didn't change
+            lu.oldFluid = oldFluid;
+            lu.newFluid = EMPTY_FLUID_TYPE;
+            lu.triggerMeshRebuild = false;
+            lightEngine_->enqueue(lu);
+        }
+
         for (int i = 0; i < 6; ++i) {
             Face face = static_cast<Face>(i);
             BlockCoord neighbor = BlockCoord{

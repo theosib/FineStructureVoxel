@@ -366,7 +366,7 @@ void World::setLightEngine(LightEngine* engine) {
 
 void World::enqueueLightingUpdate(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType) {
     if (lightEngine_) {
-        lightEngine_->enqueue(LightingUpdate{pos, oldType, newType});
+        lightEngine_->enqueue(LightingUpdate{pos, oldType, newType, {}, {}});
     }
 }
 
@@ -397,7 +397,7 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
     if (shouldDefer) {
         // Queue is empty (or forced defer) - defer mesh rebuild to lighting thread
         // The lighting thread will push remesh requests after processing
-        LightingUpdate update{pos, oldType, newType};
+        LightingUpdate update{pos, oldType, newType, {}, {}};
         update.triggerMeshRebuild = true;
         lightEngine_->enqueue(update);
     } else {
@@ -410,7 +410,7 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
 
         // Enqueue lighting update without triggerMeshRebuild
         // Lighting thread will handle its own remesh requests for affected chunks
-        LightingUpdate update{pos, oldType, newType};
+        LightingUpdate update{pos, oldType, newType, {}, {}};
         update.triggerMeshRebuild = false;
         lightEngine_->enqueue(update);
     }

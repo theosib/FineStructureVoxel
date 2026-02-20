@@ -3,9 +3,12 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/subchunk.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace finevox {
 
@@ -216,6 +219,31 @@ uint8_t LightEngine::getAttenuation(BlockTypeId blockType) const {
 
     const BlockType& type = BlockRegistry::global().getType(blockType);
     return type.lightAttenuation();
+}
+
+uint8_t LightEngine::getAttenuationWithFluid(const BlockCoord& pos, BlockTypeId blockType,
+                                              float& outFluidMult) const {
+    uint8_t blockAtten = getAttenuation(blockType);
+    outFluidMult = 0.0f;  // No logarithmic fluid by default
+
+    FluidTypeId fluidType = world_.getFluid(pos);
+    if (fluidType.isEmpty()) {
+        return blockAtten;
+    }
+
+    const FluidType* ft = FluidRegistry::global().getType(fluidType);
+    if (!ft) {
+        return blockAtten;
+    }
+
+    if (ft->customAttenuation) {
+        // Logarithmic attenuation: caller applies multiplicatively after block atten
+        outFluidMult = ft->attenuationBase;
+        return blockAtten;
+    }
+
+    // Standard fixed attenuation: combine block + fluid (capped at 15)
+    return static_cast<uint8_t>(std::min(static_cast<int>(blockAtten) + static_cast<int>(ft->lightAttenuation), 15));
 }
 
 bool LightEngine::blocksSkyLight(BlockTypeId blockType) const {
@@ -514,16 +542,26 @@ void LightEngine::propagateLightBFS(const BlockCoord& start, uint8_t startLevel,
             // Get block at neighbor position
             BlockTypeId neighborBlock = world_.getBlock(neighborPos);
 
-            // Calculate light attenuation
-            uint8_t attenuation = getAttenuation(neighborBlock);
+            // Calculate light attenuation (block + fluid combined)
+            float fluidMult = 0.0f;
+            uint8_t attenuation = getAttenuationWithFluid(neighborPos, neighborBlock, fluidMult);
 
-            // For sky light going straight down through air, no attenuation
-            if (isSkyLight && offset.y == -1 && neighborBlock.isAir()) {
+            // For sky light going straight down through air with no fluid, no attenuation
+            if (isSkyLight && offset.y == -1 && neighborBlock.isAir() && fluidMult == 0.0f
+                && attenuation == 1) {
                 attenuation = 0;
             }
 
             // Calculate new light level
-            int32_t newLight = static_cast<int32_t>(currentLight) - attenuation;
+            int32_t newLight;
+            if (fluidMult > 0.0f) {
+                // Logarithmic fluid attenuation: subtract block atten, then multiply
+                int32_t afterBlock = static_cast<int32_t>(currentLight) - getAttenuation(neighborBlock);
+                if (afterBlock <= 0) continue;
+                newLight = static_cast<int32_t>(std::floor(afterBlock * fluidMult));
+            } else {
+                newLight = static_cast<int32_t>(currentLight) - attenuation;
+            }
             if (newLight <= 0) continue;
 
             uint8_t newLightLevel = static_cast<uint8_t>(newLight);
@@ -628,6 +666,90 @@ void LightEngine::removeLightBFS(const BlockCoord& start, uint8_t startLevel, bo
     for (const auto& node : repropagateQueue) {
         propagateLightBFS(node.pos, node.light, isSkyLight);
     }
+}
+
+// ============================================================================
+// Fluid Light Updates
+// ============================================================================
+
+void LightEngine::onFluidPlaced(const BlockCoord& pos, FluidTypeId fluidTypeId) {
+    const FluidType* ft = FluidRegistry::global().getType(fluidTypeId);
+    if (!ft) return;
+
+    // If fluid emits light, propagate it
+    if (ft->lightEmission > 0) {
+        propagateBlockLight(pos, ft->lightEmission);
+    }
+
+    // If fluid attenuates light more than air (standard atten > 1, or custom),
+    // existing light passing through needs recalculation
+    if (ft->lightAttenuation > 1 || ft->customAttenuation) {
+        uint8_t currentBlock = getBlockLight(pos);
+        if (currentBlock > 0 && ft->lightEmission == 0) {
+            removeBlockLight(pos, currentBlock);
+        }
+        uint8_t currentSky = getSkyLight(pos);
+        if (currentSky > 0) {
+            removeLightBFS(pos, currentSky, true);
+            // Re-propagate sky from neighbors
+            static const std::array<BlockCoord, 6> offsets = {{
+                {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+            }};
+            for (const auto& offset : offsets) {
+                BlockCoord neighbor{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+                uint8_t neighborSky = getSkyLight(neighbor);
+                if (neighborSky > 0) {
+                    propagateSkyLight(neighbor, neighborSky);
+                }
+            }
+        }
+    }
+
+    recordAffectedChunk(pos);
+}
+
+void LightEngine::onFluidRemoved(const BlockCoord& pos, FluidTypeId fluidTypeId) {
+    const FluidType* ft = FluidRegistry::global().getType(fluidTypeId);
+    if (!ft) return;
+
+    // If fluid was emitting light, remove it
+    if (ft->lightEmission > 0) {
+        uint8_t currentLight = getBlockLight(pos);
+        if (currentLight > 0) {
+            removeBlockLight(pos, currentLight);
+        }
+    }
+
+    // If fluid was attenuating light, remove stale light and re-propagate
+    if (ft->lightAttenuation > 1 || ft->customAttenuation) {
+        // Remove existing (too-low) light at this position so neighbors can refill it
+        uint8_t currentBlock = getBlockLight(pos);
+        if (currentBlock > 0) {
+            removeBlockLight(pos, currentBlock);
+        }
+        uint8_t currentSky = getSkyLight(pos);
+        if (currentSky > 0) {
+            removeLightBFS(pos, currentSky, true);
+        }
+
+        // Re-propagate from all neighbors (they now push through with lower attenuation)
+        static const std::array<BlockCoord, 6> offsets = {{
+            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+        }};
+        for (const auto& offset : offsets) {
+            BlockCoord neighbor{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+            uint8_t neighborBlock = getBlockLight(neighbor);
+            if (neighborBlock > 0) {
+                propagateBlockLight(neighbor, neighborBlock);
+            }
+            uint8_t neighborSky = getSkyLight(neighbor);
+            if (neighborSky > 0) {
+                propagateSkyLight(neighbor, neighborSky);
+            }
+        }
+    }
+
+    recordAffectedChunk(pos);
 }
 
 // ============================================================================
@@ -835,7 +957,7 @@ void LightEngine::flushAffectedChunks() {
 }
 
 void LightEngine::processLightingUpdate(const LightingUpdate& update) {
-    // Quick check: opaque non-emitter → opaque non-emitter is no-op
+    // --- Block change handling ---
     uint8_t oldEmission = getLightEmission(update.oldType);
     uint8_t newEmission = getLightEmission(update.newType);
     uint8_t oldAttenuation = getAttenuation(update.oldType);
@@ -848,15 +970,20 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
     }
 
     if (lightingChanged) {
-        // Check if an opaque block was replaced with a transparent one
-        // This requires re-propagation from neighbors (onBlockRemoved logic)
         if (oldAttenuation >= 15 && newAttenuation < 15) {
-            // Opaque → transparent: use onBlockRemoved which re-propagates from neighbors
             onBlockRemoved(update.pos, update.oldType);
         } else {
-            // Other cases: use onBlockPlaced
-            // Light propagation will call recordAffectedChunk for each modified chunk
             onBlockPlaced(update.pos, update.oldType, update.newType);
+        }
+    }
+
+    // --- Fluid change handling ---
+    if (update.oldFluid != update.newFluid) {
+        if (!update.oldFluid.isEmpty()) {
+            onFluidRemoved(update.pos, update.oldFluid);
+        }
+        if (!update.newFluid.isEmpty()) {
+            onFluidPlaced(update.pos, update.newFluid);
         }
     }
 

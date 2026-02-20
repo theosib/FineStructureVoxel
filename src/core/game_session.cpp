@@ -281,6 +281,7 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     // Fluid simulation
     if (config.enableFluidSimulation) {
         impl.fluidTickManager = std::make_unique<FluidTickManager>(*impl.world);
+        impl.fluidTickManager->simulator().setLightEngine(impl.lightEngine.get());
     }
 
     // Command interface

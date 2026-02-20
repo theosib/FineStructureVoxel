@@ -216,7 +216,7 @@ public:
     [[nodiscard]] size_t gpuMemoryBytes() const { return gpuMemoryBytes_; }
 
     // ========================================================================
-    // Rendering
+    // Rendering (opaque block mesh)
     // ========================================================================
 
     /**
@@ -238,6 +238,29 @@ public:
     void draw(finevk::CommandBuffer& cmd, uint32_t instanceCount = 1) const;
 
     // ========================================================================
+    // Fluid Mesh (translucent, rendered in separate alpha-blended pass)
+    // ========================================================================
+
+    void uploadFluid(
+        finevk::LogicalDevice& device,
+        finevk::CommandPool& commandPool,
+        const MeshData& meshData,
+        float capacityMultiplier = 1.5f
+    );
+
+    [[nodiscard]] bool canUpdateFluidInPlace(const MeshData& meshData) const;
+    void updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData);
+    void releaseFluid();
+
+    [[nodiscard]] bool hasFluidGeometry() const { return fluidMesh_ != nullptr && fluidIndexCount_ > 0; }
+    [[nodiscard]] uint32_t fluidIndexCount() const { return fluidIndexCount_; }
+    [[nodiscard]] uint32_t fluidVertexCount() const { return fluidVertexCount_; }
+    [[nodiscard]] size_t fluidGpuMemoryBytes() const { return fluidGpuMemoryBytes_; }
+
+    void bindFluid(finevk::CommandBuffer& cmd) const;
+    void drawFluid(finevk::CommandBuffer& cmd, uint32_t instanceCount = 1) const;
+
+    // ========================================================================
     // LOD Tracking
     // ========================================================================
 
@@ -255,11 +278,20 @@ public:
 
 private:
     ChunkPos pos_{0, 0, 0};
+
+    // Opaque block mesh
     finevk::RawMeshPtr mesh_;
     uint32_t indexCount_ = 0;
     uint32_t vertexCount_ = 0;
-    size_t gpuMemoryBytes_ = 0;       // Allocated GPU memory (vertex + index buffers)
-    LODLevel lastBuiltLOD_ = LODLevel::LOD0;  // LOD level of current mesh
+    size_t gpuMemoryBytes_ = 0;
+
+    // Fluid mesh (translucent, separate render pass)
+    finevk::RawMeshPtr fluidMesh_;
+    uint32_t fluidIndexCount_ = 0;
+    uint32_t fluidVertexCount_ = 0;
+    size_t fluidGpuMemoryBytes_ = 0;
+
+    LODLevel lastBuiltLOD_ = LODLevel::LOD0;
 };
 
 }  // namespace finevox::render

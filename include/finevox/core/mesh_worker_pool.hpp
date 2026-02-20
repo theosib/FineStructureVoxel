@@ -36,12 +36,15 @@ class SubChunk;
 // Workers push these to the upload queue; graphics thread pops and uploads
 struct MeshUploadData {
     ChunkPos pos;                           // Position of the subchunk
-    MeshData mesh;                          // The generated mesh data
+    MeshData mesh;                          // The generated mesh data (opaque blocks)
+    MeshData fluidMesh;                     // Fluid mesh data (translucent, separate pass)
     LODLevel lodLevel = LODLevel::LOD0;     // LOD level of the mesh
 
     MeshUploadData() = default;
     MeshUploadData(ChunkPos p, MeshData m, LODLevel lod)
         : pos(p), mesh(std::move(m)), lodLevel(lod) {}
+    MeshUploadData(ChunkPos p, MeshData m, MeshData fm, LODLevel lod)
+        : pos(p), mesh(std::move(m)), fluidMesh(std::move(fm)), lodLevel(lod) {}
 };
 
 /// Queue type for mesh uploads (workers push, graphics thread pops)

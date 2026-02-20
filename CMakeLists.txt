@@ -108,6 +108,7 @@ add_library(finevox SHARED
     src/core/fluid_loader.cpp
     src/core/fluid_simulator.cpp
     src/core/fluid_tick_manager.cpp
+    src/core/fluid_mesh.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -288,6 +289,7 @@ if(FINEVOX_BUILD_RENDER)
         set(SHADER_SOURCES
             ${SHADER_DIR}/chunk.vert
             ${SHADER_DIR}/chunk.frag
+            ${SHADER_DIR}/fluid.frag
             ${SHADER_DIR}/overlay.vert
             ${SHADER_DIR}/overlay.frag
         )
@@ -494,6 +496,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_entity_persistence.cpp
         tests/test_fluid_core.cpp
         tests/test_fluid_simulator.cpp
+        tests/test_fluid_mesh.cpp
+        tests/test_fluid_light.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

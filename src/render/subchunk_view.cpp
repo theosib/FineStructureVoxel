@@ -113,6 +113,7 @@ void SubChunkView::release() {
     indexCount_ = 0;
     vertexCount_ = 0;
     gpuMemoryBytes_ = 0;
+    releaseFluid();
 }
 
 void SubChunkView::bind(finevk::CommandBuffer& cmd) const {
@@ -124,6 +125,103 @@ void SubChunkView::bind(finevk::CommandBuffer& cmd) const {
 void SubChunkView::draw(finevk::CommandBuffer& cmd, uint32_t instanceCount) const {
     if (mesh_) {
         mesh_->draw(cmd, instanceCount);
+    }
+}
+
+// ============================================================================
+// Fluid Mesh
+// ============================================================================
+
+void SubChunkView::uploadFluid(
+    finevk::LogicalDevice& device,
+    finevk::CommandPool& commandPool,
+    const MeshData& meshData,
+    float capacityMultiplier
+) {
+    if (meshData.isEmpty()) {
+        releaseFluid();
+        return;
+    }
+
+    bool use16BitIndices = meshData.vertexCount() <= 65535;
+
+    auto builder = finevk::RawMesh::create(&device)
+        .vertexLayout(getChunkVertexBindingDescription(),
+                      getChunkVertexAttributeDescriptions())
+        .vertices(meshData.vertices.data(), meshData.vertices.size())
+        .reserveCapacity(capacityMultiplier);
+
+    std::vector<uint16_t> indices16;
+    if (use16BitIndices) {
+        indices16.resize(meshData.indices.size());
+        for (size_t i = 0; i < meshData.indices.size(); ++i) {
+            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
+        }
+        builder.indices(indices16.data(), indices16.size());
+    } else {
+        builder.indices(meshData.indices.data(), meshData.indices.size());
+    }
+
+    fluidMesh_ = builder.build(commandPool);
+    fluidIndexCount_ = static_cast<uint32_t>(meshData.indices.size());
+    fluidVertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
+
+    size_t indexSize = use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t);
+    fluidGpuMemoryBytes_ = static_cast<size_t>(
+        (meshData.vertices.size() * sizeof(ChunkVertex) +
+         meshData.indices.size() * indexSize) * capacityMultiplier
+    );
+}
+
+bool SubChunkView::canUpdateFluidInPlace(const MeshData& meshData) const {
+    if (!fluidMesh_) return false;
+    return fluidMesh_->canUpdateInPlace(meshData.vertices.size(), meshData.indices.size());
+}
+
+void SubChunkView::updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData) {
+    if (meshData.isEmpty()) {
+        releaseFluid();
+        return;
+    }
+
+    if (!fluidMesh_) return;
+
+    bool use16BitIndices = (fluidMesh_->indexType() == VK_INDEX_TYPE_UINT16);
+
+    if (use16BitIndices) {
+        std::vector<uint16_t> indices16(meshData.indices.size());
+        for (size_t i = 0; i < meshData.indices.size(); ++i) {
+            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
+        }
+        fluidMesh_->update(commandPool,
+                           meshData.vertices.data(), meshData.vertices.size(),
+                           indices16.data(), indices16.size());
+    } else {
+        fluidMesh_->update(commandPool,
+                           meshData.vertices.data(), meshData.vertices.size(),
+                           meshData.indices.data(), meshData.indices.size());
+    }
+
+    fluidIndexCount_ = static_cast<uint32_t>(meshData.indices.size());
+    fluidVertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
+}
+
+void SubChunkView::releaseFluid() {
+    fluidMesh_.reset();
+    fluidIndexCount_ = 0;
+    fluidVertexCount_ = 0;
+    fluidGpuMemoryBytes_ = 0;
+}
+
+void SubChunkView::bindFluid(finevk::CommandBuffer& cmd) const {
+    if (fluidMesh_) {
+        fluidMesh_->bind(cmd);
+    }
+}
+
+void SubChunkView::drawFluid(finevk::CommandBuffer& cmd, uint32_t instanceCount) const {
+    if (fluidMesh_) {
+        fluidMesh_->draw(cmd, instanceCount);
     }
 }
 

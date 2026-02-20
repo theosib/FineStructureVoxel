@@ -1,6 +1,10 @@
 #include "finevox/core/mesh_worker_pool.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/subchunk.hpp"
+#include "finevox/core/fluid_mesh.hpp"
+#include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/block_type.hpp"
 #include <algorithm>
 #include <chrono>
 
@@ -96,6 +100,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
     LODLevel buildLOD = request.lodRequest.buildLevel();
 
     MeshData meshData;
+    MeshData fluidData;
     bool success = false;
 
     try {
@@ -109,8 +114,8 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             return true;
         }
 
-        if (subchunk->isEmpty()) {
-            // Empty subchunk - push empty mesh to upload queue
+        if (subchunk->isEmpty() && !subchunk->hasFluidLayer()) {
+            // Empty subchunk with no fluid - push empty mesh to upload queue
             uploadQueue_.push(MeshUploadData(pos, MeshData{}, buildLOD));
             return true;
         }
@@ -163,13 +168,43 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             BlockOpaqueProvider alwaysTransparent = [](const BlockCoord&) { return false; };
             meshData = builder.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider, lodMergeMode_);
         }
+        // Build fluid mesh if subchunk has fluid data (LOD0 only)
+        if (buildLOD == LODLevel::LOD0 && subchunk->hasFluidLayer()) {
+            const FluidLayer* fl = subchunk->fluidLayer();
+            if (fl && !fl->isEmpty()) {
+                FluidMeshBuilder fluidBuilder;
+                if (lightProvider) {
+                    fluidBuilder.setLightProvider(lightProvider);
+                }
+
+                FluidNeighborProvider fluidNeighbor = [this](BlockCoord p) -> std::pair<FluidTypeId, uint8_t> {
+                    return {world_.getFluid(p), world_.getFluidLevel(p)};
+                };
+
+                BlockSolidProvider solidProvider = [this](BlockCoord p) -> bool {
+                    BlockTypeId bt = world_.getBlock(p);
+                    if (bt.isAir()) return false;
+                    const auto& blockType = BlockRegistry::global().getType(bt);
+                    const auto& shape = blockType.collisionShape();
+                    if (shape.boxes().size() == 1) {
+                        const auto& box = shape.boxes()[0];
+                        return box.min.x <= 0.001f && box.min.y <= 0.001f && box.min.z <= 0.001f &&
+                               box.max.x >= 0.999f && box.max.y >= 0.999f && box.max.z >= 0.999f;
+                    }
+                    return false;
+                };
+
+                fluidData = fluidBuilder.buildFluidMesh(*subchunk, pos, fluidNeighbor, solidProvider);
+            }
+        }
+
         success = true;
 
         // Update statistics
         stats_.meshesBuilt.fetch_add(1, std::memory_order_relaxed);
-        stats_.totalVertices.fetch_add(meshData.vertexCount(),
+        stats_.totalVertices.fetch_add(meshData.vertexCount() + fluidData.vertexCount(),
                                        std::memory_order_relaxed);
-        stats_.totalIndices.fetch_add(meshData.indexCount(),
+        stats_.totalIndices.fetch_add(meshData.indexCount() + fluidData.indexCount(),
                                       std::memory_order_relaxed);
 
     } catch (const std::exception&) {
@@ -179,7 +214,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
 
     // Push to upload queue (move semantics - no copy)
     if (success) {
-        uploadQueue_.push(MeshUploadData(pos, std::move(meshData), buildLOD));
+        uploadQueue_.push(MeshUploadData(pos, std::move(meshData), std::move(fluidData), buildLOD));
     }
 
     return success;

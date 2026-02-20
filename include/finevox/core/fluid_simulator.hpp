@@ -27,6 +27,7 @@ namespace finevox {
 
 // Forward declarations
 class World;
+class LightEngine;
 struct FluidType;
 struct FluidInteraction;
 
@@ -89,8 +90,19 @@ public:
     /// Clear all pending updates
     void clearPendingUpdates();
 
+    /// Get set of subchunks dirtied since last clear (for mesh rebuild)
+    [[nodiscard]] const std::unordered_set<ChunkPos>& dirtySubChunks() const { return dirtySubChunks_; }
+
+    /// Clear the dirty subchunk set (call after draining for mesh rebuilds)
+    void clearDirtySubChunks() { dirtySubChunks_.clear(); }
+
+    /// Set the light engine for fluid-light integration.
+    /// When set, fluid type changes enqueue lighting updates via the LightEngine's queue.
+    void setLightEngine(LightEngine* engine) { lightEngine_ = engine; }
+
 private:
     World& world_;
+    LightEngine* lightEngine_ = nullptr;
     FluidSimulatorConfig config_;
 
     /// Updates ready to process this tick (FIFO for BFS-order processing)
@@ -101,6 +113,9 @@ private:
 
     /// Positions already processed this tick (prevent duplicate work)
     std::unordered_set<BlockCoord> processedThisTick_;
+
+    /// Subchunks that had fluid changes (for mesh rebuild triggering)
+    std::unordered_set<ChunkPos> dirtySubChunks_;
 
     // ========================================================================
     // Flow Logic

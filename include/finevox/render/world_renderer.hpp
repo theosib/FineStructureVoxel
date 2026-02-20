@@ -168,6 +168,15 @@ public:
     void loadShaders(const std::string& vertPath, const std::string& fragPath);
 
     /**
+     * @brief Load fluid fragment shader from SPIR-V file
+     *
+     * The fluid pipeline reuses the chunk vertex shader but uses a separate
+     * fragment shader that interprets tileBounds as tint color and ao as alpha.
+     * Call this after loadShaders() and before initialize().
+     */
+    void loadFluidShader(const std::string& fragPath);
+
+    /**
      * @brief Set the block texture atlas
      * @param atlas Texture containing all block face textures
      */
@@ -465,6 +474,9 @@ public:
     [[nodiscard]] FogConfig& fogConfig() { return config_.fog; }
     [[nodiscard]] const FogConfig& fogConfig() const { return config_.fog; }
 
+    /// Check if camera is currently underwater (inside a fluid block)
+    [[nodiscard]] bool isUnderwater() const { return isUnderwater_; }
+
     /**
      * @brief Enable/disable fog rendering
      */
@@ -653,12 +665,14 @@ private:
     // Shaders
     finevk::ShaderModulePtr vertexShader_;
     finevk::ShaderModulePtr fragmentShader_;
+    finevk::ShaderModulePtr fluidFragmentShader_;
 
     // Pipeline
     finevk::DescriptorSetLayoutPtr descriptorLayout_;
     finevk::DescriptorPoolPtr descriptorPool_;
     finevk::PipelineLayoutPtr pipelineLayout_;
     finevk::GraphicsPipelinePtr pipeline_;
+    finevk::GraphicsPipelinePtr fluidPipeline_;  // Alpha-blended, depth-write OFF, no backface cull
 
     // Uniform buffers (per-frame)
     std::unique_ptr<finevk::UniformBuffer<finevk::CameraUniform>> cameraUniform_;
@@ -704,6 +718,12 @@ private:
 
     // Sky parameters (updated per frame)
     SkyParameters skyParams_;
+
+    // Underwater state (detected per-frame in updateCamera)
+    bool isUnderwater_ = false;
+    glm::vec3 underwaterFogColor_{0.1f, 0.2f, 0.4f};
+    float underwaterFogStart_ = 0.0f;
+    float underwaterFogEnd_ = 48.0f;
 
     // State
     bool initialized_ = false;

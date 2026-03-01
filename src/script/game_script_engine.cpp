@@ -6,6 +6,7 @@
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/pathfinder.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <iostream>
 
 namespace finevox::script {
@@ -344,6 +345,122 @@ void GameScriptEngine::registerNativeFunctions() {
 
             BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
             return finescript::Value::boolean(type.isAir());
+        });
+
+    // ========================================================================
+    // fluid_* functions
+    // ========================================================================
+
+    // fluid_at(x, y, z) → symbol (fluid type name) or nil
+    engine_->registerFunction("fluid_at",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world) return finescript::Value::nil();
+
+            int x, y, z;
+            if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+
+            FluidTypeId fid = ud->world->getFluid(BlockCoord{x, y, z});
+            if (fid.isEmpty()) return finescript::Value::nil();
+            return finescript::Value::symbol(fid.id);
+        });
+
+    // fluid_level(x, y, z) → int (0-15)
+    engine_->registerFunction("fluid_level",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world) return finescript::Value::nil();
+
+            int x, y, z;
+            if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+
+            uint8_t level = ud->world->getFluidLevel(BlockCoord{x, y, z});
+            return finescript::Value::integer(level);
+        });
+
+    // fluid_place(x, y, z, type_symbol, level) → bool
+    engine_->registerFunction("fluid_place",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world) return finescript::Value::boolean(false);
+
+            int x, y, z;
+            uint32_t typeId;
+            int level = 15;
+
+            // fluid_place(x, y, z, :type, level)  or  fluid_place([x,y,z], :type, level)
+            if (args.size() >= 2 && args[0].isArray()) {
+                if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
+                if (!args[1].isSymbol()) return finescript::Value::boolean(false);
+                typeId = args[1].asSymbol();
+                if (args.size() >= 3) level = static_cast<int>(args[2].asInt());
+            } else if (args.size() >= 4 && args[3].isSymbol()) {
+                if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
+                typeId = args[3].asSymbol();
+                if (args.size() >= 5) level = static_cast<int>(args[4].asInt());
+            } else {
+                return finescript::Value::boolean(false);
+            }
+
+            FluidTypeId fid(typeId);
+            if (fid.isEmpty()) return finescript::Value::boolean(false);
+
+            uint8_t lvl = static_cast<uint8_t>(std::clamp(level, 1, 15));
+            bool ok = ud->world->setFluid(BlockCoord{x, y, z}, fid, lvl);
+            return finescript::Value::boolean(ok);
+        });
+
+    // fluid_remove(x, y, z) → bool
+    engine_->registerFunction("fluid_remove",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world) return finescript::Value::boolean(false);
+
+            int x, y, z;
+            if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
+
+            bool ok = ud->world->removeFluid(BlockCoord{x, y, z});
+            return finescript::Value::boolean(ok);
+        });
+
+    // fluid_set_level(x, y, z, level) → bool
+    engine_->registerFunction("fluid_set_level",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world) return finescript::Value::boolean(false);
+
+            int x, y, z;
+            if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
+
+            // Level is the last argument
+            int levelArgIdx;
+            if (args.size() >= 1 && args[0].isArray()) {
+                levelArgIdx = 1;
+            } else {
+                levelArgIdx = 3;
+            }
+            if (levelArgIdx >= static_cast<int>(args.size()))
+                return finescript::Value::boolean(false);
+
+            int level = static_cast<int>(args[levelArgIdx].asInt());
+
+            BlockCoord pos{x, y, z};
+            FluidTypeId fid = ud->world->getFluid(pos);
+            if (fid.isEmpty()) return finescript::Value::boolean(false);
+
+            uint8_t lvl = static_cast<uint8_t>(std::clamp(level, 1, 15));
+            bool ok = ud->world->setFluid(pos, fid, lvl);
+            return finescript::Value::boolean(ok);
         });
 }
 

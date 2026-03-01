@@ -1,4 +1,5 @@
 #include "finevox/core/event_queue.hpp"
+#include "finevox/core/event_journal.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/chunk_column.hpp"  // For ChunkColumn activity timer
@@ -240,6 +241,11 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         // Chunk not loaded - for BlockUpdate events, defer and request load
         if (event.type == EventType::BlockUpdate) {
             deferredEvents_.push_back(event);
+            // Also persist to journal file if available
+            if (journal_) {
+                ColumnPos colPos{event.chunkPos.x, event.chunkPos.z};
+                journal_->appendEvent(colPos, event);
+            }
             if (chunkLoadCallback_) {
                 ColumnPos colPos{event.chunkPos.x, event.chunkPos.z};
                 chunkLoadCallback_(colPos);
@@ -436,6 +442,21 @@ void UpdateScheduler::processScheduledTicks() {
 
         // Generate event for this scheduled tick
         outbox_.push(BlockEvent::tick(tick.pos, tick.type));
+    }
+}
+
+void UpdateScheduler::flushDeferredToJournal() {
+    if (!journal_ || deferredEvents_.empty()) return;
+
+    // Group events by column position for efficient batch writes
+    std::unordered_map<ColumnPos, std::vector<BlockEvent>> byColumn;
+    for (const auto& event : deferredEvents_) {
+        ColumnPos colPos{event.chunkPos.x, event.chunkPos.z};
+        byColumn[colPos].push_back(event);
+    }
+
+    for (const auto& [colPos, events] : byColumn) {
+        journal_->appendEvents(colPos, events);
     }
 }
 

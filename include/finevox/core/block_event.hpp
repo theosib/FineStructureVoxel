@@ -11,6 +11,7 @@
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/entity_state.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <cstdint>
 #include <glm/glm.hpp>
 
@@ -122,6 +123,10 @@ struct BlockEvent {
     // Entity data (for player/entity events)
     EntityId entityId = INVALID_ENTITY_ID;  // Which entity triggered this event
     EntityState entityState;                 // Entity state (for player state events)
+
+    // Fluid data (for FluidPlaced/FluidRemoved events)
+    FluidTypeId fluidType;       // Fluid type being placed/removed
+    uint8_t fluidLevel = 0;      // Fluid level (1-15, 0=none)
 
     // ========================================================================
     // Factory Methods
@@ -240,6 +245,25 @@ struct BlockEvent {
     static BlockEvent setWorldTime(int64_t ticks);
 
     // ========================================================================
+    // Fluid Event Factory Methods
+    // ========================================================================
+
+    /**
+     * @brief Create a fluid placed event
+     * @param pos World position
+     * @param type Fluid type being placed
+     * @param level Fluid level (1-15, default 15 = source)
+     */
+    static BlockEvent fluidPlaced(BlockCoord pos, FluidTypeId type, uint8_t level = 15);
+
+    /**
+     * @brief Create a fluid removed event
+     * @param pos World position
+     * @param previousFluid Fluid type that was removed
+     */
+    static BlockEvent fluidRemoved(BlockCoord pos, FluidTypeId previousFluid);
+
+    // ========================================================================
     // Sentinel Checks
     // ========================================================================
 
@@ -294,6 +318,13 @@ struct BlockEvent {
      */
     [[nodiscard]] bool hasEntityId() const {
         return entityId != INVALID_ENTITY_ID;
+    }
+
+    /**
+     * @brief Check if this is a fluid event (place/remove)
+     */
+    [[nodiscard]] bool isFluidEvent() const {
+        return type == EventType::FluidPlaced || type == EventType::FluidRemoved;
     }
 
     /**

@@ -70,7 +70,11 @@ add_library(finevox SHARED
     src/core/lod.cpp
     src/core/light_data.cpp
     src/core/light_engine.cpp
+    src/core/block_light_provider.cpp
+    src/core/fluid_light_provider.cpp
     src/core/event_queue.cpp
+    src/core/event_journal.cpp
+    src/core/event_bus.cpp
     src/core/entity.cpp
     src/core/graphics_event_queue.cpp
     src/core/entity_state.cpp
@@ -243,6 +247,9 @@ if(FINEVOX_BUILD_RENDER)
         src/render/texture_manager.cpp
         src/render/frame_fence_waiter.cpp
         src/render/entity_renderer.cpp
+        src/render/engine.cpp
+        src/render/world_render_layer.cpp
+        src/render/overlay_render_layer.cpp
     )
 
     target_include_directories(finevox_render PUBLIC
@@ -473,6 +480,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_lod.cpp
         tests/test_module.cpp
         tests/test_lighting.cpp
+        tests/test_light_provider.cpp
         tests/test_event_system.cpp
         tests/test_queue_primitives.cpp
         tests/test_noise.cpp
@@ -498,6 +506,17 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_fluid_simulator.cpp
         tests/test_fluid_mesh.cpp
         tests/test_fluid_light.cpp
+        tests/test_fluid_serialization.cpp
+        tests/test_fluid_interactions.cpp
+        tests/test_fluid_actions.cpp
+        tests/test_fluid_sound.cpp
+        tests/test_fluid_worldgen.cpp
+        tests/test_fluid_performance.cpp
+        tests/test_event_journal.cpp
+        tests/test_game_event.cpp
+        tests/test_event_bus.cpp
+        tests/test_game_subsystem.cpp
+        tests/test_render_layer.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -513,6 +532,7 @@ if(FINEVOX_BUILD_TESTS)
         add_executable(finevox_script_tests
             tests/test_script_integration.cpp
             tests/test_script_entity.cpp
+            tests/test_script_fluid.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

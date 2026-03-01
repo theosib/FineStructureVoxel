@@ -110,4 +110,25 @@ public:
     void generate(GenerationContext& ctx) override;
 };
 
+// ============================================================================
+// FluidPass — fills water below sea level, optional underground lava
+// ============================================================================
+
+class FluidPass : public GenerationPass {
+public:
+    explicit FluidPass(int32_t seaLevel = 62);
+
+    [[nodiscard]] std::string_view name() const override { return "core:fluids"; }
+    [[nodiscard]] int32_t priority() const override {
+        return static_cast<int32_t>(GenerationPriority::Fluids);
+    }
+    void generate(GenerationContext& ctx) override;
+
+    void setSeaLevel(int32_t level) { seaLevel_ = level; }
+    [[nodiscard]] int32_t seaLevel() const { return seaLevel_; }
+
+private:
+    int32_t seaLevel_;
+};
+
 }  // namespace finevox::worldgen

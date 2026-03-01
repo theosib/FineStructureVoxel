@@ -41,6 +41,7 @@ enum class GenerationPriority : int32_t {
     Ores           = 4000,
     Structures     = 5000,
     Decoration     = 6000,
+    Fluids         = 7000,
     Finalization   = 9000,
 };
 

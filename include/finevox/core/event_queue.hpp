@@ -27,6 +27,7 @@ namespace finevox {
 class World;
 class SubChunk;
 class BlockContext;
+class EventJournal;
 
 // ============================================================================
 // EventOutbox - Staging area for handler-generated events with consolidation
@@ -282,6 +283,27 @@ public:
      */
     void setChunkLoadCallback(std::function<void(ColumnPos)> callback);
 
+    /**
+     * @brief Set the event journal for persisting deferred events
+     *
+     * When set, events deferred for unloaded chunks are also written to
+     * a journal file. On column load, journals are merged back.
+     */
+    void setEventJournal(EventJournal* journal) { journal_ = journal; }
+
+    /**
+     * @brief Get the event journal (may be nullptr)
+     */
+    [[nodiscard]] EventJournal* eventJournal() const { return journal_; }
+
+    /**
+     * @brief Write all current deferred events to their journal files
+     *
+     * Called during shutdown to persist events that haven't been
+     * processed yet.
+     */
+    void flushDeferredToJournal();
+
 private:
     World& world_;
     TickConfig config_;
@@ -308,6 +330,9 @@ private:
 
     // Callback to request chunk loading
     std::function<void(ColumnPos)> chunkLoadCallback_;
+
+    // Optional event journal for persisting deferred events to disk
+    EventJournal* journal_ = nullptr;
 
     // Process a single event (returns true if processed, false if deferred)
     bool processEvent(const BlockEvent& event);

@@ -51,6 +51,8 @@ enum class SoundAction : uint8_t {
     Dig,        // While mining (repeated hits)
     Hit,        // Single hit on block
     Fall,       // Landed from height
+    Splash,     // Entity entered fluid
+    Swim,       // Entity moving in fluid
 };
 
 // ============================================================================
@@ -98,6 +100,8 @@ struct SoundEvent {
     static SoundEvent fall(SoundSetId set, glm::vec3 pos, float fallDistance);
     static SoundEvent music(SoundSetId trackId);
     static SoundEvent ambient(SoundSetId ambientId, glm::vec3 pos);
+    static SoundEvent fluidSplash(SoundSetId set, glm::vec3 pos);
+    static SoundEvent fluidSwim(SoundSetId set, glm::vec3 pos);
 };
 
 // Thread-safe queue for game thread -> audio engine communication

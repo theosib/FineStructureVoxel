@@ -2,6 +2,7 @@
 
 #include "finevox/core/game_actions.hpp"
 #include <memory>
+#include <vector>
 
 namespace finevox {
 
@@ -13,6 +14,8 @@ class EntityManager;
 class WorldTime;
 class PhysicsSystem;
 class FluidTickManager;
+class GameSubsystem;
+class EventBus;
 struct SoundEvent;
 template<typename T> class Queue;
 using SoundEventQueue = Queue<SoundEvent>;
@@ -67,6 +70,20 @@ public:
     // === Event Channels (events come OUT) ===
     SoundEventQueue& soundEvents();
     GraphicsEventQueue& graphicsEvents();
+
+    // === EventBus ===
+    EventBus& eventBus();
+
+    // === Subsystem Management ===
+    /// Add a game subsystem. Sorted by (phase, priority) at insertion time.
+    /// Must be called before startGameThread().
+    void addSubsystem(std::shared_ptr<GameSubsystem> subsystem);
+
+    /// Remove a game subsystem.
+    void removeSubsystem(const std::shared_ptr<GameSubsystem>& subsystem);
+
+    /// Get all registered subsystems (in tick order)
+    [[nodiscard]] const std::vector<std::shared_ptr<GameSubsystem>>& subsystems() const;
 
     // === Game Thread Lifecycle ===
     /// Start the game thread (processes commands + ticks at configured rate)

@@ -118,6 +118,80 @@ LightEngine::~LightEngine() {
 }
 
 // ============================================================================
+// Light Provider Management
+// ============================================================================
+
+void LightEngine::addLightProvider(std::shared_ptr<LightProvider> provider) {
+    lightProviders_.push_back(std::move(provider));
+    std::sort(lightProviders_.begin(), lightProviders_.end(),
+        [](const std::shared_ptr<LightProvider>& a,
+           const std::shared_ptr<LightProvider>& b) {
+            return a->priority() < b->priority();
+        });
+}
+
+void LightEngine::removeLightProvider(const std::shared_ptr<LightProvider>& provider) {
+    auto it = std::find(lightProviders_.begin(), lightProviders_.end(), provider);
+    if (it != lightProviders_.end()) {
+        lightProviders_.erase(it);
+    }
+}
+
+uint8_t LightEngine::queryCombinedEmission(BlockTypeId blockType) const {
+    if (lightProviders_.empty()) {
+        // Fallback: use existing internal method
+        return getLightEmission(blockType);
+    }
+    uint8_t maxEmission = 0;
+    for (const auto& provider : lightProviders_) {
+        maxEmission = std::max(maxEmission, provider->getEmission(blockType));
+    }
+    return maxEmission;
+}
+
+uint8_t LightEngine::queryCombinedAttenuation(BlockTypeId blockType) const {
+    if (lightProviders_.empty()) {
+        // Fallback: use existing internal method
+        return getAttenuation(blockType);
+    }
+    int total = 0;
+    for (const auto& provider : lightProviders_) {
+        total += provider->getAttenuation(blockType);
+    }
+    return static_cast<uint8_t>(std::min(total, 15));
+}
+
+float LightEngine::queryCombinedLogAttenuation(const BlockCoord& pos) const {
+    float combined = 0.0f;
+    for (const auto& provider : lightProviders_) {
+        float logAtten = provider->getLogAttenuation(pos);
+        if (logAtten > 0.0f) {
+            // Accumulate multiplicatively: first non-zero sets base,
+            // subsequent ones multiply in
+            if (combined == 0.0f) {
+                combined = logAtten;
+            } else {
+                combined *= logAtten;
+            }
+        }
+    }
+    return combined;
+}
+
+bool LightEngine::queryCombinedBlocksSkyLight(BlockTypeId blockType) const {
+    if (lightProviders_.empty()) {
+        // Fallback: use existing internal method
+        return blocksSkyLight(blockType);
+    }
+    for (const auto& provider : lightProviders_) {
+        if (provider->blocksSkyLight(blockType)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================================
 // Position Helpers
 // ============================================================================
 

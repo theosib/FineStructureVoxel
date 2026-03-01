@@ -7,11 +7,13 @@
 
 #include "finevox/worldgen/generation_passes.hpp"
 #include "finevox/core/chunk_column.hpp"
+#include "finevox/core/subchunk.hpp"
 #include "finevox/worldgen/noise_ops.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/worldgen/feature.hpp"
 #include "finevox/worldgen/feature_ore.hpp"
 #include "finevox/worldgen/feature_tree.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 
 #include <cmath>
 
@@ -333,6 +335,40 @@ void DecorationPass::generate(GenerationContext& /*ctx*/) {
 
     // A real implementation could use a separate FeaturePlacement category
     // or decoration-specific logic here.
+}
+
+// ============================================================================
+// FluidPass — fills water/lava in terrain gaps
+// ============================================================================
+
+FluidPass::FluidPass(int32_t seaLevel) : seaLevel_(seaLevel) {}
+
+void FluidPass::generate(GenerationContext& ctx) {
+    FluidTypeId waterId = FluidTypeId::fromName("water");
+    if (waterId.isEmpty()) return;  // No water type registered
+
+    const int32_t FLUID_SOURCE_LEVEL = 15;
+
+    for (int32_t lx = 0; lx < 16; ++lx) {
+        for (int32_t lz = 0; lz < 16; ++lz) {
+            int32_t idx = GenerationContext::hmIndex(lx, lz);
+            int32_t surfaceY = ctx.heightmap[idx];
+
+            // Fill water from surface+1 up to sea level (inclusive)
+            if (surfaceY < seaLevel_) {
+                for (int32_t y = surfaceY + 1; y <= seaLevel_; ++y) {
+                    // Only place water in air blocks (caves may exist)
+                    BlockTypeId existing = ctx.column.getBlock(lx, y, lz);
+                    if (existing.isAir()) {
+                        int32_t chunkY = ChunkColumn::worldYToChunkY(y);
+                        int32_t localY = ChunkColumn::worldYToLocalY(y);
+                        SubChunk& sc = ctx.column.getOrCreateSubChunk(chunkY);
+                        sc.setFluid(lx, localY, lz, waterId, FLUID_SOURCE_LEVEL);
+                    }
+                }
+            }
+        }
+    }
 }
 
 }  // namespace finevox::worldgen

@@ -155,4 +155,29 @@ BlockEvent BlockEvent::setWorldTime(int64_t ticks) {
     return event;
 }
 
+// ============================================================================
+// Fluid Event Factory Methods
+// ============================================================================
+
+BlockEvent BlockEvent::fluidPlaced(BlockCoord pos, FluidTypeId type, uint8_t level) {
+    BlockEvent event;
+    event.type = EventType::FluidPlaced;
+    event.pos = pos;
+    event.localPos = pos.local();
+    event.chunkPos = ChunkPos::fromBlock(pos);
+    event.fluidType = type;
+    event.fluidLevel = level;
+    return event;
+}
+
+BlockEvent BlockEvent::fluidRemoved(BlockCoord pos, FluidTypeId previousFluid) {
+    BlockEvent event;
+    event.type = EventType::FluidRemoved;
+    event.pos = pos;
+    event.localPos = pos.local();
+    event.chunkPos = ChunkPos::fromBlock(pos);
+    event.fluidType = previousFluid;
+    return event;
+}
+
 }  // namespace finevox

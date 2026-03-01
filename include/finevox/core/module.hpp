@@ -22,6 +22,12 @@ class BlockRegistry;
 class EntityRegistry;
 class ItemRegistry;
 class ModuleRegistry;
+class EventBus;
+class GameSession;
+class GameSubsystem;
+class LightEngine;
+class LightProvider;
+class RenderLayer;
 
 // ============================================================================
 // GameModule - Interface for loadable game modules
@@ -99,6 +105,51 @@ public:
     virtual void onRegister(ModuleRegistry& registry) = 0;
 
     /**
+     * @brief Subscribe to events on the EventBus
+     *
+     * Called after onRegister() for all modules.
+     * Use this to subscribe to typed events via the EventBus.
+     *
+     * @param registry Access to registries (eventBus() is available)
+     */
+    virtual void onRegisterEvents(ModuleRegistry& registry) {
+        (void)registry;
+    }
+
+    /**
+     * @brief Register GameSubsystems with the GameSession
+     *
+     * Called after onRegisterEvents() for all modules.
+     *
+     * @param registry Access to registries (session() is available)
+     */
+    virtual void onRegisterSubsystems(ModuleRegistry& registry) {
+        (void)registry;
+    }
+
+    /**
+     * @brief Register LightProviders with the LightEngine
+     *
+     * Called after onRegisterSubsystems() for all modules.
+     *
+     * @param registry Access to registries (lightEngine() is available)
+     */
+    virtual void onRegisterLightProviders(ModuleRegistry& registry) {
+        (void)registry;
+    }
+
+    /**
+     * @brief Register RenderLayers with the Engine
+     *
+     * Called after onRegisterLightProviders() for all modules.
+     *
+     * @param registry Access to registries (engine() is available)
+     */
+    virtual void onRegisterRenderLayers(ModuleRegistry& registry) {
+        (void)registry;
+    }
+
+    /**
      * @brief Called before the module is unloaded
      *
      * Use for cleanup. Called in reverse order of loading (dependents first).
@@ -165,6 +216,37 @@ public:
      */
     [[nodiscard]] std::string qualifiedName(std::string_view localName) const;
 
+    // ================================================================
+    // Extended accessors (available during later initialization phases)
+    // ================================================================
+
+    /// Get the EventBus (available from onRegisterEvents phase onwards)
+    [[nodiscard]] EventBus* eventBus() const { return eventBus_; }
+
+    /// Get the GameSession (available from onRegisterSubsystems phase onwards)
+    [[nodiscard]] GameSession* session() const { return session_; }
+
+    /// Get the LightEngine (available from onRegisterLightProviders phase onwards)
+    [[nodiscard]] LightEngine* lightEngine() const { return lightEngine_; }
+
+    // ================================================================
+    // Convenience registration methods
+    // ================================================================
+
+    /// Add a GameSubsystem to the GameSession (convenience for onRegisterSubsystems)
+    void addSubsystem(std::shared_ptr<GameSubsystem> subsystem);
+
+    /// Add a LightProvider to the LightEngine (convenience for onRegisterLightProviders)
+    void addLightProvider(std::shared_ptr<LightProvider> provider);
+
+    // ================================================================
+    // Internal setters (called by ModuleLoader during initialization)
+    // ================================================================
+
+    void setEventBus(EventBus* bus) { eventBus_ = bus; }
+    void setSession(GameSession* session) { session_ = session; }
+    void setLightEngine(LightEngine* engine) { lightEngine_ = engine; }
+
     // Logging (outputs to engine log with module prefix)
     void log(std::string_view message) const;
     void warn(std::string_view message) const;
@@ -175,6 +257,9 @@ private:
     BlockRegistry& blocks_;
     EntityRegistry& entities_;
     ItemRegistry& items_;
+    EventBus* eventBus_ = nullptr;
+    GameSession* session_ = nullptr;
+    LightEngine* lightEngine_ = nullptr;
 };
 
 // ============================================================================
@@ -219,7 +304,7 @@ public:
     bool registerBuiltin(std::unique_ptr<GameModule> module);
 
     /**
-     * @brief Initialize all loaded modules
+     * @brief Initialize all loaded modules (basic: onLoad + onRegister only)
      *
      * Resolves dependencies, calls onLoad() and onRegister() in correct order.
      * Uses the provided registries for content registration.
@@ -230,6 +315,37 @@ public:
      * @return true if all modules initialized successfully
      */
     bool initializeAll(BlockRegistry& blocks, EntityRegistry& entities, ItemRegistry& items);
+
+    /**
+     * @brief Extended initialization context for later phases
+     *
+     * Optional pointers to subsystems. Non-null pointers enable the
+     * corresponding initialization phase.
+     */
+    struct ExtendedContext {
+        EventBus* eventBus = nullptr;
+        GameSession* session = nullptr;
+        LightEngine* lightEngine = nullptr;
+    };
+
+    /**
+     * @brief Run extended initialization phases on already-initialized modules
+     *
+     * Must be called after initializeAll(). Runs the following phases
+     * in order on each module:
+     *   1. onRegisterEvents (if eventBus non-null)
+     *   2. onRegisterSubsystems (if session non-null)
+     *   3. onRegisterLightProviders (if lightEngine non-null)
+     *   4. onRegisterRenderLayers (always, if modules want to register layers)
+     *
+     * @param blocks Block registry for ModuleRegistry construction
+     * @param entities Entity registry
+     * @param items Item registry
+     * @param ctx Extended context with optional subsystem pointers
+     * @return true if all phases completed successfully
+     */
+    bool initializeExtended(BlockRegistry& blocks, EntityRegistry& entities,
+                            ItemRegistry& items, const ExtendedContext& ctx);
 
     /**
      * @brief Shutdown all modules

@@ -1,4 +1,8 @@
 #include "finevox/core/physics.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/fluid_layer.hpp"   // FLUID_SOURCE_LEVEL
+#include "finevox/core/fluid_mesh.hpp"    // FluidMeshBuilder::surfaceHeight
 
 namespace finevox {
 
@@ -715,6 +719,174 @@ bool PhysicsSystem::checkOnGround(const PhysicsBody& body) const {
 RaycastResult PhysicsSystem::raycast(const Vec3& origin, const Vec3& direction,
                                       float maxDistance, RaycastMode mode) const {
     return raycastBlocks(origin, direction, maxDistance, mode, shapeProvider_);
+}
+
+// ============================================================================
+// Fluid Physics
+// ============================================================================
+
+FluidContactInfo computeFluidContact(
+    const PhysicsBody& body,
+    float eyeHeight,
+    const FluidQueryProvider& fluidQuery)
+{
+    FluidContactInfo info;
+
+    Vec3 pos = body.position();  // Bottom-center
+    Vec3 halfExt = body.halfExtents();
+    float bodyHeight = halfExt.y * 2.0f;
+    float bodyBottom = pos.y;
+    float bodyTop = bodyBottom + bodyHeight;
+
+    BlockCoord feetBlock = toBlockCoord(pos);
+    int32_t topBlockY = static_cast<int32_t>(std::floor(bodyTop));
+
+    // Scan all blocks from feet to top of entity to find the primary fluid
+    // and the highest fluid surface within the entity's height range
+    FluidTypeId primaryFluid;
+    const FluidType* primaryFt = nullptr;
+    float highestSurfaceY = -1.0f;
+    BlockCoord primaryBlock = feetBlock;
+
+    for (int32_t by = feetBlock.y; by <= topBlockY; ++by) {
+        BlockCoord checkBlock{feetBlock.x, by, feetBlock.z};
+        auto [fluidId, level] = fluidQuery(checkBlock);
+        if (fluidId.isEmpty() || level == 0) continue;
+
+        const FluidType* ft = FluidRegistry::global().getType(fluidId);
+        if (!ft) continue;
+
+        float surfaceH = FluidMeshBuilder::surfaceHeight(level, ft->maxLevel);
+        float surfaceY = static_cast<float>(by) + surfaceH;
+
+        if (surfaceY > highestSurfaceY) {
+            highestSurfaceY = surfaceY;
+            primaryFluid = fluidId;
+            primaryFt = ft;
+            primaryBlock = checkBlock;
+        }
+    }
+
+    if (!primaryFt || highestSurfaceY <= bodyBottom) {
+        return info;  // No fluid contact or entity is above fluid
+    }
+
+    // Calculate submersion fraction
+    float submergedHeight = std::min(highestSurfaceY, bodyTop) - bodyBottom;
+    info.submersion = std::clamp(submergedHeight / bodyHeight, 0.0f, 1.0f);
+
+    info.inFluid = info.submersion > 0.0f;
+    info.fluidType = primaryFluid;
+    info.density = primaryFt->density;
+    info.viscosity = primaryFt->viscosity;
+    info.buoyancyFactor = primaryFt->buoyancyFactor;
+    info.flowForce = primaryFt->flowForce;
+    info.contactDamage = primaryFt->contactDamage;
+    info.submersionDamage = primaryFt->submersionDamage;
+
+    // Check eye submersion
+    float eyeY = pos.y + eyeHeight;
+    info.submerged = eyeY < highestSurfaceY;
+
+    // Compute flow direction from the primary (lowest) fluid block
+    info.flowDirection = computeFlowDirection(primaryBlock, primaryFluid, fluidQuery);
+
+    return info;
+}
+
+Vec3 computeFlowDirection(
+    const BlockCoord& pos,
+    FluidTypeId type,
+    const FluidQueryProvider& fluidQuery)
+{
+    // Get current level at this position
+    auto [currentType, currentLevel] = fluidQuery(pos);
+    if (currentType.isEmpty()) {
+        return Vec3(0.0f);
+    }
+
+    Vec3 direction(0.0f);
+
+    // Check 4 horizontal neighbors
+    static const std::array<BlockCoord, 4> horizontalOffsets = {{
+        {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}
+    }};
+
+    for (const auto& offset : horizontalOffsets) {
+        BlockCoord neighbor{pos.x + offset.x, pos.y + offset.y, pos.z + offset.z};
+        auto [neighborType, neighborLevel] = fluidQuery(neighbor);
+
+        if (neighborType == type && neighborLevel > 0) {
+            // Flow goes from higher level toward lower level
+            int32_t diff = static_cast<int32_t>(currentLevel) - static_cast<int32_t>(neighborLevel);
+            if (diff > 0) {
+                // Current is higher → flow toward neighbor (in offset direction)
+                direction += Vec3(static_cast<float>(offset.x * diff), 0.0f,
+                                  static_cast<float>(offset.z * diff));
+            }
+        } else if (neighborType.isEmpty() || neighborLevel == 0) {
+            // Empty neighbor — flow toward it if we have fluid
+            if (currentLevel > 0) {
+                direction += Vec3(static_cast<float>(offset.x), 0.0f,
+                                  static_cast<float>(offset.z));
+            }
+        }
+    }
+
+    // Also check block below — if there's empty space below, flow has a downward component
+    BlockCoord below{pos.x, pos.y - 1, pos.z};
+    auto [belowType, belowLevel] = fluidQuery(below);
+    if (belowType.isEmpty() || belowLevel == 0) {
+        // Falling flow — add downward component
+        direction.y -= 1.0f;
+    }
+
+    float len = glm::length(direction);
+    if (len > 0.001f) {
+        return direction / len;
+    }
+    return Vec3(0.0f);
+}
+
+void applyBuoyancy(Vec3& velocity, const FluidContactInfo& contact,
+                   float gravity, float dt)
+{
+    if (!contact.inFluid || contact.submersion <= 0.0f) {
+        return;
+    }
+
+    // Buoyancy counteracts gravity proportional to submersion and density.
+    // At density=1000 (water), buoyancyFactor=1.0, full submersion:
+    // buoyancy = gravity * 1.0 * 1.0 * 1.0 = gravity
+    // This exactly counteracts applyGravity's effect, so entity floats.
+    float buoyancy = (contact.density / 1000.0f) * gravity * contact.submersion * contact.buoyancyFactor;
+    velocity.y += buoyancy * dt;
+}
+
+void applyFluidDrag(Vec3& velocity, const FluidContactInfo& contact, float dt)
+{
+    if (!contact.inFluid || contact.submersion <= 0.0f) {
+        return;
+    }
+
+    // Drag factor: higher viscosity = more drag.
+    // Clamped to prevent velocity sign flip.
+    float dragFactor = 1.0f - std::min(contact.viscosity * contact.submersion * dt, 0.99f);
+    velocity *= dragFactor;
+}
+
+void applyFlowForce(Vec3& velocity, const FluidContactInfo& contact, float dt)
+{
+    if (!contact.inFluid || contact.submersion <= 0.0f) {
+        return;
+    }
+
+    float flowLen = glm::length(contact.flowDirection);
+    if (flowLen < 0.001f) {
+        return;
+    }
+
+    velocity += contact.flowDirection * contact.flowForce * contact.submersion * dt;
 }
 
 }  // namespace finevox

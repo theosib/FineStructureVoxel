@@ -5,6 +5,10 @@
 #include "finevox/core/event_queue.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_serializer.hpp"
+#include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/sound_event.hpp"
 
 namespace finevox {
 
@@ -143,20 +147,54 @@ void EntityManager::tick(float tickDt) {
 }
 
 void EntityManager::physicsPass(float tickDt) {
+    // Create fluid query provider from world
+    FluidQueryProvider fluidQuery = [this](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
+        FluidTypeId fid = world_.getFluid(pos);
+        uint8_t level = world_.getFluidLevel(pos);
+        return {fid, level};
+    };
+
     for (auto& [id, entity] : entities_) {
         if (!entity->isAlive()) continue;
 
-        // Apply gravity and movement
+        // 1. Compute fluid contact
+        FluidContactInfo contact;
+        if (entity->isAffectedByFluids()) {
+            bool wasInFluid = entity->isInFluid();
+            contact = computeFluidContact(*entity, entity->eyeHeight(), fluidQuery);
+            entity->setFluidState(contact.inFluid, contact.submerged,
+                                  contact.submersion, contact.fluidType);
+
+            // Splash sound on dry→wet transition
+            if (!wasInFluid && contact.inFluid && soundQueue_) {
+                const FluidType* ft = FluidRegistry::global().getType(contact.fluidType);
+                if (ft && ft->soundSet.isValid()) {
+                    soundQueue_->push(SoundEvent::fluidSplash(
+                        ft->soundSet, entity->position()));
+                }
+            }
+        }
+
+        // 2. Apply gravity
         if (entity->hasGravity()) {
             physics_.applyGravity(*entity, tickDt);
         }
 
-        // Move with collision
+        // 3. Apply fluid forces (buoyancy, drag, flow)
+        if (contact.inFluid && entity->isAffectedByFluids()) {
+            Vec3 vel = entity->velocity();
+            applyBuoyancy(vel, contact, physics_.gravity(), tickDt);
+            applyFluidDrag(vel, contact, tickDt);
+            applyFlowForce(vel, contact, tickDt);
+            entity->setVelocity(vel);
+        }
+
+        // 4. Move with collision
         Vec3 velocity = entity->velocity();
         Vec3 movement = velocity * tickDt;
         physics_.moveBody(*entity, movement);
 
-        // Update ground state
+        // 5. Update ground state
         entity->setOnGround(physics_.checkOnGround(*entity));
     }
 }

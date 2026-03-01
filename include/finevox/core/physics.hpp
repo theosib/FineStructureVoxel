@@ -9,6 +9,7 @@
 
 #include "finevox/core/position.hpp"
 #include "finevox/core/rotation.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <array>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace finevox {
 
@@ -584,5 +586,59 @@ constexpr float CAMERA_COLLISION_RADIUS = 0.4f;
 ) {
     return adjustCameraForWallCollision(safeOrigin, desiredCameraPos, CAMERA_COLLISION_RADIUS, shapeProvider);
 }
+
+// ============================================================================
+// Fluid Physics
+// ============================================================================
+
+/// Callback to query fluid at a world position.
+/// Returns (FluidTypeId, level 0-15). Empty ID + 0 means no fluid.
+using FluidQueryProvider = std::function<std::pair<FluidTypeId, uint8_t>(const BlockCoord& pos)>;
+
+/// Info about fluid contact for a single entity this tick.
+struct FluidContactInfo {
+    bool inFluid = false;           // Any fluid contact at all
+    bool submerged = false;         // Eye position is in fluid
+    float submersion = 0.0f;       // Fraction of body in fluid (0-1)
+    FluidTypeId fluidType;          // Primary fluid type (at feet)
+    float density = 0.0f;           // Fluid density (kg/m^3)
+    float viscosity = 0.0f;         // Fluid viscosity
+    float buoyancyFactor = 0.0f;    // Buoyancy multiplier
+    float flowForce = 0.0f;         // Flow force magnitude
+    float contactDamage = 0.0f;     // Contact DPS
+    float submersionDamage = 0.0f;  // Submersion DPS
+    Vec3 flowDirection{0.0f};       // Normalized flow direction
+};
+
+/// Compute fluid contact for a physics body.
+/// Samples fluid at body's feet and computes submersion based on fluid surface height.
+/// @param body Physics body to check
+/// @param eyeHeight Eye height above position (for submersion detection)
+/// @param fluidQuery Callback to query fluid at block positions
+FluidContactInfo computeFluidContact(
+    const PhysicsBody& body,
+    float eyeHeight,
+    const FluidQueryProvider& fluidQuery);
+
+/// Compute horizontal flow direction from neighbor fluid levels.
+/// Returns zero vector if no directional flow (flat pool or no fluid).
+Vec3 computeFlowDirection(
+    const BlockCoord& pos,
+    FluidTypeId type,
+    const FluidQueryProvider& fluidQuery);
+
+/// Apply buoyancy force to velocity. Counteracts gravity when submerged.
+/// At full submersion in water (density=1000, buoyancyFactor=1.0), exactly
+/// counteracts DEFAULT_GRAVITY.
+void applyBuoyancy(Vec3& velocity, const FluidContactInfo& contact,
+                   float gravity, float dt);
+
+/// Apply fluid drag to velocity. Reduces speed proportional to viscosity.
+/// velocity *= (1 - viscosity * submersion * dt), clamped to prevent sign flip.
+void applyFluidDrag(Vec3& velocity, const FluidContactInfo& contact, float dt);
+
+/// Apply flow force to velocity. Pushes entity in flow direction.
+/// velocity += flowDirection * flowForce * submersion * dt
+void applyFlowForce(Vec3& velocity, const FluidContactInfo& contact, float dt);
 
 }  // namespace finevox

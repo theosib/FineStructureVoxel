@@ -1,5 +1,6 @@
 #include "finevox/core/fluid_loader.hpp"
 #include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/fluid_interaction.hpp"
 #include "finevox/core/config_parser.hpp"
 #include <filesystem>
 #include <fstream>
@@ -124,17 +125,75 @@ size_t FluidLoader::loadDirectory(const std::string& dirPath) {
 
     if (!fs::exists(dirPath) || !fs::is_directory(dirPath)) return 0;
 
+    // First pass: load and register all fluid types
+    // Also collect file contents for interaction parsing in second pass
+    struct FileInfo {
+        std::string content;
+        std::string fluidName;
+    };
+    std::vector<FileInfo> files;
+
     size_t count = 0;
     for (const auto& entry : fs::directory_iterator(dirPath)) {
         if (!entry.is_regular_file()) continue;
         if (entry.path().extension() != ".fluid") continue;
 
-        auto ft = loadFromFile(entry.path().string());
+        std::ifstream file(entry.path());
+        if (!file.is_open()) continue;
+
+        std::string content((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+
+        auto ft = loadFromString(content);
         if (ft) {
             auto name = ft->name;
             if (FluidRegistry::global().registerType(name, std::move(*ft))) {
                 ++count;
+                files.push_back({std::move(content), name});
             }
+        }
+    }
+
+    // Second pass: parse and register interactions (all types now registered)
+    for (const auto& info : files) {
+        loadInteractions(info.content, info.fluidName);
+    }
+
+    return count;
+}
+
+size_t FluidLoader::loadInteractions(std::string_view content, std::string_view ownerFluid) {
+    ConfigParser parser;
+    auto doc = parser.parseString(content);
+    if (doc.empty()) return 0;
+
+    FluidTypeId ownerId = FluidTypeId::fromName(ownerFluid);
+    if (ownerId.isEmpty()) return 0;
+
+    size_t count = 0;
+    for (const auto& entry : doc.entries()) {
+        if (entry.key != "interaction" || !entry.hasSuffix()) continue;
+
+        // Format: "interaction <other_fluid>: <result_block>"
+        FluidTypeId otherId = FluidTypeId::fromName(entry.suffix);
+        if (otherId.isEmpty()) continue;
+
+        // Already registered? Skip (avoid duplicates from both sides)
+        if (FluidInteractionRegistry::global().hasInteraction(ownerId, otherId)) continue;
+
+        FluidInteraction interaction;
+        interaction.fluidA = ownerId;
+        interaction.fluidB = otherId;
+        interaction.consumeA = true;
+        interaction.consumeB = true;
+
+        std::string resultStr = entry.value.asStringOwned();
+        if (!resultStr.empty()) {
+            interaction.resultBlock = BlockTypeId::fromName(resultStr);
+        }
+
+        if (FluidInteractionRegistry::global().registerInteraction(interaction)) {
+            ++count;
         }
     }
 

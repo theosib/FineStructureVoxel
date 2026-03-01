@@ -2,6 +2,8 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_registry.hpp"
 #include "finevox/core/item_registry.hpp"
+#include "finevox/core/game_session.hpp"
+#include "finevox/core/light_engine.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -45,6 +47,18 @@ void ModuleRegistry::warn(std::string_view message) const {
 
 void ModuleRegistry::error(std::string_view message) const {
     std::cerr << "[" << namespace_ << "] ERROR: " << message << "\n";
+}
+
+void ModuleRegistry::addSubsystem(std::shared_ptr<GameSubsystem> subsystem) {
+    if (session_) {
+        session_->addSubsystem(std::move(subsystem));
+    }
+}
+
+void ModuleRegistry::addLightProvider(std::shared_ptr<LightProvider> provider) {
+    if (lightEngine_) {
+        lightEngine_->addLightProvider(std::move(provider));
+    }
 }
 
 // ============================================================================
@@ -246,6 +260,61 @@ bool ModuleLoader::initializeAll(BlockRegistry& blocks, EntityRegistry& entities
             std::cerr << "Module " << name << " initialization failed: " << e.what() << "\n";
             return false;
         }
+    }
+
+    return true;
+}
+
+bool ModuleLoader::initializeExtended(BlockRegistry& blocks, EntityRegistry& entities,
+                                       ItemRegistry& items, const ExtendedContext& ctx) {
+    // Must have been initialized first
+    if (initOrder_.empty() && !modules_.empty()) {
+        return false;
+    }
+
+    try {
+        // Phase 3: onRegisterEvents
+        if (ctx.eventBus) {
+            for (const auto& name : initOrder_) {
+                ModuleRegistry registry(name, blocks, entities, items);
+                registry.setEventBus(ctx.eventBus);
+                modules_[name].module->onRegisterEvents(registry);
+            }
+        }
+
+        // Phase 4: onRegisterSubsystems
+        if (ctx.session) {
+            for (const auto& name : initOrder_) {
+                ModuleRegistry registry(name, blocks, entities, items);
+                registry.setEventBus(ctx.eventBus);
+                registry.setSession(ctx.session);
+                modules_[name].module->onRegisterSubsystems(registry);
+            }
+        }
+
+        // Phase 5: onRegisterLightProviders
+        if (ctx.lightEngine) {
+            for (const auto& name : initOrder_) {
+                ModuleRegistry registry(name, blocks, entities, items);
+                registry.setEventBus(ctx.eventBus);
+                registry.setSession(ctx.session);
+                registry.setLightEngine(ctx.lightEngine);
+                modules_[name].module->onRegisterLightProviders(registry);
+            }
+        }
+
+        // Phase 6: onRegisterRenderLayers
+        for (const auto& name : initOrder_) {
+            ModuleRegistry registry(name, blocks, entities, items);
+            registry.setEventBus(ctx.eventBus);
+            registry.setSession(ctx.session);
+            registry.setLightEngine(ctx.lightEngine);
+            modules_[name].module->onRegisterRenderLayers(registry);
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << "Extended module initialization failed: " << e.what() << "\n";
+        return false;
     }
 
     return true;

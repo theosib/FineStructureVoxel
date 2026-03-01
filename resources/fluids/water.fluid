@@ -45,3 +45,6 @@ underwater_fog_density: 0.04
 
 # Container
 units_per_source: 1000
+
+# Interactions (water flowing into other fluids)
+interaction:lava: lite_rock

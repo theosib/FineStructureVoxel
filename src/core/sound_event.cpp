@@ -77,4 +77,23 @@ SoundEvent SoundEvent::ambient(SoundSetId ambientId, glm::vec3 pos) {
     return event;
 }
 
+SoundEvent SoundEvent::fluidSplash(SoundSetId set, glm::vec3 pos) {
+    SoundEvent event;
+    event.soundSet = set;
+    event.action = SoundAction::Splash;
+    event.category = SoundCategory::Effects;
+    event.setPosition(pos);
+    return event;
+}
+
+SoundEvent SoundEvent::fluidSwim(SoundSetId set, glm::vec3 pos) {
+    SoundEvent event;
+    event.soundSet = set;
+    event.action = SoundAction::Swim;
+    event.category = SoundCategory::Effects;
+    event.setPosition(pos);
+    event.volume = 0.4f;
+    return event;
+}
+
 }  // namespace finevox

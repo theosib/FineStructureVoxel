@@ -4,6 +4,12 @@
 #include "finevox/core/block_handler.hpp"
 #include "finevox/core/entity_registry.hpp"
 #include "finevox/core/item_registry.hpp"
+#include "finevox/core/event_bus.hpp"
+#include "finevox/core/game_session.hpp"
+#include "finevox/core/game_subsystem.hpp"
+#include "finevox/core/light_engine.hpp"
+#include "finevox/core/light_provider.hpp"
+#include "finevox/core/world.hpp"
 
 using namespace finevox;
 
@@ -390,4 +396,289 @@ TEST(ItemRegistryTest, CannotRegisterDuplicate) {
 
     bool second = registry.registerType("testmod:item_dup");
     EXPECT_FALSE(second);
+}
+
+// ============================================================================
+// Extended Module Lifecycle Tests
+// ============================================================================
+
+class ExtendedTestModule : public GameModule {
+public:
+    explicit ExtendedTestModule(std::string_view name) : name_(name) {}
+
+    [[nodiscard]] std::string_view name() const override { return name_; }
+    [[nodiscard]] std::string_view version() const override { return "1.0.0"; }
+
+    void onRegister(ModuleRegistry&) override {
+        registerCalled = true;
+    }
+
+    void onRegisterEvents(ModuleRegistry& registry) override {
+        eventsCalled = true;
+        hasEventBus = (registry.eventBus() != nullptr);
+    }
+
+    void onRegisterSubsystems(ModuleRegistry& registry) override {
+        subsystemsCalled = true;
+        hasSession = (registry.session() != nullptr);
+    }
+
+    void onRegisterLightProviders(ModuleRegistry& registry) override {
+        lightProvidersCalled = true;
+        hasLightEngine = (registry.lightEngine() != nullptr);
+    }
+
+    void onRegisterRenderLayers(ModuleRegistry& registry) override {
+        renderLayersCalled = true;
+    }
+
+    bool registerCalled = false;
+    bool eventsCalled = false;
+    bool subsystemsCalled = false;
+    bool lightProvidersCalled = false;
+    bool renderLayersCalled = false;
+    bool hasEventBus = false;
+    bool hasSession = false;
+    bool hasLightEngine = false;
+
+private:
+    std::string name_;
+};
+
+TEST(ExtendedModuleTest, ExtendedPhasesCalledInOrder) {
+    ModuleLoader loader;
+
+    auto module = std::make_unique<ExtendedTestModule>("testmod_extended");
+    ExtendedTestModule* rawPtr = module.get();
+    loader.registerBuiltin(std::move(module));
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+
+    // Phase 1-2: basic initialization
+    bool success = loader.initializeAll(blocks, entities, items);
+    EXPECT_TRUE(success);
+    EXPECT_TRUE(rawPtr->registerCalled);
+    EXPECT_FALSE(rawPtr->eventsCalled);
+
+    // Phase 3-6: extended initialization
+    auto session = GameSession::createLocal();
+    EventBus& bus = session->eventBus();
+    World& world = session->world();
+    LightEngine lightEngine(world);
+
+    ModuleLoader::ExtendedContext ctx;
+    ctx.eventBus = &bus;
+    ctx.session = session.get();
+    ctx.lightEngine = &lightEngine;
+
+    success = loader.initializeExtended(blocks, entities, items, ctx);
+    EXPECT_TRUE(success);
+
+    EXPECT_TRUE(rawPtr->eventsCalled);
+    EXPECT_TRUE(rawPtr->subsystemsCalled);
+    EXPECT_TRUE(rawPtr->lightProvidersCalled);
+    EXPECT_TRUE(rawPtr->renderLayersCalled);
+}
+
+TEST(ExtendedModuleTest, ExtendedContextAvailable) {
+    ModuleLoader loader;
+
+    auto module = std::make_unique<ExtendedTestModule>("testmod_ctx");
+    ExtendedTestModule* rawPtr = module.get();
+    loader.registerBuiltin(std::move(module));
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+
+    loader.initializeAll(blocks, entities, items);
+
+    auto session = GameSession::createLocal();
+    World& world = session->world();
+    LightEngine lightEngine(world);
+
+    ModuleLoader::ExtendedContext ctx;
+    ctx.eventBus = &session->eventBus();
+    ctx.session = session.get();
+    ctx.lightEngine = &lightEngine;
+
+    loader.initializeExtended(blocks, entities, items, ctx);
+
+    EXPECT_TRUE(rawPtr->hasEventBus);
+    EXPECT_TRUE(rawPtr->hasSession);
+    EXPECT_TRUE(rawPtr->hasLightEngine);
+}
+
+TEST(ExtendedModuleTest, PartialContextSkipsPhases) {
+    ModuleLoader loader;
+
+    auto module = std::make_unique<ExtendedTestModule>("testmod_partial");
+    ExtendedTestModule* rawPtr = module.get();
+    loader.registerBuiltin(std::move(module));
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+
+    loader.initializeAll(blocks, entities, items);
+
+    // Only provide eventBus - no session or lightEngine
+    auto session = GameSession::createLocal();
+    ModuleLoader::ExtendedContext ctx;
+    ctx.eventBus = &session->eventBus();
+
+    loader.initializeExtended(blocks, entities, items, ctx);
+
+    EXPECT_TRUE(rawPtr->eventsCalled);
+    EXPECT_FALSE(rawPtr->subsystemsCalled);   // No session provided
+    EXPECT_FALSE(rawPtr->lightProvidersCalled); // No lightEngine provided
+    EXPECT_TRUE(rawPtr->renderLayersCalled);   // Always called
+}
+
+TEST(ExtendedModuleTest, ConvenienceAddSubsystem) {
+    auto session = GameSession::createLocal();
+    size_t beforeCount = session->subsystems().size();
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+    ModuleRegistry registry("testmod_convenience", blocks, entities, items);
+    registry.setSession(session.get());
+
+    // Create a minimal subsystem
+    class TestSubsystem : public GameSubsystem {
+    public:
+        std::string_view name() const override { return "TestConvenience"; }
+        TickPhase phase() const override { return TickPhase::Tick; }
+        void tick(float) override {}
+    };
+
+    registry.addSubsystem(std::make_shared<TestSubsystem>());
+    EXPECT_EQ(session->subsystems().size(), beforeCount + 1);
+}
+
+TEST(ExtendedModuleTest, ConvenienceAddLightProvider) {
+    World world;
+    LightEngine lightEngine(world);
+    EXPECT_EQ(lightEngine.lightProviders().size(), 0u);
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+    ModuleRegistry registry("testmod_lightconv", blocks, entities, items);
+    registry.setLightEngine(&lightEngine);
+
+    registry.addLightProvider(createBlockLightProvider());
+    EXPECT_EQ(lightEngine.lightProviders().size(), 1u);
+}
+
+TEST(ExtendedModuleTest, ConvenienceNullSafetySubsystem) {
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+    ModuleRegistry registry("testmod_nullsafe", blocks, entities, items);
+
+    // session not set - should be a safe no-op
+    class TestSubsystem : public GameSubsystem {
+    public:
+        std::string_view name() const override { return "Null"; }
+        TickPhase phase() const override { return TickPhase::Tick; }
+        void tick(float) override {}
+    };
+
+    // Should not crash
+    registry.addSubsystem(std::make_shared<TestSubsystem>());
+}
+
+TEST(ExtendedModuleTest, ConvenienceNullSafetyLightProvider) {
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+    ModuleRegistry registry("testmod_nullsafe2", blocks, entities, items);
+
+    // lightEngine not set - should be a safe no-op
+    registry.addLightProvider(createBlockLightProvider());
+}
+
+TEST(ExtendedModuleTest, DependencyOrderPreservedInExtended) {
+    ModuleLoader loader;
+
+    std::vector<std::string> callOrder;
+
+    class OrderedModule : public GameModule {
+    public:
+        OrderedModule(std::string n, std::vector<std::string>& log)
+            : name_(std::move(n)), log_(log) {}
+
+        std::string_view name() const override { return name_; }
+        std::string_view version() const override { return "1.0.0"; }
+
+        std::vector<std::string_view> dependencies() const override { return deps_; }
+
+        void onRegister(ModuleRegistry&) override {}
+        void onRegisterEvents(ModuleRegistry&) override {
+            log_.push_back(name_ + ":events");
+        }
+        void onRegisterSubsystems(ModuleRegistry&) override {
+            log_.push_back(name_ + ":subsystems");
+        }
+
+        void addDep(std::string_view dep) {
+            depStrings_.push_back(std::string(dep));
+            deps_.clear();
+            for (const auto& s : depStrings_) deps_.push_back(s);
+        }
+
+        std::string name_;
+        std::vector<std::string> depStrings_;
+        std::vector<std::string_view> deps_;
+        std::vector<std::string>& log_;
+    };
+
+    auto modA = std::make_unique<OrderedModule>("testmod_order_a", callOrder);
+    auto modB = std::make_unique<OrderedModule>("testmod_order_b", callOrder);
+    modB->addDep("testmod_order_a");
+
+    loader.registerBuiltin(std::move(modB));
+    loader.registerBuiltin(std::move(modA));
+
+    BlockRegistry& blocks = BlockRegistry::global();
+    EntityRegistry& entities = EntityRegistry::global();
+    ItemRegistry& items = ItemRegistry::global();
+    loader.initializeAll(blocks, entities, items);
+
+    auto session = GameSession::createLocal();
+    ModuleLoader::ExtendedContext ctx;
+    ctx.eventBus = &session->eventBus();
+    ctx.session = session.get();
+    loader.initializeExtended(blocks, entities, items, ctx);
+
+    // A's events should come before B's events
+    // A's subsystems should come before B's subsystems
+    auto findIdx = [&](const std::string& s) -> int {
+        for (int i = 0; i < (int)callOrder.size(); i++) {
+            if (callOrder[i] == s) return i;
+        }
+        return -1;
+    };
+
+    int aEvents = findIdx("testmod_order_a:events");
+    int bEvents = findIdx("testmod_order_b:events");
+    int aSubsystems = findIdx("testmod_order_a:subsystems");
+    int bSubsystems = findIdx("testmod_order_b:subsystems");
+
+    ASSERT_NE(aEvents, -1);
+    ASSERT_NE(bEvents, -1);
+    ASSERT_NE(aSubsystems, -1);
+    ASSERT_NE(bSubsystems, -1);
+
+    // Within each phase, dependency order is preserved
+    EXPECT_LT(aEvents, bEvents);
+    EXPECT_LT(aSubsystems, bSubsystems);
+
+    // All events come before all subsystems (phase ordering)
+    EXPECT_LT(aEvents, aSubsystems);
+    EXPECT_LT(bEvents, bSubsystems);
 }

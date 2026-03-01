@@ -175,6 +175,10 @@ private:
     /// Check if a cell has a valid supply (source above or adjacent higher-level same fluid)
     bool hasValidSupply(BlockCoord pos, FluidTypeId type, uint8_t level) const;
 
+    /// Check if a source block is static (all neighbors are same-type source or solid)
+    /// Static sources cannot flow anywhere and don't need evaluation.
+    bool isStaticSource(BlockCoord pos, FluidTypeId type) const;
+
     /// Count adjacent source blocks of the same type
     int32_t countAdjacentSources(BlockCoord pos, FluidTypeId type) const;
 

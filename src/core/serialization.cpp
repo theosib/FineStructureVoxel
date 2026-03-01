@@ -1,6 +1,8 @@
 #include "finevox/core/serialization.hpp"
 #include "finevox/core/cbor.hpp"
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 
 namespace finevox {
 
@@ -91,6 +93,26 @@ SerializedSubChunk SubChunkSerializer::serialize(const SubChunk& chunk, int32_t 
         result.subchunkData = chunk.data()->clone();
     }
 
+    // Serialize fluid layer (only if non-empty)
+    const FluidLayer* fluidLayer = chunk.fluidLayer();
+    if (fluidLayer && !fluidLayer->isEmpty()) {
+        const FluidPalette& fp = fluidLayer->palette();
+        // Build palette strings: index 0 = empty (unused), 1..15 = fluid type names
+        result.fluidPalette.resize(FluidPalette::MAX_ENTRIES + 1);
+        result.fluidPalette[0] = "";  // index 0 = empty
+        for (uint8_t i = 1; i <= FluidPalette::MAX_ENTRIES; ++i) {
+            FluidTypeId fid = fp.getType(i);
+            result.fluidPalette[i] = fid.isValid() ? std::string(fid.name()) : "";
+        }
+        // Trim trailing empty entries
+        while (result.fluidPalette.size() > 1 && result.fluidPalette.back().empty()) {
+            result.fluidPalette.pop_back();
+        }
+        // Copy raw data
+        const auto& raw = fluidLayer->rawData();
+        result.fluidData.assign(raw.begin(), raw.end());
+    }
+
     return result;
 }
 
@@ -98,16 +120,18 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
     SerializedSubChunk data = serialize(chunk, yLevel);
     std::vector<uint8_t> out;
 
-    // Count fields: y, palette, blocks, and optionally rotations, light, blockData, subchunkData
+    // Count fields: y, palette, blocks, and optionally rotations, light, blockData, subchunkData, fluid
     int fieldCount = 3;  // y, palette, blocks
     bool hasRotations = !data.rotations.empty();
     bool hasLightData = !data.lightData.empty();
     bool hasBlockData = !data.blockData.empty();
     bool hasSubchunkData = data.subchunkData && !data.subchunkData->empty();
+    bool hasFluidData = !data.fluidData.empty();
     if (hasRotations) fieldCount++;
     if (hasLightData) fieldCount++;
     if (hasBlockData) fieldCount++;
     if (hasSubchunkData) fieldCount++;
+    if (hasFluidData) fieldCount += 2;  // fluid_palette + fluid_data
 
     cbor::encodeMapHeader(out, fieldCount);
 
@@ -155,6 +179,18 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
         cbor::encodeString(out, "data");
         auto containerBytes = data.subchunkData->toCBOR();
         out.insert(out.end(), containerBytes.begin(), containerBytes.end());
+    }
+
+    // "fluid_palette" + "fluid_data": fluid layer (optional)
+    if (hasFluidData) {
+        cbor::encodeString(out, "fluid_palette");
+        cbor::encodeArrayHeader(out, data.fluidPalette.size());
+        for (const auto& name : data.fluidPalette) {
+            cbor::encodeString(out, name);
+        }
+
+        cbor::encodeString(out, "fluid_data");
+        cbor::encodeBytes(out, data.fluidData);
     }
 
     return out;
@@ -231,6 +267,36 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
         data.subchunkData->forEach([&subchunkData](DataKey key, const DataValue& value) {
             subchunkData.set(key, DataContainer::cloneValue(value));
         });
+    }
+
+    // Restore fluid layer (only if fluid data was serialized)
+    if (!data.fluidData.empty() && data.fluidData.size() == FluidLayer::VOLUME) {
+        FluidLayer& fl = chunk->getOrCreateFluidLayer();
+        fl.clear();
+
+        // Rebuild palette mapping: serialized index → FluidTypeId
+        // index 0 is empty, 1..N are fluid type names
+        std::array<FluidTypeId, 16> paletteMap{};
+        for (size_t i = 1; i < data.fluidPalette.size() && i <= FluidPalette::MAX_ENTRIES; ++i) {
+            if (!data.fluidPalette[i].empty()) {
+                paletteMap[i] = FluidTypeId::fromName(data.fluidPalette[i]);
+            }
+        }
+
+        // Re-set each non-empty cell using the public API so palette + refcounts are correct
+        std::array<uint8_t, FluidLayer::VOLUME> rawData{};
+        std::copy(data.fluidData.begin(), data.fluidData.end(), rawData.begin());
+        for (int32_t idx = 0; idx < FluidLayer::VOLUME; ++idx) {
+            uint8_t packed = rawData[idx];
+            uint8_t palIdx = (packed >> 4) & 0x0F;
+            uint8_t level  = packed & 0x0F;
+            if (palIdx != 0 && level != 0) {
+                FluidTypeId fid = paletteMap[palIdx];
+                if (fid.isValid()) {
+                    fl.setFluid(idx, fid, level);
+                }
+            }
+        }
     }
 
     return chunk;
@@ -319,6 +385,24 @@ std::unique_ptr<SubChunk> SubChunkSerializer::fromCBOR(std::span<const uint8_t> 
 
             std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
             serialized.subchunkData = DataContainer::fromCBOR(containerData);
+        } else if (key == "fluid_palette") {
+            auto [arrType, arrLen] = decoder.readHeader();
+            if (arrType == cbor::ARRAY) {
+                serialized.fluidPalette.reserve(arrLen);
+                for (uint64_t j = 0; j < arrLen; ++j) {
+                    auto [strType, strLen] = decoder.readHeader();
+                    if (strType == cbor::TEXT_STRING) {
+                        serialized.fluidPalette.push_back(decoder.readString(strLen));
+                    } else {
+                        serialized.fluidPalette.push_back("");
+                    }
+                }
+            }
+        } else if (key == "fluid_data") {
+            auto [bytesType, bytesLen] = decoder.readHeader();
+            if (bytesType == cbor::BYTE_STRING) {
+                serialized.fluidData = decoder.readBytes(bytesLen);
+            }
         } else {
             decoder.skipValue();
         }
@@ -502,6 +586,24 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
 
                             std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
                             serialized.subchunkData = DataContainer::fromCBOR(containerData);
+                        } else if (fieldKey == "fluid_palette") {
+                            auto [paletteType, paletteLen] = decoder.readHeader();
+                            if (paletteType == cbor::ARRAY) {
+                                serialized.fluidPalette.reserve(paletteLen);
+                                for (uint64_t p = 0; p < paletteLen; ++p) {
+                                    auto [strType, strLen] = decoder.readHeader();
+                                    if (strType == cbor::TEXT_STRING) {
+                                        serialized.fluidPalette.push_back(decoder.readString(strLen));
+                                    } else {
+                                        serialized.fluidPalette.push_back("");
+                                    }
+                                }
+                            }
+                        } else if (fieldKey == "fluid_data") {
+                            auto [bytesType, bytesLen] = decoder.readHeader();
+                            if (bytesType == cbor::BYTE_STRING) {
+                                serialized.fluidData = decoder.readBytes(bytesLen);
+                            }
                         } else {
                             decoder.skipValue();
                         }
@@ -567,6 +669,22 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
                 sc->data()->forEach([&targetData](DataKey key, const DataValue& value) {
                     targetData.set(key, DataContainer::cloneValue(value));
                 });
+            }
+
+            // Copy fluid layer
+            const FluidLayer* srcFluid = sc->fluidLayer();
+            if (srcFluid && !srcFluid->isEmpty()) {
+                FluidLayer& targetFluid = targetSc->getOrCreateFluidLayer();
+                // Copy cell by cell using public API to maintain palette/refcounts
+                for (int32_t idx = 0; idx < FluidLayer::VOLUME; ++idx) {
+                    FluidCell cell = srcFluid->getCell(idx);
+                    if (!cell.isEmpty()) {
+                        FluidTypeId fid = srcFluid->palette().getType(cell.paletteIndex);
+                        if (fid.isValid()) {
+                            targetFluid.setFluid(idx, fid, cell.level);
+                        }
+                    }
+                }
             }
         }
     }

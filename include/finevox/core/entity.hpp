@@ -161,6 +161,23 @@ public:
     void advanceAnimation(float dt) { animationTime_ += dt; }
 
     // ========================================================================
+    // Fluid State
+    // ========================================================================
+
+    [[nodiscard]] bool isInFluid() const { return inFluid_; }
+    [[nodiscard]] bool isSubmerged() const { return isSubmerged_; }
+    [[nodiscard]] float fluidSubmersion() const { return fluidSubmersion_; }
+    [[nodiscard]] FluidTypeId inFluidType() const { return inFluidType_; }
+    [[nodiscard]] virtual bool isAffectedByFluids() const { return true; }
+
+    void setFluidState(bool inFluid, bool submerged, float submersion, FluidTypeId type) {
+        inFluid_ = inFluid;
+        isSubmerged_ = submerged;
+        fluidSubmersion_ = submersion;
+        inFluidType_ = type;
+    }
+
+    // ========================================================================
     // Lifecycle
     // ========================================================================
 
@@ -232,6 +249,13 @@ protected:
 
     // Lifecycle
     bool markedForRemoval_ = false;
+
+    // Fluid state
+    bool inFluid_ = false;
+    bool isSubmerged_ = false;
+    float fluidSubmersion_ = 0.0f;
+    FluidTypeId inFluidType_;
+    float fluidDamageAccumulator_ = 0.0f;
 
     // Subchunk tracking (for EntityManager)
     ChunkPos currentChunk_{0, 0, 0};

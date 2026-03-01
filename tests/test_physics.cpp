@@ -1285,3 +1285,319 @@ TEST(PhysicsSystemTest, PerBodyStepHeightZeroDisablesStep) {
     EXPECT_LT(body.position().x, 3.0f);  // Blocked
     EXPECT_NEAR(body.position().y, 1.0f, 0.1f);  // Still on ground level
 }
+
+// ============================================================================
+// Fluid Physics Tests
+// ============================================================================
+
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/string_interner.hpp"
+#include "finevox/core/entity.hpp"
+
+namespace {
+
+// Helper: register a test fluid type and return its ID
+FluidTypeId registerTestFluid(const std::string& name, float density = 1000.0f,
+                               float viscosity = 1.0f, float buoyancyFactor = 1.0f,
+                               float flowForce = 0.5f, float contactDamage = 0.0f,
+                               float submersionDamage = 0.0f) {
+    FluidType ft;
+    ft.name = name;
+    ft.id = FluidTypeId(StringInterner::global().intern(name));
+    ft.density = density;
+    ft.viscosity = viscosity;
+    ft.buoyancyFactor = buoyancyFactor;
+    ft.flowForce = flowForce;
+    ft.contactDamage = contactDamage;
+    ft.submersionDamage = submersionDamage;
+    ft.maxLevel = 14;
+
+    auto& reg = FluidRegistry::global();
+    if (!reg.getType(ft.id)) {
+        reg.registerType(name, ft);
+    }
+    return ft.id;
+}
+
+// Helper: create a fluid query that returns fluid at specific positions
+FluidQueryProvider makeFluidQuery(
+    const std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>>& fluids)
+{
+    return [fluids](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
+        auto it = fluids.find(pos);
+        if (it != fluids.end()) {
+            return it->second;
+        }
+        return {FluidTypeId{}, 0};
+    };
+}
+
+}  // anonymous namespace
+
+// --- computeFluidContact tests ---
+
+TEST(FluidPhysicsTest, NoFluidContact) {
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.35f, 0.925f, 0.35f));
+
+    // Empty world — no fluid anywhere
+    FluidQueryProvider noFluid = [](const BlockCoord&) -> std::pair<FluidTypeId, uint8_t> {
+        return {FluidTypeId{}, 0};
+    };
+
+    FluidContactInfo contact = computeFluidContact(body, 1.65f, noFluid);
+    EXPECT_FALSE(contact.inFluid);
+    EXPECT_FALSE(contact.submerged);
+    EXPECT_FLOAT_EQ(contact.submersion, 0.0f);
+}
+
+TEST(FluidPhysicsTest, FullySubmerged) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // Entity at y=10, height=1.85 (top at 11.85)
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.35f, 0.925f, 0.35f));
+
+    // Water source at y=10 and y=11 (surface at ~11.875)
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{5, 11, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    auto query = makeFluidQuery(fluids);
+
+    FluidContactInfo contact = computeFluidContact(body, 1.65f, query);
+    EXPECT_TRUE(contact.inFluid);
+    EXPECT_TRUE(contact.submerged);  // Eye at 11.65, surface at 11.875
+    EXPECT_GT(contact.submersion, 0.9f);
+    EXPECT_EQ(contact.fluidType, waterId);
+    EXPECT_FLOAT_EQ(contact.density, 1000.0f);
+}
+
+TEST(FluidPhysicsTest, PartialSubmersion) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // Entity at y=10, height=1.85
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.35f, 0.925f, 0.35f));
+
+    // Water source at y=10 only (surface at ~10.875)
+    // Body bottom at 10.0, body top at 11.85
+    // Submerged height = min(10.875, 11.85) - 10.0 = 0.875
+    // Submersion = 0.875 / 1.85 ≈ 0.473
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    auto query = makeFluidQuery(fluids);
+
+    FluidContactInfo contact = computeFluidContact(body, 1.65f, query);
+    EXPECT_TRUE(contact.inFluid);
+    EXPECT_FALSE(contact.submerged);  // Eye at 11.65, surface at 10.875
+    EXPECT_GT(contact.submersion, 0.3f);
+    EXPECT_LT(contact.submersion, 0.6f);
+}
+
+TEST(FluidPhysicsTest, EyeBelowSurface) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // Short entity: eye height at 0.5, body height 0.8
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.25f, 0.4f, 0.25f));
+
+    // Water source at y=10 (surface at ~10.875)
+    // Eye at 10.5, which is below 10.875
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    auto query = makeFluidQuery(fluids);
+
+    FluidContactInfo contact = computeFluidContact(body, 0.5f, query);
+    EXPECT_TRUE(contact.inFluid);
+    EXPECT_TRUE(contact.submerged);  // Eye at 10.5 < surface at 10.875
+}
+
+TEST(FluidPhysicsTest, EyeAboveSurface) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // Entity at y=10, eye height 1.65 → eye at 11.65
+    SimplePhysicsBody body(Vec3(5.0f, 10.0f, 5.0f), Vec3(0.35f, 0.925f, 0.35f));
+
+    // Water source at y=10 only (surface at ~10.875)
+    // Eye at 11.65, which is above 10.875
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    auto query = makeFluidQuery(fluids);
+
+    FluidContactInfo contact = computeFluidContact(body, 1.65f, query);
+    EXPECT_TRUE(contact.inFluid);
+    EXPECT_FALSE(contact.submerged);
+}
+
+// --- computeFlowDirection tests ---
+
+TEST(FluidPhysicsTest, FlatPoolNoFlow) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // All neighbors have same level → no directional flow
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{6, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{4, 10, 5}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{5, 10, 6}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{5, 10, 4}] = {waterId, FLUID_SOURCE_LEVEL};
+    fluids[{5, 9, 5}]  = {waterId, FLUID_SOURCE_LEVEL};  // Below
+    auto query = makeFluidQuery(fluids);
+
+    Vec3 dir = computeFlowDirection({5, 10, 5}, waterId, query);
+    EXPECT_NEAR(glm::length(dir), 0.0f, 0.01f);
+}
+
+TEST(FluidPhysicsTest, FlowTowardLowerLevel) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    // Center has level 10, +X neighbor has level 5 → flow toward +X
+    std::unordered_map<BlockCoord, std::pair<FluidTypeId, uint8_t>> fluids;
+    fluids[{5, 10, 5}] = {waterId, 10};
+    fluids[{6, 10, 5}] = {waterId, 5};
+    fluids[{4, 10, 5}] = {waterId, 10};
+    fluids[{5, 10, 6}] = {waterId, 10};
+    fluids[{5, 10, 4}] = {waterId, 10};
+    fluids[{5, 9, 5}]  = {waterId, FLUID_SOURCE_LEVEL};
+    auto query = makeFluidQuery(fluids);
+
+    Vec3 dir = computeFlowDirection({5, 10, 5}, waterId, query);
+    EXPECT_GT(dir.x, 0.0f);  // Flows toward lower-level neighbor in +X
+}
+
+// --- applyBuoyancy tests ---
+
+TEST(FluidPhysicsTest, BuoyancyCounteractsGravity) {
+    FluidContactInfo contact;
+    contact.inFluid = true;
+    contact.submersion = 1.0f;
+    contact.density = 1000.0f;
+    contact.buoyancyFactor = 1.0f;
+
+    Vec3 vel(0.0f, 0.0f, 0.0f);
+    float dt = 0.05f;
+
+    // Apply gravity first
+    vel.y -= DEFAULT_GRAVITY * dt;  // -1.0
+
+    // Apply buoyancy — should counteract gravity
+    applyBuoyancy(vel, contact, DEFAULT_GRAVITY, dt);
+
+    // Velocity should be near zero (buoyancy exactly counteracts gravity)
+    EXPECT_NEAR(vel.y, 0.0f, 0.01f);
+}
+
+TEST(FluidPhysicsTest, HalfSubmersionHalfBuoyancy) {
+    FluidContactInfo contact;
+    contact.inFluid = true;
+    contact.submersion = 0.5f;
+    contact.density = 1000.0f;
+    contact.buoyancyFactor = 1.0f;
+
+    Vec3 vel(0.0f, 0.0f, 0.0f);
+    float dt = 0.05f;
+
+    // Apply gravity
+    vel.y -= DEFAULT_GRAVITY * dt;  // -1.0
+
+    // Apply buoyancy at half submersion → half counteraction
+    applyBuoyancy(vel, contact, DEFAULT_GRAVITY, dt);
+
+    // Should have half the gravity effect remaining
+    EXPECT_NEAR(vel.y, -DEFAULT_GRAVITY * dt * 0.5f, 0.01f);
+}
+
+// --- applyFluidDrag tests ---
+
+TEST(FluidPhysicsTest, DragReducesVelocity) {
+    FluidContactInfo contact;
+    contact.inFluid = true;
+    contact.submersion = 1.0f;
+    contact.viscosity = 1.0f;
+
+    Vec3 vel(10.0f, 0.0f, 5.0f);
+    float originalSpeed = glm::length(vel);
+
+    applyFluidDrag(vel, contact, 0.05f);
+
+    float newSpeed = glm::length(vel);
+    EXPECT_LT(newSpeed, originalSpeed);
+    EXPECT_GT(newSpeed, 0.0f);  // Not zero after one tick
+}
+
+TEST(FluidPhysicsTest, HigherViscosityMoreDrag) {
+    // Water (viscosity 1.0)
+    FluidContactInfo waterContact;
+    waterContact.inFluid = true;
+    waterContact.submersion = 1.0f;
+    waterContact.viscosity = 1.0f;
+
+    Vec3 waterVel(10.0f, 0.0f, 0.0f);
+    applyFluidDrag(waterVel, waterContact, 0.05f);
+
+    // Lava (viscosity 4.0)
+    FluidContactInfo lavaContact;
+    lavaContact.inFluid = true;
+    lavaContact.submersion = 1.0f;
+    lavaContact.viscosity = 4.0f;
+
+    Vec3 lavaVel(10.0f, 0.0f, 0.0f);
+    applyFluidDrag(lavaVel, lavaContact, 0.05f);
+
+    // Lava should have more drag (slower resulting velocity)
+    EXPECT_LT(lavaVel.x, waterVel.x);
+}
+
+// --- applyFlowForce tests ---
+
+TEST(FluidPhysicsTest, FlowForceApplied) {
+    FluidContactInfo contact;
+    contact.inFluid = true;
+    contact.submersion = 1.0f;
+    contact.flowForce = 2.0f;
+    contact.flowDirection = glm::normalize(Vec3(1.0f, 0.0f, 0.0f));
+
+    Vec3 vel(0.0f, 0.0f, 0.0f);
+    applyFlowForce(vel, contact, 0.05f);
+
+    EXPECT_GT(vel.x, 0.0f);
+    EXPECT_NEAR(vel.y, 0.0f, 0.001f);
+    EXPECT_NEAR(vel.z, 0.0f, 0.001f);
+}
+
+// --- Entity fluid state tests ---
+
+TEST(FluidPhysicsTest, EntityFluidStateRoundTrip) {
+    FluidTypeId waterId = registerTestFluid("test_water_phys");
+
+    Entity entity(1, EntityType::Player);
+    EXPECT_FALSE(entity.isInFluid());
+    EXPECT_FALSE(entity.isSubmerged());
+    EXPECT_FLOAT_EQ(entity.fluidSubmersion(), 0.0f);
+
+    entity.setFluidState(true, true, 0.75f, waterId);
+    EXPECT_TRUE(entity.isInFluid());
+    EXPECT_TRUE(entity.isSubmerged());
+    EXPECT_FLOAT_EQ(entity.fluidSubmersion(), 0.75f);
+    EXPECT_EQ(entity.inFluidType(), waterId);
+}
+
+TEST(FluidPhysicsTest, IsAffectedByFluidsDefault) {
+    Entity entity(1, EntityType::Player);
+    EXPECT_TRUE(entity.isAffectedByFluids());
+}
+
+TEST(FluidPhysicsTest, NoForcesWhenNoFluid) {
+    FluidContactInfo contact;  // Default: inFluid=false
+
+    Vec3 vel(5.0f, -2.0f, 3.0f);
+    Vec3 origVel = vel;
+
+    applyBuoyancy(vel, contact, DEFAULT_GRAVITY, 0.05f);
+    applyFluidDrag(vel, contact, 0.05f);
+    applyFlowForce(vel, contact, 0.05f);
+
+    // Velocity unchanged when not in fluid
+    EXPECT_FLOAT_EQ(vel.x, origVel.x);
+    EXPECT_FLOAT_EQ(vel.y, origVel.y);
+    EXPECT_FLOAT_EQ(vel.z, origVel.z);
+}

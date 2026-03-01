@@ -23,6 +23,9 @@ namespace finevox {
 class World;
 class UpdateScheduler;
 class ChunkColumn;
+struct SoundEvent;
+template<typename T> class Queue;
+using SoundEventQueue = Queue<SoundEvent>;
 
 // ============================================================================
 // PlayerAuthority - Server-side tracking of player state for validation
@@ -249,9 +252,13 @@ public:
     PhysicsSystem& physics() { return physics_; }
     const PhysicsSystem& physics() const { return physics_; }
 
+    /// Set sound queue for fluid/entity sound events (optional)
+    void setSoundQueue(SoundEventQueue* queue) { soundQueue_ = queue; }
+
 private:
     World& world_;
     GraphicsEventQueue& graphicsQueue_;
+    SoundEventQueue* soundQueue_ = nullptr;
     PhysicsSystem physics_;
 
     // Entity storage

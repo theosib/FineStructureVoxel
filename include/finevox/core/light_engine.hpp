@@ -13,6 +13,7 @@
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/lod.hpp"
+#include "finevox/core/light_provider.hpp"
 #include <functional>
 #include <queue>
 #include <vector>
@@ -380,11 +381,41 @@ public:
     /// Set scan radius for background scan distance culling (in blocks)
     void setScanRadius(float radius) { scanRadius_ = radius; }
 
+    // ========================================================================
+    // Light Providers
+    // ========================================================================
+
+    /// Add a light provider. Sorted by priority at insertion time.
+    void addLightProvider(std::shared_ptr<LightProvider> provider);
+
+    /// Remove a light provider.
+    void removeLightProvider(const std::shared_ptr<LightProvider>& provider);
+
+    /// Get all registered light providers (in priority order)
+    [[nodiscard]] const std::vector<std::shared_ptr<LightProvider>>& lightProviders() const {
+        return lightProviders_;
+    }
+
+    /// Query combined emission across all providers (returns MAX)
+    [[nodiscard]] uint8_t queryCombinedEmission(BlockTypeId blockType) const;
+
+    /// Query combined attenuation across all providers (returns SUM, clamped to 15)
+    [[nodiscard]] uint8_t queryCombinedAttenuation(BlockTypeId blockType) const;
+
+    /// Query combined log attenuation across all providers (accumulated multiplicatively)
+    [[nodiscard]] float queryCombinedLogAttenuation(const BlockCoord& pos) const;
+
+    /// Query combined sky light blocking (returns OR)
+    [[nodiscard]] bool queryCombinedBlocksSkyLight(BlockTypeId blockType) const;
+
 private:
     World& world_;
 
     // Custom attenuation callbacks
     std::unordered_map<BlockTypeId, LightAttenuationCallback> attenuationCallbacks_;
+
+    // Registered light providers (sorted by priority)
+    std::vector<std::shared_ptr<LightProvider>> lightProviders_;
 
     // Pending updates for batch processing
     std::unordered_set<BlockCoord> pendingUpdates_;

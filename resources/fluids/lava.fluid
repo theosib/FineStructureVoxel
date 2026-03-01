@@ -45,3 +45,6 @@ underwater_fog_density: 0.5
 
 # Container
 units_per_source: 1000
+
+# Interactions (lava flowing into other fluids)
+interaction:water: glow_ite

@@ -56,7 +56,11 @@
 #include <finevox/core/key_bindings.hpp>
 #include <finevox/core/world_time.hpp>
 #include <finevox/core/sky.hpp>
-#include <finevox/render/frame_fence_waiter.hpp>
+#include <finevox/core/fluid_type_id.hpp>
+#include <finevox/core/fluid_loader.hpp>
+#include <finevox/render/engine.hpp>
+#include <finevox/render/world_render_layer.hpp>
+#include <finevox/render/overlay_render_layer.hpp>
 #include <finevox/worldgen/world_generator.hpp>
 #include <finevox/worldgen/generation_passes.hpp>
 #include <finevox/worldgen/biome_loader.hpp>
@@ -296,6 +300,38 @@ void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = f
                 world.setBlock({baseX + x, y, baseZ + z}, stone);
             }
         }
+
+        // Water pool (small pond near the house)
+        auto waterId = FluidTypeId::fromName("water");
+        if (!waterId.isEmpty()) {
+            // Dig a basin and fill with water (at y=2..4, replacing dirt/grass)
+            for (int x = -8; x < -2; x++) {
+                for (int z = 3; z < 9; z++) {
+                    // Clear blocks at water level (y=3,4) to make a basin
+                    world.setBlock({baseX + x, 3, baseZ + z}, BlockTypeId());  // air
+                    world.setBlock({baseX + x, 4, baseZ + z}, BlockTypeId());  // air
+                    // Fill with water source blocks
+                    world.setFluid({baseX + x, 3, baseZ + z}, waterId, 15);
+                    world.setFluid({baseX + x, 4, baseZ + z}, waterId, 15);
+                }
+            }
+            std::cout << "  Added water pool at (" << (baseX - 8) << "," << 3 << "," << (baseZ + 3) << ")\n";
+
+            // Small lava pool nearby
+            auto lavaId = FluidTypeId::fromName("lava");
+            if (!lavaId.isEmpty()) {
+                for (int x = 12; x < 16; x++) {
+                    for (int z = -8; z < -4; z++) {
+                        world.setBlock({baseX + x, 3, baseZ + z}, BlockTypeId());
+                        world.setBlock({baseX + x, 4, baseZ + z}, BlockTypeId());
+                        world.setFluid({baseX + x, 3, baseZ + z}, lavaId, 15);
+                    }
+                }
+                std::cout << "  Added lava pool at (" << (baseX + 12) << "," << 3 << "," << (baseZ - 8) << ")\n";
+            }
+        } else {
+            std::cout << "  Warning: 'water' fluid type not registered (load .fluid files first)\n";
+        }
     }
 
     std::cout << "World built.\n";
@@ -354,6 +390,7 @@ void buildGeneratedWorld(World& world, const std::string& resourceDir) {
     pipeline.addPass(std::make_unique<OrePass>());
     pipeline.addPass(std::make_unique<StructurePass>());
     pipeline.addPass(std::make_unique<DecorationPass>());
+    pipeline.addPass(std::make_unique<FluidPass>(62));
 
     std::cout << "  Pipeline: " << pipeline.passCount() << " passes\n";
 
@@ -405,52 +442,35 @@ int main(int argc, char* argv[]) {
         }
         ResourceLocator::instance().setGameRoot(resourcePath);
 
-        // Create Vulkan instance
-        auto instance = finevk::Instance::create()
-            .applicationName("FineVox Render Demo")
-            .applicationVersion(1, 0, 0)
-            .enableValidation(true)
-            .build();
+        // Create Engine (handles Vulkan instance, window, device, renderer, input)
+        EngineConfig engineConfig;
+        engineConfig.windowTitle = "FineVox Render Demo";
+        engineConfig.windowWidth = 1280;
+        engineConfig.windowHeight = 720;
+        engineConfig.enableValidation = true;
+        Engine engine(engineConfig);
 
-        // Create window
-        auto window = finevk::Window::create(instance)
-            .title("FineVox Render Demo")
-            .size(1280, 720)
-            .resizable(true)
-            .build();
-
-        // Select GPU and create device
-        auto physicalDevice = instance->selectPhysicalDevice(window);
-        std::cout << "GPU: " << physicalDevice.name() << "\n";
-
-        auto device = physicalDevice.createLogicalDevice()
-            .surface(window->surface())
-            .enableAnisotropy()
-            .build();
-
-        window->bindDevice(device);
-
-        // Create renderer with depth buffer
-        finevk::RendererConfig renderConfig;
-        renderConfig.enableDepthBuffer = true;
-        renderConfig.msaa = finevk::MSAALevel::Medium;
-        auto renderer = finevk::SimpleRenderer::create(window, renderConfig);
+        // Convenience references to Engine subsystems
+        auto& window = engine.window();
+        auto& device = engine.device();
+        auto& renderer = engine.renderer();
+        auto& inputManager = engine.inputManager();
 
         // Create 2D overlay for crosshair
-        auto overlay = finevk::Overlay2D::create(device.get(), renderer->renderPass())
-            .msaaSamples(renderer->msaaSamples())
+        auto overlay = finevk::Overlay2D::create(&device, renderer.renderPass())
+            .msaaSamples(renderer.msaaSamples())
             .build();
 
         // Create GUI system
 #ifdef FINEVOX_HAS_GUI
         finegui::GuiConfig guiConfig;
         guiConfig.fontSize = 16.0f;
-        guiConfig.msaaSamples = renderer->msaaSamples();
-        if (window->isHighDPI()) {
-            guiConfig.dpiScale = window->contentScale().x;
+        guiConfig.msaaSamples = renderer.msaaSamples();
+        if (window.isHighDPI()) {
+            guiConfig.dpiScale = window.contentScale().x;
         }
-        finegui::GuiSystem gui(device.get(), guiConfig);
-        gui.initialize(renderer.get());
+        finegui::GuiSystem gui(&device, guiConfig);
+        gui.initialize(&renderer);
         std::cout << "GUI system initialized\n";
 #endif
 
@@ -526,22 +546,26 @@ int main(int argc, char* argv[]) {
         std::cout << "Script-driven GUI engine initialized\n";
 #endif
 
-        // Create input manager
-        auto inputManager = finevk::InputManager::create(window.get());
-
         // Load key bindings from config (falls back to defaults if not configured)
         auto keyBindings = loadKeyBindings();
         for (const auto& binding : keyBindings) {
             if (binding.isMouse) {
-                inputManager->mapActionToMouse(binding.action, binding.keyCode);
+                inputManager.mapActionToMouse(binding.action, binding.keyCode);
             } else {
-                inputManager->mapAction(binding.action, binding.keyCode);
+                inputManager.mapAction(binding.action, binding.keyCode);
             }
         }
 
         // Load all block definitions from spec files
         // This registers block types and loads custom geometries
         std::unordered_map<uint32_t, BlockGeometry> blockGeometries = loadBlockDefinitions();
+
+        // Load fluid definitions from .fluid files
+        std::string fluidsDir = resourcePath + "/fluids";
+        if (std::filesystem::exists(fluidsDir)) {
+            size_t fluidCount = FluidLoader::loadDirectory(fluidsDir);
+            std::cout << "Loaded " << fluidCount << " fluid types from " << fluidsDir << "\n";
+        }
 
         // Create game session (owns World, UpdateScheduler, LightEngine, EntityManager, WorldTime, event queues)
         auto session = GameSession::createLocal();
@@ -572,7 +596,7 @@ int main(int argc, char* argv[]) {
         worldConfig.debugOffset = glm::vec3(0.0f, 0.0f, -32.0f);
         worldConfig.meshCapacityMultiplier = 1.0f;  // DEBUG: No extra capacity to rule out uninitialized data
 
-        WorldRenderer worldRenderer(device.get(), renderer.get(), world, worldConfig);
+        WorldRenderer worldRenderer(&device, &renderer, world, worldConfig);
 
         // Load shaders (from build output directory)
         worldRenderer.loadShaders("shaders/chunk.vert.spv", "shaders/chunk.frag.spv");
@@ -580,7 +604,7 @@ int main(int argc, char* argv[]) {
 
         // Create a simple placeholder atlas (16x16 tiles of solid colors)
         BlockAtlas atlas;
-        atlas.createPlaceholderAtlas(device.get(), renderer->commandPool(), 16, 16);
+        atlas.createPlaceholderAtlas(&device, renderer.commandPool(), 16, 16);
 
         // Map block types to atlas positions
         atlas.setBlockTexture(BlockTypeId::fromName("stone"), 0, 0);    // Gray
@@ -721,20 +745,13 @@ int main(int argc, char* argv[]) {
         world.setAlwaysDeferMeshRebuild(false);
         std::cout << "Push-based meshing enabled (lighting thread handles remesh requests)\n";
 
-        // Set up fence-wait thread: overlaps mesh processing with GPU fence wait
-        FrameFenceWaiter fenceWaiter;
-        fenceWaiter.setRenderer(renderer.get());
-        fenceWaiter.attach(worldRenderer.wakeSignal());
-        fenceWaiter.start();
-        std::cout << "Fence-wait thread started\n";
-
         // Mark all chunks as dirty to generate initial meshes
         worldRenderer.rebuildAllMeshes();
 
         // Camera setup - use FineVK's Camera with double-precision support
         PlayerController playerController;
         finevk::Camera camera;
-        camera.setPerspective(70.0f, float(window->width()) / float(window->height()), 0.1f, 500.0f);
+        camera.setPerspective(70.0f, float(window.width()) / float(window.height()), 0.1f, 500.0f);
 
         if (singleBlockMode) {
             // Position camera to look at the single block at origin
@@ -819,19 +836,19 @@ int main(int argc, char* argv[]) {
             inputContext = ctx;
             switch (ctx) {
                 case InputContext::Gameplay:
-                    inputManager->setCursorMode(finevk::CursorMode::Disabled);
+                    inputManager.setCursorMode(finevk::CursorMode::Disabled);
 #ifdef FINEVOX_HAS_GUI
                     gui.setGuiMode(finegui::GuiMode::Passive);
 #endif
                     break;
                 case InputContext::Menu:
-                    inputManager->setCursorMode(finevk::CursorMode::Normal);
+                    inputManager.setCursorMode(finevk::CursorMode::Normal);
 #ifdef FINEVOX_HAS_GUI
                     gui.setGuiMode(finegui::GuiMode::Exclusive);
 #endif
                     break;
                 case InputContext::Chat:
-                    inputManager->setCursorMode(finevk::CursorMode::Normal);
+                    inputManager.setCursorMode(finevk::CursorMode::Normal);
 #ifdef FINEVOX_HAS_GUI
                     gui.setGuiMode(finegui::GuiMode::Auto);
 #endif
@@ -843,7 +860,7 @@ int main(int argc, char* argv[]) {
         // --- Input listener chain (priority-ordered) ---
 
         // Priority 200 (Menu): Context switching — handles Escape and backtick
-        inputManager->addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
+        inputManager.addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
             if (e.type != finevk::InputEventType::KeyPress)
                 return finevk::ListenerResult::Reject;
 
@@ -853,7 +870,7 @@ int main(int argc, char* argv[]) {
 #ifdef FINEVOX_HAS_SCRIPT_GUI
                     {
                         // Show dim overlay + main menu
-                        auto winSz = window->windowSize();
+                        auto winSz = window.windowSize();
                         float w = static_cast<float>(winSz.x);
                         float h = static_cast<float>(winSz.y);
                         auto dimTree = uiCtx.get("dim_overlay");
@@ -897,7 +914,7 @@ int main(int argc, char* argv[]) {
             // Backtick toggles console (Gameplay <-> Chat)
             if (e.key == GLFW_KEY_GRAVE_ACCENT) {
                 if (inputContext == InputContext::Gameplay) {
-                    auto cWinSz = window->windowSize();
+                    auto cWinSz = window.windowSize();
                     float w = static_cast<float>(cWinSz.x);
                     float h = static_cast<float>(cWinSz.y);
                     float consoleHeight = h * 0.4f;
@@ -925,11 +942,11 @@ int main(int argc, char* argv[]) {
 
         // Priority 300 (HUD): finegui input routing (respects GuiMode)
 #ifdef FINEVOX_HAS_GUI
-        gui.connectToInputManager(*inputManager);
+        gui.connectToInputManager(inputManager);
 #endif
 
         // Priority 500 (Game): Gameplay input handling
-        inputManager->addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
+        inputManager.addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
             // Only handle input in Gameplay context
             if (inputContext != InputContext::Gameplay) {
                 return finevk::ListenerResult::Reject;
@@ -998,7 +1015,7 @@ int main(int argc, char* argv[]) {
                         auto debugTree = uiCtx.get("debug_overlay");
                         if (!debugTree.isNil()) {
                             // Position at upper-right
-                            float w = static_cast<float>(window->windowSize().x);
+                            float w = static_cast<float>(window.windowSize().x);
                             debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
                             debugTree.asMap().set(symWindowPosY, finescript::Value::number(10));
                             debugTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(1.0));
@@ -1202,7 +1219,7 @@ int main(int argc, char* argv[]) {
 
         guiEngine.registerFunction("quit_game",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() { window->close(); });
+                deferredUiActions.push_back([&]() { window.close(); });
                 return finescript::Value::nil();
             });
 
@@ -1212,7 +1229,7 @@ int main(int argc, char* argv[]) {
                     if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
                     auto settingsTree = uiCtx.get("settings_menu");
                     if (!settingsTree.isNil()) {
-                        auto sWinSz = window->windowSize();
+                        auto sWinSz = window.windowSize();
                         settingsTree.asMap().set(symWindowPosX, finescript::Value::number(sWinSz.x / 2.0f));
                         settingsTree.asMap().set(symWindowPosY, finescript::Value::number(sWinSz.y / 2.0f));
                         settingsMenuId = mapRenderer.show(settingsTree, uiCtx);
@@ -1240,7 +1257,7 @@ int main(int argc, char* argv[]) {
                     if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
                     auto mainTree = uiCtx.get("main_menu");
                     if (!mainTree.isNil()) {
-                        auto mWinSz = window->windowSize();
+                        auto mWinSz = window.windowSize();
                         mainTree.asMap().set(symWindowPosX, finescript::Value::number(mWinSz.x / 2.0f));
                         mainTree.asMap().set(symWindowPosY, finescript::Value::number(mWinSz.y / 2.0f));
                         mainMenuId = mapRenderer.show(mainTree, uiCtx);
@@ -1260,7 +1277,7 @@ int main(int argc, char* argv[]) {
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
                 if (!args.empty()) {
                     fovDegrees = static_cast<float>(args[0].asNumber());
-                    auto winSize = window->size();
+                    auto winSize = window.size();
                     if (winSize.x > 0 && winSize.y > 0) {
                         camera.setPerspective(fovDegrees, float(winSize.x) / float(winSize.y), 0.1f, 500.0f);
                     }
@@ -1477,13 +1494,6 @@ int main(int argc, char* argv[]) {
         // Start in gameplay mode with cursor captured
         setInputContext(InputContext::Gameplay);
 
-        // Resize callback
-        window->onResize([&](uint32_t width, uint32_t height) {
-            if (width > 0 && height > 0) {
-                camera.setPerspective(fovDegrees, float(width) / float(height), 0.1f, 500.0f);
-            }
-        });
-
         std::cout << "\nControls:\n";
         std::cout << "  WASD + Mouse: Move and look\n";
         std::cout << "  Space: Jump (physics) / Up (fly)\n";
@@ -1511,81 +1521,181 @@ int main(int argc, char* argv[]) {
         std::cout << "  ` (backtick): Toggle console\n";
         std::cout << "\nFlags: --single-block, --large-coords, --sync (async is default)\n\n";
 
-        // Timing
-        auto lastTime = std::chrono::high_resolution_clock::now();
-        uint32_t frameCount = 0;
-        float fpsTimer = 0.0f;
+        // ================================================================
+        // RenderLayers
+        // ================================================================
+        auto worldLayer = std::make_shared<WorldRenderLayer>(worldRenderer);
+        auto overlayLayer = std::make_shared<OverlayRenderLayer>(*overlay);
+        engine.addRenderLayer(worldLayer);
+        engine.addRenderLayer(overlayLayer);
 
-        // Main loop
-        while (window->isOpen()) {
-            // ================================================================
-            // Phase 1: Fence wait + mesh processing overlap
-            // ================================================================
-            // Kick the fence wait thread, then process meshes while the GPU
-            // finishes the previous frame. This eliminates dead time: instead
-            // of blocking on vkWaitForFences, we upload meshes concurrently.
+#ifdef FINEVOX_HAS_GUI
+        // GUI render layer — wraps finegui + ImGui rendering
+        class GuiRenderLayer : public finevox::RenderLayer {
+        public:
+            std::string_view name() const override { return "GUI"; }
+            RenderPhase phase() const override { return RenderPhase::GUI; }
+            int32_t priority() const override { return 0; }
+            std::function<void(const finevox::RenderContext&)> renderFn;
+            void render(const finevox::RenderContext& ctx) override {
+                if (renderFn) renderFn(ctx);
+            }
+        };
+
+        auto guiLayer = std::make_shared<GuiRenderLayer>();
+        guiLayer->renderFn = [&](const finevox::RenderContext& ctx) {
+            gui.beginFrame();
+
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+            // Per-frame overlay text updates via finegui mapRenderer
             {
-                fenceWaiter.kickWait();
+                glm::dvec3 pos = camera.positionD();
+                char buf[64];
+                auto updateText = [&](const char* id, const char* fmt, auto... args) {
+                    snprintf(buf, sizeof(buf), fmt, args...);
+                    auto widget = mapRenderer.findById(id);
+                    if (!widget.isNil()) widget.asMap().set(symText, finescript::Value::string(buf));
+                };
+                updateText("pos_x", "X: %.1f", pos.x);
+                updateText("pos_y", "Y: %.1f", pos.y);
+                updateText("pos_z", "Z: %.1f", pos.z);
 
-                // Process meshes while fence is pending (no deadline yet)
-                while (!fenceWaiter.isReady()) {
-                    if (!worldRenderer.waitForMeshUploads(
-                            std::chrono::steady_clock::now() + std::chrono::milliseconds(5))) {
-                        break;  // Shutdown signaled
+                if (debugOverlayId >= 0) {
+                    updateText("fps", "FPS: %d", lastFps);
+                    updateText("chunks", "Chunks: %u/%u (culled %u)",
+                        worldRenderer.renderedChunkCount(), worldRenderer.loadedChunkCount(),
+                        worldRenderer.culledChunkCount());
+                    updateText("tris", "Tris: %u", worldRenderer.renderedTriangleCount());
+                    float tod = worldTime.timeOfDay();
+                    const char* timePhase = worldTime.isDaytime() ? "Day" : "Night";
+                    updateText("time", "Time: %s %d/36000", timePhase, static_cast<int>(tod * 36000));
+                    updateText("mode", "Mode: %s", playerController.flyMode() ? "Fly" : "Physics");
+                    updateText("lod", "LOD: %s  Greedy: %s",
+                        worldRenderer.lodEnabled() ? "ON" : "OFF",
+                        worldRenderer.greedyMeshing() ? "ON" : "OFF");
+
+                    auto debugTree = uiCtx.get("debug_overlay");
+                    if (!debugTree.isNil()) {
+                        float w = static_cast<float>(window.windowSize().x);
+                        debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
                     }
-                    worldRenderer.updateMeshes(0);
                 }
 
-                // Drain any meshes that arrived right as fence completed
-                worldRenderer.updateMeshes(0);
+                if (dimOverlayId >= 0) {
+                    auto dimTree = uiCtx.get("dim_overlay");
+                    if (!dimTree.isNil()) {
+                        auto dSz = window.windowSize();
+                        dimTree.asMap().set(symWindowSizeW, finescript::Value::number(static_cast<float>(dSz.x)));
+                        dimTree.asMap().set(symWindowSizeH, finescript::Value::number(static_cast<float>(dSz.y)));
+                    }
+                }
 
-                // Detach from WakeSignal during render — prevents spurious wakes
-                fenceWaiter.detach();
+                if (consoleWindowId >= 0) {
+                    auto consoleTree = uiCtx.get("console_window");
+                    if (!consoleTree.isNil()) {
+                        auto cSz = window.windowSize();
+                        float w = static_cast<float>(cSz.x);
+                        float h = static_cast<float>(cSz.y);
+                        float consoleHeight = h * 0.4f;
+                        auto& cm = consoleTree.asMap();
+                        cm.set(symWindowPosX, finescript::Value::number(0));
+                        cm.set(symWindowPosY, finescript::Value::number(h - consoleHeight));
+                        cm.set(symWindowSizeW, finescript::Value::number(w));
+                        cm.set(symWindowSizeH, finescript::Value::number(consoleHeight));
+                    }
+                }
             }
 
-            // ================================================================
-            // Phase 2: Input, world updates, acquire frame, deadline meshes
-            // ================================================================
-            window->pollEvents();
+            guiManager.processPendingMessages();
+            mapRenderer.renderAll();
 
-            // Query mouse delta BEFORE update() clears it
-            glm::vec2 mouseDelta = inputManager->mouseDelta();
+            for (auto& action : deferredUiActions) action();
+            deferredUiActions.clear();
+#endif
 
-            // Update input manager - clears per-frame state (mouseDelta, key press/release sets)
-            inputManager->update();
-
-            // Update movement state from action mappings (only in gameplay context)
+            // Hotbar (bottom center) — only in gameplay
             if (inputContext == InputContext::Gameplay) {
-                playerController.setMoveForward(inputManager->isActionActive("forward"));
-                playerController.setMoveBack(inputManager->isActionActive("back"));
-                playerController.setMoveLeft(inputManager->isActionActive("left"));
-                playerController.setMoveRight(inputManager->isActionActive("right"));
-                playerController.setMoveDown(inputManager->isActionActive("down"));
+                const char* slotNames[] = {
+                    "Stone", "Dirt", "Grass", "Cobble",
+                    "Glow", "Slab", "Stair", "Wedge", ""
+                };
+                const int slotCount = 8;
+                const float slotSize = 48.0f;
+                const float slotPad = 4.0f;
+                const float barWidth = slotCount * (slotSize + slotPad) + slotPad;
+
+                ImGuiIO& io = ImGui::GetIO();
+                ImGui::SetNextWindowPos(
+                    ImVec2((io.DisplaySize.x - barWidth) / 2.0f, io.DisplaySize.y - slotSize - slotPad * 4));
+                ImGui::Begin("##hotbar", nullptr,
+                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
+
+                for (int i = 0; i < slotCount; i++) {
+                    if (i > 0) ImGui::SameLine(0, slotPad);
+
+                    bool selected = (i == selectedBlockIndex);
+                    if (selected) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
+                    }
+
+                    char label[32];
+                    snprintf(label, sizeof(label), "%s\n[%d]", slotNames[i], i + 1);
+                    ImGui::Button(label, ImVec2(slotSize, slotSize));
+
+                    ImGui::PopStyleColor(2);
+                }
+                ImGui::End();
+            }
+
+            gui.endFrame();
+            if (ctx.commandBuffer) gui.render(*ctx.commandBuffer);
+        };
+        engine.addRenderLayer(guiLayer);
+#endif
+
+        // ================================================================
+        // Frame callbacks
+        // ================================================================
+        uint32_t frameCount = 0;
+        float fpsTimer = 0.0f;
+        SkyParameters currentSkyParams;
+
+        FrameCallbacks callbacks;
+        callbacks.onUpdate = [&](float dt) {
+            // Movement input (only in gameplay context)
+            if (inputContext == InputContext::Gameplay) {
+                playerController.setMoveForward(inputManager.isActionActive("forward"));
+                playerController.setMoveBack(inputManager.isActionActive("back"));
+                playerController.setMoveLeft(inputManager.isActionActive("left"));
+                playerController.setMoveRight(inputManager.isActionActive("right"));
+                playerController.setMoveDown(inputManager.isActionActive("down"));
                 if (playerController.flyMode()) {
-                    playerController.setMoveUp(inputManager->isActionActive("up"));
+                    playerController.setMoveUp(inputManager.isActionActive("up"));
                 }
 
+                glm::vec2 mouseDelta = inputManager.mouseDelta();
                 if (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f) {
                     playerController.look(mouseDelta.x * mouseSensitivity, mouseDelta.y * mouseSensitivity);
                 }
             }
 
-            // Record frame start and get estimated frame period (tracks vsync timing)
             auto framePeriod = worldRenderer.recordFrameStart();
 
-            // Calculate delta time
-            auto now = std::chrono::high_resolution_clock::now();
-            float dt = std::chrono::duration<float>(now - lastTime).count();
-            lastTime = now;
-
-            // Compute sky parameters (worldTime advanced by game thread; reads are thread-safe)
-            auto skyParams = computeSkyParameters(worldTime.timeOfDay());
-            worldRenderer.setSkyParameters(skyParams);
-
-            // Use dynamic fog color from sky
+            // Sky parameters
+            currentSkyParams = computeSkyParameters(worldTime.timeOfDay());
+            worldRenderer.setSkyParameters(currentSkyParams);
             if (worldRenderer.fogDynamicColor()) {
-                worldRenderer.setFogColor(skyParams.fogColor);
+                worldRenderer.setFogColor(currentSkyParams.fogColor);
             }
+
+            // Enable overlay only during gameplay
+            overlayLayer->setEnabled(inputContext == InputContext::Gameplay);
 
             // FPS counter
             frameCount++;
@@ -1606,7 +1716,7 @@ int main(int argc, char* argv[]) {
                 fpsTimer = 0.0f;
             }
 
-            // Update player/camera position
+            // Player/camera update
             playerController.update(dt);
 
 #ifdef FINEVOX_HAS_AUDIO
@@ -1614,26 +1724,19 @@ int main(int argc, char* argv[]) {
 #endif
 
             if (playerController.flyMode()) {
-                // Fly mode: apply position delta to camera
                 camera.move(playerController.flyPositionDelta());
             } else {
-                // Physics mode: camera follows body
                 Vec3 playerPos = playerBody.position();
                 Vec3 desiredCameraPos(playerPos.x, playerPos.y + playerController.eyeHeight(), playerPos.z);
-
-                // Safe origin is body center (inside the collision volume)
                 Vec3 safeOrigin(playerPos.x, playerPos.y + 0.9f, playerPos.z);
-
-                // Adjust camera to prevent near-plane clipping through walls
                 Vec3 adjustedCameraPos = adjustCameraForWallCollision(
                     safeOrigin, desiredCameraPos, shapeProvider);
-
                 camera.moveTo(glm::dvec3(adjustedCameraPos.x, adjustedCameraPos.y, adjustedCameraPos.z));
             }
             camera.setOrientation(playerController.forwardVector(), glm::vec3(0, 1, 0));
             camera.updateState();
 
-            // Send player state to game thread via command queue
+            // Send player state to game thread
             {
                 EntityState state;
                 state.position = glm::dvec3(playerBody.position());
@@ -1644,198 +1747,44 @@ int main(int argc, char* argv[]) {
                 session->actions().sendPlayerState(playerId, state);
             }
 
-            // Drain graphics event queue (for now, just discard the events)
-            // In a full implementation, we'd use these for entity interpolation
             [[maybe_unused]] auto graphicsEvents = session->graphicsEvents().drainAll();
 
 #ifdef FINEVOX_HAS_AUDIO
             audioEngine.update(camera.positionD(), playerController.forwardVector(), glm::vec3(0, 1, 0));
 #endif
 
-            // Update world renderer - camera.positionD() provides high-precision position
             worldRenderer.updateCamera(camera.state(), camera.positionD());
 
-            // Deadline-based mesh processing: catch input-driven changes in the same frame.
-            // The deadline starts HERE (after frame acquire + input), giving mesh workers
-            // time to respond to block placements etc. triggered by pollEvents().
+            // Deadline-based mesh processing
             {
                 auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::microseconds(framePeriod.count() / 2);
-
                 while (std::chrono::steady_clock::now() < deadline) {
-                    if (!worldRenderer.waitForMeshUploads(deadline)) {
-                        break;  // Shutdown signaled
-                    }
+                    if (!worldRenderer.waitForMeshUploads(deadline)) break;
                     worldRenderer.updateMeshes(0);
                 }
             }
+        };
+        callbacks.onResize = [&](uint32_t width, uint32_t height) {
+            camera.setPerspective(fovDegrees, float(width) / float(height), 0.1f, 500.0f);
+        };
+        callbacks.getClearColor = [&]() -> glm::vec4 {
+            return currentSkyParams.skyColor;
+        };
+        engine.setFrameCallbacks(std::move(callbacks));
+        engine.setFenceWakeSignal(worldRenderer.wakeSignal());
 
-            // ================================================================
-            // Phase 3: Render + submit
-            // ================================================================
-            if (auto frame = renderer->beginFrame(true)) {
-                frame.beginRenderPass(skyParams.skyColor);  // Dynamic sky color
-
-                // Render the world
-                worldRenderer.render(frame);
-
-                // Draw crosshair at screen center (only in gameplay)
-                overlay->beginFrame(frame.frameIndex(), frame.extent.width, frame.extent.height);
-                if (inputContext == InputContext::Gameplay) {
-                    overlay->drawCrosshair(
-                        frame.extent.width / 2.0f, frame.extent.height / 2.0f,
-                        20.0f,   // size
-                        2.0f,    // thickness
-                        {1.0f, 1.0f, 1.0f, 0.8f}  // white with slight transparency
-                    );
-                }
-                overlay->render(frame);
-
-                // GUI overlays
-#ifdef FINEVOX_HAS_GUI
-                gui.beginFrame();
-
-#ifdef FINEVOX_HAS_SCRIPT_GUI
-                // Per-frame overlay text updates via finegui mapRenderer
-                {
-                    // Coordinates overlay
-                    glm::dvec3 pos = camera.positionD();
-                    char buf[64];
-                    auto updateText = [&](const char* id, const char* fmt, auto... args) {
-                        snprintf(buf, sizeof(buf), fmt, args...);
-                        auto widget = mapRenderer.findById(id);
-                        if (!widget.isNil()) widget.asMap().set(symText, finescript::Value::string(buf));
-                    };
-                    updateText("pos_x", "X: %.1f", pos.x);
-                    updateText("pos_y", "Y: %.1f", pos.y);
-                    updateText("pos_z", "Z: %.1f", pos.z);
-
-                    // Debug overlay text (only if shown)
-                    if (debugOverlayId >= 0) {
-                        updateText("fps", "FPS: %d", lastFps);
-                        updateText("chunks", "Chunks: %u/%u (culled %u)",
-                            worldRenderer.renderedChunkCount(), worldRenderer.loadedChunkCount(),
-                            worldRenderer.culledChunkCount());
-                        updateText("tris", "Tris: %u", worldRenderer.renderedTriangleCount());
-                        float tod = worldTime.timeOfDay();
-                        const char* phase = worldTime.isDaytime() ? "Day" : "Night";
-                        updateText("time", "Time: %s %d/36000", phase, static_cast<int>(tod * 36000));
-                        updateText("mode", "Mode: %s", playerController.flyMode() ? "Fly" : "Physics");
-                        updateText("lod", "LOD: %s  Greedy: %s",
-                            worldRenderer.lodEnabled() ? "ON" : "OFF",
-                            worldRenderer.greedyMeshing() ? "ON" : "OFF");
-
-                        // Update debug overlay position (upper-right, may change on resize)
-                        auto debugTree = uiCtx.get("debug_overlay");
-                        if (!debugTree.isNil()) {
-                            float w = static_cast<float>(window->windowSize().x);
-                            debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
-                        }
-                    }
-
-                    // Update dim overlay size (in case of window resize)
-                    if (dimOverlayId >= 0) {
-                        auto dimTree = uiCtx.get("dim_overlay");
-                        if (!dimTree.isNil()) {
-                            auto dSz = window->windowSize();
-                            dimTree.asMap().set(symWindowSizeW, finescript::Value::number(static_cast<float>(dSz.x)));
-                            dimTree.asMap().set(symWindowSizeH, finescript::Value::number(static_cast<float>(dSz.y)));
-                        }
-                    }
-
-                    // Update console position/size (in case of window resize)
-                    if (consoleWindowId >= 0) {
-                        auto consoleTree = uiCtx.get("console_window");
-                        if (!consoleTree.isNil()) {
-                            auto cSz = window->windowSize();
-                            float w = static_cast<float>(cSz.x);
-                            float h = static_cast<float>(cSz.y);
-                            float consoleHeight = h * 0.4f;
-                            auto& cm = consoleTree.asMap();
-                            cm.set(symWindowPosX, finescript::Value::number(0));
-                            cm.set(symWindowPosY, finescript::Value::number(h - consoleHeight));
-                            cm.set(symWindowSizeW, finescript::Value::number(w));
-                            cm.set(symWindowSizeH, finescript::Value::number(consoleHeight));
-                        }
-                    }
-                }
-
-                // Render all finegui map trees
-                guiManager.processPendingMessages();
-                mapRenderer.renderAll();
-
-                // Process deferred UI actions (from button callbacks)
-                for (auto& action : deferredUiActions) action();
-                deferredUiActions.clear();
-#endif
-
-                // Hotbar (bottom center) — only in gameplay
-                if (inputContext == InputContext::Gameplay) {
-                    const char* slotNames[] = {
-                        "Stone", "Dirt", "Grass", "Cobble",
-                        "Glow", "Slab", "Stair", "Wedge", ""
-                    };
-                    const int slotCount = 8;
-                    const float slotSize = 48.0f;
-                    const float slotPad = 4.0f;
-                    const float barWidth = slotCount * (slotSize + slotPad) + slotPad;
-
-                    ImGuiIO& io = ImGui::GetIO();
-                    ImGui::SetNextWindowPos(
-                        ImVec2((io.DisplaySize.x - barWidth) / 2.0f, io.DisplaySize.y - slotSize - slotPad * 4));
-                    ImGui::Begin("##hotbar", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
-
-                    for (int i = 0; i < slotCount; i++) {
-                        if (i > 0) ImGui::SameLine(0, slotPad);
-
-                        bool selected = (i == selectedBlockIndex);
-                        if (selected) {
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
-                        } else {
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
-                        }
-
-                        char label[32];
-                        snprintf(label, sizeof(label), "%s\n[%d]", slotNames[i], i + 1);
-                        ImGui::Button(label, ImVec2(slotSize, slotSize));
-
-                        ImGui::PopStyleColor(2);
-                    }
-                    ImGui::End();
-                }
-
-                gui.endFrame();
-                gui.render(frame);
-#endif
-
-                frame.endRenderPass();
-                renderer->endFrame();
-
-                // Re-attach fence waiter for next frame's fence wait
-                fenceWaiter.attach(worldRenderer.wakeSignal());
-            }
-        }
+        std::cout << "\nStarting engine...\n";
+        engine.run();
 
         std::cout << "\n\nShutting down...\n";
-
-        // Two-phase shutdown: signal threads to stop first, then join.
-        // Fence waiter uses requestStop()/join() so it can exit its timeout
-        // loop concurrently while other threads shut down.
-
-        // Signal fence waiter to stop (non-blocking, exits within ~100ms)
-        fenceWaiter.requestStop();
 
 #ifdef FINEVOX_HAS_AUDIO
         audioEngine.shutdown();
         std::cout << "Audio engine stopped.\n";
 #endif
 
-        // Stop game thread first (flushes pending commands)
+        // Stop game thread (flushes pending commands)
         session->stopGameThread();
         std::cout << "Game thread stopped.\n";
 
@@ -1843,11 +1792,7 @@ int main(int argc, char* argv[]) {
         lightEngine.stop();
         std::cout << "Lighting thread stopped.\n";
 
-        // Join fence waiter (should already be done by now)
-        fenceWaiter.join();
-        std::cout << "Fence-wait thread stopped.\n";
-
-        renderer->waitIdle();
+        // Engine destructor handles fence waiter, renderer, and GPU idle wait
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";

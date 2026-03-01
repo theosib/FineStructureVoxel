@@ -3,6 +3,9 @@
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/ai_goals.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
 #include <cmath>
 #include <algorithm>
 
@@ -38,11 +41,32 @@ std::string MobEntity::typeName() const {
 }
 
 void MobEntity::tick(float dt, World& world) {
-    (void)world;
-
     // Update timers
     timeSinceLastDamage_ += dt;
     animationTime_ += dt;
+
+    // Apply fluid damage if in fluid
+    if (isInFluid()) {
+        BlockCoord feetBlock = toBlockCoord(position_);
+        FluidTypeId fid = world.getFluid(feetBlock);
+        if (!fid.isEmpty()) {
+            const FluidType* ft = FluidRegistry::global().getType(fid);
+            if (ft) {
+                float dmg = ft->contactDamage;
+                if (isSubmerged() && ft->submersionDamage > ft->contactDamage) {
+                    dmg = ft->submersionDamage;
+                }
+                if (dmg > 0.0f) {
+                    fluidDamageAccumulator_ += dmg * dt;
+                    if (fluidDamageAccumulator_ >= 1.0f) {
+                        int wholeDmg = static_cast<int>(fluidDamageAccumulator_);
+                        damage(static_cast<float>(wholeDmg));
+                        fluidDamageAccumulator_ -= static_cast<float>(wholeDmg);
+                    }
+                }
+            }
+        }
+    }
 
     // Update senses
     if (entityManager_) {

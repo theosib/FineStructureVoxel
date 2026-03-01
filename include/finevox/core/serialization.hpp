@@ -10,6 +10,7 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/data_container.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -32,6 +33,10 @@ struct SerializedSubChunk {
     std::vector<uint8_t> lightData;              // 4096 bytes: packed sky+block light (empty if all dark)
     std::unordered_map<uint16_t, std::unique_ptr<DataContainer>> blockData;  // Sparse per-block extra data
     std::unique_ptr<DataContainer> subchunkData; // SubChunk-level extra data
+
+    // Fluid layer (optional — only present when subchunk has fluid)
+    std::vector<std::string> fluidPalette;       // Fluid type names; index 1-15, index 0 unused/empty
+    std::vector<uint8_t> fluidData;              // 4096 packed bytes (palette_idx<<4 | level), empty = no fluid
 };
 
 class SubChunkSerializer {

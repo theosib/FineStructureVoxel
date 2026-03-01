@@ -170,6 +170,12 @@ void FluidSimulator::processFluidAt(BlockCoord pos) {
 
     bool isSource = (level == FLUID_SOURCE_LEVEL);
 
+    // Static source optimization: source blocks surrounded by same-type sources
+    // or solid blocks cannot flow anywhere — skip them entirely.
+    if (isSource && isStaticSource(pos, type)) {
+        return;
+    }
+
     // For flowing cells: check source formation first, then supply
     if (!isSource && fluidType->sourceFormation) {
         if (checkSourceFormation(pos, type, *fluidType)) {
@@ -573,6 +579,27 @@ int32_t FluidSimulator::countAdjacentSources(BlockCoord pos, FluidTypeId type) c
         }
     }
     return count;
+}
+
+bool FluidSimulator::isStaticSource(BlockCoord pos, FluidTypeId type) const {
+    for (int i = 0; i < 6; ++i) {
+        Face face = static_cast<Face>(i);
+        BlockCoord neighbor = BlockCoord{
+            pos.x + faceOffset(face).x,
+            pos.y + faceOffset(face).y,
+            pos.z + faceOffset(face).z
+        };
+
+        // Neighbor must be either: same-type source, or a full solid block
+        if (isBlockFull(neighbor)) continue;
+
+        FluidTypeId neighborType = world_.getFluid(neighbor);
+        if (neighborType == type && world_.getFluidLevel(neighbor) == FLUID_SOURCE_LEVEL) continue;
+
+        // This neighbor is not blocking — source is not static
+        return false;
+    }
+    return true;
 }
 
 BlockCoord FluidSimulator::faceOffset(Face face) {

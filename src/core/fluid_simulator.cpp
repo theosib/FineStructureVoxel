@@ -221,9 +221,18 @@ bool FluidSimulator::tryFlowDown(BlockCoord pos, FluidTypeId type, uint8_t /*lev
     // Same fluid below at source level — nothing to do
     if (existingType == type && existingLevel == FLUID_SOURCE_LEVEL) return false;
 
+    // If below already has fluid at the max flowing level, no new downward flow is
+    // actually occurring. Return false so horizontal spreading is not suppressed.
+    if (existingType == type && existingLevel >= fluidType.maxLevel) return false;
+
+    // Track whether the space was truly empty before flowing into it.
+    // Only suppress horizontal spreading when filling empty space (waterfall effect).
+    // If below already had fluid (just at a lower level), don't suppress horizontal.
+    bool wasEmpty = existingType.isEmpty();
+
     // Flow down at max level (not source level — only user-placed sources should be level 15)
     setFluidAndNotify(below, type, fluidType.maxLevel, fluidType);
-    return true;
+    return wasEmpty;
 }
 
 void FluidSimulator::spreadHorizontally(BlockCoord pos, FluidTypeId type, uint8_t level, const FluidType& fluidType) {
@@ -341,6 +350,16 @@ uint8_t FluidSimulator::findSlopeDirections(BlockCoord pos, FluidTypeId type, in
 
     uint8_t resultMask = 0;
 
+    // Helper: is the block below a real gravity drop for slope purposes?
+    // A position already full of the same fluid is not a real drop — it can't absorb more.
+    auto isRealDrop = [&](BlockCoord below) -> bool {
+        if (!canFluidEnter(below, type, *ft)) return false;
+        FluidTypeId existingFluid = world_.getFluid(below);
+        if (existingFluid != type) return true;  // empty or different fluid = real drop
+        uint8_t existingLevel = world_.getFluidLevel(below);
+        return existingLevel < ft->maxLevel;  // partial fill = still a real drop
+    };
+
     for (Face startFace : horizontalFaces) {
         BlockCoord start = BlockCoord{
             pos.x + faceOffset(startFace).x,
@@ -348,14 +367,23 @@ uint8_t FluidSimulator::findSlopeDirections(BlockCoord pos, FluidTypeId type, in
             pos.z + faceOffset(startFace).z
         };
 
-        // Quick check: is the position below this neighbor open?
+        // Quick check: is the position below this neighbor a real drop?
         BlockCoord belowStart{start.x, start.y - 1, start.z};
-        if (canFluidEnter(belowStart, type, *ft)) {
+        if (isRealDrop(belowStart)) {
             resultMask |= (1 << static_cast<uint8_t>(startFace));
             continue;
         }
 
-        // BFS to find a drop within maxDepth steps
+        // BFS to find a drop within maxDepth steps.
+        // Don't traverse into cells already at max capacity of the same fluid —
+        // they're not reachable outflow space (e.g. pool interior behind us).
+        auto isBFSEnterable = [&](BlockCoord p) -> bool {
+            if (isBlockFull(p)) return false;
+            FluidTypeId pFluid = world_.getFluid(p);
+            if (pFluid == type && world_.getFluidLevel(p) >= ft->maxLevel) return false;
+            return true;
+        };
+
         struct BFSEntry {
             BlockCoord pos;
             int32_t depth;
@@ -363,7 +391,7 @@ uint8_t FluidSimulator::findSlopeDirections(BlockCoord pos, FluidTypeId type, in
         std::queue<BFSEntry> bfsQueue;
         std::unordered_set<BlockCoord> visited;
 
-        if (!isBlockFull(start)) {
+        if (isBFSEnterable(start)) {
             bfsQueue.push({start, 1});
             visited.insert(start);
         }
@@ -374,7 +402,7 @@ uint8_t FluidSimulator::findSlopeDirections(BlockCoord pos, FluidTypeId type, in
             bfsQueue.pop();
 
             BlockCoord below{bfsPos.x, bfsPos.y - 1, bfsPos.z};
-            if (canFluidEnter(below, type, *ft)) {
+            if (isRealDrop(below)) {
                 foundDrop = true;
                 break;
             }
@@ -386,7 +414,7 @@ uint8_t FluidSimulator::findSlopeDirections(BlockCoord pos, FluidTypeId type, in
                         bfsPos.y + faceOffset(face).y,
                         bfsPos.z + faceOffset(face).z
                     };
-                    if (visited.count(next) == 0 && !isBlockFull(next)) {
+                    if (visited.count(next) == 0 && isBFSEnterable(next)) {
                         visited.insert(next);
                         bfsQueue.push({next, depth + 1});
                     }

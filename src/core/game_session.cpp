@@ -136,10 +136,12 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
     switch (cmd.type) {
         case EventType::BlockBroken:
             world.breakBlock(cmd.pos);
+            if (fluidTickManager) fluidTickManager->notifyBlockChanged(cmd.pos);
             break;
 
         case EventType::BlockPlaced:
             world.placeBlock(cmd.pos, cmd.blockType);
+            if (fluidTickManager) fluidTickManager->notifyBlockChanged(cmd.pos);
             break;
 
         case EventType::FluidPlaced:

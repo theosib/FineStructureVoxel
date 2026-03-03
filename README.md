@@ -1,24 +1,43 @@
 # FineStructureVoxel
 
-A voxel game engine built on FineStructureVK (Vulkan wrapper).
-
-## Overview
-
-FineStructure Voxel (finevox) is a game-agnostic voxel engine. Games are loaded as modules (shared objects), making the engine itself independent of specific game content.
+A voxel game engine built on FineStructureVK (Vulkan wrapper). Game content is loaded as modules (shared objects), keeping the engine game-agnostic.
 
 ## Current Status
 
-**Phase 0-1 Complete:**
-- Position types (BlockPos, ChunkPos, ColumnPos)
-- String interning for block type IDs
-- Per-subchunk palette with variable bit-width storage
-- SubChunk (16x16x16) and ChunkColumn structures
-- World management with lifecycle states
-- LRU cache for unloaded columns
-- Batch operations with coalescing
-- DataContainer with CBOR serialization
+**Phase 21 complete — 1684 tests passing** (1633 main + 51 script)
 
-**261 tests passing**
+All engine systems implemented:
+- World management (chunk columns, lifecycle, persistence)
+- Rendering (greedy meshing, LOD 0-4, fluid rendering)
+- Physics (AABB collision, raycasting, step-climbing)
+- Lighting (sky + block light, smooth AO, day/night cycle)
+- Block update system (UpdateScheduler, BlockHandler, tick types)
+- World generation (noise, biomes, feature pipeline)
+- Entity system (AI, pathfinding, skeletal animation, spawning)
+- Fluid system (storage, flow simulation, physics, rendering, light)
+- Audio (miniaudio, 3D spatialization, footsteps)
+- Script integration (finescript with BlockContextProxy, native functions)
+- UI (finegui MapRenderer + finescript-driven UI, in-game console)
+- Game session & game thread (30 TPS, GameActions interface)
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Game Modules  (.so/.dll)                               │  ← Games built here
+├─────────────────────────────────────────────────────────┤
+│  finevox Engine  (5 shared libraries)                   │
+│  ├── libfinevox (core) ── finevox::                     │
+│  ├── libfinevox_worldgen  ── finevox::worldgen::        │
+│  ├── libfinevox_render  ── finevox::render::            │
+│  ├── libfinevox_audio  ── finevox::audio::              │
+│  └── libfinevox_script  ── finevox::script::            │
+├─────────────────────────────────────────────────────────┤
+│  finegui / finescript / FineStructureVK                 │
+├─────────────────────────────────────────────────────────┤
+│  Vulkan / GLFW / GLM                                    │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Building
 
@@ -27,30 +46,21 @@ mkdir build && cd build
 cmake ..
 make -j8
 ./finevox_tests
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Game Modules (loaded .so/.dll)                         │
-├─────────────────────────────────────────────────────────┤
-│  finevox Engine                                         │
-│  ├── World (columns, subchunks, blocks)                 │
-│  ├── Rendering (mesh gen, LOD, view-relative)           │
-│  ├── Physics (collision, raycasting)                    │
-│  ├── Persistence (CBOR, region files)                   │
-│  └── Module Loader                                      │
-├─────────────────────────────────────────────────────────┤
-│  FineStructureVK                                        │
-├─────────────────────────────────────────────────────────┤
-│  Vulkan / GLFW / GLM                                    │
-└─────────────────────────────────────────────────────────┘
+./render_demo          # interactive demo (requires Vulkan)
+./render_demo --worldgen  # with procedural world generation
 ```
 
 ## Documentation
 
-See the `docs/` directory for detailed design documentation.
+See **[docs/INDEX.md](docs/INDEX.md)** for the full documentation index.
+
+Quick links:
+- [docs/STATUS.md](docs/STATUS.md) — current phase status and test counts
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer diagram and library structure
+- [docs/PATTERNS.md](docs/PATTERNS.md) — code conventions and gotchas
+- [docs/ROADMAP.md](docs/ROADMAP.md) — future planned work
+
+Original design documents are archived in [old_docs/](old_docs/).
 
 ## License
 

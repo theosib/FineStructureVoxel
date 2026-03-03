@@ -73,16 +73,27 @@ private:
     };
     static const std::array<FaceData, 6> FACE_DATA;
 
-    /// Add a fluid face to the mesh, adjusting Y positions for fluid height
+    /// Add a fluid face to the mesh using per-corner heights for smooth surfaces.
+    /// cornerHeights[cx + cz*2] where cx=0/1 for NegX/PosX, cz=0/1 for NegZ/PosZ.
     void addFluidFace(
         MeshData& mesh,
         const glm::vec3& blockPos,
         Face face,
-        float height,
+        const std::array<float, 4>& cornerHeights,
         const glm::vec4& tintColor,
         float skyLight,
         float blockLight
     );
+
+    /// Compute per-corner surface heights by averaging surrounding fluid levels.
+    /// Produces smooth slopes between adjacent blocks of different flow levels.
+    [[nodiscard]] std::array<float, 4> computeCornerHeights(
+        BlockCoord worldPos,
+        FluidTypeId type,
+        uint8_t level,
+        const FluidType& ft,
+        const FluidNeighborProvider& fluidNeighbor
+    ) const;
 
     /// Check if a fluid face should be culled
     /// @return true if the face should NOT be rendered

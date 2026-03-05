@@ -32,21 +32,21 @@ TEST(FluidMeshBuilderTest, SourceHeightIs14Over16) {
 }
 
 TEST(FluidMeshBuilderTest, FlowingLevelHalfHeight) {
-    // Level 7 out of maxLevel 14 = 0.5
+    // Level 7 out of maxLevel 14, scaled by source height (14/16)
     float h = FluidMeshBuilder::surfaceHeight(7, 14);
-    EXPECT_FLOAT_EQ(h, 7.0f / 14.0f);
+    EXPECT_FLOAT_EQ(h, 7.0f / 14.0f * (14.0f / 16.0f));
 }
 
 TEST(FluidMeshBuilderTest, FlowingLevelMinHeight) {
-    // Level 1 out of maxLevel 14
+    // Level 1 out of maxLevel 14, scaled by source height (14/16)
     float h = FluidMeshBuilder::surfaceHeight(1, 14);
-    EXPECT_FLOAT_EQ(h, 1.0f / 14.0f);
+    EXPECT_FLOAT_EQ(h, 1.0f / 14.0f * (14.0f / 16.0f));
 }
 
 TEST(FluidMeshBuilderTest, FlowingLevelMaxHeight) {
-    // Level 14 out of maxLevel 14 = 1.0
+    // Level 14 out of maxLevel 14 = source height (14/16), not full block
     float h = FluidMeshBuilder::surfaceHeight(14, 14);
-    EXPECT_FLOAT_EQ(h, 1.0f);
+    EXPECT_FLOAT_EQ(h, 14.0f / 16.0f);
 }
 
 // ============================================================================
@@ -251,8 +251,8 @@ TEST(FluidMeshBuilderTest, FlowingBlockHasLowerHeight) {
     MeshData mesh = builder.buildFluidMesh(sc, {0, 0, 0}, noFluid, noSolid);
     ASSERT_FALSE(mesh.isEmpty());
 
-    // Find a vertex with Y > block base (should be at 5 + 7/14 = 5.5)
-    float expectedTopY = 5.0f + 7.0f / 14.0f;
+    // Find a vertex with Y > block base (level 7/14 scaled by source height 14/16)
+    float expectedTopY = 5.0f + 7.0f / 14.0f * (14.0f / 16.0f);
     bool foundTopVertex = false;
     for (const auto& v : mesh.vertices) {
         if (v.position.y > 5.25f) {

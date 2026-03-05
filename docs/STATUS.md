@@ -10,7 +10,7 @@
 | Item | Value |
 |------|-------|
 | Last completed phase | Phase 21 — Fluid System (all 6 sub-phases) |
-| Test count | **1684** (1633 main + 51 script) |
+| Test count | **1827** |
 | In-progress | None — see Roadmap for next steps |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -62,8 +62,8 @@
 ## Deferred Items (From Completed Phases)
 
 From **Phase 9**:
-- Scheduled tick persistence across save/load (ticks lost on world reload)
-- `UpdatePropagationPolicy` for cross-chunk block updates
+- ~~Scheduled tick persistence~~ ✓ — TickJournal persists ticks per-column; IOManager/ColumnManager wired
+- ~~`UpdatePropagationPolicy`~~ ✓ — Per-block-type PropagationPolicy enum (Drop/Defer) in notifyNeighbors()
 - Network quiescence protocol for connected blocks
 
 From **Phase 2**:

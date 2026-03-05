@@ -27,6 +27,17 @@ namespace finevox {
 class BlockHandler;
 
 /**
+ * @brief Policy for neighbor notifications that cross into unloaded chunks
+ *
+ * Controls what happens when BlockContext::notifyNeighbors() encounters
+ * a neighbor block in an unloaded chunk.
+ */
+enum class PropagationPolicy : uint8_t {
+    Drop = 0,   ///< Silently skip unloaded neighbors (default, backward-compatible)
+    Defer = 1,  ///< Emit BlockUpdate event for the neighbor (deferred until chunk loads)
+};
+
+/**
  * @brief Properties for a block type
  *
  * BlockType stores the collision and hit shapes for a block,
@@ -95,6 +106,9 @@ public:
     /// Set the loot table for this block type
     BlockType& setLootTable(LootTableId lootTable);
 
+    /// Set propagation policy for cross-chunk neighbor notifications
+    BlockType& setPropagationPolicy(PropagationPolicy policy);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -144,6 +158,9 @@ public:
     /// Get the loot table for this block type
     [[nodiscard]] LootTableId lootTable() const { return lootTable_; }
 
+    /// Get propagation policy for cross-chunk neighbor notifications
+    [[nodiscard]] PropagationPolicy propagationPolicy() const { return propagationPolicy_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -162,6 +179,7 @@ private:
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
     SoundSetId soundSet_;            // Sound set for this block type
     LootTableId lootTable_;          // Loot table for this block type
+    PropagationPolicy propagationPolicy_ = PropagationPolicy::Drop;
 };
 
 /**

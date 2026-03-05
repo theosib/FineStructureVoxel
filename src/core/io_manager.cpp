@@ -1,4 +1,6 @@
 #include "finevox/core/io_manager.hpp"
+#include "finevox/core/tick_journal.hpp"
+#include "finevox/core/event_queue.hpp"  // ScheduledTick
 #include "finevox/core/resource_locator.hpp"
 #include "finevox/core/serialization.hpp"
 #include <algorithm>
@@ -71,8 +73,27 @@ void IOManager::queueSave(ColumnPos pos, const ChunkColumn& column, SaveCallback
     auto serialized = ColumnSerializer::toCBOR(column, pos.x, pos.z);
 
     std::lock_guard lock(saveMutex_);
-    saveQueue_.push_back({pos, std::move(serialized), std::move(callback)});
+    saveQueue_.push_back({pos, std::move(serialized), {}, std::move(callback), false});
     saveCond_.notify_one();
+}
+
+void IOManager::queueSave(ColumnPos pos, const ChunkColumn& column,
+                           std::vector<ScheduledTick> ticks, SaveCallback callback) {
+    auto serialized = ColumnSerializer::toCBOR(column, pos.x, pos.z);
+
+    std::lock_guard lock(saveMutex_);
+    saveQueue_.push_back({pos, std::move(serialized), std::move(ticks), std::move(callback), false});
+    saveCond_.notify_one();
+}
+
+void IOManager::queueTickSave(ColumnPos pos, std::vector<ScheduledTick> ticks) {
+    std::lock_guard lock(saveMutex_);
+    saveQueue_.push_back({pos, {}, std::move(ticks), nullptr, true});
+    saveCond_.notify_one();
+}
+
+void IOManager::setTickLoadCallback(TickLoadCallback callback) {
+    tickLoadCallback_ = std::move(callback);
 }
 
 void IOManager::flush() {
@@ -155,6 +176,15 @@ void IOManager::loadThreadFunc() {
             column = region->loadColumn(request.pos);
         }
 
+        // Read tick journal and deliver to scheduler
+        if (tickJournal_ && tickJournal_->hasJournal(request.pos)) {
+            auto ticks = tickJournal_->readTicks(request.pos);
+            tickJournal_->deleteJournal(request.pos);
+            if (!ticks.empty() && tickLoadCallback_) {
+                tickLoadCallback_(request.pos, std::move(ticks));
+            }
+        }
+
         // Invoke callback
         if (request.callback) {
             request.callback(request.pos, std::move(column));
@@ -188,11 +218,30 @@ void IOManager::saveThreadFunc() {
         // Perform save (outside lock)
         bool success = false;
 
-        RegionPos regionPos = RegionPos::fromColumn(request.pos);
-        RegionFile* region = getOrOpenRegion(regionPos);
+        if (request.ticksOnly) {
+            // Tick-only save (eviction path): append ticks to journal
+            if (tickJournal_ && !request.pendingTicks.empty()) {
+                success = tickJournal_->appendTicks(request.pos, request.pendingTicks);
+            } else {
+                success = true;
+            }
+        } else {
+            // Full column save: region write + tick journal
+            RegionPos regionPos = RegionPos::fromColumn(request.pos);
+            RegionFile* region = getOrOpenRegion(regionPos);
 
-        if (region) {
-            success = region->saveColumnRaw(request.pos, request.serializedData);
+            if (region) {
+                success = region->saveColumnRaw(request.pos, request.serializedData);
+            }
+
+            // Write tick journal (overwrite) alongside region data
+            if (tickJournal_) {
+                if (request.pendingTicks.empty()) {
+                    tickJournal_->deleteJournal(request.pos);
+                } else {
+                    tickJournal_->writeTicks(request.pos, request.pendingTicks);
+                }
+            }
         }
 
         // Invoke callback

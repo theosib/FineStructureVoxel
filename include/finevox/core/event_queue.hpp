@@ -28,6 +28,7 @@ class World;
 class SubChunk;
 class BlockContext;
 class EventJournal;
+class TickJournal;
 
 // ============================================================================
 // EventOutbox - Staging area for handler-generated events with consolidation
@@ -270,6 +271,61 @@ public:
     [[nodiscard]] size_t deferredEventCount() const;
 
     // ========================================================================
+    // Tick Persistence (for save/load of scheduled ticks)
+    // ========================================================================
+
+    /**
+     * @brief Set the tick journal for persisting scheduled ticks
+     */
+    void setTickJournal(TickJournal* journal) { tickJournal_ = journal; }
+
+    /**
+     * @brief Get the tick journal (may be nullptr)
+     */
+    [[nodiscard]] TickJournal* tickJournal() const { return tickJournal_; }
+
+    /**
+     * @brief Set current tick counter (for restoring on world load)
+     */
+    void setCurrentTick(uint64_t tick) { currentTick_ = tick; }
+
+    /**
+     * @brief Copy all scheduled ticks belonging to a column (non-destructive)
+     *
+     * Used during periodic saves — ticks remain in the scheduler.
+     */
+    [[nodiscard]] std::vector<ScheduledTick> copyTicksForColumn(ColumnPos colPos) const;
+
+    /**
+     * @brief Extract and remove all scheduled ticks belonging to a column
+     *
+     * Used during column eviction — ticks are removed from the scheduler.
+     */
+    [[nodiscard]] std::vector<ScheduledTick> extractTicksForColumn(ColumnPos colPos);
+
+    /**
+     * @brief Extract all scheduled ticks grouped by column position
+     *
+     * Empties the scheduler. Used during shutdown.
+     */
+    [[nodiscard]] std::unordered_map<ColumnPos, std::vector<ScheduledTick>> extractAllTicks();
+
+    /**
+     * @brief Push scheduled ticks from IO thread (thread-safe)
+     *
+     * Ticks are buffered and merged into the priority queue on
+     * the next advanceGameTick() call.
+     */
+    void pushPendingTicks(std::vector<ScheduledTick> ticks);
+
+    /**
+     * @brief Extract all ticks and write them to the tick journal
+     *
+     * Called during shutdown to persist all remaining scheduled ticks.
+     */
+    void flushTicksToJournal();
+
+    // ========================================================================
     // Deferred Events (for cross-chunk updates to unloaded chunks)
     // ========================================================================
 
@@ -334,6 +390,11 @@ private:
     // Optional event journal for persisting deferred events to disk
     EventJournal* journal_ = nullptr;
 
+    // Tick persistence
+    TickJournal* tickJournal_ = nullptr;
+    std::vector<ScheduledTick> pendingTicks_;
+    mutable std::mutex pendingTicksMutex_;
+
     // Process a single event (returns true if processed, false if deferred)
     bool processEvent(const BlockEvent& event);
 
@@ -351,6 +412,9 @@ private:
 
     // Drain external input into inbox
     void drainExternalInput();
+
+    // Merge pending ticks into the priority queue (called from advanceGameTick)
+    void mergePendingTicks();
 };
 
 }  // namespace finevox

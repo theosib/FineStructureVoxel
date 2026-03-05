@@ -21,8 +21,10 @@
 
 namespace finevox {
 
-// Forward declaration
+// Forward declarations
 class ColumnManager;
+class TickJournal;
+struct ScheduledTick;
 
 // ============================================================================
 // IOManager - Async save/load for world persistence
@@ -45,6 +47,10 @@ public:
     // Callback when a save completes
     // Called on the save thread - implementation should be fast!
     using SaveCallback = std::function<void(ColumnPos pos, bool success)>;
+
+    // Callback when tick journal data is loaded
+    // Called on the load thread - should push ticks into scheduler
+    using TickLoadCallback = std::function<void(ColumnPos pos, std::vector<ScheduledTick>)>;
 
     // Create IOManager with given world directory
     explicit IOManager(const std::filesystem::path& worldPath);
@@ -81,6 +87,19 @@ public:
     // Flush all pending saves (blocks until complete)
     void flush();
 
+    // Set the tick journal for persisting scheduled ticks alongside region data
+    void setTickJournal(TickJournal* journal) { tickJournal_ = journal; }
+
+    // Set callback invoked on load thread when tick journal data is read
+    void setTickLoadCallback(TickLoadCallback callback);
+
+    // Queue a column save that includes scheduled ticks
+    void queueSave(ColumnPos pos, const ChunkColumn& column,
+                   std::vector<ScheduledTick> ticks, SaveCallback callback = nullptr);
+
+    // Queue a tick-only journal write (for eviction — no region data)
+    void queueTickSave(ColumnPos pos, std::vector<ScheduledTick> ticks);
+
     // Check if there are pending operations
     [[nodiscard]] bool hasPendingLoads() const;
     [[nodiscard]] bool hasPendingSaves() const;
@@ -113,8 +132,10 @@ private:
     // Save queue
     struct SaveRequest {
         ColumnPos pos;
-        std::vector<uint8_t> serializedData;  // Pre-serialized CBOR
+        std::vector<uint8_t> serializedData;  // Pre-serialized CBOR (empty for tick-only saves)
+        std::vector<ScheduledTick> pendingTicks;
         SaveCallback callback;
+        bool ticksOnly = false;  // If true, only write tick journal (no region data)
     };
     mutable std::mutex saveMutex_;
     std::condition_variable saveCond_;
@@ -124,6 +145,10 @@ private:
     std::thread loadThread_;
     std::thread saveThread_;
     std::atomic<bool> running_{false};
+
+    // Tick journal (optional)
+    TickJournal* tickJournal_ = nullptr;
+    TickLoadCallback tickLoadCallback_;
 
     // Internal methods
     void loadThreadFunc();

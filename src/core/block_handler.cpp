@@ -128,9 +128,25 @@ void BlockContext::notifyNeighbors() {
     // Get handler for each neighbor and call onNeighborUpdated
     BlockRegistry& registry = BlockRegistry::global();
 
+    // Read source block's propagation policy once for all faces
+    const BlockType* sourceType = type();
+    PropagationPolicy policy = sourceType ? sourceType->propagationPolicy()
+                                          : PropagationPolicy::Drop;
+
     for (int faceIdx = 0; faceIdx < 6; ++faceIdx) {
         Face face = static_cast<Face>(faceIdx);
         BlockCoord neighborPos = pos_.neighbor(face);
+
+        // Get the subchunk containing the neighbor
+        ChunkPos neighborChunkPos = ChunkPos::fromBlock(neighborPos);
+        auto neighborSubChunk = world_.getSubChunkShared(neighborChunkPos);
+        if (!neighborSubChunk) {
+            // Neighbor chunk not loaded — apply propagation policy
+            if (policy == PropagationPolicy::Defer && scheduler_) {
+                scheduler_->outbox().push(BlockEvent::blockUpdate(neighborPos));
+            }
+            continue;
+        }
 
         BlockTypeId neighborType = world_.getBlock(neighborPos);
         if (neighborType.isAir()) {
@@ -140,13 +156,6 @@ void BlockContext::notifyNeighbors() {
         // Get handler for neighbor
         BlockHandler* handler = registry.getHandler(neighborType);
         if (!handler) {
-            continue;
-        }
-
-        // Get the subchunk containing the neighbor
-        ChunkPos neighborChunkPos = ChunkPos::fromBlock(neighborPos);
-        auto neighborSubChunk = world_.getSubChunkShared(neighborChunkPos);
-        if (!neighborSubChunk) {
             continue;
         }
 

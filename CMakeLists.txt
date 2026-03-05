@@ -74,6 +74,7 @@ add_library(finevox SHARED
     src/core/fluid_light_provider.cpp
     src/core/event_queue.cpp
     src/core/event_journal.cpp
+    src/core/tick_journal.cpp
     src/core/event_bus.cpp
     src/core/entity.cpp
     src/core/graphics_event_queue.cpp
@@ -513,6 +514,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_fluid_worldgen.cpp
         tests/test_fluid_performance.cpp
         tests/test_event_journal.cpp
+        tests/test_tick_journal.cpp
+        tests/test_tick_persistence.cpp
         tests/test_game_event.cpp
         tests/test_event_bus.cpp
         tests/test_game_subsystem.cpp

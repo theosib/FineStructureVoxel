@@ -95,6 +95,11 @@ BlockType& BlockType::setLootTable(LootTableId lootTable) {
     return *this;
 }
 
+BlockType& BlockType::setPropagationPolicy(PropagationPolicy policy) {
+    propagationPolicy_ = policy;
+    return *this;
+}
+
 const CollisionShape& BlockType::collisionShape(const Rotation& rotation) const {
     return collisionShapes_[rotation.index()];
 }

@@ -1,5 +1,6 @@
 #include "finevox/core/column_manager.hpp"
 #include "finevox/core/io_manager.hpp"
+#include "finevox/core/event_queue.hpp"  // ScheduledTick
 
 namespace finevox {
 
@@ -193,8 +194,11 @@ void ColumnManager::setCacheCapacity(size_t capacity) {
 
     auto evicted = unloadCache_.setCapacity(capacity);
 
-    if (evictionCallback_) {
-        for (auto& [key, col] : evicted) {
+    for (auto& [key, col] : evicted) {
+        if (preEvictionCallback_) {
+            preEvictionCallback_(ColumnPos::unpack(key));
+        }
+        if (evictionCallback_) {
             evictionCallback_(std::move(col->column));
         }
     }
@@ -235,6 +239,16 @@ void ColumnManager::setCanUnloadCallback(CanUnloadCallback callback) {
     canUnloadCallback_ = std::move(callback);
 }
 
+void ColumnManager::setTickExtractCallback(TickExtractCallback callback) {
+    std::unique_lock lock(mutex_);
+    tickExtractCallback_ = std::move(callback);
+}
+
+void ColumnManager::setPreEvictionCallback(PreEvictionCallback callback) {
+    std::unique_lock lock(mutex_);
+    preEvictionCallback_ = std::move(callback);
+}
+
 void ColumnManager::transitionToSaveQueue(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
@@ -269,8 +283,14 @@ void ColumnManager::transitionToUnloadCache(uint64_t key) {
     col->state = ColumnState::UnloadQueued;
 
     auto evicted = unloadCache_.put(key, std::move(col));
-    if (evicted && evictionCallback_) {
-        evictionCallback_(std::move(evicted->second->column));
+    if (evicted) {
+        ColumnPos evictedPos = ColumnPos::unpack(evicted->first);
+        if (preEvictionCallback_) {
+            preEvictionCallback_(evictedPos);
+        }
+        if (evictionCallback_) {
+            evictionCallback_(std::move(evicted->second->column));
+        }
     }
 }
 
@@ -347,7 +367,13 @@ bool ColumnManager::requestLoad(ColumnPos pos, LoadCallback callback) {
 
 void ColumnManager::processSaveQueue() {
     IOManager* io = nullptr;
-    std::vector<std::pair<ColumnPos, ChunkColumn*>> toSave;
+    TickExtractCallback tickExtract;
+    struct SaveEntry {
+        ColumnPos pos;
+        ChunkColumn* col;
+        std::vector<ScheduledTick> ticks;
+    };
+    std::vector<SaveEntry> toSave;
 
     {
         std::unique_lock lock(mutex_);
@@ -356,6 +382,7 @@ void ColumnManager::processSaveQueue() {
             return;
         }
         io = ioManager_;
+        tickExtract = tickExtractCallback_;
 
         // Process save queue
         while (true) {
@@ -370,13 +397,20 @@ void ColumnManager::processSaveQueue() {
             // Mark as currently saving
             it->second->state = ColumnState::Saving;
             currentlySaving_.insert(*key);
-            toSave.emplace_back(ColumnPos::unpack(*key), it->second->column.get());
+
+            ColumnPos pos = ColumnPos::unpack(*key);
+            std::vector<ScheduledTick> ticks;
+            if (tickExtract) {
+                ticks = tickExtract(pos);
+            }
+            toSave.push_back({pos, it->second->column.get(), std::move(ticks)});
         }
     }
 
     // Queue saves outside the lock
-    for (auto& [pos, col] : toSave) {
-        io->queueSave(pos, *col, [this](ColumnPos savedPos, bool success) {
+    for (auto& entry : toSave) {
+        io->queueSave(entry.pos, *entry.col, std::move(entry.ticks),
+                       [this](ColumnPos savedPos, bool success) {
             if (success) {
                 onSaveComplete(savedPos);
             } else {

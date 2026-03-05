@@ -557,3 +557,151 @@ TEST(ChunkColumnGameTickTest, RebuildGameTickRegistries) {
     // (3, 20, 3) world -> (3, 4, 3) local within subchunk 1
     EXPECT_TRUE(sc1->isRegisteredForGameTicks(BlockCoord{3, 4, 3}.localIndex()));
 }
+
+// ============================================================================
+// PropagationPolicy Tests
+// ============================================================================
+
+TEST(PropagationPolicyTest, DefaultPolicyIsDrop) {
+    BlockType type;
+    EXPECT_EQ(type.propagationPolicy(), PropagationPolicy::Drop);
+}
+
+TEST(PropagationPolicyTest, SetPropagationPolicy) {
+    BlockType type;
+    type.setPropagationPolicy(PropagationPolicy::Defer);
+    EXPECT_EQ(type.propagationPolicy(), PropagationPolicy::Defer);
+}
+
+TEST(PropagationPolicyTest, DropPolicySkipsUnloadedNeighbors) {
+    // Register a block type with Drop policy (default)
+    BlockType dropType;
+    auto dropId = BlockTypeId::fromName("proptest:drop_block");
+    BlockRegistry::global().registerType(dropId, dropType);
+
+    // Create world with block at chunk boundary
+    World world;
+    // Place at x=15, so +X neighbor at x=16 is in a different chunk
+    BlockCoord sourcePos{15, 5, 5};
+    world.setBlock(sourcePos, dropId);
+
+    // Set up scheduler
+    UpdateScheduler scheduler(world);
+
+    // Create context and call notifyNeighbors
+    ChunkPos chunkPos = ChunkPos::fromBlock(sourcePos);
+    auto subChunk = world.getSubChunkShared(chunkPos);
+    ASSERT_NE(subChunk, nullptr);
+
+    BlockContext ctx(world, *subChunk, sourcePos, sourcePos.local());
+    ctx.setScheduler(&scheduler);
+    ctx.notifyNeighbors();
+
+    // Outbox should be empty — no events for unloaded neighbors
+    EXPECT_TRUE(scheduler.outbox().empty());
+}
+
+TEST(PropagationPolicyTest, DeferPolicyEmitsBlockUpdate) {
+    // Register a block type with Defer policy
+    BlockType deferType;
+    deferType.setPropagationPolicy(PropagationPolicy::Defer);
+    auto deferId = BlockTypeId::fromName("proptest:defer_block");
+    BlockRegistry::global().registerType(deferId, deferType);
+
+    // Create world with block at chunk boundary
+    World world;
+    BlockCoord sourcePos{15, 5, 5};
+    world.setBlock(sourcePos, deferId);
+    // Neighbor at (16, 5, 5) is in an unloaded chunk
+
+    // Set up scheduler
+    UpdateScheduler scheduler(world);
+
+    // Create context and call notifyNeighbors
+    ChunkPos chunkPos = ChunkPos::fromBlock(sourcePos);
+    auto subChunk = world.getSubChunkShared(chunkPos);
+    ASSERT_NE(subChunk, nullptr);
+
+    BlockContext ctx(world, *subChunk, sourcePos, sourcePos.local());
+    ctx.setScheduler(&scheduler);
+    ctx.notifyNeighbors();
+
+    // Outbox should have a BlockUpdate for the unloaded neighbor
+    EXPECT_FALSE(scheduler.outbox().empty());
+
+    std::vector<BlockEvent> events;
+    scheduler.outbox().swapTo(events);
+
+    // Find BlockUpdate for +X neighbor at (16, 5, 5)
+    bool found = false;
+    for (const auto& event : events) {
+        if (event.type == EventType::BlockUpdate &&
+            event.pos.x == 16 && event.pos.y == 5 && event.pos.z == 5) {
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST(PropagationPolicyTest, DeferredEventProcessedOnChunkLoad) {
+    // Register a block type with Defer policy
+    BlockType deferType;
+    deferType.setPropagationPolicy(PropagationPolicy::Defer);
+    auto deferId = BlockTypeId::fromName("proptest:defer_load");
+    BlockRegistry::global().registerType(deferId, deferType);
+
+    World world;
+    BlockCoord sourcePos{15, 5, 5};
+    world.setBlock(sourcePos, deferId);
+
+    UpdateScheduler scheduler(world);
+
+    // Call notifyNeighbors — should emit deferred BlockUpdate for (16, 5, 5)
+    ChunkPos chunkPos = ChunkPos::fromBlock(sourcePos);
+    auto subChunk = world.getSubChunkShared(chunkPos);
+    ASSERT_NE(subChunk, nullptr);
+
+    BlockContext ctx(world, *subChunk, sourcePos, sourcePos.local());
+    ctx.setScheduler(&scheduler);
+    ctx.notifyNeighbors();
+
+    // Process events — BlockUpdate at (16, 5, 5) should be deferred
+    scheduler.processEvents();
+    EXPECT_GE(scheduler.deferredEventCount(), 1u);
+
+    // Load the chunk containing (16, 5, 5) by placing a block there
+    auto neighborId = BlockTypeId::fromName("proptest:neighbor");
+    BlockRegistry::global().registerType(neighborId, BlockType{});
+    world.setBlock(BlockCoord{16, 5, 5}, neighborId);
+
+    // Advance game tick to trigger processDeferredEvents
+    scheduler.advanceGameTick();
+    scheduler.processEvents();
+
+    // Deferred event should now be processed (chunk is loaded)
+    EXPECT_EQ(scheduler.deferredEventCount(), 0u);
+}
+
+TEST(PropagationPolicyTest, NoSchedulerFallsBackToDrop) {
+    // Register a block type with Defer policy
+    BlockType deferType;
+    deferType.setPropagationPolicy(PropagationPolicy::Defer);
+    auto deferId = BlockTypeId::fromName("proptest:defer_nosched");
+    BlockRegistry::global().registerType(deferId, deferType);
+
+    World world;
+    BlockCoord sourcePos{15, 5, 5};
+    world.setBlock(sourcePos, deferId);
+
+    ChunkPos chunkPos = ChunkPos::fromBlock(sourcePos);
+    auto subChunk = world.getSubChunkShared(chunkPos);
+    ASSERT_NE(subChunk, nullptr);
+
+    // Create context WITHOUT setting scheduler
+    BlockContext ctx(world, *subChunk, sourcePos, sourcePos.local());
+    // ctx.setScheduler NOT called — scheduler_ is nullptr
+
+    // This should not crash — falls back to Drop behavior
+    ctx.notifyNeighbors();
+    // No way to verify events weren't generated, but at least it doesn't crash
+}

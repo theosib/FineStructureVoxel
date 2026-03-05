@@ -22,6 +22,7 @@ namespace finevox {
 // Forward declarations
 class World;
 class IOManager;
+struct ScheduledTick;
 
 // Lifecycle state for managed columns
 enum class ColumnState {
@@ -167,6 +168,17 @@ public:
     using ChunkLoadCallback = std::function<void(ColumnPos pos)>;
     void setChunkLoadCallback(ChunkLoadCallback callback);
 
+    // Callback to extract scheduled ticks for a column during save
+    // Called from processSaveQueue — should return a copy of ticks (non-destructive)
+    using TickExtractCallback = std::function<std::vector<ScheduledTick>(ColumnPos)>;
+    void setTickExtractCallback(TickExtractCallback callback);
+
+    // Callback fired before a column is evicted from the LRU cache
+    // Used to extract remaining ticks from the scheduler and queue them
+    // for journal persistence via IOManager
+    using PreEvictionCallback = std::function<void(ColumnPos)>;
+    void setPreEvictionCallback(PreEvictionCallback callback);
+
 private:
     mutable std::shared_mutex mutex_;
 
@@ -200,6 +212,10 @@ private:
 
     // IOManager for persistence (optional, not owned)
     IOManager* ioManager_ = nullptr;
+
+    // Tick persistence callbacks
+    TickExtractCallback tickExtractCallback_;
+    PreEvictionCallback preEvictionCallback_;
 
     // Internal helper to move column between states
     void transitionToSaveQueue(uint64_t key);

@@ -1,5 +1,6 @@
 #include "finevox/core/event_queue.hpp"
 #include "finevox/core/event_journal.hpp"
+#include "finevox/core/tick_journal.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/chunk_column.hpp"  // For ChunkColumn activity timer
@@ -195,6 +196,9 @@ size_t UpdateScheduler::processEvents() {
 
 void UpdateScheduler::advanceGameTick() {
     ++currentTick_;
+
+    // Merge any pending ticks from IO threads
+    mergePendingTicks();
 
     // Process deferred events whose chunks are now loaded
     processDeferredEvents();
@@ -457,6 +461,95 @@ void UpdateScheduler::flushDeferredToJournal() {
 
     for (const auto& [colPos, events] : byColumn) {
         journal_->appendEvents(colPos, events);
+    }
+}
+
+// ============================================================================
+// Tick Persistence
+// ============================================================================
+
+std::vector<ScheduledTick> UpdateScheduler::copyTicksForColumn(ColumnPos colPos) const {
+    std::vector<ScheduledTick> result;
+
+    // Iterate through all ticks by draining and rebuilding the queue
+    auto copy = scheduledTicks_;
+    while (!copy.empty()) {
+        const ScheduledTick& tick = copy.top();
+        ColumnPos tickCol = ColumnPos::fromBlock(tick.pos);
+        if (tickCol.x == colPos.x && tickCol.z == colPos.z) {
+            result.push_back(tick);
+        }
+        copy.pop();
+    }
+
+    return result;
+}
+
+std::vector<ScheduledTick> UpdateScheduler::extractTicksForColumn(ColumnPos colPos) {
+    std::vector<ScheduledTick> extracted;
+    std::vector<ScheduledTick> remaining;
+
+    while (!scheduledTicks_.empty()) {
+        ScheduledTick tick = scheduledTicks_.top();
+        scheduledTicks_.pop();
+
+        ColumnPos tickCol = ColumnPos::fromBlock(tick.pos);
+        if (tickCol.x == colPos.x && tickCol.z == colPos.z) {
+            extracted.push_back(tick);
+        } else {
+            remaining.push_back(tick);
+        }
+    }
+
+    for (auto& tick : remaining) {
+        scheduledTicks_.push(std::move(tick));
+    }
+
+    return extracted;
+}
+
+std::unordered_map<ColumnPos, std::vector<ScheduledTick>> UpdateScheduler::extractAllTicks() {
+    std::unordered_map<ColumnPos, std::vector<ScheduledTick>> result;
+
+    while (!scheduledTicks_.empty()) {
+        ScheduledTick tick = scheduledTicks_.top();
+        scheduledTicks_.pop();
+
+        ColumnPos colPos = ColumnPos::fromBlock(tick.pos);
+        result[colPos].push_back(std::move(tick));
+    }
+
+    return result;
+}
+
+void UpdateScheduler::pushPendingTicks(std::vector<ScheduledTick> ticks) {
+    if (ticks.empty()) return;
+
+    std::lock_guard<std::mutex> lock(pendingTicksMutex_);
+    pendingTicks_.reserve(pendingTicks_.size() + ticks.size());
+    for (auto& tick : ticks) {
+        pendingTicks_.push_back(std::move(tick));
+    }
+}
+
+void UpdateScheduler::mergePendingTicks() {
+    std::vector<ScheduledTick> ticks;
+    {
+        std::lock_guard<std::mutex> lock(pendingTicksMutex_);
+        ticks.swap(pendingTicks_);
+    }
+
+    for (auto& tick : ticks) {
+        scheduledTicks_.push(std::move(tick));
+    }
+}
+
+void UpdateScheduler::flushTicksToJournal() {
+    if (!tickJournal_) return;
+
+    auto allTicks = extractAllTicks();
+    for (auto& [colPos, ticks] : allTicks) {
+        tickJournal_->writeTicks(colPos, ticks);
     }
 }
 

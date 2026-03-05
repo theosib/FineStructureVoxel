@@ -114,6 +114,8 @@ add_library(finevox SHARED
     src/core/fluid_simulator.cpp
     src/core/fluid_tick_manager.cpp
     src/core/fluid_mesh.cpp
+    src/core/recipe_registry.cpp
+    src/core/recipe_loader.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -520,6 +522,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_event_bus.cpp
         tests/test_game_subsystem.cpp
         tests/test_render_layer.cpp
+        tests/test_recipe_system.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

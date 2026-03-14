@@ -75,6 +75,38 @@ std::optional<EntityTypeDef> EntityTypeLoader::loadFromString(std::string_view c
             def.script = entry.value.asStringOwned();
         } else if (entry.key == "sounds") {
             def.soundSet = SoundSetId::fromName(entry.value.asString());
+        } else {
+            // Store unknown keys in extensible properties DataContainer
+            if (!def.properties) {
+                def.properties = std::make_unique<DataContainer>();
+            }
+            // Try to store as the most specific type
+            auto sv = entry.value.asString();
+            if (sv == "true" || sv == "false") {
+                def.properties->set(entry.key, sv == "true");
+            } else {
+                // Try int, then float, then string
+                auto intVal = entry.value.asInt(0);
+                auto strVal = entry.value.asStringOwned();
+                bool isInt = false;
+                try {
+                    if (!strVal.empty() && (std::isdigit(strVal[0]) || strVal[0] == '-')) {
+                        auto check = std::stoll(strVal);
+                        isInt = (check == intVal && strVal.find('.') == std::string::npos);
+                    }
+                } catch (...) {}
+
+                if (isInt) {
+                    def.properties->set<int64_t>(entry.key, intVal);
+                } else {
+                    float fVal = entry.value.asFloat(0.0f);
+                    if (fVal != 0.0f || strVal == "0" || strVal == "0.0") {
+                        def.properties->set<double>(entry.key, fVal);
+                    } else {
+                        def.properties->set<std::string>(entry.key, strVal);
+                    }
+                }
+            }
         }
     }
 

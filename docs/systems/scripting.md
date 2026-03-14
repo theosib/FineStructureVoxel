@@ -2,7 +2,7 @@
 
 **Library:** `finevox_script` (`finevox::script::`)
 **Headers:** `include/finevox/script/`
-**External dep:** finescript at `/Users/theosib/projects/game-language/` (headers: `.h` not `.hpp`)
+**External dep:** finescript at `/Users/theosib/projects/FineStructure/game-language/` (headers: `.h` not `.hpp`)
 **Old docs:** [old_docs/AI-NOTES.md](../../old_docs/AI-NOTES.md) — Phase 17 section
 
 ---
@@ -25,6 +25,8 @@
 | `BlockContextProxy` | `finescript::ProxyMap` wrapping `BlockContext`; pre-interned field IDs |
 | `DataContainerProxy` | `finescript::ProxyMap` wrapping `DataContainer`; uint32_t keys = zero overhead |
 | `EntityContextProxy` | `finescript::ProxyMap` wrapping `MobEntity` for script field access |
+| `EventSymbols` | Pre-interned symbol cache singleton for all event Value map field names |
+| `event_value.hpp` | Builder functions: `makeBlockPlacedValue()`, `makeSoundEventValue()`, etc. — build `finescript::Value` maps for all event types |
 
 ---
 

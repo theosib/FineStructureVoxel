@@ -8,8 +8,10 @@
 #include "finevox/core/sound_event.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/script/event_value.hpp"
 
 using namespace finevox;
+using namespace finevox::script;
 
 // ============================================================================
 // Helper: register a test block type with sound
@@ -110,8 +112,9 @@ TEST(GameSessionTest, BreakBlockGeneratesSound) {
 
     auto events = session->soundEvents().drainAll();
     ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].action, SoundAction::Break);
-    EXPECT_EQ(events[0].soundSet, SoundSetId::fromName("test_stone_snd"));
+    const auto& s = EventSymbols::instance();
+    EXPECT_EQ(readString(events[0], s.action), "break");
+    EXPECT_EQ(readString(events[0], s.sound_set), "test_stone_snd");
 }
 
 TEST(GameSessionTest, PlaceBlockGeneratesSound) {
@@ -122,8 +125,9 @@ TEST(GameSessionTest, PlaceBlockGeneratesSound) {
 
     auto events = session->soundEvents().drainAll();
     ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].action, SoundAction::Place);
-    EXPECT_EQ(events[0].soundSet, SoundSetId::fromName("test_stone_snd2"));
+    const auto& s = EventSymbols::instance();
+    EXPECT_EQ(readString(events[0], s.action), "place");
+    EXPECT_EQ(readString(events[0], s.sound_set), "test_stone_snd2");
 }
 
 TEST(GameSessionTest, NoSoundWithoutSoundSet) {

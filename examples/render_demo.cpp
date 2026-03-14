@@ -501,6 +501,7 @@ int main(int argc, char* argv[]) {
         int debugOverlayId = -1;
         int coordsOverlayId = -1;
         int consoleWindowId = -1;
+        int hotbarOverlayId = -1;
 
         // Console state
         struct ConsoleEntry {
@@ -536,12 +537,23 @@ int main(int argc, char* argv[]) {
         loadUiScript("ui/pause_menu.fs");
         loadUiScript("ui/overlays.fs");
         loadUiScript("ui/console.fs");
+        loadUiScript("ui/hotbar.fs");
 
         // Show coords overlay at startup (immediate = skip warmup)
         auto coordsTree = uiCtx.get("coords_overlay");
         if (!coordsTree.isNil()) {
             coordsOverlayId = mapRenderer.show(coordsTree, uiCtx, true);
         }
+
+        // Show hotbar overlay at startup
+        auto hotbarTree = uiCtx.get("hotbar_overlay");
+        if (!hotbarTree.isNil()) {
+            hotbarOverlayId = mapRenderer.show(hotbarTree, uiCtx, true);
+        }
+
+        // Pre-intern symbols for hotbar per-frame updates
+        uint32_t symColor = guiEngine.intern("color");
+        uint32_t symLabel = guiEngine.intern("label");
 
         std::cout << "Script-driven GUI engine initialized\n";
 #endif
@@ -840,11 +852,24 @@ int main(int argc, char* argv[]) {
 #ifdef FINEVOX_HAS_GUI
                     gui.setGuiMode(finegui::GuiMode::Passive);
 #endif
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                    if (hotbarOverlayId < 0) {
+                        auto hTree = uiCtx.get("hotbar_overlay");
+                        if (!hTree.isNil())
+                            hotbarOverlayId = mapRenderer.show(hTree, uiCtx, true);
+                    }
+#endif
                     break;
                 case InputContext::Menu:
                     inputManager.setCursorMode(finevk::CursorMode::Normal);
 #ifdef FINEVOX_HAS_GUI
                     gui.setGuiMode(finegui::GuiMode::Exclusive);
+#endif
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                    if (hotbarOverlayId >= 0) {
+                        mapRenderer.hide(hotbarOverlayId);
+                        hotbarOverlayId = -1;
+                    }
 #endif
                     break;
                 case InputContext::Chat:
@@ -1489,6 +1514,34 @@ int main(int argc, char* argv[]) {
                 if (consoleLog.size() > MAX_CONSOLE_LINES) consoleLog.pop_front();
                 return finescript::Value::nil();
             });
+
+        // Hotbar bridge functions
+        guiEngine.registerFunction("get_hotbar_slots",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                std::vector<finescript::Value> slots;
+                for (const auto& bt : blockPalette) {
+                    auto name = StringInterner::global().lookup(bt.id);
+                    slots.push_back(finescript::Value::string(std::string(name)));
+                }
+                return finescript::Value::array(std::move(slots));
+            });
+
+        guiEngine.registerFunction("get_selected_slot",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
+                return finescript::Value::integer(selectedBlockIndex);
+            });
+
+        guiEngine.registerFunction("set_selected_slot",
+            [&](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) -> finescript::Value {
+                if (!args.empty() && args[0].isNumeric()) {
+                    int idx = static_cast<int>(args[0].asNumber());
+                    if (idx >= 0 && idx < static_cast<int>(blockPalette.size())) {
+                        selectedBlockIndex = idx;
+                        selectedBlock = blockPalette[selectedBlockIndex];
+                    }
+                }
+                return finescript::Value::nil();
+            });
 #endif
 
         // Start in gameplay mode with cursor captured
@@ -1606,52 +1659,63 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // Update hotbar: position and selection colors
+            if (hotbarOverlayId >= 0) {
+                // Show/hide based on input context
+                auto hotbarTree = uiCtx.get("hotbar_overlay");
+                if (!hotbarTree.isNil()) {
+                    // Position at bottom center
+                    const float slotSize = 48.0f;
+                    const float slotPad = 4.0f;
+                    const int slotCount = static_cast<int>(blockPalette.size());
+                    const float barWidth = slotCount * (slotSize + slotPad) + slotPad;
+                    auto winSz = window.windowSize();
+                    float wx = (static_cast<float>(winSz.x) - barWidth) / 2.0f;
+                    float wy = static_cast<float>(winSz.y) - slotSize - slotPad * 4;
+                    auto& hm = hotbarTree.asMap();
+                    hm.set(symWindowPosX, finescript::Value::number(wx));
+                    hm.set(symWindowPosY, finescript::Value::number(wy));
+
+                    // Update slot colors based on selection
+                    const char* slotNames[] = {"Stone", "Dirt", "Grass", "Cobble",
+                                               "Glow", "Slab", "Stair", "Wedge"};
+                    auto selColor = finescript::Value::array({
+                        finescript::Value::number(0.3), finescript::Value::number(0.6),
+                        finescript::Value::number(1.0), finescript::Value::number(0.9)});
+                    auto normColor = finescript::Value::array({
+                        finescript::Value::number(0.2), finescript::Value::number(0.2),
+                        finescript::Value::number(0.2), finescript::Value::number(0.7)});
+
+                    for (int i = 0; i < slotCount && i < 8; i++) {
+                        bool sel = (i == selectedBlockIndex);
+                        const auto& col = sel ? selColor : normColor;
+
+                        // Update push_color widgets for button and button_hovered
+                        std::string btnId = "s" + std::to_string(i) + "_btn_col";
+                        std::string hovId = "s" + std::to_string(i) + "_hov_col";
+                        auto btnW = mapRenderer.findById(btnId);
+                        if (!btnW.isNil()) btnW.asMap().set(symColor, col);
+                        auto hovW = mapRenderer.findById(hovId);
+                        if (!hovW.isNil()) hovW.asMap().set(symColor, col);
+
+                        // Update button label
+                        std::string slotId = "slot_" + std::to_string(i);
+                        auto slotW = mapRenderer.findById(slotId);
+                        if (!slotW.isNil()) {
+                            char label[32];
+                            snprintf(label, sizeof(label), "%s\n[%d]", slotNames[i], i + 1);
+                            slotW.asMap().set(symLabel, finescript::Value::string(label));
+                        }
+                    }
+                }
+            }
+
             guiManager.processPendingMessages();
             mapRenderer.renderAll();
 
             for (auto& action : deferredUiActions) action();
             deferredUiActions.clear();
 #endif
-
-            // Hotbar (bottom center) — only in gameplay
-            if (inputContext == InputContext::Gameplay) {
-                const char* slotNames[] = {
-                    "Stone", "Dirt", "Grass", "Cobble",
-                    "Glow", "Slab", "Stair", "Wedge", ""
-                };
-                const int slotCount = 8;
-                const float slotSize = 48.0f;
-                const float slotPad = 4.0f;
-                const float barWidth = slotCount * (slotSize + slotPad) + slotPad;
-
-                ImGuiIO& io = ImGui::GetIO();
-                ImGui::SetNextWindowPos(
-                    ImVec2((io.DisplaySize.x - barWidth) / 2.0f, io.DisplaySize.y - slotSize - slotPad * 4));
-                ImGui::Begin("##hotbar", nullptr,
-                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
-
-                for (int i = 0; i < slotCount; i++) {
-                    if (i > 0) ImGui::SameLine(0, slotPad);
-
-                    bool selected = (i == selectedBlockIndex);
-                    if (selected) {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 1.0f, 0.9f));
-                    } else {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.7f));
-                    }
-
-                    char label[32];
-                    snprintf(label, sizeof(label), "%s\n[%d]", slotNames[i], i + 1);
-                    ImGui::Button(label, ImVec2(slotSize, slotSize));
-
-                    ImGui::PopStyleColor(2);
-                }
-                ImGui::End();
-            }
 
             gui.endFrame();
             if (ctx.commandBuffer) gui.render(*ctx.commandBuffer);

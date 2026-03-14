@@ -180,4 +180,18 @@ BlockEvent BlockEvent::fluidRemoved(BlockCoord pos, FluidTypeId previousFluid) {
     return event;
 }
 
+// ============================================================================
+// Crafting Event Factory Methods
+// ============================================================================
+
+BlockEvent BlockEvent::craftItem(BlockCoord stationPos, RecipeId recipe) {
+    BlockEvent event;
+    event.type = EventType::CraftItem;
+    event.pos = stationPos;
+    event.localPos = stationPos.local();
+    event.chunkPos = ChunkPos::fromBlock(stationPos);
+    event.recipeId = recipe;
+    return event;
+}
+
 }  // namespace finevox

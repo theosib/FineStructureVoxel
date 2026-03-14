@@ -14,6 +14,11 @@
 #include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/data_container.hpp"
+#include "finevox/script/event_value.hpp"
+
+#include <finescript/value.h>
+#include <finescript/map_data.h>
 
 #include <thread>
 #include <atomic>
@@ -22,6 +27,59 @@
 #include <chrono>
 
 namespace finevox {
+
+using namespace finevox::script;
+
+// ============================================================================
+// GameActions convenience methods — build Values and call sendAction()
+// ============================================================================
+
+bool GameActions::breakBlock(BlockCoord pos) {
+    auto oldType = BlockTypeId::fromName("finevox:air"); // actual type checked server-side
+    sendAction(makeBlockBrokenValue(pos, oldType));
+    return true;
+}
+
+bool GameActions::placeBlock(BlockCoord pos, BlockTypeId type) {
+    auto oldType = BlockTypeId::fromName("finevox:air");
+    sendAction(makeBlockPlacedValue(pos, type, oldType));
+    return true;
+}
+
+bool GameActions::useBlock(BlockCoord pos, Face face) {
+    sendAction(makePlayerUseValue(pos, face));
+    return true;
+}
+
+bool GameActions::hitBlock(BlockCoord pos, Face face) {
+    sendAction(makePlayerHitValue(pos, face));
+    return true;
+}
+
+bool GameActions::placeFluid(BlockCoord pos, FluidTypeId type, uint8_t level) {
+    sendAction(makeFluidPlacedValue(pos, type, level));
+    return true;
+}
+
+bool GameActions::removeFluid(BlockCoord pos) {
+    auto emptyFluid = FluidTypeId{}; // empty
+    sendAction(makeFluidRemovedValue(pos, emptyFluid));
+    return true;
+}
+
+void GameActions::sendPlayerState(EntityId id, const EntityState& state) {
+    sendAction(makePlayerPositionValue(id, state.position, state.velocity,
+                                        state.onGround, state.inputSequence));
+}
+
+void GameActions::setWorldTime(int64_t ticks) {
+    sendAction(makeSetWorldTimeValue(ticks));
+}
+
+bool GameActions::craftItem(BlockCoord stationPos, RecipeId recipe) {
+    sendAction(makeCraftItemValue(stationPos, recipe));
+    return true;
+}
 
 // ============================================================================
 // LocalGameActions — single-player implementation
@@ -36,6 +94,12 @@ public:
     LocalGameActions(World& world, SoundEventQueue& soundQueue, GameCommandQueue& commandQueue)
         : world_(world), soundQueue_(soundQueue), commandQueue_(commandQueue) {}
 
+    void sendAction(finescript::Value action) override {
+        // Push the raw Value into the command queue for the game thread
+        commandQueue_.push(std::move(action));
+    }
+
+    // Override typed methods to add eager sound feedback before queuing
     bool breakBlock(BlockCoord pos) override {
         BlockTypeId oldType = world_.getBlock(pos);
         if (oldType.isAir()) return false;
@@ -43,11 +107,11 @@ public:
         // Sound eagerly (instant audio feedback on calling thread)
         auto soundSet = BlockRegistry::global().getType(oldType).soundSet();
         if (soundSet.isValid()) {
-            soundQueue_.push(SoundEvent::blockBreak(soundSet, pos));
+            soundQueue_.push(makeSoundEventValue(soundSet, "break", "effects", pos));
         }
 
         // Defer mutation to game thread
-        commandQueue_.push(BlockEvent::blockBroken(pos, oldType));
+        sendAction(makeBlockBrokenValue(pos, oldType));
         return true;
     }
 
@@ -55,11 +119,11 @@ public:
         // Sound eagerly
         auto soundSet = BlockRegistry::global().getType(type).soundSet();
         if (soundSet.isValid()) {
-            soundQueue_.push(SoundEvent::blockPlace(soundSet, pos));
+            soundQueue_.push(makeSoundEventValue(soundSet, "place", "effects", pos));
         }
 
         // Defer mutation to game thread
-        commandQueue_.push(BlockEvent::blockPlaced(pos, type, world_.getBlock(pos)));
+        sendAction(makeBlockPlacedValue(pos, type, world_.getBlock(pos)));
         return true;
     }
 
@@ -67,11 +131,11 @@ public:
         // Sound eagerly
         const FluidType* ft = FluidRegistry::global().getType(type);
         if (ft && ft->soundSet.isValid()) {
-            soundQueue_.push(SoundEvent::blockPlace(ft->soundSet, pos));
+            soundQueue_.push(makeSoundEventValue(ft->soundSet, "place", "effects", pos));
         }
 
         // Defer mutation to game thread
-        commandQueue_.push(BlockEvent::fluidPlaced(pos, type, level));
+        sendAction(makeFluidPlacedValue(pos, type, level));
         return true;
     }
 
@@ -82,11 +146,11 @@ public:
         // Sound eagerly
         const FluidType* ft = FluidRegistry::global().getType(oldFluid);
         if (ft && ft->soundSet.isValid()) {
-            soundQueue_.push(SoundEvent::blockBreak(ft->soundSet, pos));
+            soundQueue_.push(makeSoundEventValue(ft->soundSet, "break", "effects", pos));
         }
 
         // Defer mutation to game thread
-        commandQueue_.push(BlockEvent::fluidRemoved(pos, oldFluid));
+        sendAction(makeFluidRemovedValue(pos, oldFluid));
         return true;
     }
 
@@ -94,7 +158,7 @@ public:
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 
-        commandQueue_.push(BlockEvent::playerUse(pos, face));
+        sendAction(makePlayerUseValue(pos, face));
         return true;
     }
 
@@ -102,21 +166,8 @@ public:
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 
-        commandQueue_.push(BlockEvent::playerHit(pos, face));
+        sendAction(makePlayerHitValue(pos, face));
         return true;
-    }
-
-    void sendPlayerState(EntityId id, const EntityState& state) override {
-        BlockEvent event;
-        event.type = EventType::PlayerPosition;
-        event.entityId = id;
-        event.entityState = state;
-        event.entityState.id = id;
-        commandQueue_.push(std::move(event));
-    }
-
-    void setWorldTime(int64_t ticks) override {
-        commandQueue_.push(BlockEvent::setWorldTime(ticks));
     }
 
 private:
@@ -126,71 +177,93 @@ private:
 };
 
 // ============================================================================
-// Command execution — maps BlockEvent commands to World/Scheduler operations
+// Command execution — reads finescript Value commands, dispatches to subsystems
 // ============================================================================
 
 static void executeCommand(World& world, UpdateScheduler& scheduler,
                            EntityManager& entityManager, WorldTime& worldTime,
                            FluidTickManager* fluidTickManager,
-                           const BlockEvent& cmd) {
-    switch (cmd.type) {
-        case EventType::BlockBroken:
-            world.breakBlock(cmd.pos);
-            if (fluidTickManager) fluidTickManager->notifyBlockChanged(cmd.pos);
-            break;
+                           const finescript::Value& cmd) {
+    auto typeStr = readEventType(cmd);
 
-        case EventType::BlockPlaced:
-            world.placeBlock(cmd.pos, cmd.blockType);
-            if (fluidTickManager) fluidTickManager->notifyBlockChanged(cmd.pos);
-            break;
+    if (typeStr == EVT_BLOCK_BROKEN) {
+        auto pos = readBlockCoord(cmd);
+        world.breakBlock(pos);
+        if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
+    }
+    else if (typeStr == EVT_BLOCK_PLACED) {
+        auto pos = readBlockCoord(cmd);
+        const auto& s = EventSymbols::instance();
+        auto blockType = readBlockTypeId(cmd, s.block_type);
+        world.placeBlock(pos, blockType);
+        if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
+    }
+    else if (typeStr == EVT_FLUID_PLACED) {
+        auto pos = readBlockCoord(cmd);
+        auto fluidType = readFluidTypeId(cmd);
+        auto level = static_cast<uint8_t>(readInt(cmd, EventSymbols::instance().fluid_level, 15));
+        world.setFluid(pos, fluidType, level);
+        if (fluidTickManager) fluidTickManager->notifyFluidChanged(pos);
+    }
+    else if (typeStr == EVT_FLUID_REMOVED) {
+        auto pos = readBlockCoord(cmd);
+        world.removeFluid(pos);
+        if (fluidTickManager) fluidTickManager->notifyFluidChanged(pos);
+    }
+    else if (typeStr == EVT_PLAYER_USE) {
+        auto pos = readBlockCoord(cmd);
+        auto face = readFace(cmd);
+        scheduler.pushExternalEvent(BlockEvent::playerUse(pos, face));
+    }
+    else if (typeStr == EVT_PLAYER_HIT) {
+        auto pos = readBlockCoord(cmd);
+        auto face = readFace(cmd);
+        scheduler.pushExternalEvent(BlockEvent::playerHit(pos, face));
+    }
+    else if (typeStr == EVT_PLAYER_POSITION) {
+        auto id = readEntityId(cmd);
+        const auto& s = EventSymbols::instance();
+        auto pos = readDVec3(cmd, s.pos_x, s.pos_y, s.pos_z);
+        auto vel = readDVec3(cmd, s.vel_x, s.vel_y, s.vel_z);
+        bool onGround = readBool(cmd, s.on_ground);
+        uint64_t seq = static_cast<uint64_t>(readInt(cmd, s.input_sequence));
 
-        case EventType::FluidPlaced:
-            world.setFluid(cmd.pos, cmd.fluidType, cmd.fluidLevel);
-            if (fluidTickManager) fluidTickManager->notifyFluidChanged(cmd.pos);
-            break;
+        BlockEvent event = BlockEvent::playerPosition(id, pos, vel, onGround, seq);
+        entityManager.handlePlayerPosition(event);
+    }
+    else if (typeStr == EVT_PLAYER_LOOK) {
+        auto id = readEntityId(cmd);
+        const auto& s = EventSymbols::instance();
+        float yaw = readFloat(cmd, s.yaw);
+        float pitch = readFloat(cmd, s.pitch);
 
-        case EventType::FluidRemoved:
-            world.removeFluid(cmd.pos);
-            if (fluidTickManager) fluidTickManager->notifyFluidChanged(cmd.pos);
-            break;
-
-        case EventType::PlayerUse:
-        case EventType::PlayerHit:
-            scheduler.pushExternalEvent(cmd);
-            break;
-
-        case EventType::PlayerPosition:
-            entityManager.handlePlayerPosition(cmd);
-            break;
-
-        case EventType::PlayerLook:
-            entityManager.handlePlayerLook(cmd);
-            break;
-
-        case EventType::PlayerJump:
-            entityManager.handlePlayerJump(cmd);
-            break;
-
-        case EventType::PlayerStartSprint:
-        case EventType::PlayerStopSprint:
-            entityManager.handlePlayerSprint(cmd,
-                cmd.type == EventType::PlayerStartSprint);
-            break;
-
-        case EventType::PlayerStartSneak:
-        case EventType::PlayerStopSneak:
-            entityManager.handlePlayerSneak(cmd,
-                cmd.type == EventType::PlayerStartSneak);
-            break;
-
-        case EventType::SetWorldTime:
-            worldTime.setTime(static_cast<int64_t>(cmd.entityState.inputSequence));
-            break;
-
-        default:
-            // Forward other event types to the scheduler
-            scheduler.pushExternalEvent(cmd);
-            break;
+        BlockEvent event = BlockEvent::playerLook(id, yaw, pitch);
+        entityManager.handlePlayerLook(event);
+    }
+    else if (typeStr == EVT_PLAYER_JUMP) {
+        auto id = readEntityId(cmd);
+        BlockEvent event = BlockEvent::playerJump(id);
+        entityManager.handlePlayerJump(event);
+    }
+    else if (typeStr == EVT_PLAYER_SPRINT) {
+        auto id = readEntityId(cmd);
+        bool starting = readBool(cmd, EventSymbols::instance().starting);
+        BlockEvent event = BlockEvent::playerSprint(id, starting);
+        entityManager.handlePlayerSprint(event, starting);
+    }
+    else if (typeStr == EVT_PLAYER_SNEAK) {
+        auto id = readEntityId(cmd);
+        bool starting = readBool(cmd, EventSymbols::instance().starting);
+        BlockEvent event = BlockEvent::playerSneak(id, starting);
+        entityManager.handlePlayerSneak(event, starting);
+    }
+    else if (typeStr == EVT_SET_WORLD_TIME) {
+        int64_t ticks = readInt(cmd, EventSymbols::instance().ticks);
+        worldTime.setTime(ticks);
+    }
+    else if (typeStr == EVT_CRAFT_ITEM) {
+        // Stub: recipe validation and station-block inventory wiring
+        // will be implemented in Phase 22-3 (station block handlers).
     }
 }
 
@@ -266,7 +339,7 @@ struct GameSession::Impl {
     // Registered subsystems (sorted by phase/priority)
     std::vector<std::shared_ptr<GameSubsystem>> subsystems;
 
-    // Command queue (graphics thread → game thread)
+    // Command queue (graphics thread -> game thread)
     std::unique_ptr<GameCommandQueue> commandQueue;
 
     // Command interface
@@ -509,6 +582,32 @@ void GameSession::tick(float dt) {
 
     // Tick all subsystems in order
     impl_->tickSubsystems(dt);
+}
+
+// ============================================================================
+// GameSessionConfig serialization
+// ============================================================================
+
+GameSessionConfig GameSessionConfig::fromDataContainer(const DataContainer& dc) {
+    GameSessionConfig c;
+    c.enableLighting = dc.get<bool>("enable_lighting", true);
+    c.enableSound = dc.get<bool>("enable_sound", true);
+    c.enableFluidSimulation = dc.get<bool>("enable_fluid_simulation", true);
+    c.gravity = dc.get<float>("gravity", -14.0f);
+    c.tickRate = dc.get<uint32_t>("tick_rate", 30);
+    c.randomTicksPerChunk = dc.get<uint32_t>("random_ticks_per_chunk", 4);
+    return c;
+}
+
+DataContainer GameSessionConfig::toDataContainer() const {
+    DataContainer dc;
+    dc.set("enable_lighting", enableLighting);
+    dc.set("enable_sound", enableSound);
+    dc.set("enable_fluid_simulation", enableFluidSimulation);
+    dc.set("gravity", gravity);
+    dc.set("tick_rate", tickRate);
+    dc.set("random_ticks_per_chunk", randomTicksPerChunk);
+    return dc;
 }
 
 }  // namespace finevox

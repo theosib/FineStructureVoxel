@@ -2,6 +2,7 @@
 #include "finevox/core/world.hpp"
 #include "finevox/core/player_controller.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/script/event_value.hpp"
 
 #include <cmath>
 
@@ -50,7 +51,12 @@ void FootstepTracker::update(float /*dt*/, const PlayerController& player, glm::
 
         auto soundSet = getSurfaceSoundSet(feetPos);
         if (soundSet.isValid()) {
-            eventQueue_.push(SoundEvent::footstep(soundSet, glm::vec3(feetPos)));
+            eventQueue_.push(script::makeSoundEventValue(
+                soundSet, "step", "effects",
+                static_cast<float>(feetPos.x),
+                static_cast<float>(feetPos.y),
+                static_cast<float>(feetPos.z),
+                0.5f));
         }
     }
 }

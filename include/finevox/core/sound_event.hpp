@@ -12,6 +12,7 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/queue.hpp"
 
+#include <finescript/value.h>
 #include <glm/glm.hpp>
 #include <cstdint>
 
@@ -104,8 +105,18 @@ struct SoundEvent {
     static SoundEvent fluidSwim(SoundSetId set, glm::vec3 pos);
 };
 
+/// Parse a string action name to SoundAction enum.
+/// Returns SoundAction::Place for unrecognized strings.
+[[nodiscard]] SoundAction parseSoundAction(std::string_view name);
+
+/// Parse a string category name to SoundCategory enum.
+/// Returns SoundCategory::Effects for unrecognized strings.
+[[nodiscard]] SoundCategory parseSoundCategory(std::string_view name);
+
 // Thread-safe queue for game thread -> audio engine communication
-using SoundEventQueue = Queue<SoundEvent>;
+// Carries finescript::Value maps (serializable, extensible).
+// Use makeSoundEventValue() to build, readString()/readFloat() to consume.
+using SoundEventQueue = Queue<finescript::Value>;
 
 }  // namespace finevox
 

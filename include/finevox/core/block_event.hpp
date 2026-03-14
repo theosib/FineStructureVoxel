@@ -12,8 +12,11 @@
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/entity_state.hpp"
 #include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/recipe.hpp"
 #include <cstdint>
 #include <glm/glm.hpp>
+
+namespace finevox { class DataContainer; }
 
 // Use glm::vec3 for helper methods
 using Vec3 = glm::vec3;
@@ -77,6 +80,9 @@ enum class EventType : uint8_t {
 
     // Console/admin commands
     SetWorldTime,       // Set world time (ticks in entityState.inputSequence)
+
+    // Crafting
+    CraftItem,          // Craft request (recipeId identifies the recipe)
 };
 
 // ============================================================================
@@ -127,6 +133,9 @@ struct BlockEvent {
     // Fluid data (for FluidPlaced/FluidRemoved events)
     FluidTypeId fluidType;       // Fluid type being placed/removed
     uint8_t fluidLevel = 0;      // Fluid level (1-15, 0=none)
+
+    // Crafting data (for CraftItem events)
+    RecipeId recipeId;           // Recipe to craft
 
     // ========================================================================
     // Factory Methods
@@ -262,6 +271,17 @@ struct BlockEvent {
      * @param previousFluid Fluid type that was removed
      */
     static BlockEvent fluidRemoved(BlockCoord pos, FluidTypeId previousFluid);
+
+    // ========================================================================
+    // Crafting Event Factory Methods
+    // ========================================================================
+
+    /**
+     * @brief Create a craft item event
+     * @param stationPos Position of the crafting station block
+     * @param recipe     RecipeId to craft
+     */
+    static BlockEvent craftItem(BlockCoord stationPos, RecipeId recipe);
 
     // ========================================================================
     // Sentinel Checks
@@ -421,6 +441,15 @@ struct TickConfig {
 
     /// Whether random ticks are enabled
     bool randomTicksEnabled = true;
+
+    /// Create a config with all defaults
+    static TickConfig defaults() { return {}; }
+
+    /// Populate from a DataContainer (missing keys use defaults)
+    static TickConfig fromDataContainer(const DataContainer& dc);
+
+    /// Serialize to a DataContainer
+    [[nodiscard]] DataContainer toDataContainer() const;
 };
 
 }  // namespace finevox

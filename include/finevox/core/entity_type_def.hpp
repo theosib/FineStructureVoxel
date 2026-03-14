@@ -8,7 +8,9 @@
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/loot_table.hpp"
 #include "finevox/core/sound_event.hpp"
+#include "finevox/core/data_container.hpp"
 #include <glm/glm.hpp>
+#include <memory>
 #include <string>
 #include <cstdint>
 
@@ -74,6 +76,16 @@ struct EntityTypeDef {
 
     // Sound
     SoundSetId soundSet;
+
+    // Extensible properties (mod/script data from .entity files)
+    // Unknown keys from .entity files are stored here.
+    std::unique_ptr<DataContainer> properties;
+
+    /// Get a property value with default fallback
+    template<typename T>
+    [[nodiscard]] T getProperty(std::string_view key, T defaultVal = T{}) const {
+        return properties ? properties->get<T>(key, std::move(defaultVal)) : defaultVal;
+    }
 };
 
 }  // namespace finevox

@@ -21,8 +21,8 @@ The audio system uses **miniaudio** as the backend. Core sound types (events, re
 | Type | Description |
 |------|-------------|
 | `SoundSetId` | Interned ID for a set of sound variants |
-| `SoundEvent` | Sound trigger with SetId, position, volume/pitch variance, category |
-| `SoundEventQueue` | Thread-safe queue; game thread pushes, audio thread consumes |
+| `SoundEvent` | Sound trigger struct (still used for struct definition; actual queue uses `finescript::Value`) |
+| `SoundEventQueue` | `Queue<finescript::Value>` — game thread pushes Value maps, audio thread consumes |
 | `SoundRegistry` | Maps block types / actions to SoundSetIds; loaded from `.sound` files |
 | `SoundAction` enum | `Place`, `Break`, `Step`, `Interact`, `Ambient`, `Splash`, `Swim` |
 
@@ -44,13 +44,11 @@ SoundRegistry& reg = SoundRegistry::global();
 reg.loadDirectory("resources/sounds/");  // loads all .sound files
 SoundSetId id = reg.getActionSound(blockTypeId, SoundAction::Break);
 
-// Triggering sounds (game thread)
-SoundEvent event;
-event.soundSetId = id;
-event.position = blockPos;
-event.volume = 1.0f;
-event.pitchVariance = 0.1f;  // ±10% pitch randomization
-soundQueue.push(event);
+// Triggering sounds (game thread) — uses Value maps via event_value.hpp builders
+#include "finevox/script/event_value.hpp"
+soundQueue.push(script::makeSoundEventValue(
+    soundSetName, "place", "effects",
+    blockPos.x, blockPos.y, blockPos.z, 1.0f));
 
 // AudioEngine setup
 AudioEngine engine;

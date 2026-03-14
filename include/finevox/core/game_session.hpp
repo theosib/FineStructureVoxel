@@ -1,6 +1,7 @@
 #pragma once
 
 #include "finevox/core/game_actions.hpp"
+#include <finescript/value.h>
 #include <memory>
 #include <vector>
 
@@ -16,15 +17,17 @@ class PhysicsSystem;
 class FluidTickManager;
 class GameSubsystem;
 class EventBus;
-struct SoundEvent;
 template<typename T> class Queue;
-using SoundEventQueue = Queue<SoundEvent>;
-struct GraphicsEvent;
-using GraphicsEventQueue = Queue<GraphicsEvent>;
-struct BlockEvent;
-using GameCommandQueue = Queue<BlockEvent>;
+using SoundEventQueue = Queue<finescript::Value>;
+struct GraphicsMessage;
+using GraphicsEventQueue = Queue<GraphicsMessage>;
+using GameCommandQueue = Queue<finescript::Value>;
 
-/// Configuration for creating a GameSession
+// Forward declaration
+class DataContainer;
+
+/// Configuration for creating a GameSession.
+/// Fields can be set directly or loaded from a DataContainer / config file.
 struct GameSessionConfig {
     bool enableLighting = true;
     bool enableSound = true;
@@ -32,6 +35,15 @@ struct GameSessionConfig {
     float gravity = -14.0f;
     uint32_t tickRate = 30;           // TPS
     uint32_t randomTicksPerChunk = 4;
+
+    /// Create a config with all defaults
+    static GameSessionConfig defaults() { return {}; }
+
+    /// Populate from a DataContainer (missing keys use defaults)
+    static GameSessionConfig fromDataContainer(const DataContainer& dc);
+
+    /// Serialize to a DataContainer
+    [[nodiscard]] DataContainer toDataContainer() const;
 };
 
 /// Owns all game state and provides the session boundary.

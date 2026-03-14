@@ -72,7 +72,7 @@ TEST(SpawnManagerTest, AddRules) {
     SpawnRule rule;
     rule.entityType = EntityTypeId::fromName("test_sm_zombie");
     rule.weight = 2.0f;
-    manager.addRule(rule);
+    manager.addRule(std::move(rule));
 
     EXPECT_EQ(manager.ruleCount(), 1u);
     EXPECT_FLOAT_EQ(manager.rules()[0].weight, 2.0f);
@@ -83,7 +83,7 @@ TEST(SpawnManagerTest, ClearRules) {
 
     SpawnRule rule;
     rule.entityType = EntityTypeId::fromName("test_sm_pig");
-    manager.addRule(rule);
+    manager.addRule(std::move(rule));
     EXPECT_EQ(manager.ruleCount(), 1u);
 
     manager.clearRules();
@@ -201,7 +201,7 @@ protected:
         EntityTypeDef zombieDef;
         zombieDef.name = "test_count_zombie";
         zombieDef.aiType = AIType::Hostile;
-        EntityTypeRegistry::global().registerType("test_count_zombie", zombieDef);
+        EntityTypeRegistry::global().registerType("test_count_zombie", std::move(zombieDef));
     }
 
     void TearDown() override {
@@ -266,7 +266,7 @@ protected:
         EntityTypeDef def;
         def.name = "test_tick_zombie";
         def.aiType = AIType::Hostile;
-        EntityTypeRegistry::global().registerType("test_tick_zombie", def);
+        EntityTypeRegistry::global().registerType("test_tick_zombie", std::move(def));
     }
 
     void TearDown() override {
@@ -295,7 +295,7 @@ TEST_F(SpawnManagerTickTest, NoPlayersNoSpawns) {
     SpawnRule rule;
     rule.entityType = EntityTypeId::fromName("test_tick_zombie");
     rule.maxLightLevel = -1;
-    manager.addRule(rule);
+    manager.addRule(std::move(rule));
 
     std::vector<glm::dvec3> players;  // Empty
     manager.tick(2.0f, world, em, players);
@@ -319,7 +319,7 @@ TEST_F(SpawnManagerTickTest, GlobalMobCapEnforced) {
     SpawnRule rule;
     rule.entityType = typeId;
     rule.maxLightLevel = -1;
-    manager.addRule(rule);
+    manager.addRule(std::move(rule));
 
     std::vector<glm::dvec3> players = { glm::dvec3(0, 64, 0) };
     size_t before = em.entityCount();
@@ -338,7 +338,7 @@ TEST_F(SpawnManagerTickTest, TimerRespectsInterval) {
     SpawnRule rule;
     rule.entityType = EntityTypeId::fromName("test_tick_zombie");
     rule.maxLightLevel = -1;
-    manager.addRule(rule);
+    manager.addRule(std::move(rule));
 
     std::vector<glm::dvec3> players = { glm::dvec3(0, 64, 0) };
 

@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 21 — Fluid System (all 6 sub-phases) |
-| Test count | **1827** |
+| Last completed phase | Phase 22 — Flexibility Initiative (7 sub-phases) |
+| Test count | **1971** |
 | In-progress | None — see Roadmap for next steps |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -56,6 +56,14 @@
   - [x] 21-4: Light integration (fluid attenuation, logarithmic model, fluid emission, LightingUpdate extended)
   - [x] 21-5: Entity physics (FluidContactInfo, buoyancy, drag, flow force, EntityManager::physicsPass)
   - [x] 21-6: Polish + interactions (serialization, FluidInteractionRegistry, GameActions::placeFluid/removeFluid, FluidPass worldgen, script API, splash sound, isStaticSource optimization, EventJournal)
+- [x] **Phase 22** — Flexibility Initiative (replace rigid C++ structs with flexible data on non-hot paths):
+  - [x] 22-1: Event foundation — `EventSymbols` cache, `event_value.hpp` builder functions for all event types, finescript config builtins (`config_parse`/`config_encode`)
+  - [x] 22-2: GameCommandQueue migration — `Queue<BlockEvent>` → `Queue<finescript::Value>`, `GameActions::sendAction(Value)`, `LocalGameActions` builds Value maps
+  - [x] 22-3: GraphicsEvent/SoundEvent migration — `GraphicsMessage` wrapper (POD snapshots + Value events), `SoundEventQueue` → `Queue<Value>`, AudioEngine reads Values
+  - [x] 22-4: EntityState extension — `std::unique_ptr<DataContainer> extra` field, CBOR serialization, deep-copy semantics
+  - [x] 22-5: Config flexibilization — `GameSessionConfig`/`TickConfig`/`DistanceConfig` DataContainer serialization, data-driven `SkyConfig` with keyframes (`resources/sky.conf`)
+  - [x] 22-6: Entity system extension — `EntityTypeDef::properties` DataContainer for mod-extensible attributes, `SpawnPredicateRegistry` for custom spawn conditions
+  - [x] 22-7: UI scripting — hotbar migrated from hardcoded ImGui to `resources/ui/hotbar.fs`, `ScriptGuiManager::loadUIFromValue()` for server-sendable UI
 
 ---
 
@@ -92,4 +100,4 @@ Known design issue:
 | `libfinevox_worldgen` | `finevox::worldgen::` | Noise, BiomeRegistry, FeatureRegistry, GenerationPipeline, Schematics |
 | `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD |
 | `libfinevox_audio` | `finevox::audio::` | AudioEngine (miniaudio), SoundLoader, FootstepTracker |
-| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptBlockHandler, BlockContextProxy, DataContainerProxy |
+| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders |

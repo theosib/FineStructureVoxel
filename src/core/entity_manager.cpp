@@ -9,6 +9,7 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/sound_event.hpp"
+#include "finevox/script/event_value.hpp"
 
 namespace finevox {
 
@@ -32,8 +33,9 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
     entity->setCurrentChunk(ChunkPos::fromBlock(toBlockCoord(position)));
 
     // Publish spawn event to graphics
-    graphicsQueue_.push(GraphicsEvent::entitySpawn(
-        id, type, position, entity->yaw(), entity->pitch()));
+    graphicsQueue_.push(GraphicsMessage::fromEvent(
+        script::makeEntitySpawnValue(id, static_cast<uint16_t>(type),
+                                      position, entity->yaw(), entity->pitch())));
 
     entities_[id] = std::move(entity);
     return id;
@@ -48,8 +50,9 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     entity->setCurrentChunk(ChunkPos::fromBlock(toBlockCoord(entity->position())));
 
     // Publish spawn event to graphics
-    graphicsQueue_.push(GraphicsEvent::entitySpawn(
-        id, entity->type(), entity->position(), entity->yaw(), entity->pitch()));
+    graphicsQueue_.push(GraphicsMessage::fromEvent(
+        script::makeEntitySpawnValue(id, static_cast<uint16_t>(entity->type()),
+                                      entity->position(), entity->yaw(), entity->pitch())));
 
     entities_[id] = std::move(entity);
     return id;
@@ -62,7 +65,7 @@ bool EntityManager::despawnEntity(EntityId id) {
     }
 
     // Publish despawn event to graphics
-    graphicsQueue_.push(GraphicsEvent::entityDespawn(id));
+    graphicsQueue_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id)));
 
     // Remove from player authorities if applicable
     playerAuthorities_.erase(id);
@@ -169,8 +172,9 @@ void EntityManager::physicsPass(float tickDt) {
             if (!wasInFluid && contact.inFluid && soundQueue_) {
                 const FluidType* ft = FluidRegistry::global().getType(contact.fluidType);
                 if (ft && ft->soundSet.isValid()) {
-                    soundQueue_->push(SoundEvent::fluidSplash(
-                        ft->soundSet, entity->position()));
+                    auto pos = entity->position();
+                    soundQueue_->push(script::makeSoundEventValue(
+                        ft->soundSet, "splash", "effects", pos.x, pos.y, pos.z));
                 }
             }
         }
@@ -219,25 +223,27 @@ void EntityManager::validatePlayerPredictions() {
         float errorMagnitude = glm::length(posError);
 
         if (errorMagnitude > auth.correctionThreshold) {
-            graphicsQueue_.push(GraphicsEvent::playerCorrection(
-                playerId,
-                player->position(),
-                player->velocity(),
-                player->isOnGround(),
-                auth.lastInputSequence,
-                CorrectionReason::PhysicsDivergence
-            ));
+            graphicsQueue_.push(GraphicsMessage::fromEvent(
+                script::makePlayerCorrectionValue(
+                    playerId,
+                    player->position(),
+                    player->velocity(),
+                    player->isOnGround(),
+                    auth.lastInputSequence,
+                    "physics_divergence"
+                )));
         }
     }
 }
 
 void EntityManager::publishSnapshots() {
-    std::vector<GraphicsEvent> batch;
+    std::vector<GraphicsMessage> batch;
     batch.reserve(entities_.size());
 
     for (const auto& [id, entity] : entities_) {
         if (entity->isAlive()) {
-            batch.push_back(GraphicsEvent::entitySnapshot(*entity, currentTick_));
+            batch.push_back(GraphicsMessage::fromSnapshot(
+                EntitySnapshot::fromEntity(*entity, currentTick_)));
         }
     }
 

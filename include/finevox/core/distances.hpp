@@ -7,6 +7,7 @@
  * Design: [23-distance-and-loading.md] §23.1 Distance Zones
  */
 
+#include "finevox/core/data_container.hpp"
 #include <glm/glm.hpp>
 
 namespace finevox {
@@ -151,6 +152,12 @@ struct DistanceConfig {
             rendering.unloadMultiplier = 1.0f;
         }
     }
+    /// Create from ConfigManager (reads keys like "render.chunk_distance", etc.)
+    /// Missing keys use defaults.
+    static DistanceConfig fromConfig(const class ConfigManager& config);
+
+    /// Serialize current values into a DataContainer
+    [[nodiscard]] DataContainer toDataContainer() const;
 };
 
 }  // namespace finevox

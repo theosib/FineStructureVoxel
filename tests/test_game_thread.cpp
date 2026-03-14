@@ -7,11 +7,13 @@
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_state.hpp"
+#include "finevox/script/event_value.hpp"
 
 #include <thread>
 #include <chrono>
 
 using namespace finevox;
+using namespace finevox::script;
 using namespace std::chrono_literals;
 
 // ============================================================================
@@ -172,7 +174,8 @@ TEST(GameThreadTest, SoundEventsEager) {
     // Sound should be available immediately (pushed on calling thread)
     auto events = session->soundEvents().drainAll();
     ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].action, SoundAction::Break);
+    const auto& s = EventSymbols::instance();
+    EXPECT_EQ(readString(events[0], s.action), "break");
 
     session->stopGameThread();
 }
@@ -218,7 +221,7 @@ TEST(GameThreadTest, EntitySnapshotsPublished) {
     auto events = session->graphicsEvents().drainAll();
     bool hasSnapshot = false;
     for (const auto& event : events) {
-        if (event.type == GraphicsEventType::EntitySnapshot) {
+        if (event.kind == GraphicsMessage::Kind::Snapshot) {
             hasSnapshot = true;
             break;
         }

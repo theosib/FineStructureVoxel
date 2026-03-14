@@ -52,10 +52,8 @@ public:
 private:
     std::unordered_map<EntityId, EntityRenderState> entities_;
 
-    void handleSpawn(const GraphicsEvent& event);
-    void handleDespawn(const GraphicsEvent& event);
-    void handleSnapshot(const GraphicsEvent& event);
-    void handleAnimation(const GraphicsEvent& event);
+    void handleSnapshot(const EntitySnapshot& snap);
+    void handleEvent(const finescript::Value& event);
 };
 
 }  // namespace render

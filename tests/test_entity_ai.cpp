@@ -29,14 +29,14 @@ protected:
         zombieDef.attackDamage = 3.0f;
         zombieDef.attackRange = 1.5f;
         zombieDef.followRange = 16.0f;
-        EntityTypeRegistry::global().registerType("test_ai_zombie", zombieDef);
+        EntityTypeRegistry::global().registerType("test_ai_zombie", std::move(zombieDef));
 
         EntityTypeDef pigDef;
         pigDef.name = "test_ai_pig";
         pigDef.aiType = AIType::Passive;
         pigDef.maxHealth = 10.0f;
         pigDef.maxSpeed = 2.5f;
-        EntityTypeRegistry::global().registerType("test_ai_pig", pigDef);
+        EntityTypeRegistry::global().registerType("test_ai_pig", std::move(pigDef));
     }
 
     void TearDown() override {

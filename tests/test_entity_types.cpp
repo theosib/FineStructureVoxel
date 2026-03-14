@@ -115,7 +115,7 @@ TEST_F(EntityTypeRegistryTest, RegisterAndRetrieve) {
     def.maxHealth = 20.0f;
     def.aiType = AIType::Hostile;
 
-    EXPECT_TRUE(EntityTypeRegistry::global().registerType("test_zombie", def));
+    EXPECT_TRUE(EntityTypeRegistry::global().registerType("test_zombie", std::move(def)));
     EXPECT_EQ(EntityTypeRegistry::global().size(), 1u);
 
     auto id = EntityTypeId::fromName("test_zombie");
@@ -130,7 +130,7 @@ TEST_F(EntityTypeRegistryTest, RetrieveByName) {
     EntityTypeDef def;
     def.name = "test_pig";
 
-    EntityTypeRegistry::global().registerType("test_pig", def);
+    EntityTypeRegistry::global().registerType("test_pig", std::move(def));
 
     const auto* found = EntityTypeRegistry::global().getType("test_pig");
     ASSERT_NE(found, nullptr);
@@ -141,15 +141,17 @@ TEST_F(EntityTypeRegistryTest, NoDuplicates) {
     EntityTypeDef def;
     def.name = "test_dup";
 
-    EXPECT_TRUE(EntityTypeRegistry::global().registerType("test_dup", def));
-    EXPECT_FALSE(EntityTypeRegistry::global().registerType("test_dup", def));
+    EntityTypeDef def2;
+    def2.name = "test_dup";
+    EXPECT_TRUE(EntityTypeRegistry::global().registerType("test_dup", std::move(def)));
+    EXPECT_FALSE(EntityTypeRegistry::global().registerType("test_dup", std::move(def2)));
     EXPECT_EQ(EntityTypeRegistry::global().size(), 1u);
 }
 
 TEST_F(EntityTypeRegistryTest, HasType) {
     EntityTypeDef def;
     def.name = "test_has";
-    EntityTypeRegistry::global().registerType("test_has", def);
+    EntityTypeRegistry::global().registerType("test_has", std::move(def));
 
     auto id = EntityTypeId::fromName("test_has");
     EXPECT_TRUE(EntityTypeRegistry::global().hasType(id));
@@ -169,8 +171,8 @@ TEST_F(EntityTypeRegistryTest, ForEachType) {
     EntityTypeDef pig;
     pig.name = "test_pig_iter";
 
-    EntityTypeRegistry::global().registerType("test_zombie_iter", zombie);
-    EntityTypeRegistry::global().registerType("test_pig_iter", pig);
+    EntityTypeRegistry::global().registerType("test_zombie_iter", std::move(zombie));
+    EntityTypeRegistry::global().registerType("test_pig_iter", std::move(pig));
 
     int count = 0;
     EntityTypeRegistry::global().forEachType([&](EntityTypeId, const EntityTypeDef&) {
@@ -182,7 +184,7 @@ TEST_F(EntityTypeRegistryTest, ForEachType) {
 TEST_F(EntityTypeRegistryTest, ClearWorks) {
     EntityTypeDef def;
     def.name = "test_clear";
-    EntityTypeRegistry::global().registerType("test_clear", def);
+    EntityTypeRegistry::global().registerType("test_clear", std::move(def));
     EXPECT_EQ(EntityTypeRegistry::global().size(), 1u);
 
     EntityTypeRegistry::global().clear();

@@ -12,6 +12,7 @@
 #include "finevox/core/physics.hpp"
 #include "finevox/core/position.hpp"
 
+#include <finescript/value.h>
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -25,7 +26,7 @@ class UpdateScheduler;
 class ChunkColumn;
 struct SoundEvent;
 template<typename T> class Queue;
-using SoundEventQueue = Queue<SoundEvent>;
+using SoundEventQueue = Queue<finescript::Value>;
 
 // ============================================================================
 // PlayerAuthority - Server-side tracking of player state for validation

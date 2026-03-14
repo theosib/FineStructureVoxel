@@ -3,8 +3,10 @@
 #include "finevox/core/sound_registry.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/config_parser.hpp"
+#include "finevox/script/event_value.hpp"
 
 using namespace finevox;
+using namespace finevox::script;
 
 // ============================================================================
 // SoundSetId
@@ -156,13 +158,14 @@ TEST(SoundEventQueueTest, PushAndDrain) {
     SoundEventQueue queue;
 
     auto id = SoundSetId::fromName("queue_test_sound");
-    queue.push(SoundEvent::blockPlace(id, BlockCoord(0, 0, 0)));
-    queue.push(SoundEvent::blockBreak(id, BlockCoord(1, 1, 1)));
+    queue.push(makeSoundEventValue(id, "place", "effects", BlockCoord(0, 0, 0)));
+    queue.push(makeSoundEventValue(id, "break", "effects", BlockCoord(1, 1, 1)));
 
     auto events = queue.drainAll();
+    const auto& s = EventSymbols::instance();
     EXPECT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].action, SoundAction::Place);
-    EXPECT_EQ(events[1].action, SoundAction::Break);
+    EXPECT_EQ(readString(events[0], s.action), "place");
+    EXPECT_EQ(readString(events[1], s.action), "break");
 }
 
 TEST(SoundEventQueueTest, DrainEmptyReturnsEmpty) {
@@ -175,16 +178,18 @@ TEST(SoundEventQueueTest, TryPopOrder) {
     SoundEventQueue queue;
 
     auto id = SoundSetId::fromName("queue_pop_test");
-    queue.push(SoundEvent::blockPlace(id, BlockCoord(0, 0, 0)));
-    queue.push(SoundEvent::blockBreak(id, BlockCoord(1, 1, 1)));
+    queue.push(makeSoundEventValue(id, "place", "effects", BlockCoord(0, 0, 0)));
+    queue.push(makeSoundEventValue(id, "break", "effects", BlockCoord(1, 1, 1)));
+
+    const auto& s = EventSymbols::instance();
 
     auto first = queue.tryPop();
     ASSERT_TRUE(first.has_value());
-    EXPECT_EQ(first->action, SoundAction::Place);
+    EXPECT_EQ(readString(*first, s.action), "place");
 
     auto second = queue.tryPop();
     ASSERT_TRUE(second.has_value());
-    EXPECT_EQ(second->action, SoundAction::Break);
+    EXPECT_EQ(readString(*second, s.action), "break");
 
     auto third = queue.tryPop();
     EXPECT_FALSE(third.has_value());

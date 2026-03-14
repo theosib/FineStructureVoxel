@@ -8,7 +8,7 @@
 
 ## Overview
 
-`GameSession` is the top-level owner of all game state: World, UpdateScheduler, LightEngine, EntityManager, FluidTickManager, and WorldTime. It manages a dedicated game thread running at 30 TPS with alarm-based wakeup. Commands from the render/input thread are submitted as `BlockEvent`s via `LocalGameActions` and processed immediately when the game thread wakes (not waiting for next tick).
+`GameSession` is the top-level owner of all game state: World, UpdateScheduler, LightEngine, EntityManager, FluidTickManager, and WorldTime. It manages a dedicated game thread running at 30 TPS with alarm-based wakeup. Commands from the render/input thread are submitted as `finescript::Value` maps via `LocalGameActions::sendAction()` and processed immediately when the game thread wakes (not waiting for next tick). The Value-based command queue makes all commands inherently serializable for multiplayer.
 
 ---
 
@@ -18,8 +18,8 @@
 |------|-------------|
 | `GameSession` | Top-level game state owner; factory: `GameSession::createLocal(config)` |
 | `GameActions` | Abstract interface for the render thread to submit game commands |
-| `LocalGameActions` | Concrete impl; routes commands through `Queue<BlockEvent>` |
-| `EntityState` | Unified POD struct for entity snapshots (position/velocity as `glm::dvec3`) |
+| `LocalGameActions` | Concrete impl; builds `finescript::Value` maps, routes through `Queue<Value>` |
+| `EntityState` | Entity snapshot struct with optional `DataContainer extra` (position/velocity as `glm::dvec3`, CBOR serializable) |
 | `EntityId` | Defined in `entity_state.hpp` (not `block_event.hpp`) |
 | `WorldTime` | Tick-based time; 36000 ticks/day at 30 TPS; has atomic `totalTicks_` for cross-thread reads |
 
@@ -59,7 +59,7 @@ bool isDay = session->worldTime().isDaytime();
 
 ## Game Thread Behavior
 
-- Wakes on: command arrival in `Queue<BlockEvent>` OR tick alarm (30 TPS)
+- Wakes on: command arrival in `Queue<finescript::Value>` OR tick alarm (30 TPS)
 - Commands processed immediately on wake (no waiting for tick boundary)
 - Tick drives: `worldTime.advance()`, `scheduler.advanceGameTick()`, `entityManager.tick()`, `fluidTickManager.tick()`
 - Catch-up capped at 10 ticks max to avoid spiral of death
@@ -70,7 +70,7 @@ bool isDay = session->worldTime().isDaytime();
 
 ## EntityState (Cross-Thread Communication)
 
-`EntityState` is the unified POD struct for game→graphics communication:
+`EntityState` is the entity snapshot struct for game→graphics communication:
 
 ```cpp
 struct EntityState {
@@ -78,16 +78,19 @@ struct EntityState {
     glm::dvec3 velocity;
     float yaw, pitch;
     EntityId id;
+    std::unique_ptr<DataContainer> extra;  // mod-extensible data (nullptr by default)
     // ... other fields
 
     static EntityState fromEntity(const Entity& e);  // float→double conversion
+    std::vector<uint8_t> toCBOR() const;
+    static EntityState fromCBOR(std::span<const uint8_t> data);
 };
 ```
 
-Used in:
+Non-trivially copyable (deep-clones `extra`). Used in:
 - `sendPlayerState()` to send player position to game thread
-- `GraphicsEvent` for entity rendering snapshots
-- Future network packets
+- `GraphicsMessage` for entity rendering snapshots
+- Network packets (CBOR serializable)
 
 ---
 

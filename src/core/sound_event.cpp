@@ -96,4 +96,29 @@ SoundEvent SoundEvent::fluidSwim(SoundSetId set, glm::vec3 pos) {
     return event;
 }
 
+// ============================================================================
+// String ↔ Enum Conversion
+// ============================================================================
+
+SoundAction parseSoundAction(std::string_view name) {
+    if (name == "place")  return SoundAction::Place;
+    if (name == "break")  return SoundAction::Break;
+    if (name == "step")   return SoundAction::Step;
+    if (name == "dig")    return SoundAction::Dig;
+    if (name == "hit")    return SoundAction::Hit;
+    if (name == "fall")   return SoundAction::Fall;
+    if (name == "splash") return SoundAction::Splash;
+    if (name == "swim")   return SoundAction::Swim;
+    return SoundAction::Place;
+}
+
+SoundCategory parseSoundCategory(std::string_view name) {
+    if (name == "master")  return SoundCategory::Master;
+    if (name == "effects") return SoundCategory::Effects;
+    if (name == "music")   return SoundCategory::Music;
+    if (name == "ambient") return SoundCategory::Ambient;
+    if (name == "ui")      return SoundCategory::UI;
+    return SoundCategory::Effects;
+}
+
 }  // namespace finevox

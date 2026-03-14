@@ -7,6 +7,8 @@
 
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/string_interner.hpp"
+#include <memory>
+#include <string>
 #include <vector>
 #include <cstdint>
 
@@ -30,6 +32,10 @@ struct SpawnRule {
     // Player distance
     float minPlayerDistance = 32.0f;   // Don't spawn too close
     float maxPlayerDistance = 160.0f;  // Don't spawn too far
+
+    // Extensible conditions (for mods/scripts)
+    std::unique_ptr<class DataContainer> conditions;
+    std::vector<std::string> customPredicates;  // Names of registered predicates
 
     [[nodiscard]] bool isValid() const {
         return entityType.isValid() && weight > 0.0f && groupMin >= 1;

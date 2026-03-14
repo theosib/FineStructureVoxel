@@ -104,9 +104,9 @@ FineStructureVoxel/
 
 | Project | Path | Purpose |
 |---------|------|---------|
-| FineStructureVK (finevk) | `/Users/theosib/projects/FineStructureVK/` | Vulkan wrapper |
-| finegui | `/Users/theosib/projects/finegui/` | GUI toolkit |
-| finescript (game-language) | `/Users/theosib/projects/game-language/` | Scripting language |
+| FineStructureVK (finevk) | `/Users/theosib/projects/FineStructure/FineStructureVK/` | Vulkan wrapper |
+| finegui | `/Users/theosib/projects/FineStructure/finegui/` | GUI toolkit |
+| finescript (game-language) | `/Users/theosib/projects/FineStructure/game-language/` | Scripting language |
 
 finescript headers use `.h` not `.hpp`. finegui links: `libfinegui.a` + `libfinegui-script.a` + `libfinegui-retained.a`.
 

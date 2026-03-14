@@ -88,6 +88,8 @@ add_library(finevox SHARED
     src/core/sound_event.cpp
     src/core/sound_registry.cpp
     src/core/game_session.cpp
+    src/core/config_serialization.cpp
+    src/core/sky.cpp
     src/core/loot_table.cpp
     src/core/loot_registry.cpp
     src/core/loot_table_loader.cpp
@@ -106,6 +108,7 @@ add_library(finevox SHARED
     src/core/entity_mesh.cpp
     src/core/entity_render_state.cpp
     src/core/spawn_manager.cpp
+    src/core/spawn_predicate.cpp
     src/core/entity_serializer.cpp
     src/core/fluid_registry.cpp
     src/core/fluid_layer.cpp
@@ -116,6 +119,8 @@ add_library(finevox SHARED
     src/core/fluid_mesh.cpp
     src/core/recipe_registry.cpp
     src/core/recipe_loader.cpp
+    src/core/crafting_helper.cpp
+    src/script/event_value.cpp
 )
 
 target_include_directories(finevox PUBLIC
@@ -128,17 +133,28 @@ target_compile_options(finevox PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
-target_link_libraries(finevox PUBLIC lz4_static glm::glm)
-
-# ============================================================================
-# Script Module (namespace: finevox::script) - always built
-# ============================================================================
-
-# Find finescript
+# Find finescript (needed by core for event Values)
 if(NOT DEFINED FINESCRIPT_DIR)
     set(FINESCRIPT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../game-language"
         CACHE PATH "Path to finescript")
 endif()
+
+target_link_libraries(finevox PUBLIC lz4_static glm::glm)
+
+if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
+    target_include_directories(finevox PUBLIC ${FINESCRIPT_DIR}/include)
+    if(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.dylib")
+        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.dylib")
+    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.so")
+        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.so")
+    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.a")
+        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.a")
+    endif()
+endif()
+
+# ============================================================================
+# Script Module (namespace: finevox::script) - always built
+# ============================================================================
 
 if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
     add_library(finevox_script SHARED
@@ -151,10 +167,10 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/script_entity_handler.cpp
     )
 
+    # finevox already provides include dirs and finescript PUBLIC
     target_include_directories(finevox_script PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-        ${FINESCRIPT_DIR}/include
     )
 
     target_compile_options(finevox_script PRIVATE
@@ -162,19 +178,8 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
     )
 
+    # finevox already links finescript PUBLIC, so finevox_script gets it transitively
     target_link_libraries(finevox_script PUBLIC finevox)
-
-    # Link finescript shared library
-    if(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.dylib")
-        target_link_libraries(finevox_script PUBLIC
-            "${FINESCRIPT_DIR}/build/libfinescript.dylib")
-    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.so")
-        target_link_libraries(finevox_script PUBLIC
-            "${FINESCRIPT_DIR}/build/libfinescript.so")
-    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.a")
-        target_link_libraries(finevox_script PUBLIC
-            "${FINESCRIPT_DIR}/build/libfinescript.a")
-    endif()
 
     target_compile_definitions(finevox_script PUBLIC FINEVOX_HAS_SCRIPT=1)
 
@@ -505,6 +510,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_entity_render.cpp
         tests/test_spawning.cpp
         tests/test_entity_persistence.cpp
+        tests/test_entity_state.cpp
         tests/test_fluid_core.cpp
         tests/test_fluid_simulator.cpp
         tests/test_fluid_mesh.cpp
@@ -521,8 +527,12 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_game_event.cpp
         tests/test_event_bus.cpp
         tests/test_game_subsystem.cpp
+        tests/test_config_structs.cpp
+        tests/test_spawn_predicate.cpp
+        tests/test_entity_type_properties.cpp
         tests/test_render_layer.cpp
         tests/test_recipe_system.cpp
+        tests/test_crafting_helper.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -539,6 +549,8 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_script_integration.cpp
             tests/test_script_entity.cpp
             tests/test_script_fluid.cpp
+            tests/test_event_value.cpp
+            tests/test_hotbar_bridge.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

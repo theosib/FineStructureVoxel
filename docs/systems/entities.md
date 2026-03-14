@@ -17,7 +17,7 @@ Phase 20 complete (1570 tests: 1526 main + 44 script). Entities use `EntityTypeI
 | Type | Description |
 |------|-------------|
 | `EntityTypeId` | Interned ID; `.id` is public `uint32_t` |
-| `EntityTypeDef` | Data struct loaded from `.entity` files; size, health, behavior config |
+| `EntityTypeDef` | Data struct loaded from `.entity` files; size, health, behavior config; `properties` DataContainer for mod-extensible attributes |
 | `EntityTypeRegistry` | Singleton; `EntityTypeRegistry::global()` |
 | `Entity` | Base class: position, velocity, AABB, events |
 | `MobEntity` | Extends Entity: AIBrain, EntitySenses, health/combat, movement commands |
@@ -30,8 +30,9 @@ Phase 20 complete (1570 tests: 1526 main + 44 script). Entities use `EntityTypeI
 | `AnimationClip` | Frame-based bone keyframes; sample at arbitrary time |
 | `AnimationController` | Manages clips with crossfade blending; updates bone transforms each tick |
 | `EntityRenderer` | Graphics thread; processes `GraphicsEventQueue`; interpolates between snapshots |
-| `GraphicsEventQueue` | Entity snapshots for render thread; `AlarmQueue`-based |
-| `SpawnManager` | Rules-based surface spawning; mob cap per region |
+| `GraphicsEventQueue` | `Queue<GraphicsMessage>` — POD snapshots + `finescript::Value` events; `AlarmQueue`-based |
+| `SpawnManager` | Rules-based surface spawning; mob cap per region; evaluates `SpawnPredicateRegistry` |
+| `SpawnPredicateRegistry` | Extensible spawn conditions; named predicates with AND logic; `SpawnPredicateRegistry::global()` |
 | `SpawnerBlockHandler` | Block handler for spawner blocks (data-driven, per-block config) |
 | `ScriptEntityHandler` | `BlockHandler`-like for entities; caches finescript event closures |
 | `EntityContextProxy` | `finescript::ProxyMap` wrapping `MobEntity` for script access |

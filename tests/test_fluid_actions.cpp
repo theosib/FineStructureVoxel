@@ -7,8 +7,10 @@
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/sound_event.hpp"
 #include "finevox/core/fluid_tick_manager.hpp"
+#include "finevox/script/event_value.hpp"
 
 using namespace finevox;
+using namespace finevox::script;
 
 // ============================================================================
 // Test fixture — creates a GameSession with fluid simulation enabled
@@ -144,8 +146,9 @@ TEST_F(FluidActionsTest, PlaceFluidPushesSoundEvent) {
     // Sound should be pushed eagerly (before tick)
     auto sounds = session_->soundEvents().drainAll();
     ASSERT_EQ(sounds.size(), 1);
-    EXPECT_EQ(sounds[0].soundSet, SoundSetId::fromName("water_sound"));
-    EXPECT_EQ(sounds[0].action, SoundAction::Place);
+    const auto& s = EventSymbols::instance();
+    EXPECT_EQ(readString(sounds[0], s.sound_set), "water_sound");
+    EXPECT_EQ(readString(sounds[0], s.action), "place");
 }
 
 TEST_F(FluidActionsTest, RemoveFluidPushesSoundEvent) {
@@ -156,8 +159,9 @@ TEST_F(FluidActionsTest, RemoveFluidPushesSoundEvent) {
 
     auto sounds = session_->soundEvents().drainAll();
     ASSERT_EQ(sounds.size(), 1);
-    EXPECT_EQ(sounds[0].soundSet, SoundSetId::fromName("water_sound"));
-    EXPECT_EQ(sounds[0].action, SoundAction::Break);
+    const auto& s = EventSymbols::instance();
+    EXPECT_EQ(readString(sounds[0], s.sound_set), "water_sound");
+    EXPECT_EQ(readString(sounds[0], s.action), "break");
 }
 
 TEST_F(FluidActionsTest, PlaceFluidNoSoundWhenNoSoundSet) {

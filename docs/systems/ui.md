@@ -1,7 +1,7 @@
 # System: UI
 
 **Library:** `apps/render_demo` (UI is app-level, not engine library)
-**Dependencies:** finegui (`/Users/theosib/projects/finegui/`), `finevox_script`
+**Dependencies:** finegui (`/Users/theosib/projects/FineStructure/finegui/`), `finevox_script`
 **CMake flag:** `FINEVOX_HAS_SCRIPT_GUI` — defined when both finegui and finevox_script available
 **Links:** `libfinegui.a` + `libfinegui-script.a` + `libfinegui-retained.a` + `finevox_script`
 **UI scripts:** `resources/ui/*.fs` (finescript files)
@@ -11,7 +11,7 @@
 
 ## Overview
 
-All UI (except the hotbar) is driven by finegui `MapRenderer` + finescript `.fs` files. The UI definitions live in `resources/ui/` as finescript files loaded at runtime. Native C++ functions are registered on the `guiEngine` for UI callbacks (menus, settings, console commands). A deferred action pattern prevents mutation during `renderAll()` iteration.
+All UI is driven by finegui `MapRenderer` + finescript `.fs` files. The UI definitions live in `resources/ui/` as finescript files loaded at runtime. Native C++ functions are registered on the `guiEngine` for UI callbacks (menus, settings, console commands). A deferred action pattern prevents mutation during `renderAll()` iteration. For multiplayer, `ScriptGuiManager::loadUIFromValue()` accepts pre-built Value maps received via CBOR from the server.
 
 ---
 
@@ -20,7 +20,7 @@ All UI (except the hotbar) is driven by finegui `MapRenderer` + finescript `.fs`
 | Type | Description |
 |------|-------------|
 | `MapRenderer` | finegui retained-mode renderer; UI state as a nested map of maps |
-| `ScriptGuiManager` | Wires finescript UI definitions to MapRenderer |
+| `ScriptGuiManager` | Wires finescript UI definitions to MapRenderer; `loadUIFromValue()` for server-sendable UI |
 | `VoxelResourceFinder` | Adapts finescript `ResourceFinder` to finevox `ResourceLocator`; resolves `"ui/X.fs"` paths |
 
 ---
@@ -30,8 +30,9 @@ All UI (except the hotbar) is driven by finegui `MapRenderer` + finescript `.fs`
 | File | Purpose |
 |------|---------|
 | `resources/ui/pause_menu.fs` | Pause menu (Resume, Settings, Quit) |
-| `resources/ui/overlays.fs` | HUD overlays (crosshair, hotbar) |
+| `resources/ui/overlays.fs` | HUD overlays (debug stats, coordinates) |
 | `resources/ui/console.fs` | In-game console widget |
+| `resources/ui/hotbar.fs` | Hotbar (8 block slots, selection highlight via `ui.push_color`) |
 
 ---
 
@@ -64,6 +65,13 @@ set_sensitivity(s)            -- mouse sensitivity
 set_time_speed(mult)          -- WorldTime speed multiplier
 set_freeze_time(bool)         -- freeze/unfreeze day-night cycle
 set_lighting(bool)            -- toggle dynamic lighting
+```
+
+### Hotbar bridge
+```
+get_hotbar_slots()         -- returns array of block type names
+get_selected_slot()        -- returns selected slot index (0-7)
+set_selected_slot(idx)     -- set selected slot index
 ```
 
 ### Console commands (also registered as native functions)
@@ -124,6 +132,6 @@ float scale = window->contentScale();  // HiDPI scale factor (e.g., 2.0 on Retin
 ## Gotchas
 
 - `show_main_menu()` crossing finescript execution contexts is architecturally awkward — known design issue, see [ROADMAP.md](../ROADMAP.md)
-- finegui user guide: `/Users/theosib/projects/finegui/` (local project)
+- finegui user guide: `/Users/theosib/projects/FineStructure/finegui/` (local project)
 - `VoxelResourceFinder` resolves logical paths like `"ui/pause_menu.fs"` via `ResourceLocator::instance().resolve("game/...")`
 - All UI positioning in screen coords (windowSize), not framebuffer pixels

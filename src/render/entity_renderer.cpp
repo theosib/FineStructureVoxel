@@ -1,25 +1,17 @@
 #include "finevox/render/entity_renderer.hpp"
+#include "finevox/script/event_value.hpp"
 
 namespace finevox::render {
 
+using namespace finevox::script;
+
 void EntityRenderer::processEvents(GraphicsEventQueue& queue) {
-    auto events = queue.drainAll();
-    for (const auto& event : events) {
-        switch (event.type) {
-            case GraphicsEventType::EntitySpawn:
-                handleSpawn(event);
-                break;
-            case GraphicsEventType::EntityDespawn:
-                handleDespawn(event);
-                break;
-            case GraphicsEventType::EntitySnapshot:
-                handleSnapshot(event);
-                break;
-            case GraphicsEventType::EntityAnimation:
-                handleAnimation(event);
-                break;
-            default:
-                break;
+    auto messages = queue.drainAll();
+    for (auto& msg : messages) {
+        if (msg.kind == GraphicsMessage::Kind::Snapshot) {
+            handleSnapshot(msg.snapshot);
+        } else {
+            handleEvent(msg.event);
         }
     }
 }
@@ -53,40 +45,46 @@ void EntityRenderer::clear() {
     entities_.clear();
 }
 
-void EntityRenderer::handleSpawn(const GraphicsEvent& event) {
-    EntityId id = event.entity.id;
-    if (entities_.count(id)) return;  // Already exists
-
-    EntityRenderState state;
-    state.id = id;
-    state.prevPosition = event.entity.position;
-    state.currentPosition = event.entity.position;
-    state.prevYaw = event.entity.yaw;
-    state.currentYaw = event.entity.yaw;
-    state.prevPitch = event.entity.pitch;
-    state.currentPitch = event.entity.pitch;
-    state.visible = true;
-    state.active = true;
-
-    entities_[id] = std::move(state);
-}
-
-void EntityRenderer::handleDespawn(const GraphicsEvent& event) {
-    entities_.erase(event.entity.id);
-}
-
-void EntityRenderer::handleSnapshot(const GraphicsEvent& event) {
-    auto it = entities_.find(event.entity.id);
+void EntityRenderer::handleSnapshot(const EntitySnapshot& snap) {
+    auto it = entities_.find(snap.entity.id);
     if (it == entities_.end()) return;
-    it->second.applySnapshot(event.entity);
+    it->second.applySnapshot(snap.entity);
 }
 
-void EntityRenderer::handleAnimation(const GraphicsEvent& event) {
-    auto it = entities_.find(event.entity.id);
-    if (it == entities_.end()) return;
-    // Animation clip lookup would happen here in full integration
-    // For now, just note the animation change was received
-    (void)event.entity.animationId;
+void EntityRenderer::handleEvent(const finescript::Value& event) {
+    auto type = readEventType(event);
+
+    if (type == EVT_ENTITY_SPAWN) {
+        EntityId id = readEntityId(event);
+        if (entities_.count(id)) return;
+
+        const auto& s = EventSymbols::instance();
+        auto pos = readDVec3(event, s.pos_x, s.pos_y, s.pos_z);
+        float yaw = readFloat(event, s.yaw);
+        float pitch = readFloat(event, s.pitch);
+
+        EntityRenderState state;
+        state.id = id;
+        state.prevPosition = pos;
+        state.currentPosition = pos;
+        state.prevYaw = yaw;
+        state.currentYaw = yaw;
+        state.prevPitch = pitch;
+        state.currentPitch = pitch;
+        state.visible = true;
+        state.active = true;
+
+        entities_[id] = std::move(state);
+    }
+    else if (type == EVT_ENTITY_DESPAWN) {
+        entities_.erase(readEntityId(event));
+    }
+    else if (type == EVT_ENTITY_ANIMATION) {
+        EntityId id = readEntityId(event);
+        auto it = entities_.find(id);
+        if (it == entities_.end()) return;
+        // Animation clip lookup would happen here in full integration
+    }
 }
 
 }  // namespace finevox::render

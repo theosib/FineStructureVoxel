@@ -7,8 +7,10 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/fluid_registry.hpp"
+#include "finevox/script/event_value.hpp"
 
 using namespace finevox;
+using namespace finevox::script;
 
 // ============================================================================
 // SoundEvent factory tests
@@ -89,10 +91,11 @@ TEST_F(FluidSplashTest, EntityEnteringWaterPushesSplash) {
 
     // Check for splash sound
     auto sounds = session_->soundEvents().drainAll();
+    const auto& sym = EventSymbols::instance();
     bool hasSplash = false;
-    for (const auto& s : sounds) {
-        if (s.action == SoundAction::Splash &&
-            s.soundSet == SoundSetId::fromName("water_splash_set")) {
+    for (const auto& snd : sounds) {
+        if (readString(snd, sym.action) == "splash" &&
+            readString(snd, sym.sound_set) == "water_splash_set") {
             hasSplash = true;
             break;
         }
@@ -106,5 +109,6 @@ TEST_F(FluidSplashTest, PlaceFluidPushesPlaceSound) {
     session_->actions().placeFluid({0, 64, 0}, waterId_);
     auto sounds = session_->soundEvents().drainAll();
     ASSERT_FALSE(sounds.empty());
-    EXPECT_EQ(sounds[0].action, SoundAction::Place);
+    const auto& sym = EventSymbols::instance();
+    EXPECT_EQ(readString(sounds[0], sym.action), "place");
 }

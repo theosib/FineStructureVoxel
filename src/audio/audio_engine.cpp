@@ -2,6 +2,7 @@
 #include "miniaudio.h"
 
 #include "finevox/audio/audio_engine.hpp"
+#include "finevox/script/event_value.hpp"
 
 #include <random>
 #include <algorithm>
@@ -86,43 +87,59 @@ struct AudioEngine::Impl {
                volumes[static_cast<size_t>(cat)];
     }
 
-    void processEvent(const SoundEvent& event) {
+    void processEvent(const finescript::Value& event) {
+        using namespace finevox::script;
         if (!engineInitialized) return;
 
-        // Look up the sound set definition
-        auto* def = registry.getSoundSet(event.soundSet);
+        const auto& s = EventSymbols::instance();
+
+        // Read sound set name and look up definition
+        auto soundSetName = readString(event, s.sound_set);
+        if (soundSetName.empty()) return;
+        auto soundSetId = SoundSetId::fromName(soundSetName);
+        auto* def = registry.getSoundSet(soundSetId);
         if (!def) return;
 
-        // Find the action group
-        auto* group = def->getAction(event.action);
+        // Read action and find the action group
+        auto actionStr = readString(event, s.action);
+        SoundAction action = parseSoundAction(actionStr);
+        auto* group = def->getAction(action);
         if (!group || group->empty()) return;
 
         // Select a random variant
         std::uniform_int_distribution<size_t> dist(0, group->size() - 1);
         const auto& variant = group->variants[dist(rng)];
 
+        // Read position
+        glm::vec3 pos(readFloat(event, s.pos_x),
+                      readFloat(event, s.pos_y),
+                      readFloat(event, s.pos_z));
+        bool isPositional = readBool(event, s.positional, true);
+
         // Compute relative position (listener at origin)
-        glm::vec3 relativePos = event.position() - glm::vec3(listenerWorldPos);
+        glm::vec3 relativePos = pos - glm::vec3(listenerWorldPos);
         float distance = glm::length(relativePos);
 
         // Distance culling
-        if (event.positional && distance > config.maxSoundDistance) {
+        if (isPositional && distance > config.maxSoundDistance) {
             return;
         }
 
+        // Read category, volume, pitch
+        auto categoryStr = readString(event, s.category, "effects");
+        SoundCategory cat = parseSoundCategory(categoryStr);
+        float evtVolume = readFloat(event, s.volume, 1.0f);
+        float evtPitch = readFloat(event, s.pitch, 1.0f);
+
         // Compute final volume
-        float categoryVol = getCategoryVolume(event.category);
-        float finalVolume = event.volume * categoryVol * variant.volumeScale * def->volume;
+        float categoryVol = getCategoryVolume(cat);
+        float finalVolume = evtVolume * categoryVol * variant.volumeScale * def->volume;
 
         // Apply pitch variance
         std::uniform_real_distribution<float> pitchDist(
             -def->pitchVariance, def->pitchVariance);
-        float finalPitch = event.pitch * variant.pitchScale + pitchDist(rng);
+        float finalPitch = evtPitch * variant.pitchScale + pitchDist(rng);
         finalPitch = std::clamp(finalPitch, 0.5f, 2.0f);
-
-        // Play the sound
-        // For positional sounds, we use ma_engine_play_sound_ex (fire-and-forget)
-        // miniaudio handles spatialization based on listener/sound positions
 
         // Create a sound inline (fire-and-forget)
         ma_sound* sound = new ma_sound;
@@ -139,7 +156,7 @@ struct AudioEngine::Impl {
         ma_sound_set_volume(sound, finalVolume);
         ma_sound_set_pitch(sound, finalPitch);
 
-        if (event.positional) {
+        if (isPositional) {
             ma_sound_set_spatialization_enabled(sound, MA_TRUE);
             ma_sound_set_position(sound, relativePos.x, relativePos.y, relativePos.z);
             ma_sound_set_min_distance(sound, 1.0f);

@@ -1,4 +1,5 @@
 #include "finevox/core/spawn_manager.hpp"
+#include "finevox/core/spawn_predicate.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
@@ -65,6 +66,14 @@ bool SpawnManager::trySpawnGroup(const SpawnRule& rule, World& world,
     if (!surface) return false;
 
     if (!checkLightLevel(world, *surface, rule)) return false;
+
+    // Evaluate custom predicates
+    if (!rule.customPredicates.empty()) {
+        SpawnContext ctx{world, *surface, 0.0f, dist};
+        if (!SpawnPredicateRegistry::global().evaluateAll(rule, ctx)) {
+            return false;
+        }
+    }
 
     // Determine group size
     std::uniform_int_distribution<int> groupDist(rule.groupMin, rule.groupMax);

@@ -2,12 +2,12 @@
 
 /**
  * @file entity_state.hpp
- * @brief Unified POD struct for entity state snapshots
+ * @brief Unified struct for entity state snapshots
  *
  * Used for:
  * - Game thread → graphics thread communication (entity snapshots)
  * - Graphics thread → game thread communication (player state updates)
- * - Future network serialization (entity state packets)
+ * - Network serialization (entity state packets)
  *
  * Uses double-precision position/velocity to avoid float precision
  * issues at large world coordinates.
@@ -15,6 +15,9 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <memory>
+#include <span>
+#include <vector>
 
 namespace finevox {
 
@@ -24,8 +27,9 @@ using EntityId = uint64_t;
 /// Invalid entity ID constant
 constexpr EntityId INVALID_ENTITY_ID = 0;
 
-// Forward declaration
+// Forward declarations
 class Entity;
+class DataContainer;
 
 struct EntityState {
     EntityId id = INVALID_ENTITY_ID;
@@ -47,8 +51,27 @@ struct EntityState {
     // Client prediction
     uint64_t inputSequence = 0;
 
-    // Factory from Entity (converts Entity's float position to double)
+    // Extensible mod/script data (nullptr by default — zero overhead)
+    std::unique_ptr<DataContainer> extra;
+
+    // Default constructor
+    EntityState();
+    ~EntityState();
+
+    // Copy (deep-clones extra DataContainer)
+    EntityState(const EntityState& other);
+    EntityState& operator=(const EntityState& other);
+
+    // Move
+    EntityState(EntityState&&) noexcept;
+    EntityState& operator=(EntityState&&) noexcept;
+
+    // Factory from Entity
     static EntityState fromEntity(const Entity& entity);
+
+    // CBOR serialization
+    [[nodiscard]] std::vector<uint8_t> toCBOR() const;
+    static EntityState fromCBOR(std::span<const uint8_t> data);
 };
 
 }  // namespace finevox

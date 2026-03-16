@@ -14,12 +14,12 @@
 
 The player is a `MobEntity` in the game thread, identical to any mob. Differences:
 
-| Aspect | Mobs | Player |
-|--------|------|--------|
-| **Decision source** | AIBrain (goals) | Input from graphics-thread proxy |
+| Aspect                 | Mobs                | Player                                                          |
+| ------------------------| ---------------------| -----------------------------------------------------------------|
+| **Decision source**    | AIBrain (goals)     | Input from graphics-thread proxy                                |
 | **Movement authority** | Game thread physics | Graphics-thread proxy for responsiveness; game thread validates |
-| **Camera** | N/A | Graphics thread reads proxy position for camera |
-| **Persistence** | CBOR per-column | CBOR in player save file |
+| **Camera**             | N/A                 | Graphics thread reads proxy position for camera                 |
+| **Persistence**        | CBOR per-column     | CBOR in player save file                                        |
 
 The graphics-thread **player proxy** queries a lightweight world shell (loaded chunks)
 for collision to avoid visual glitches at frame rate. All mutations (block break, attack,
@@ -28,6 +28,60 @@ use) are *actions* sent to the game thread's `MobEntity`, which decides what's r
 Player actions serve the same role as AI goals — they're just input to the entity's
 tick cycle. The entity doesn't know or care whether its commands come from a keyboard
 or an AIBrain.
+
+### AI Driver Adapter
+
+Both script-driven and C++-driven AI use the same adapter interface:
+
+```cpp
+class AIDriver {
+public:
+    virtual ~AIDriver() = default;
+
+    // Periodic update — called every game tick
+    virtual void tick(MobEntity& mob, float dt) = 0;
+
+    // Event delivery — driver receives only events it subscribed to.
+    // The game thread looks up the target entity, checks subscriptions,
+    // and delivers immediately (not batched — the thread is already awake
+    // processing the command queue).
+    virtual void onEvent(MobEntity& mob, const finescript::Value& event) = 0;
+
+    // Declare which event types this driver consumes (checked once at registration).
+    // Events not in this set are silently dropped for this entity.
+    virtual std::vector<InternedId> subscribedEvents() const = 0;
+};
+```
+
+Three implementations:
+- **`ScriptAIDriver`** — delegates to finescript `on` handlers. Subscribes to:
+  `damage`, `death`, `strike`, `landing`, `interact`, `spawn`. Default for mobs.
+- **`PlayerInputDriver`** — consumes input messages from the graphics thread proxy.
+  Subscribes to: `move`, `jump`, `look`, `attack`, `use`, `select_slot`,
+  `open_inventory`. Player movement messages from the network are consumed by this
+  driver, which translates them into entity actions. First example of C++ AI adapter.
+- **`NativeAIDriver`** — loads from a game module shared library (dlopen). For
+  compute-intensive AI that games want in C++ (server-side only; client needs no
+  special mods, animations still scripted). Subscribes to whatever events it declares.
+
+**Event routing flow:**
+1. Action arrives on game command queue (player input, damage, use, etc.)
+2. Game thread pops it, identifies target entity from the Value's `:target` field
+3. Looks up entity's `AIDriver`, checks `subscribedEvents()`
+4. If subscribed, calls `driver->onEvent(mob, event)` immediately
+5. If not subscribed, event is silently dropped for that entity
+
+This means `PlayerInputDriver` isn't special — it's just a driver that subscribes
+to input event types. A hypothetical "possessed mob" (player controlling a mob)
+would work by swapping its driver to a `PlayerInputDriver`.
+
+The `AIDriver` replaces the current `AIBrain` as the top-level decision-maker.
+`AIBrain` (with its goal system) becomes one tool *within* `ScriptAIDriver` — scripts
+can still use `mob_add_goal` to configure the C++ goal system as an acceleration
+primitive, or bypass it entirely and drive behavior from pure script.
+
+**World collision** (preventing entities from walking through walls, step height,
+swimming) stays in C++ as physics infrastructure — it's not policy.
 
 ---
 
@@ -54,10 +108,14 @@ New:      isDead() → onDeath(mob, killer) → script decides: play animation,
 
 Scripts get a `mob_remove(id)` native to trigger removal when ready.
 
-### A2: AI Brain Wiring
+### A2: AI Driver + Brain Wiring
 
-`configureAIPreset()` exists but is never called. Rather than calling it, **move AI
-configuration to script `onSpawn`**:
+`configureAIPreset()` exists but is never called. Replace the direct AIBrain model
+with the `AIDriver` adapter:
+
+**New files:**
+- `include/finevox/core/ai_driver.hpp` — `AIDriver` base, `ScriptAIDriver`, `PlayerInputDriver`
+- `src/core/ai_driver.cpp` — implementations
 
 **New native functions** (registered in `finevox_script`):
 - `mob_add_goal(id, priority, goal_type, params_map)` — add a goal to entity's AIBrain
@@ -68,7 +126,7 @@ configuration to script `onSpawn`**:
 
 **Example onSpawn script** (replaces C++ `configureAIPreset`):
 ```finescript
-set on_spawn fn [mob] do
+on spawn [mob] do
     {mob_clear_goals mob.id}
     {mob_add_goal mob.id 0 "idle" {}}
     {mob_add_goal mob.id 1 "wander" {:range 8.0}}
@@ -81,16 +139,22 @@ end
 
 Move magic numbers to goal parameter maps (DataContainer or finescript Value):
 
-| Current hardcoded | Becomes |
-|-------------------|---------|
+| Current hardcoded                      | Becomes                                                       |
+| ----------------------------------------| ---------------------------------------------------------------|
 | `idleDuration = randomFloat(2.0, 5.0)` | `params.get("min_idle", 2.0)` / `params.get("max_idle", 5.0)` |
-| `wanderChance = 0.1f` | `params.get("chance", 0.1)` |
-| `fleeDuration = 5.0f` | `params.get("duration", 5.0)` |
-| `fleeSpeed = 1.5f` | `params.get("speed_mult", 1.5)` |
-| `recentlyDamaged = 10.0f` | `params.get("memory", 10.0)` |
-| `setAnimation(2)` | `params.get("anim_slot", 2)` |
+| `wanderChance = 0.1f`                  | `params.get("chance", 0.1)`                                   |
+| `fleeDuration = 5.0f`                  | `params.get("duration", 5.0)`                                 |
+| `fleeSpeed = 1.5f`                     | `params.get("speed_mult", 1.5)`                               |
+| `recentlyDamaged = 10.0f`              | `params.get("memory", 10.0)`                                  |
+| `setAnimation(2)`                      | `params.get("anim_slot", 2)`                                  |
 
 Defaults stay the same — existing behavior unchanged if no params provided.
+
+### A4: finescript Standard Library Audit
+
+Most math, random, and string functions already exist as finescript builtins.
+Before adding any new natives, audit what's already available to avoid duplication.
+Only add what's confirmed missing after checking `game-language/src/`.
 
 **Tests:** Existing AI tests pass with default params. New tests verify param overrides.
 
@@ -103,7 +167,7 @@ Defaults stay the same — existing behavior unchanged if no params provided.
 Currently the player is an `Entity` managed separately. Make it a `MobEntity`:
 
 **Files to modify:**
-- `src/core/entity_manager.cpp` — player creation returns `MobEntity*` with special flag
+- `src/core/entity_manager.cpp` — player creation returns `MobEntity*` with `PlayerInputDriver`
 - `include/finevox/core/mob_entity.hpp` — `bool isPlayer() const` flag
 - Player's `EntityTypeDef` loaded from `resources/entities/player.entity`
 
@@ -117,28 +181,26 @@ ai_type: none
 script: scripts/player
 ```
 
-`ai_type: none` → no AIBrain goals. Input comes from the action queue instead.
+`ai_type: none` → `PlayerInputDriver` assigned instead of `ScriptAIDriver`.
+The driver consumes input messages from the graphics-thread proxy and translates
+them into entity actions (move, jump, attack, use).
 
 ### B2: Player Script Hooks
 
-`scripts/player.fs` handles player-specific events via the same `onDamage`/`onDeath`
-hooks as mobs:
+`scripts/player.fs` handles player-specific events via the same event hooks as mobs.
+Uses finescript's `on` syntax for event handlers:
 
 ```finescript
-set on_damage fn [mob amount source] do
+on damage [mob amount source] do
     # Apply armor reduction (read from DataContainer)
     set armor {mob_get_data mob.id "armor"}
     set reduced (amount * (1.0 - armor * 0.04))
-    # Clamp and apply
     {mob_set_data mob.id "health" (mob.health - reduced)}
 end
 
-set on_death fn [mob killer] do
-    # Drop inventory
+on death [mob killer] do
     {player_drop_inventory mob.id}
-    # Show death screen
     {show_ui "death_screen"}
-    # Respawn after delay
     {schedule_respawn mob.id 3.0}
 end
 ```
@@ -153,13 +215,13 @@ C++ detects landing (velocity transition from downward to `onGround`). Sends a
 // In physics/movement update:
 if (onGround_ && !wasOnGround && velocity_.y < -fallDamageThreshold) {
     // Push landing event to script
-    scriptHandler->onLanding(mob, previousVelocityY);
+    driver->onEvent(mob, makeLandingEvent(previousVelocityY));
 }
 ```
 
 **Script policy** (scripts/player.fs):
 ```finescript
-set on_landing fn [mob velocity_y] do
+on landing [mob velocity_y] do
     if (velocity_y < -10.0) do
         set damage ((0.0 - velocity_y - 10.0) * 0.5)
         {mob_damage mob.id damage "fall"}
@@ -194,6 +256,39 @@ C++ provides fast operations that scripts call. Scripts direct; C++ executes.
 **Performance:** Grid lookup is O(cells_in_range) not O(total_entities).
 For 1000 mobs, a 16-block radius query touches ~8 cells vs scanning 1000 entities.
 
+### C1b: Interest-Based Query Cache
+
+For scripts that need to repeatedly locate specific block or entity types, provide
+a registration-based cache system rather than per-tick searches:
+
+```cpp
+class InterestCache {
+public:
+    // Register interest — "I want to know about X within radius R of position P"
+    QueryHandle registerInterest(EntityId owner, InterestQuery query);
+    void unregister(QueryHandle handle);
+
+    // Returns cached results (may be stale by up to N ticks)
+    const std::vector<BlockCoord>& getCachedBlocks(QueryHandle handle) const;
+    const std::vector<EntityId>& getCachedEntities(QueryHandle handle) const;
+
+    // Called by EntityManager each tick — updates a subset of registered queries
+    // to spread work across frames
+    void updateIncremental(World& world, EntitySpatialIndex& entities);
+};
+```
+
+**Native functions:**
+- `register_interest(entity_id, type, params_map)` → handle
+  - Entity interest: `{:kind "entity" :type "zombie" :radius 32}`
+  - Block interest: `{:kind "block" :type "finevox:ore" :radius 16}`
+- `query_interest(handle)` → cached result array (entities or positions)
+- `unregister_interest(handle)`
+
+**Incremental update:** Each tick, the cache updates a fraction of registered queries
+(round-robin or priority-based). Results are latency-tolerant — a mob looking for the
+nearest water source gets an answer that's 0-5 ticks old, which is fine for AI decisions.
+
 ### C2: Line-of-Sight Native
 
 DDA raycasting already exists for block targeting. Expose it:
@@ -209,6 +304,27 @@ A* pathfinder exists but is dead code. Wire it and expose:
 - Budget-capped: max iterations per call (default 200), returns partial path if exceeded
 - Path cached per entity, re-requested only when target moves significantly
 
+**Navigator config** — pathfinder respects mob movement capabilities:
+
+```cpp
+struct NavigatorConfig {
+    float entityWidth = 0.6f;
+    float entityHeight = 1.8f;
+    int stepHeight = 1;        // max block height entity can step up
+    bool canFly = false;       // ignore gravity constraints
+    bool canSwim = false;      // traverse fluid blocks
+    bool canClimb = false;     // traverse ladder/vine blocks
+    float maxFallDistance = 3;  // blocks willing to drop
+};
+```
+
+Flying mobs ignore step height limits and gravity in pathfinding. Aquatic mobs
+can path through water. Config loaded from `EntityTypeDef` properties or set by
+script.
+
+**Native:** `mob_pathfind(id, x, y, z, max_dist, config_map)` — config_map overrides
+defaults from EntityTypeDef.
+
 ### C4: Flow Field (Horde Scale)
 
 For many mobs targeting one location, individual A* is wasteful. A flow field computes
@@ -218,7 +334,10 @@ one BFS from the target outward; each mob reads its next-step from the field in 
 - `compute(target, radius)` — BFS outward, stores direction per cell
 - `getDirection(position) → Vec3` — which way to walk
 - Shared among all mobs targeting the same location
-- Re-computed when target moves or terrain changes
+- **Incremental updates** — when terrain changes, dirty affected cells and
+  re-propagate from boundaries. Mobs following stale directions temporarily
+  walk into walls, then the field adapts within a few ticks and they course-correct.
+  No need for perfect real-time consistency.
 
 **Native function:**
 - `flow_field_create(target_x, target_y, target_z, radius)` → field handle
@@ -281,7 +400,7 @@ Script computes knockback direction and magnitude based on weapon/damage type.
 Player's `MobEntity` has `extra` DataContainer. Script `onTick` manages stats:
 
 ```finescript
-set on_tick fn [mob dt] do
+on tick [mob dt] do
     # Drain hunger
     set hunger {mob_get_data mob.id "hunger"}
     set new_hunger (hunger - 0.001 * dt)
@@ -316,7 +435,7 @@ C++ natives that expose read-only player state to UI scripts:
 
 ```finescript
 # Health bar
-set health_bar {ui.progress_bar {player_health} / {player_max_health}
+set health_bar {ui.progress_bar ({player_health} / {player_max_health})
     =width 200 =height 20 =id "health_bar"
     =overlay {format "HP: %.0f / %.0f" {player_health} {player_max_health}}}
 
@@ -367,8 +486,8 @@ Items to address:
 ## Sequencing & Dependencies
 
 ```
-Sub-Phase A (Entity fixes + script wiring)  ← no deps, pure bugfix
-    ├─→ Sub-Phase B (Player unification)     ← needs A (script hooks)
+Sub-Phase A (Entity fixes + script wiring + stdlib)  ← no deps, pure bugfix
+    ├─→ Sub-Phase B (Player unification)     ← needs A (AIDriver, script hooks)
     │     └─→ Sub-Phase E (Survival + HUD)   ← needs B (player entity)
     ├─→ Sub-Phase C (Acceleration primitives) ← needs A (entity manager changes)
     │     └─→ Sub-Phase D (Combat bridge)     ← needs C (spatial queries)

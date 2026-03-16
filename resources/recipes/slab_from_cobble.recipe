@@ -1,0 +1,7 @@
+name: finevox:slab_from_cobble
+type: shaped
+station: none
+category: building
+row: finevox:cobble finevox:cobble finevox:cobble
+output: finevox:slab
+count: 6

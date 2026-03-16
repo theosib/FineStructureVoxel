@@ -82,6 +82,8 @@ add_library(finevox SHARED
     src/core/entity_manager.cpp
     src/core/player_controller.cpp
     src/core/key_bindings.cpp
+    src/core/input_action_system.cpp
+    src/core/action_dispatch.cpp
     src/core/tag_registry.cpp
     src/core/unification.cpp
     src/core/world_time.cpp
@@ -120,6 +122,7 @@ add_library(finevox SHARED
     src/core/recipe_registry.cpp
     src/core/recipe_loader.cpp
     src/core/crafting_helper.cpp
+    src/core/label_registry.cpp
     src/script/event_value.cpp
 )
 
@@ -165,6 +168,7 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/game_script_engine.cpp
         src/script/entity_context_proxy.cpp
         src/script/script_entity_handler.cpp
+        src/script/inventory_bridge.cpp
     )
 
     # finevox already provides include dirs and finescript PUBLIC
@@ -252,6 +256,7 @@ if(FINEVOX_BUILD_RENDER)
         src/render/subchunk_view.cpp
         src/render/world_renderer.cpp
         src/render/block_atlas.cpp
+        src/render/icon_atlas.cpp
         src/render/texture_manager.cpp
         src/render/frame_fence_waiter.cpp
         src/render/entity_renderer.cpp
@@ -533,6 +538,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_render_layer.cpp
         tests/test_recipe_system.cpp
         tests/test_crafting_helper.cpp
+        tests/test_input_action_system.cpp
+        tests/test_label_registry.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -551,6 +558,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_script_fluid.cpp
             tests/test_event_value.cpp
             tests/test_hotbar_bridge.cpp
+            tests/test_inventory_natives.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE
@@ -566,6 +574,7 @@ if(FINEVOX_BUILD_TESTS)
     if(TARGET finevox_render)
         add_executable(finevox_render_tests
             tests/test_frame_fence_waiter.cpp
+            tests/test_icon_atlas.cpp
         )
 
         target_link_libraries(finevox_render_tests PRIVATE

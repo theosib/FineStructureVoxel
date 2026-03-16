@@ -1,0 +1,79 @@
+# Default input bindings for FineStructureVoxel demo
+#
+# Format: event_spec: action_name [finescript_args]
+#
+# Event specs:
+#   key_<name>          - key typed (fires on press)
+#   keypress_<name>     - key press only
+#   keyrelease_<name>   - key release only
+#   click_<name>        - mouse button click (fires on press)
+#   mousepress_<name>   - mouse button press only
+#   mouserelease_<name> - mouse button release only
+#   mod_<mod>+<event>   - with modifier (shift, ctrl, alt, super)
+#   scroll              - mouse wheel (delta passed as argument)
+#
+# Key names: a-z, 0-9, space, escape, enter, tab, backspace, f1-f12,
+#            arrow_up/down/left/right, grave, comma, period, etc.
+# Mouse buttons: left, right, middle
+
+context: gameplay
+  # Movement (begin/end for network-ready held-key tracking)
+  keypress_w: begin_move_forward
+  keyrelease_w: end_move_forward
+  keypress_s: begin_move_back
+  keyrelease_s: end_move_back
+  keypress_a: begin_move_left
+  keyrelease_a: end_move_left
+  keypress_d: begin_move_right
+  keyrelease_d: end_move_right
+  keypress_space: begin_move_up
+  keyrelease_space: end_move_up
+  keypress_left_shift: begin_move_down
+  keyrelease_left_shift: end_move_down
+
+  # Actions
+  click_left: primary_action
+  click_right: secondary_action
+  key_e: open_inventory
+
+  # Hotbar
+  key_1: select_hotbar_slot 0
+  key_2: select_hotbar_slot 1
+  key_3: select_hotbar_slot 2
+  key_4: select_hotbar_slot 3
+  key_5: select_hotbar_slot 4
+  key_6: select_hotbar_slot 5
+  key_7: select_hotbar_slot 6
+  key_8: select_hotbar_slot 7
+  key_9: select_hotbar_slot 8
+  key_tab: cycle_hotbar
+  scroll: scroll_hotbar
+
+  # Debug
+  key_f1: toggle_camera_offset
+  key_f2: teleport_far
+  key_f3: teleport_origin
+  key_f4: toggle_face_culling
+  key_f5: toggle_physics
+  key_f7: toggle_debug_overlay
+  key_g: toggle_greedy_meshing
+  key_l: toggle_lod
+  key_m: toggle_merge_mode
+  key_c: toggle_frustum_culling
+  key_v: print_mesh_stats
+  key_t: cycle_time_speed
+  key_b: toggle_lighting
+
+context: inventory
+  key_e: close_inventory
+  key_escape: close_inventory
+  click_left: inventory_interact :left
+  click_right: inventory_interact :right
+  mod_shift+click_left: quick_transfer :left
+
+context: menu
+  key_escape: close_menu
+
+context: chat
+  key_escape: close_chat
+  key_enter: submit_chat

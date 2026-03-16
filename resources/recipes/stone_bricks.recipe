@@ -1,0 +1,8 @@
+name: finevox:stone_bricks
+type: shaped
+station: finevox:workbench
+category: building
+row: finevox:stone finevox:stone
+row: finevox:stone finevox:stone
+output: finevox:stone
+count: 4

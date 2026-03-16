@@ -1,6 +1,6 @@
 # FineStructureVoxel — Roadmap
 
-> Future phases and deferred design work. All phases 0–21 are complete.
+> Future phases and deferred design work. All phases 0–23 are complete.
 > See [STATUS.md](STATUS.md) for current state and deferred items from completed phases.
 >
 > Priority is driven by **Shattered Lands** (`test_voxel_game/GAME_CONCEPT.md`),
@@ -24,6 +24,13 @@ These items were designed and partially scoped but deferred during implementatio
 ### From Phase 10 (World Generation)
 - **Schematic file I/O** — CBOR format designed (see old_docs/21-clipboard-schematic.md). Clipboard/copy-paste in-memory works; disk save/load not wired.
 
+### From Phase 23 (Inventory UI & Crafting)
+- **Config-driven input bindings** — Sub-Phase A designed a `.bindings` file format and `InputActionSystem` class. Currently render_demo uses `ActionDispatch` with hardcoded listener chains. The config-driven system would make bindings rebindable and serializable.
+- **Block breaking → inventory** — Breaking blocks removes them from the world but doesn't add items to the player's bag. Needs a loot/drop system.
+- **Generic container UI** — `container.fs` for chests/barrels/etc. with shared inventory interaction.
+- **Icon-based slot rendering** — `IconAtlas` and `item_icon` exist but inventory slots show text labels not block preview icons. Wire icon UVs into slot button images.
+- **Cursor item visual** — Currently a text tooltip near mouse. Should be a dragged icon sprite following the cursor.
+
 ### Design Issue (Phase 19 / Script)
 - **Cross-context native functions** — Functions like `show_main_menu()` crossing finescript execution contexts is architecturally awkward. The right fix is a message-passing or state-machine approach where UI state transitions are events rather than direct calls.
 
@@ -31,21 +38,12 @@ These items were designed and partially scoped but deferred during implementatio
 
 ## Planned Future Work
 
-### Tier 1 — Core Game Loop (Phases 22–24)
+### Tier 1 — Core Game Loop (Phases 24+)
 
 These features together produce a playable survival loop: craft, eat, fight, die, respawn.
+Crafting/recipe system and inventory UI are complete (Phases 22-23).
 
-#### Phase 22: Crafting + Recipe System
-**Priority: Immediate** | Data model complete (ItemStack, InventoryView, ItemMatch predicate)
-
-- **RecipeRegistry** — shaped (3x3 grid), shapeless (unordered set), smelting/cooking (input + fuel + time). Each recipe specifies required station type (or none for hand-crafting).
-- **Recipe matching** — uses existing ItemMatch/TagId for flexible ingredient specification.
-- **Crafting UI** (finegui) — recipe book with category tabs and search, shows required station and materials, craft button with quantity selector.
-- **Inventory UI** — drag-and-drop grid, shift-click transfer, sort button, equipment slots.
-- **Crafting stations as block entities** — workbench, furnace, etc. have inventories and UI. Adjacent-container material pull (stations draw from neighboring chests).
-- **Smelting/cooking progress** — fuel consumption, progress bar, output slot.
-
-#### Phase 23: Player Survival + Combat
+#### Phase 24: Player Survival + Combat
 **Priority: Immediate**
 
 - **Survival stats** — hunger, stamina (thirst/temperature deferred to weather phase). Hunger drains over time; food restores it with saturation. Stamina spent on sprint/combat/mining, regens based on food level.
@@ -57,7 +55,7 @@ These features together produce a playable survival loop: craft, eat, fight, die
 - **Shield blocking** — damage reduction when blocking, timed parry for stagger.
 - **HUD** — health/hunger/stamina bars, hotbar, crosshair, damage flash.
 
-#### Phase 24: Horde Defense + Mob Variety
+#### Phase 25: Horde Defense + Mob Variety
 **Priority: High**
 
 - **Horde event system** — scheduled waves tied to WorldTime (every N days). Wave composition, intensity scaling with player progression, storm visual/audio effects.

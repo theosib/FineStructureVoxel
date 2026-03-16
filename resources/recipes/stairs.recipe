@@ -1,0 +1,9 @@
+name: finevox:stairs
+type: shaped
+station: none
+category: building
+row: finevox:cobble _ _
+row: finevox:cobble finevox:cobble _
+row: finevox:cobble finevox:cobble finevox:cobble
+output: finevox:stairs
+count: 4

@@ -39,6 +39,7 @@
 #include <finevox/core/game_session.hpp>
 #include <finevox/render/world_renderer.hpp>
 #include <finevox/render/block_atlas.hpp>
+#include <finevox/render/icon_atlas.hpp>
 #include <finevox/core/block_type.hpp>
 #include <finevox/core/block_model.hpp>
 #include <finevox/core/block_model_loader.hpp>
@@ -54,6 +55,9 @@
 #include <finevox/core/player_controller.hpp>
 #include <finevox/core/input_context.hpp>
 #include <finevox/core/key_bindings.hpp>
+#include <finevox/core/input_action_system.hpp>
+#include <finevox/core/action_dispatch.hpp>
+#include <finevox/core/label_registry.hpp>
 #include <finevox/core/world_time.hpp>
 #include <finevox/core/sky.hpp>
 #include <finevox/core/fluid_type_id.hpp>
@@ -83,11 +87,18 @@
 #include <finegui/script_gui.hpp>
 #include <finegui/script_gui_manager.hpp>
 #include <finegui/script_bindings.hpp>
+#include <finegui/texture_registry.hpp>
 #include <finescript/script_engine.h>
 #include <finescript/execution_context.h>
 #include <finescript/value.h>
 #include <finescript/map_data.h>
 #include <finescript/resource_finder.h>
+#include <finevox/script/inventory_bridge.hpp>
+#include <finevox/script/finevox_interner.hpp>
+#include <finevox/core/inventory.hpp>
+#include <finevox/core/crafting_helper.hpp>
+#include <finevox/core/recipe_registry.hpp>
+#include <finevox/core/recipe_loader.hpp>
 #endif
 
 #ifdef FINEVOX_HAS_AUDIO
@@ -116,6 +127,8 @@ public:
         auto p = ResourceLocator::instance().resolve("game/" + s);
         if (std::filesystem::exists(p)) return p;
         p = ResourceLocator::instance().resolve("game/" + s + ".fs");
+        if (std::filesystem::exists(p)) return p;
+        p = ResourceLocator::instance().resolve("game/" + s + ".fsc");
         if (std::filesystem::exists(p)) return p;
         return {};
     }
@@ -475,11 +488,15 @@ int main(int argc, char* argv[]) {
 #endif
 
 #ifdef FINEVOX_HAS_SCRIPT_GUI
-        // Script engine for GUI scripts and console (separate from GameScriptEngine)
+        // Script engine for GUI scripts and console — shares global interner
+        static finevox::script::FineVoxInterner sharedInterner;
         finescript::ScriptEngine guiEngine;
+        guiEngine.setInterner(&sharedInterner);
         finegui::registerGuiBindings(guiEngine);
         finegui::MapRenderer mapRenderer(guiEngine);
         finegui::ScriptGuiManager guiManager(guiEngine, mapRenderer);
+        finegui::TextureRegistry textureRegistry;
+        mapRenderer.setTextureRegistry(&textureRegistry);
 
         // Resource finder: bridges finescript source directive to finevox ResourceLocator
         VoxelResourceFinder voxelResourceFinder;
@@ -502,6 +519,9 @@ int main(int argc, char* argv[]) {
         int coordsOverlayId = -1;
         int consoleWindowId = -1;
         int hotbarOverlayId = -1;
+        int inventoryWindowId = -1;
+        int recipeBrowserId = -1;
+        int workbenchWindowId = -1;
 
         // Console state
         struct ConsoleEntry {
@@ -517,6 +537,13 @@ int main(int argc, char* argv[]) {
         finescript::ExecutionContext uiCtx(guiEngine);
         // Separate context for console command execution (retains variables across commands)
         finescript::ExecutionContext consoleCtx(guiEngine);
+
+        // Load recipes before UI scripts (recipe_browser.fs calls build_recipe_list at load time)
+        std::string recipesDir = resourcePath + "/recipes";
+        if (std::filesystem::exists(recipesDir)) {
+            size_t recipeCount = RecipeLoader::loadDirectory(recipesDir);
+            std::cout << "Loaded " << recipeCount << " recipes from " << recipesDir << "\n";
+        }
 
         // Deferred UI actions (for callbacks that run during renderAll)
         std::vector<std::function<void()>> deferredUiActions;
@@ -559,6 +586,7 @@ int main(int argc, char* argv[]) {
 #endif
 
         // Load key bindings from config (falls back to defaults if not configured)
+        // Legacy: registers actions with finevk InputManager for isActionActive()
         auto keyBindings = loadKeyBindings();
         for (const auto& binding : keyBindings) {
             if (binding.isMouse) {
@@ -567,6 +595,122 @@ int main(int argc, char* argv[]) {
                 inputManager.mapAction(binding.action, binding.keyCode);
             }
         }
+
+        // New config-driven input action system
+        InputActionSystem inputActions;
+        ActionDispatch actionDispatch;
+        std::string bindingsPath = resourcePath + "/input/default.bindings";
+        if (std::filesystem::exists(bindingsPath)) {
+            inputActions.loadBindings(bindingsPath);
+            std::cout << "Loaded input bindings from " << bindingsPath << "\n";
+        } else {
+            std::cerr << "Warning: input bindings not found at " << bindingsPath << "\n";
+        }
+
+        // Load language labels
+        std::string langPath = resourcePath + "/lang/en.lang";
+        if (std::filesystem::exists(langPath)) {
+            LabelRegistry::global().loadFile(langPath);
+            std::cout << "Loaded language labels from " << langPath << "\n";
+        }
+
+        // Player inventory DataContainer (will be used by InventoryBridge)
+        auto playerInventoryDC = std::make_unique<DataContainer>();
+        NameRegistry itemNameRegistry;
+
+        // Initialize inventory sections
+        {
+            // Main bag: 36 slots (4 rows x 9 cols)
+            auto& bag = playerInventoryDC->getOrCreateChild("bag");
+            InventoryView bagView(bag, itemNameRegistry);
+            bagView.setSlotCount(36);
+
+            // Cursor: 1 slot (held item)
+            auto& cursor = playerInventoryDC->getOrCreateChild("cursor");
+            InventoryView cursorView(cursor, itemNameRegistry);
+            cursorView.setSlotCount(1);
+
+            // Crafting grid: 4 slots (2x2 hand crafting)
+            auto& craftGrid = playerInventoryDC->getOrCreateChild("craft_grid");
+            InventoryView craftView(craftGrid, itemNameRegistry);
+            craftView.setSlotCount(4);
+
+            // Crafting output: 1 slot (result preview)
+            auto& craftOut = playerInventoryDC->getOrCreateChild("craft_output");
+            InventoryView craftOutView(craftOut, itemNameRegistry);
+            craftOutView.setSlotCount(1);
+
+            // Workbench crafting grid: 9 slots (3x3)
+            auto& wbCraftGrid = playerInventoryDC->getOrCreateChild("wb_craft_grid");
+            InventoryView wbCraftView(wbCraftGrid, itemNameRegistry);
+            wbCraftView.setSlotCount(9);
+
+            // Starter items for testing crafting (creative-style)
+            bagView.addItem(ItemTypeId::fromName("finevox:stone"), 64);
+            bagView.addItem(ItemTypeId::fromName("finevox:dirt"), 64);
+            bagView.addItem(ItemTypeId::fromName("finevox:cobble"), 64);
+            bagView.addItem(ItemTypeId::fromName("finevox:grass"), 64);
+            bagView.addItem(ItemTypeId::fromName("finevox:luminite"), 16);
+            bagView.addItem(ItemTypeId::fromName("finevox:slab"), 32);
+            bagView.addItem(ItemTypeId::fromName("finevox:stone_slab"), 32);
+            bagView.addItem(ItemTypeId::fromName("finevox:stairs"), 32);
+            bagView.addItem(ItemTypeId::fromName("finevox:wedge"), 32);
+            bagView.addItem(ItemTypeId::fromName("finevox:workbench"), 4);
+        }
+
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+        // Initialize inventory bridge and register native functions on GUI script engine
+        script::InventoryBridge inventoryBridge;
+        inventoryBridge.registerOwner("player", *playerInventoryDC, itemNameRegistry);
+        inventoryBridge.registerNativeFunctions(guiEngine);
+
+        // Load inventory UI scripts AFTER bridge natives are registered
+        loadUiScript("ui/inventory.fs");
+        loadUiScript("ui/recipe_browser.fs");
+        loadUiScript("ui/workbench.fs");
+#endif
+
+        // Movement state (updated by begin/end action handlers)
+        bool moveForward = false, moveBack = false, moveLeft = false, moveRight = false;
+        bool moveUp = false, moveDown = false;
+
+        // Helper: convert finevk::InputEvent to RawInputEvent
+        auto toRawEvent = [](const finevk::InputEvent& e) -> RawInputEvent {
+            RawInputEvent raw;
+            switch (e.type) {
+                case finevk::InputEventType::KeyPress:
+                    raw.type = RawEventType::KeyPress;
+                    raw.keyOrButton = e.key;
+                    break;
+                case finevk::InputEventType::KeyRelease:
+                    raw.type = RawEventType::KeyRelease;
+                    raw.keyOrButton = e.key;
+                    break;
+                case finevk::InputEventType::MouseButtonPress:
+                    raw.type = RawEventType::MouseButtonPress;
+                    raw.keyOrButton = e.mouseButton;
+                    break;
+                case finevk::InputEventType::MouseButtonRelease:
+                    raw.type = RawEventType::MouseButtonRelease;
+                    raw.keyOrButton = e.mouseButton;
+                    break;
+                case finevk::InputEventType::MouseScroll:
+                    raw.type = RawEventType::MouseScroll;
+                    raw.scrollDelta = e.state.scrollDelta.y;
+                    break;
+                default:
+                    raw.type = RawEventType::KeyPress;
+                    raw.keyOrButton = -1; // Won't match anything
+                    break;
+            }
+            // Convert modifiers
+            raw.modifiers = InputModifier::None;
+            if (e.state.isShiftPressed()) raw.modifiers = raw.modifiers | InputModifier::Shift;
+            if (e.state.isControlPressed()) raw.modifiers = raw.modifiers | InputModifier::Control;
+            if (e.state.isAltPressed()) raw.modifiers = raw.modifiers | InputModifier::Alt;
+            if (e.state.isSuperPressed()) raw.modifiers = raw.modifiers | InputModifier::Super;
+            return raw;
+        };
 
         // Load all block definitions from spec files
         // This registers block types and loads custom geometries
@@ -630,6 +774,30 @@ int main(int argc, char* argv[]) {
 
         worldRenderer.setBlockAtlas(atlas.texture());
         worldRenderer.setTextureProvider(atlas.createProvider());
+
+        // Build icon atlas from block atlas for inventory UI
+        render::IconAtlas iconAtlas;
+        iconAtlas.buildFromBlockAtlas(atlas);
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+        // Register the block atlas as a GUI texture for icon rendering
+        auto atlasHandle = gui.registerTexture(atlas.texture());
+        textureRegistry.registerTexture(iconAtlas.textureName(), atlasHandle);
+        std::cout << "Icon atlas: " << iconAtlas.size() << " icons registered\n";
+
+        // Wire up icon lookup on the inventory bridge
+        inventoryBridge.setIconLookup(
+            [&iconAtlas](std::string_view typeName)
+                -> std::optional<script::InventoryBridge::IconInfo>
+            {
+                auto* region = iconAtlas.getIcon(typeName);
+                if (!region) return std::nullopt;
+                return script::InventoryBridge::IconInfo{
+                    iconAtlas.textureName(),
+                    region->uv0.x, region->uv0.y,
+                    region->uv1.x, region->uv1.y
+                };
+            });
+#endif
 
         // Set geometry provider for custom mesh blocks (geometries loaded earlier)
         worldRenderer.setGeometryProvider([&blockGeometries](BlockTypeId type) -> const BlockGeometry* {
@@ -796,7 +964,8 @@ int main(int argc, char* argv[]) {
             BlockTypeId::fromName("luminite"),
             BlockTypeId::fromName("slab"),
             BlockTypeId::fromName("stairs"),
-            BlockTypeId::fromName("wedge")
+            BlockTypeId::fromName("wedge"),
+            BlockTypeId::fromName("workbench")
         };
 
         // Input context for routing (gameplay vs menu vs chat)
@@ -879,6 +1048,10 @@ int main(int argc, char* argv[]) {
 #endif
                     break;
             }
+            // Cancel active begin actions (prevents stuck movement on context switch)
+            moveForward = moveBack = moveLeft = moveRight = moveUp = moveDown = false;
+            inputActions.clearActiveBeginActions();
+            inputActions.setContext(ctx);
             playerController.clearInput();
         };
 
@@ -923,6 +1096,9 @@ int main(int argc, char* argv[]) {
                         if (dimOverlayId >= 0) { mapRenderer.hide(dimOverlayId); dimOverlayId = -1; }
                         if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
                         if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
+                        if (inventoryWindowId >= 0) { mapRenderer.hide(inventoryWindowId); inventoryWindowId = -1; }
+                        if (recipeBrowserId >= 0) { mapRenderer.hide(recipeBrowserId); recipeBrowserId = -1; }
+                        if (workbenchWindowId >= 0) { mapRenderer.hide(workbenchWindowId); workbenchWindowId = -1; }
 #endif
                         setInputContext(InputContext::Gameplay);
                         return finevk::ListenerResult::Consumed;
@@ -961,6 +1137,16 @@ int main(int argc, char* argv[]) {
                 }
                 return finevk::ListenerResult::Consumed;
             }
+            // E key closes inventory/workbench while in Menu context
+            if (e.key == GLFW_KEY_E && inputContext == InputContext::Menu) {
+                if (inventoryWindowId >= 0 || workbenchWindowId >= 0) {
+                    if (inventoryWindowId >= 0) { mapRenderer.hide(inventoryWindowId); inventoryWindowId = -1; }
+                    if (recipeBrowserId >= 0) { mapRenderer.hide(recipeBrowserId); recipeBrowserId = -1; }
+                    if (workbenchWindowId >= 0) { mapRenderer.hide(workbenchWindowId); workbenchWindowId = -1; }
+                    setInputContext(InputContext::Gameplay);
+                    return finevk::ListenerResult::Consumed;
+                }
+            }
 #endif
             return finevk::ListenerResult::Reject;
         }, finevk::InputPriority::Menu);
@@ -970,261 +1156,395 @@ int main(int argc, char* argv[]) {
         gui.connectToInputManager(inputManager);
 #endif
 
-        // Priority 500 (Game): Gameplay input handling
+        // ====================================================================
+        // Register action handlers with ActionDispatch
+        // ====================================================================
+
+        // Movement begin/end handlers
+        actionDispatch.registerAction("begin_move_forward", [&](const ActionArgs&) { moveForward = true; });
+        actionDispatch.registerAction("end_move_forward", [&](const ActionArgs&) { moveForward = false; });
+        actionDispatch.registerAction("begin_move_back", [&](const ActionArgs&) { moveBack = true; });
+        actionDispatch.registerAction("end_move_back", [&](const ActionArgs&) { moveBack = false; });
+        actionDispatch.registerAction("begin_move_left", [&](const ActionArgs&) { moveLeft = true; });
+        actionDispatch.registerAction("end_move_left", [&](const ActionArgs&) { moveLeft = false; });
+        actionDispatch.registerAction("begin_move_right", [&](const ActionArgs&) { moveRight = true; });
+        actionDispatch.registerAction("end_move_right", [&](const ActionArgs&) { moveRight = false; });
+        actionDispatch.registerAction("begin_move_up", [&](const ActionArgs&) {
+            moveUp = true;
+            // In physics mode, space also triggers jump
+            if (!playerController.flyMode()) {
+                playerController.requestJump();
+            }
+        });
+        actionDispatch.registerAction("end_move_up", [&](const ActionArgs&) { moveUp = false; });
+        actionDispatch.registerAction("begin_move_down", [&](const ActionArgs&) { moveDown = true; });
+        actionDispatch.registerAction("end_move_down", [&](const ActionArgs&) { moveDown = false; });
+
+        // Primary/secondary actions (break/place block)
+        actionDispatch.registerAction("primary_action", [&](const ActionArgs&) {
+            glm::dvec3 camPos = camera.positionD();
+            Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+            Vec3 direction = playerController.forwardVector();
+            RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+            if (result.hit) {
+                session->actions().breakBlock(result.blockPos);
+                std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
+            }
+        });
+
+        actionDispatch.registerAction("secondary_action", [&](const ActionArgs&) {
+            glm::dvec3 camPos = camera.positionD();
+            Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
+            Vec3 direction = playerController.forwardVector();
+            RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
+            if (result.hit) {
+                // Check if the targeted block is interactive (e.g., workbench)
+                BlockTypeId hitType = world.getBlock(result.blockPos);
+                auto hitName = StringInterner::global().lookup(hitType.id);
+                if (hitName == "workbench") {
+                    actionDispatch.dispatch("open_workbench", ActionArgs{});
+                    return;
+                }
+
+                BlockCoord placePos = getPlacePosition(result.blockPos, result.face);
+                if (wouldBlockIntersectBody(placePos, playerBody)) {
+                    auto mode = ConfigManager::instance().blockPlacementMode();
+                    if (mode == "block") {
+                        std::cout << "Cannot place block at (" << placePos.x << "," << placePos.y << "," << placePos.z
+                                  << ") - would intersect player\n";
+                        return;
+                    }
+                    session->actions().placeBlock(placePos, selectedBlock);
+                    std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                              << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
+                              << ") - pushing player\n";
+                } else {
+                    session->actions().placeBlock(placePos, selectedBlock);
+                    std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
+                              << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
+                }
+            }
+        });
+
+        // Hotbar
+        actionDispatch.registerAction("select_hotbar_slot", [&](const ActionArgs& args) {
+            int index = 0;
+            if (!args.argExpression.empty()) {
+                try { index = std::stoi(args.argExpression); } catch (...) {}
+            }
+            if (index >= 0 && index < static_cast<int>(blockPalette.size())) {
+                selectedBlockIndex = index;
+                selectedBlock = blockPalette[selectedBlockIndex];
+                std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+            }
+        });
+
+        actionDispatch.registerAction("cycle_hotbar", [&](const ActionArgs&) {
+            selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
+            selectedBlock = blockPalette[selectedBlockIndex];
+            std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+        });
+
+        actionDispatch.registerAction("scroll_hotbar", [&](const ActionArgs& args) {
+            if (args.scrollDelta > 0) {
+                selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
+            } else if (args.scrollDelta < 0) {
+                selectedBlockIndex = (selectedBlockIndex - 1 + static_cast<int>(blockPalette.size())) % static_cast<int>(blockPalette.size());
+            }
+            selectedBlock = blockPalette[selectedBlockIndex];
+            std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
+        });
+
+        // Debug toggles
+        actionDispatch.registerAction("toggle_camera_offset", [&](const ActionArgs&) {
+            bool enabled = !worldRenderer.debugCameraOffset();
+            worldRenderer.setDebugCameraOffset(enabled);
+            std::cout << "Debug camera offset: " << (enabled ? "ON" : "OFF") << "\n";
+        });
+
+        actionDispatch.registerAction("teleport_far", [&](const ActionArgs&) {
+            glm::dvec3 teleportPos(1000000.0, 32.0, 1000000.0);
+            camera.moveTo(teleportPos);
+            playerController.setFlyPosition(teleportPos);
+            playerBody.setPosition(Vec3(1000000.0f, 32.0f - playerController.eyeHeight(), 1000000.0f));
+            playerBody.setVelocity(Vec3(0.0f));
+            std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
+        });
+
+        actionDispatch.registerAction("teleport_origin", [&](const ActionArgs&) {
+            glm::dvec3 teleportPos(0.0, 32.0, 0.0);
+            camera.moveTo(teleportPos);
+            playerController.setFlyPosition(teleportPos);
+            playerBody.setPosition(Vec3(0.0f, 32.0f - playerController.eyeHeight(), 0.0f));
+            playerBody.setVelocity(Vec3(0.0f));
+            std::cout << "Teleported to origin\n";
+        });
+
+        actionDispatch.registerAction("toggle_face_culling", [&](const ActionArgs&) {
+            bool disabled = !worldRenderer.disableFaceCulling();
+            worldRenderer.setDisableFaceCulling(disabled);
+            worldRenderer.rebuildAllMeshes();
+            std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
+        });
+
+        actionDispatch.registerAction("toggle_physics", [&](const ActionArgs&) {
+            bool wasFlying = playerController.flyMode();
+            playerController.setFlyMode(!wasFlying);
+            if (!playerController.flyMode()) {
+                camera.moveTo(playerController.eyePosition());
+                std::cout << "Physics mode: ON (gravity, collision, step-climbing)\n";
+            } else {
+                std::cout << "Physics mode: OFF (free-fly camera)\n";
+            }
+        });
+
+        actionDispatch.registerAction("toggle_debug_overlay", [&](const ActionArgs&) {
+            showDebugOverlay = !showDebugOverlay;
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+            if (showDebugOverlay) {
+                auto debugTree = uiCtx.get("debug_overlay");
+                if (!debugTree.isNil()) {
+                    float w = static_cast<float>(window.windowSize().x);
+                    debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
+                    debugTree.asMap().set(symWindowPosY, finescript::Value::number(10));
+                    debugTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(1.0));
+                    debugTree.asMap().set(guiEngine.intern("window_pivot_y"), finescript::Value::number(0.0));
+                    debugOverlayId = mapRenderer.show(debugTree, uiCtx, true);
+                }
+            } else {
+                if (debugOverlayId >= 0) { mapRenderer.hide(debugOverlayId); debugOverlayId = -1; }
+            }
+#endif
+            std::cout << "Debug overlay: " << (showDebugOverlay ? "ON" : "OFF") << "\n";
+        });
+
+        actionDispatch.registerAction("toggle_greedy_meshing", [&](const ActionArgs&) {
+            bool enabled = !worldRenderer.greedyMeshing();
+            worldRenderer.setGreedyMeshing(enabled);
+            worldRenderer.rebuildAllMeshes();
+            std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
+        });
+
+        actionDispatch.registerAction("toggle_lod", [&](const ActionArgs&) {
+            bool enabled = !worldRenderer.lodEnabled();
+            worldRenderer.setLODEnabled(enabled);
+            worldRenderer.rebuildAllMeshes();
+            std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
+        });
+
+        actionDispatch.registerAction("toggle_merge_mode", [&](const ActionArgs&) {
+            auto currentMode = worldRenderer.lodMergeMode();
+            LODMergeMode nextMode;
+            const char* modeName;
+            switch (currentMode) {
+                case LODMergeMode::FullHeight:
+                    nextMode = LODMergeMode::HeightLimited;
+                    modeName = "HeightLimited (smoother transitions)";
+                    break;
+                case LODMergeMode::HeightLimited:
+                    nextMode = LODMergeMode::FullHeight;
+                    modeName = "FullHeight (best culling)";
+                    break;
+                default:
+                    nextMode = LODMergeMode::FullHeight;
+                    modeName = "FullHeight (best culling)";
+                    break;
+            }
+            worldRenderer.setLODMergeMode(nextMode);
+            std::cout << "LOD merge mode: " << modeName << "\n";
+        });
+
+        actionDispatch.registerAction("toggle_frustum_culling", [&](const ActionArgs&) {
+            bool enabled = !worldRenderer.frustumCullingEnabled();
+            worldRenderer.setFrustumCullingEnabled(enabled);
+            std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
+        });
+
+        actionDispatch.registerAction("print_mesh_stats", [&](const ActionArgs&) {
+            std::cout << "\n=== Mesh Stats ===\n";
+            std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
+            std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
+            std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
+            std::cout << "  Frustum culling: " << (worldRenderer.frustumCullingEnabled() ? "ON" : "OFF") << "\n";
+            std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
+            std::cout << "  LOD system: " << (worldRenderer.lodEnabled() ? "ON" : "OFF") << "\n";
+            if (worldRenderer.lodEnabled()) {
+                const char* mergeModeName = "Unknown";
+                switch (worldRenderer.lodMergeMode()) {
+                    case LODMergeMode::FullHeight: mergeModeName = "FullHeight"; break;
+                    case LODMergeMode::HeightLimited: mergeModeName = "HeightLimited"; break;
+                    case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
+                }
+                std::cout << "  LOD merge mode: " << mergeModeName << "\n";
+                auto lodStats = worldRenderer.getLODStats();
+                std::cout << "  LOD distribution:\n";
+                for (int i = 0; i < 5; ++i) {
+                    if (lodStats.chunksPerLevel[i] > 0) {
+                        std::cout << "    LOD" << i << ": " << lodStats.chunksPerLevel[i] << " chunks\n";
+                    }
+                }
+            }
+            std::cout << "==================\n\n";
+        });
+
+        actionDispatch.registerAction("cycle_time_speed", [&](const ActionArgs&) {
+            if (timeFrozen) {
+                timeFrozen = false;
+                timeSpeedMultiplier = 1.0f;
+                worldTime.setFrozen(false);
+                worldTime.setTimeSpeed(1.0f);
+                std::cout << "Time: 1x speed\n";
+            } else if (timeSpeedMultiplier < 5.0f) {
+                timeSpeedMultiplier = 10.0f;
+                worldTime.setTimeSpeed(10.0f);
+                std::cout << "Time: 10x speed\n";
+            } else if (timeSpeedMultiplier < 50.0f) {
+                timeSpeedMultiplier = 100.0f;
+                worldTime.setTimeSpeed(100.0f);
+                std::cout << "Time: 100x speed\n";
+            } else {
+                timeFrozen = true;
+                worldTime.setFrozen(true);
+                std::cout << "Time: FROZEN\n";
+            }
+        });
+
+        actionDispatch.registerAction("toggle_lighting", [&](const ActionArgs&) {
+            lightingMode = (lightingMode + 1) % 3;
+            applyLightingMode();
+            worldRenderer.rebuildAllMeshes();
+        });
+
+        // Inventory placeholder (Phase 23-D will implement)
+        actionDispatch.registerAction("open_inventory", [&](const ActionArgs&) {
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+            if (inventoryWindowId >= 0) {
+                // Close inventory + recipe browser
+                deferredUiActions.push_back([&]() {
+                    mapRenderer.hide(inventoryWindowId);
+                    inventoryWindowId = -1;
+                    if (recipeBrowserId >= 0) {
+                        mapRenderer.hide(recipeBrowserId);
+                        recipeBrowserId = -1;
+                    }
+                    setInputContext(InputContext::Gameplay);
+                });
+            } else {
+                // Open inventory + recipe browser side by side
+                deferredUiActions.push_back([&]() {
+                    auto winSz = window.windowSize();
+                    float w = static_cast<float>(winSz.x);
+                    float h = static_cast<float>(winSz.y);
+
+                    auto invTree = uiCtx.get("inventory_window");
+                    if (!invTree.isNil()) {
+                        // Center-left
+                        invTree.asMap().set(symWindowPosX, finescript::Value::number(w * 0.25f));
+                        invTree.asMap().set(symWindowPosY, finescript::Value::number(h * 0.5f));
+                        invTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(0.5));
+                        invTree.asMap().set(guiEngine.intern("window_pivot_y"), finescript::Value::number(0.5));
+                        inventoryWindowId = mapRenderer.show(invTree, uiCtx);
+                    }
+                    // Build recipe browser for 2x2 hand-crafting grid
+                    auto builderFn = uiCtx.get("build_recipe_browser");
+                    if (!builderFn.isNil()) {
+                        std::vector<finescript::Value> rbArgs;
+                        rbArgs.push_back(finescript::Value::string("none"));
+                        rbArgs.push_back(finescript::Value::string("craft_grid"));
+                        rbArgs.push_back(finescript::Value::integer(2));
+                        rbArgs.push_back(finescript::Value::integer(2));
+                        auto recipeTree = guiEngine.callFunction(builderFn, std::move(rbArgs), uiCtx);
+                        if (recipeTree.isMap()) {
+                            recipeTree.asMap().set(symWindowPosX, finescript::Value::number(w * 0.65f));
+                            recipeTree.asMap().set(symWindowPosY, finescript::Value::number(h * 0.3f));
+                            recipeBrowserId = mapRenderer.show(recipeTree, uiCtx);
+                        }
+                    }
+                    setInputContext(InputContext::Menu);
+                });
+            }
+#endif
+        });
+
+        actionDispatch.registerAction("open_workbench", [&](const ActionArgs&) {
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+            if (workbenchWindowId >= 0) {
+                // Close workbench
+                deferredUiActions.push_back([&]() {
+                    mapRenderer.hide(workbenchWindowId);
+                    workbenchWindowId = -1;
+                    if (recipeBrowserId >= 0) {
+                        mapRenderer.hide(recipeBrowserId);
+                        recipeBrowserId = -1;
+                    }
+                    setInputContext(InputContext::Gameplay);
+                });
+            } else {
+                // Open workbench + recipe browser side by side
+                deferredUiActions.push_back([&]() {
+                    auto winSz = window.windowSize();
+                    float w = static_cast<float>(winSz.x);
+                    float h = static_cast<float>(winSz.y);
+
+                    auto wbTree = uiCtx.get("workbench_window");
+                    if (!wbTree.isNil()) {
+                        wbTree.asMap().set(symWindowPosX, finescript::Value::number(w * 0.25f));
+                        wbTree.asMap().set(symWindowPosY, finescript::Value::number(h * 0.5f));
+                        wbTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(0.5));
+                        wbTree.asMap().set(guiEngine.intern("window_pivot_y"), finescript::Value::number(0.5));
+                        workbenchWindowId = mapRenderer.show(wbTree, uiCtx);
+                    }
+                    // Build recipe browser for 3x3 workbench grid
+                    auto builderFn = uiCtx.get("build_recipe_browser");
+                    if (!builderFn.isNil() && recipeBrowserId < 0) {
+                        std::vector<finescript::Value> rbArgs;
+                        rbArgs.push_back(finescript::Value::string("finevox:workbench"));
+                        rbArgs.push_back(finescript::Value::string("wb_craft_grid"));
+                        rbArgs.push_back(finescript::Value::integer(3));
+                        rbArgs.push_back(finescript::Value::integer(3));
+                        auto recipeTree = guiEngine.callFunction(builderFn, std::move(rbArgs), uiCtx);
+                        if (recipeTree.isMap()) {
+                            recipeTree.asMap().set(symWindowPosX, finescript::Value::number(w * 0.65f));
+                            recipeTree.asMap().set(symWindowPosY, finescript::Value::number(h * 0.3f));
+                            recipeBrowserId = mapRenderer.show(recipeTree, uiCtx);
+                        }
+                    }
+                    setInputContext(InputContext::Menu);
+                });
+            }
+#endif
+        });
+
+        // Priority 500 (Game): Route through InputActionSystem
         inputManager.addListener([&](const finevk::InputEvent& e) -> finevk::ListenerResult {
-            // Only handle input in Gameplay context
             if (inputContext != InputContext::Gameplay) {
                 return finevk::ListenerResult::Reject;
             }
 
-            // Key press events
-            if (e.type == finevk::InputEventType::KeyPress) {
-                // Jump in physics mode (space key)
-                if (e.key == GLFW_KEY_SPACE && !playerController.flyMode()) {
-                    playerController.requestJump();
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                // Debug controls
-                if (e.key == GLFW_KEY_F1) {
-                    bool enabled = !worldRenderer.debugCameraOffset();
-                    worldRenderer.setDebugCameraOffset(enabled);
-                    std::cout << "Debug camera offset: " << (enabled ? "ON" : "OFF") << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_F2) {
-                    glm::dvec3 teleportPos(1000000.0, 32.0, 1000000.0);
-                    camera.moveTo(teleportPos);
-                    playerController.setFlyPosition(teleportPos);
-                    playerBody.setPosition(Vec3(1000000.0f, 32.0f - playerController.eyeHeight(), 1000000.0f));
-                    playerBody.setVelocity(Vec3(0.0f));
-                    std::cout << "Teleported to large coordinates (1M, 32, 1M)\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_F3) {
-                    glm::dvec3 teleportPos(0.0, 32.0, 0.0);
-                    camera.moveTo(teleportPos);
-                    playerController.setFlyPosition(teleportPos);
-                    playerBody.setPosition(Vec3(0.0f, 32.0f - playerController.eyeHeight(), 0.0f));
-                    playerBody.setVelocity(Vec3(0.0f));
-                    std::cout << "Teleported to origin\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_F4 || e.key == GLFW_KEY_4) {
-                    bool disabled = !worldRenderer.disableFaceCulling();
-                    worldRenderer.setDisableFaceCulling(disabled);
-                    worldRenderer.rebuildAllMeshes();
-                    std::cout << "Hidden face culling: " << (disabled ? "DISABLED (debug)" : "ENABLED") << std::endl;
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_F5) {
-                    bool wasFlying = playerController.flyMode();
-                    playerController.setFlyMode(!wasFlying);
-                    if (!playerController.flyMode()) {
-                        camera.moveTo(playerController.eyePosition());
-                        std::cout << "Physics mode: ON (gravity, collision, step-climbing)\n";
-                    } else {
-                        std::cout << "Physics mode: OFF (free-fly camera)\n";
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_F7) {
-                    showDebugOverlay = !showDebugOverlay;
-#ifdef FINEVOX_HAS_SCRIPT_GUI
-                    if (showDebugOverlay) {
-                        auto debugTree = uiCtx.get("debug_overlay");
-                        if (!debugTree.isNil()) {
-                            // Position at upper-right
-                            float w = static_cast<float>(window.windowSize().x);
-                            debugTree.asMap().set(symWindowPosX, finescript::Value::number(w - 10));
-                            debugTree.asMap().set(symWindowPosY, finescript::Value::number(10));
-                            debugTree.asMap().set(guiEngine.intern("window_pivot_x"), finescript::Value::number(1.0));
-                            debugTree.asMap().set(guiEngine.intern("window_pivot_y"), finescript::Value::number(0.0));
-                            debugOverlayId = mapRenderer.show(debugTree, uiCtx, true);
-                        }
-                    } else {
-                        if (debugOverlayId >= 0) { mapRenderer.hide(debugOverlayId); debugOverlayId = -1; }
-                    }
-#endif
-                    std::cout << "Debug overlay: " << (showDebugOverlay ? "ON" : "OFF") << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_G) {
-                    bool enabled = !worldRenderer.greedyMeshing();
-                    worldRenderer.setGreedyMeshing(enabled);
-                    worldRenderer.rebuildAllMeshes();
-                    std::cout << "Greedy meshing: " << (enabled ? "ON" : "OFF") << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_V) {
-                    std::cout << "\n=== Mesh Stats ===\n";
-                    std::cout << "  Loaded meshes: " << worldRenderer.loadedMeshCount() << "\n";
-                    std::cout << "  Total vertices: " << worldRenderer.totalVertexCount() << "\n";
-                    std::cout << "  Total indices: " << worldRenderer.totalIndexCount() << "\n";
-                    std::cout << "  Frustum culling: " << (worldRenderer.frustumCullingEnabled() ? "ON" : "OFF") << "\n";
-                    std::cout << "  Greedy meshing: " << (worldRenderer.greedyMeshing() ? "ON" : "OFF") << "\n";
-                    std::cout << "  LOD system: " << (worldRenderer.lodEnabled() ? "ON" : "OFF") << "\n";
-                    if (worldRenderer.lodEnabled()) {
-                        const char* mergeModeName = "Unknown";
-                        switch (worldRenderer.lodMergeMode()) {
-                            case LODMergeMode::FullHeight: mergeModeName = "FullHeight"; break;
-                            case LODMergeMode::HeightLimited: mergeModeName = "HeightLimited"; break;
-                            case LODMergeMode::NoMerge: mergeModeName = "NoMerge"; break;
-                        }
-                        std::cout << "  LOD merge mode: " << mergeModeName << "\n";
-                        auto lodStats = worldRenderer.getLODStats();
-                        std::cout << "  LOD distribution:\n";
-                        for (int i = 0; i < 5; ++i) {
-                            if (lodStats.chunksPerLevel[i] > 0) {
-                                std::cout << "    LOD" << i << ": " << lodStats.chunksPerLevel[i] << " chunks\n";
-                            }
-                        }
-                    }
-                    std::cout << "==================\n\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_M) {
-                    auto currentMode = worldRenderer.lodMergeMode();
-                    LODMergeMode nextMode;
-                    const char* modeName;
-                    switch (currentMode) {
-                        case LODMergeMode::FullHeight:
-                            nextMode = LODMergeMode::HeightLimited;
-                            modeName = "HeightLimited (smoother transitions)";
-                            break;
-                        case LODMergeMode::HeightLimited:
-                            nextMode = LODMergeMode::FullHeight;
-                            modeName = "FullHeight (best culling)";
-                            break;
-                        default:
-                            nextMode = LODMergeMode::FullHeight;
-                            modeName = "FullHeight (best culling)";
-                            break;
-                    }
-                    worldRenderer.setLODMergeMode(nextMode);
-                    std::cout << "LOD merge mode: " << modeName << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_L) {
-                    bool enabled = !worldRenderer.lodEnabled();
-                    worldRenderer.setLODEnabled(enabled);
-                    worldRenderer.rebuildAllMeshes();
-                    std::cout << "LOD system: " << (enabled ? "ON" : "OFF (all LOD0, no merging)") << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_C) {
-                    bool enabled = !worldRenderer.frustumCullingEnabled();
-                    worldRenderer.setFrustumCullingEnabled(enabled);
-                    std::cout << "Frustum culling: " << (enabled ? "ON" : "OFF (render all chunks)") << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_T) {
-                    if (timeFrozen) {
-                        timeFrozen = false;
-                        timeSpeedMultiplier = 1.0f;
-                        worldTime.setFrozen(false);
-                        worldTime.setTimeSpeed(1.0f);
-                        std::cout << "Time: 1x speed\n";
-                    } else if (timeSpeedMultiplier < 5.0f) {
-                        timeSpeedMultiplier = 10.0f;
-                        worldTime.setTimeSpeed(10.0f);
-                        std::cout << "Time: 10x speed\n";
-                    } else if (timeSpeedMultiplier < 50.0f) {
-                        timeSpeedMultiplier = 100.0f;
-                        worldTime.setTimeSpeed(100.0f);
-                        std::cout << "Time: 100x speed\n";
-                    } else {
-                        timeFrozen = true;
-                        worldTime.setFrozen(true);
-                        std::cout << "Time: FROZEN\n";
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_B) {
-                    lightingMode = (lightingMode + 1) % 3;
-                    applyLightingMode();
-                    worldRenderer.rebuildAllMeshes();
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key == GLFW_KEY_TAB) {
-                    selectedBlockIndex = (selectedBlockIndex + 1) % static_cast<int>(blockPalette.size());
-                    selectedBlock = blockPalette[selectedBlockIndex];
-                    std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.key >= GLFW_KEY_1 && e.key <= GLFW_KEY_9) {
-                    int index = e.key - GLFW_KEY_1;
-                    if (index < static_cast<int>(blockPalette.size())) {
-                        selectedBlockIndex = index;
-                        selectedBlock = blockPalette[selectedBlockIndex];
-                        std::cout << "Selected block: " << StringInterner::global().lookup(selectedBlock.id) << "\n";
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
+            // Skip events we don't process
+            if (e.type == finevk::InputEventType::KeyRepeat ||
+                e.type == finevk::InputEventType::MouseMove ||
+                e.type == finevk::InputEventType::CharInput) {
+                return finevk::ListenerResult::Reject;
             }
 
-            // Mouse button events
-            if (e.type == finevk::InputEventType::MouseButtonPress) {
-                if (e.mouseButton == GLFW_MOUSE_BUTTON_LEFT) {
-                    // Left click = break block
-                    glm::dvec3 camPos = camera.positionD();
-                    Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                    Vec3 direction = playerController.forwardVector();
-
-                    RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
-                    if (result.hit) {
-                        session->actions().breakBlock(result.blockPos);
-                        std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
-
-                if (e.mouseButton == GLFW_MOUSE_BUTTON_RIGHT) {
-                    // Right click = place block
-                    glm::dvec3 camPos = camera.positionD();
-                    Vec3 origin(static_cast<float>(camPos.x), static_cast<float>(camPos.y), static_cast<float>(camPos.z));
-                    Vec3 direction = playerController.forwardVector();
-
-                    RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
-                    if (result.hit) {
-                        BlockCoord placePos = getPlacePosition(result.blockPos, result.face);
-
-                        if (wouldBlockIntersectBody(placePos, playerBody)) {
-                            auto mode = ConfigManager::instance().blockPlacementMode();
-                            if (mode == "block") {
-                                std::cout << "Cannot place block at (" << placePos.x << "," << placePos.y << "," << placePos.z
-                                          << ") - would intersect player\n";
-                            } else {
-                                session->actions().placeBlock(placePos, selectedBlock);
-                                std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
-                                          << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
-                                          << ") - pushing player\n";
-                            }
-                        } else {
-                            session->actions().placeBlock(placePos, selectedBlock);
-                            std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
-                                      << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
-                        }
-                    }
-                    return finevk::ListenerResult::Consumed;
-                }
+            RawInputEvent raw = toRawEvent(e);
+            ActionResult result = inputActions.processEvent(raw);
+            if (!result.matched()) {
+                return finevk::ListenerResult::Reject;
             }
 
-            return finevk::ListenerResult::Reject;
+            // Track begin/end actions for movement auto-cancel
+            inputActions.trackBeginAction(result.actionName);
+            inputActions.trackEndAction(result.actionName);
+
+            // Dispatch to registered handler
+            ActionArgs args;
+            args.argExpression = result.argExpression;
+            args.scrollDelta = result.scrollDelta;
+            actionDispatch.dispatch(result.actionName, args);
+
+            return finevk::ListenerResult::Consumed;
         }, finevk::InputPriority::Game);
 
 #ifdef FINEVOX_HAS_SCRIPT_GUI
@@ -1678,7 +1998,8 @@ int main(int argc, char* argv[]) {
 
                     // Update slot colors based on selection
                     const char* slotNames[] = {"Stone", "Dirt", "Grass", "Cobble",
-                                               "Glow", "Slab", "Stair", "Wedge"};
+                                               "Glow", "Slab", "Stair", "Wedge",
+                                               "Bench"};
                     auto selColor = finescript::Value::array({
                         finescript::Value::number(0.3), finescript::Value::number(0.6),
                         finescript::Value::number(1.0), finescript::Value::number(0.9)});
@@ -1686,7 +2007,7 @@ int main(int argc, char* argv[]) {
                         finescript::Value::number(0.2), finescript::Value::number(0.2),
                         finescript::Value::number(0.2), finescript::Value::number(0.7)});
 
-                    for (int i = 0; i < slotCount && i < 8; i++) {
+                    for (int i = 0; i < slotCount && i < 9; i++) {
                         bool sel = (i == selectedBlockIndex);
                         const auto& col = sel ? selColor : normColor;
 
@@ -1710,8 +2031,164 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // Update inventory slots per-frame when inventory is open
+            if (inventoryWindowId >= 0) {
+                // Update bag slots (4x9 = 36)
+                auto* bagDC = playerInventoryDC->getChild("bag");
+                if (bagDC) {
+                    InventoryView bagView(*bagDC, itemNameRegistry);
+                    for (int i = 0; i < 36; i++) {
+                        std::string slotId = "slot_bag_" + std::to_string(i);
+                        auto slotW = mapRenderer.findById(slotId);
+                        if (!slotW.isNil()) {
+                            auto stack = bagView.getSlot(i);
+                            std::string lbl;
+                            if (!stack.isEmpty()) {
+                                lbl = std::string(stack.type.name());
+                                if (stack.count > 1)
+                                    lbl += "\n" + std::to_string(stack.count);
+                            }
+                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                        }
+                    }
+                }
+
+                // Update craft grid slots (2x2 = 4)
+                auto* craftDC = playerInventoryDC->getChild("craft_grid");
+                if (craftDC) {
+                    InventoryView craftView(*craftDC, itemNameRegistry);
+                    for (int i = 0; i < 4; i++) {
+                        std::string slotId = "slot_craft_grid_" + std::to_string(i);
+                        auto slotW = mapRenderer.findById(slotId);
+                        if (!slotW.isNil()) {
+                            auto stack = craftView.getSlot(i);
+                            std::string lbl;
+                            if (!stack.isEmpty()) {
+                                lbl = std::string(stack.type.name());
+                                if (stack.count > 1)
+                                    lbl += "\n" + std::to_string(stack.count);
+                            }
+                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                        }
+                    }
+                }
+
+                // Update craft output slot with recipe preview
+                auto* craftDCPreview = playerInventoryDC->getChild("craft_grid");
+                if (craftDCPreview) {
+                    auto slotW = mapRenderer.findById("slot_craft_output_0");
+                    if (!slotW.isNil()) {
+                        InventoryView craftPreview(*craftDCPreview, itemNameRegistry);
+                        std::vector<ItemTypeId> gridSlots(4);
+                        for (int i = 0; i < 4; i++) {
+                            auto stack = craftPreview.getSlot(i);
+                            gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                        }
+                        auto match = CraftingHelper::findRecipe(
+                            gridSlots.data(), 2, 2, EMPTY_STATION);
+                        std::string lbl;
+                        if (match.recipe) {
+                            lbl = std::string(match.recipe->outputItem.name());
+                            if (match.recipe->outputCount > 1)
+                                lbl += "\n" + std::to_string(match.recipe->outputCount);
+                        }
+                        slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                    }
+                }
+            }
+
+            // Update workbench slots per-frame when workbench is open
+            if (workbenchWindowId >= 0) {
+                // Update workbench craft grid slots (3x3 = 9)
+                auto* wbCraftDC = playerInventoryDC->getChild("wb_craft_grid");
+                if (wbCraftDC) {
+                    InventoryView wbCraftView(*wbCraftDC, itemNameRegistry);
+                    for (int i = 0; i < 9; i++) {
+                        std::string slotId = "slot_wb_craft_grid_" + std::to_string(i);
+                        auto slotW = mapRenderer.findById(slotId);
+                        if (!slotW.isNil()) {
+                            auto stack = wbCraftView.getSlot(i);
+                            std::string lbl;
+                            if (!stack.isEmpty()) {
+                                lbl = std::string(stack.type.name());
+                                if (stack.count > 1)
+                                    lbl += "\n" + std::to_string(stack.count);
+                            }
+                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                        }
+                    }
+                }
+
+                // Update workbench craft output preview
+                if (wbCraftDC) {
+                    auto slotW = mapRenderer.findById("slot_wb_craft_output_0");
+                    if (!slotW.isNil()) {
+                        InventoryView wbPreview(*wbCraftDC, itemNameRegistry);
+                        std::vector<ItemTypeId> gridSlots(9);
+                        for (int i = 0; i < 9; i++) {
+                            auto stack = wbPreview.getSlot(i);
+                            gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                        }
+                        auto match = CraftingHelper::findRecipe(
+                            gridSlots.data(), 3, 3, StationTypeId::fromName("finevox:workbench"));
+                        std::string lbl;
+                        if (match.recipe) {
+                            lbl = std::string(match.recipe->outputItem.name());
+                            if (match.recipe->outputCount > 1)
+                                lbl += "\n" + std::to_string(match.recipe->outputCount);
+                        }
+                        slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                    }
+                }
+
+                // Also update bag slots (shared between inventory and workbench)
+                auto* bagDC2 = playerInventoryDC->getChild("bag");
+                if (bagDC2) {
+                    InventoryView bagView2(*bagDC2, itemNameRegistry);
+                    for (int i = 0; i < 36; i++) {
+                        std::string slotId = "slot_bag_" + std::to_string(i);
+                        auto slotW = mapRenderer.findById(slotId);
+                        if (!slotW.isNil()) {
+                            auto stack = bagView2.getSlot(i);
+                            std::string lbl;
+                            if (!stack.isEmpty()) {
+                                lbl = std::string(stack.type.name());
+                                if (stack.count > 1)
+                                    lbl += "\n" + std::to_string(stack.count);
+                            }
+                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                        }
+                    }
+                }
+            }
+
             guiManager.processPendingMessages();
             mapRenderer.renderAll();
+
+            // Draw cursor item overlay near mouse pointer
+            if (inventoryWindowId >= 0 || workbenchWindowId >= 0) {
+                auto* cursorDC = playerInventoryDC->getChild("cursor");
+                if (cursorDC) {
+                    InventoryView cursorView(*cursorDC, itemNameRegistry);
+                    auto cursorStack = cursorView.getSlot(0);
+                    if (!cursorStack.isEmpty()) {
+                        auto mousePos = ImGui::GetMousePos();
+                        ImGui::SetNextWindowPos(ImVec2(mousePos.x + 16, mousePos.y + 16));
+                        ImGui::SetNextWindowBgAlpha(0.8f);
+                        if (ImGui::Begin("##cursor_overlay", nullptr,
+                                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
+                                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs)) {
+                            std::string cursorText = std::string(cursorStack.type.name());
+                            if (cursorStack.count > 1)
+                                cursorText += " x" + std::to_string(cursorStack.count);
+                            ImGui::Text("%s", cursorText.c_str());
+                        }
+                        ImGui::End();
+                    }
+                }
+            }
 
             for (auto& action : deferredUiActions) action();
             deferredUiActions.clear();
@@ -1733,14 +2210,15 @@ int main(int argc, char* argv[]) {
         FrameCallbacks callbacks;
         callbacks.onUpdate = [&](float dt) {
             // Movement input (only in gameplay context)
+            // Uses begin/end action tracking instead of polling isActionActive
             if (inputContext == InputContext::Gameplay) {
-                playerController.setMoveForward(inputManager.isActionActive("forward"));
-                playerController.setMoveBack(inputManager.isActionActive("back"));
-                playerController.setMoveLeft(inputManager.isActionActive("left"));
-                playerController.setMoveRight(inputManager.isActionActive("right"));
-                playerController.setMoveDown(inputManager.isActionActive("down"));
+                playerController.setMoveForward(moveForward);
+                playerController.setMoveBack(moveBack);
+                playerController.setMoveLeft(moveLeft);
+                playerController.setMoveRight(moveRight);
+                playerController.setMoveDown(moveDown);
                 if (playerController.flyMode()) {
-                    playerController.setMoveUp(inputManager.isActionActive("up"));
+                    playerController.setMoveUp(moveUp);
                 }
 
                 glm::vec2 mouseDelta = inputManager.mouseDelta();

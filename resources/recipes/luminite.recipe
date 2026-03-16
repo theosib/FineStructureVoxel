@@ -1,0 +1,9 @@
+name: finevox:luminite
+type: shapeless
+station: none
+category: materials
+ingredient: finevox:stone
+ingredient: finevox:dirt
+ingredient: finevox:cobble
+output: finevox:luminite
+count: 1

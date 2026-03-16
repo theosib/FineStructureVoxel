@@ -1,0 +1,45 @@
+# English language labels for FineStructureVoxel demo
+#
+# Format: key: value
+# Positional args: {0}, {1}, etc.
+
+# Inventory UI
+inventory.title: Inventory
+inventory.crafting: Crafting
+inventory.equipment: Equipment
+
+# Hotbar
+hotbar.slot: Slot {0}
+
+# Block names
+block.stone.name: Stone
+block.dirt.name: Dirt
+block.grass.name: Grass
+block.cobble.name: Cobblestone
+block.luminite.name: Luminite
+block.slab.name: Slab
+block.stairs.name: Stairs
+block.wedge.name: Wedge
+block.furnace.name: Furnace
+block.chest.name: Chest
+
+# Item names (same as block for block items)
+item.stone.name: Stone
+item.dirt.name: Dirt
+item.grass.name: Grass Block
+item.cobble.name: Cobblestone
+item.luminite.name: Luminite
+
+# Actions
+action.break: Break
+action.place: Place
+action.use: Use
+
+# Menu
+menu.resume: Resume Game
+menu.settings: Settings
+menu.quit: Quit
+
+# Debug
+debug.fps: FPS: {0}
+debug.chunks: Chunks: {0}/{1}

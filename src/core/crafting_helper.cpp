@@ -153,6 +153,11 @@ CraftingHelper::MatchResult CraftingHelper::findRecipe(const ItemTypeId* gridSlo
                                                          int32_t gridHeight,
                                                          StationTypeId station) {
     auto recipes = RecipeRegistry::global().getRecipesForStation(station);
+    // A station can also craft hand-crafting recipes
+    if (station != EMPTY_STATION) {
+        auto handRecipes = RecipeRegistry::global().getRecipesForStation(EMPTY_STATION);
+        recipes.insert(recipes.end(), handRecipes.begin(), handRecipes.end());
+    }
 
     for (const auto* recipe : recipes) {
         if (recipe->isShaped()) {

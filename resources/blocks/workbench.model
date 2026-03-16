@@ -1,0 +1,5 @@
+# Workbench — crafting station with 3x3 grid
+include: base/solid_cube
+texture: blocks/wood
+sounds: wood
+hardness: 2.0

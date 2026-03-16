@@ -1,0 +1,7 @@
+name: finevox:stone_slab
+type: shaped
+station: none
+category: building
+row: finevox:stone finevox:stone finevox:stone
+output: finevox:stone_slab
+count: 6

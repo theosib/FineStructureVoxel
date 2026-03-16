@@ -215,6 +215,16 @@ public:
     [[nodiscard]] uint32_t gridWidth() const { return gridWidth_; }
     [[nodiscard]] uint32_t gridHeight() const { return gridHeight_; }
 
+    /// Get all registered block type IDs (for IconAtlas enumeration)
+    [[nodiscard]] std::vector<BlockTypeId> registeredBlockTypes() const {
+        std::vector<BlockTypeId> result;
+        result.reserve(blockTextures_.size());
+        for (const auto& [id, _] : blockTextures_) {
+            result.push_back(BlockTypeId{id});
+        }
+        return result;
+    }
+
 private:
     // Convert grid coordinates to UV bounds
     [[nodiscard]] BlockFaceTexture gridToUV(uint32_t gridX, uint32_t gridY) const;

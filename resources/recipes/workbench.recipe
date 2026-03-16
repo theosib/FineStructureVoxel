@@ -1,0 +1,8 @@
+name: finevox:workbench
+type: shaped
+station: none
+category: tools
+row: finevox:dirt finevox:dirt
+row: finevox:dirt finevox:dirt
+output: finevox:workbench
+count: 1

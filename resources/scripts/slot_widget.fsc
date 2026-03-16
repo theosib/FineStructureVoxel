@@ -1,0 +1,75 @@
+# slot_widget.fsc — Reusable inventory slot builder
+#
+# Provides make_slot and make_slot_row functions for building
+# inventory slot buttons. Each slot is a button widget with an
+# ID pattern "slot_{section}_{index}" for per-frame C++ updates.
+#
+# Usage: {source "scripts/slot_widget"}
+# Depends: scripts/inventory_helpers
+
+# make_slot — Create a single inventory slot button widget
+# Args: owner, section, index, slot_size (pixel width/height)
+# Returns: a ui.button widget map with click handler
+set make_slot fn [owner section index slot_size] do
+    set slot_id {str_concat "slot_" section "_" {to_str index}}
+    set item {inv_get owner section index}
+
+    # Build label text
+    set label ""
+    if (item != nil) do
+        set item_type item.type
+        set item_count item.count
+        if (item_count > 1) do
+            set label {str_concat item_type "\n" {to_str item_count}}
+        else do
+            set label item_type
+        end
+    end
+
+    # Default background color (dark for empty, slightly lighter for filled)
+    set bg_col [0.2 0.2 0.2 0.7]
+    if (item != nil) do
+        set bg_col [0.3 0.3 0.35 0.8]
+    end
+
+    # Try to get icon info for image-based rendering
+    set icon nil
+    if (item != nil) do
+        set icon {item_icon item.type}
+    end
+
+    # Create button widget
+    if ((icon != nil) and (icon.texture != nil)) do
+        # Image button with icon
+        {ui.image_button slot_id icon.texture
+            =width slot_size =height slot_size
+            =uv0 icon.uv0 =uv1 icon.uv1
+            =id slot_id
+            =on_click fn [] do
+                {swap_or_stack "player" "cursor" 0 owner section index}
+            end}
+    else do
+        # Text button fallback
+        {ui.button label =width slot_size =height slot_size
+            =id slot_id
+            =on_click fn [] do
+                {swap_or_stack "player" "cursor" 0 owner section index}
+            end}
+    end
+end
+
+# make_slot_row — Create a row of slot buttons with same_line spacing
+# Args: owner, section, start_index, count, slot_size, spacing
+# Returns: array of widget maps (buttons + same_line spacers)
+set make_slot_row fn [owner section start_index count slot_size spacing] do
+    set widgets []
+    set i 0
+    while (i < count) do
+        if (i > 0) do
+            widgets.push {ui.same_line spacing}
+        end
+        widgets.push {make_slot owner section (start_index + i) slot_size}
+        set i (i + 1)
+    end
+    widgets
+end

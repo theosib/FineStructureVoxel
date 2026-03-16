@@ -1,0 +1,99 @@
+# inventory_helpers.fsc — Shared inventory helper functions
+#
+# These functions compose the C++ inv_* primitives into game-specific
+# inventory operations. Different games can override these with their
+# own scripts. The demo uses these as reference implementations.
+#
+# Usage: {source "scripts/inventory_helpers"}
+
+# slot_accept — Check if a slot can accept an item type
+# Returns true if the slot is empty or contains the same type with room
+# Games can override this to add filtering (fuel-only slots, armor slots, etc.)
+set slot_accept fn [owner section slot item_type] do
+    set current {inv_type owner section slot}
+    if (current == nil) do
+        true
+    else do
+        (current == item_type)
+    end
+end
+
+# quick_transfer — Move all items from one slot to the best slot in another section
+# Tries to stack with existing items first, then fills empty slots
+# Returns remainder count (0 = fully transferred)
+set quick_transfer fn [owner src_section src_slot dst_section] do
+    set item {inv_get owner src_section src_slot}
+    if (item == nil) do
+        return 0
+    end
+    set item_type item.type
+    set item_count item.count
+    set dst_size {inv_size owner dst_section}
+    set remaining item_count
+
+    # First pass: try to stack with existing items of same type
+    set i 0
+    while ((i < dst_size) and (remaining > 0)) do
+        set dst_item {inv_get owner dst_section i}
+        if ((dst_item != nil) and (dst_item.type == item_type)) do
+            set moved_remainder {inv_move owner src_section src_slot owner dst_section i remaining}
+            set remaining moved_remainder
+        end
+        set i (i + 1)
+    end
+
+    # Second pass: fill empty slots
+    set i 0
+    while ((i < dst_size) and (remaining > 0)) do
+        set dst_item {inv_get owner dst_section i}
+        if (dst_item == nil) do
+            set moved_remainder {inv_move owner src_section src_slot owner dst_section i remaining}
+            set remaining moved_remainder
+        end
+        set i (i + 1)
+    end
+
+    remaining
+end
+
+# swap_or_stack — Attempt to stack, or swap if types differ
+# This is the typical left-click behavior with a cursor item
+# Returns the new cursor item (nil if fully placed, or the swapped-out item)
+set swap_or_stack fn [cursor_owner cursor_section cursor_slot
+                      target_owner target_section target_slot] do
+    set cursor {inv_get cursor_owner cursor_section cursor_slot}
+    set target {inv_get target_owner target_section target_slot}
+
+    if (cursor == nil) do
+        # No cursor item — pick up from target
+        if (target != nil) do
+            {inv_swap cursor_owner cursor_section cursor_slot
+                      target_owner target_section target_slot}
+        end
+        return nil
+    end
+
+    if (target == nil) do
+        # Empty target — place cursor item there
+        {inv_swap cursor_owner cursor_section cursor_slot
+                  target_owner target_section target_slot}
+        return nil
+    end
+
+    # Both have items
+    set cursor_type cursor.type
+    set target_type target.type
+
+    if (cursor_type == target_type) do
+        # Same type — try to stack
+        set cursor_count cursor.count
+        {inv_move cursor_owner cursor_section cursor_slot
+                  target_owner target_section target_slot cursor_count}
+        {inv_get cursor_owner cursor_section cursor_slot}
+    else do
+        # Different types — swap
+        {inv_swap cursor_owner cursor_section cursor_slot
+                  target_owner target_section target_slot}
+        {inv_get cursor_owner cursor_section cursor_slot}
+    end
+end

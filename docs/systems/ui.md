@@ -33,6 +33,10 @@ All UI is driven by finegui `MapRenderer` + finescript `.fs` files. The UI defin
 | `resources/ui/overlays.fs` | HUD overlays (debug stats, coordinates) |
 | `resources/ui/console.fs` | In-game console widget |
 | `resources/ui/hotbar.fs` | Hotbar (8 block slots, selection highlight via `ui.push_color`) |
+| `resources/ui/inventory.fs` | Player inventory window (4x9 bag + 2x2 hand-crafting grid + output) |
+| `resources/ui/workbench.fs` | Workbench crafting window (3x3 crafting grid + output + bag) |
+| `resources/ui/container.fs` | Generic container window template (configurable owner/section/dimensions) |
+| `resources/ui/recipe_browser.fs` | Scrollable recipe list showing available recipes + ingredients |
 
 ---
 
@@ -74,6 +78,23 @@ get_selected_slot()        -- returns selected slot index (0-7)
 set_selected_slot(idx)     -- set selected slot index
 ```
 
+### Inventory & Crafting bridge
+```
+inv_get owner section slot           -- get item at slot → {=type =count} or nil
+inv_set owner section slot item      -- set item at slot
+inv_move src_owner src_sec src_slot dst_owner dst_sec dst_slot count  -- move items
+inv_swap owner1 sec1 slot1 owner2 sec2 slot2  -- swap two slots
+inv_size owner section               -- get slot count
+inv_count owner section type         -- count items of type
+inv_type owner section slot          -- get item type string or nil
+item_icon type_name                  -- get icon info → {=texture =uv0 =uv1} or nil
+build_inv_grid owner section rows cols size [click_fn]  -- build slot button grid
+build_recipe_list [station]          -- build recipe list widgets
+craft_find owner section w h [station]   -- preview recipe match → {=recipe =output =count} or nil
+craft_execute owner section w h [station]  -- consume ingredients → {=type =count} or nil
+craft_recipes [station]              -- list recipes → [{=recipe =output =count =ingredients}]
+```
+
 ### Console commands (also registered as native functions)
 ```
 tp x y z              -- teleport player
@@ -82,6 +103,29 @@ place x y z name      -- place block
 break_block x y z     -- break block
 print message         -- output to console (overrides finescript default print)
 ```
+
+---
+
+## Helper Scripts (resources/scripts/)
+
+| File | Purpose |
+|------|---------|
+| `scripts/inventory_helpers.fsc` | `slot_accept`, `quick_transfer`, `swap_or_stack` — composable inventory operations |
+| `scripts/slot_widget.fsc` | `make_slot`, `make_slot_row` — reusable slot button builders with icon support |
+
+---
+
+## Inventory UI Architecture
+
+The inventory system bridges C++ data (`DataContainer`-backed `InventoryView`) to finescript UI:
+
+1. **InventoryBridge** registers "owners" (player, containers) with their `DataContainer` + `NameRegistry`
+2. **Native functions** (`inv_get/set/move/swap`) read/write slot data in the DC
+3. **`build_inv_grid`** constructs button widget arrays from C++ (handles icon lookup, click handlers)
+4. **Per-frame updates** in `render_demo.cpp` sync slot labels from DC to widget `=label` fields via `mapRenderer.findById()`
+5. **Crafting preview** — `CraftingHelper::findRecipe()` runs each frame to show output in craft output slot
+6. **Cursor item** — "cursor" section (1 slot) holds the item being moved; `swap_or_stack` handles click logic
+7. **Workbench interaction** — right-clicking a workbench block opens the 3x3 crafting UI via `open_workbench` action
 
 ---
 

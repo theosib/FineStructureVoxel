@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 22 — Flexibility Initiative (7 sub-phases) |
-| Test count | **1971** |
+| Last completed phase | Phase 23 — Inventory UI & Crafting Integration (6 sub-phases) |
+| Test count | **2061** |
 | In-progress | None — see Roadmap for next steps |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -64,6 +64,13 @@
   - [x] 22-5: Config flexibilization — `GameSessionConfig`/`TickConfig`/`DistanceConfig` DataContainer serialization, data-driven `SkyConfig` with keyframes (`resources/sky.conf`)
   - [x] 22-6: Entity system extension — `EntityTypeDef::properties` DataContainer for mod-extensible attributes, `SpawnPredicateRegistry` for custom spawn conditions
   - [x] 22-7: UI scripting — hotbar migrated from hardcoded ImGui to `resources/ui/hotbar.fs`, `ScriptGuiManager::loadUIFromValue()` for server-sendable UI
+- [x] **Phase 23** — Inventory UI & Crafting Integration (6 sub-phases):
+  - [x] 23-A: Recipe data model — `Recipe`, `RecipeRegistry`, `RecipeLoader` (shaped/shapeless/smelting), `.recipe` file format, `CraftingHelper` with pattern matching
+  - [x] 23-B: Inventory native functions — `InventoryBridge` with `inv_get/set/move/swap/size/count/type`, `build_inv_grid` grid builder, crafting natives (`craft_find/execute/recipes`)
+  - [x] 23-C: Block/item icon widgets — `IconAtlas` (UV regions from block atlas), `IconRegion`, finegui `uv0/uv1` support for `ui.image`/`ui.image_button`, `item_icon` native, `IconLookup` callback
+  - [x] 23-D: Inventory UI scripts — `inventory.fs` (4x9 bag + 2x2 crafting grid + output), `container.fs` (generic container template), `slot_widget.fsc` (reusable slot builder), open/close via `open_inventory` action
+  - [x] 23-E: Recipe browser — `recipe_browser.fs` (scrollable recipe list), `build_recipe_list` native, ingredient display in `craft_recipes`, craft output preview in per-frame update
+  - [x] 23-F: Workbench crafting station — `workbench.model` block definition, `workbench.fs` (3x3 crafting grid UI), right-click interaction opens workbench UI, `open_workbench` action
 
 ---
 
@@ -88,7 +95,10 @@ Known design issue:
 
 ## Next Planned Work
 
-> *TBD — see [ROADMAP.md](ROADMAP.md) for candidate next phases*
+See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
+
+- **Phase 24: Player Survival + Combat** — hunger, stamina, damage types, fall damage, death/respawn, melee/ranged combat, HUD bars
+- **Phase 23 polish** — config-driven input bindings, block-break drops, icon-based slots, container UI (see ROADMAP.md deferred items)
 
 ---
 

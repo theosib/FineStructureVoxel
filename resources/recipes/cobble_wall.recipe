@@ -1,0 +1,8 @@
+name: finevox:cobble_wall
+type: shaped
+station: finevox:workbench
+category: building
+row: finevox:cobble finevox:cobble finevox:cobble
+row: finevox:cobble finevox:cobble finevox:cobble
+output: finevox:wedge
+count: 6

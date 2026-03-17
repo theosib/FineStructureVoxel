@@ -59,6 +59,9 @@ const EventSymbols& EventSymbols::instance() {
         s.block_z         = si.intern("block_z");
         s.ticks           = si.intern("ticks");
         s.starting        = si.intern("starting");
+        s.attacker_id     = si.intern("attacker_id");
+        s.target_id       = si.intern("target_id");
+        s.damage_info     = si.intern("damage_info");
         return s;
     }();
     return syms;
@@ -263,6 +266,18 @@ finescript::Value makeCraftItemValue(BlockCoord stationPos, RecipeId recipe) {
     setInt(m, s.station_pos_y, stationPos.y);
     setInt(m, s.station_pos_z, stationPos.z);
     setInt(m, s.recipe_id, static_cast<int64_t>(recipe.id));
+    return v;
+}
+
+finescript::Value makeAttackEntityValue(EntityId attacker, EntityId target,
+                                        finescript::Value damageInfo) {
+    const auto& s = EventSymbols::instance();
+    auto v = makeMap();
+    auto& m = v.asMap();
+    setType(m, EVT_ATTACK_ENTITY);
+    setInt(m, s.attacker_id, static_cast<int64_t>(attacker));
+    setInt(m, s.target_id, static_cast<int64_t>(target));
+    m.set(s.damage_info, std::move(damageInfo));
     return v;
 }
 

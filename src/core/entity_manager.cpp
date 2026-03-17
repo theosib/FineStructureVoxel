@@ -122,6 +122,16 @@ const Entity* EntityManager::getEntity(EntityId id) const {
     return it != entities_.end() ? it->second.get() : nullptr;
 }
 
+MobEntity* EntityManager::getMob(EntityId id) {
+    auto* e = getEntity(id);
+    return e ? dynamic_cast<MobEntity*>(e) : nullptr;
+}
+
+const MobEntity* EntityManager::getMob(EntityId id) const {
+    auto* e = getEntity(id);
+    return e ? dynamic_cast<const MobEntity*>(e) : nullptr;
+}
+
 bool EntityManager::hasEntity(EntityId id) const {
     return entities_.find(id) != entities_.end();
 }

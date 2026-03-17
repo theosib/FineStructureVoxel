@@ -89,6 +89,9 @@ struct EventSymbols {
     // Sprint/sneak state
     uint32_t starting;
 
+    // Combat fields
+    uint32_t attacker_id, target_id, damage_info;
+
     /// Get the singleton instance (lazily initialized).
     static const EventSymbols& instance();
 };
@@ -119,6 +122,9 @@ constexpr const char* EVT_FLUID_REMOVED = "fluid_removed";
 
 // Admin/system
 constexpr const char* EVT_SET_WORLD_TIME = "set_world_time";
+
+// Combat
+constexpr const char* EVT_ATTACK_ENTITY = "attack_entity";
 
 // Crafting
 constexpr const char* EVT_CRAFT_ITEM = "craft_item";
@@ -180,6 +186,10 @@ finescript::Value makeSetWorldTimeValue(int64_t ticks);
 
 /** Build a craft-item action. */
 finescript::Value makeCraftItemValue(BlockCoord stationPos, RecipeId recipe);
+
+/** Build an attack-entity action. */
+finescript::Value makeAttackEntityValue(EntityId attacker, EntityId target,
+                                        finescript::Value damageInfo);
 
 // ============================================================================
 // Sound Event Builders

@@ -50,6 +50,10 @@ public:
 
     /// Attempt to craft a recipe at a station position.
     virtual bool craftItem(BlockCoord stationPos, RecipeId recipe);
+
+    /// Attack an entity with a flexible damage info map.
+    /// damageInfo is a Value map: {:type "slash" :amount 5.0 :knockback 0.4 ...}
+    virtual void attackEntity(EntityId attacker, EntityId target, finescript::Value damageInfo);
 };
 
 }  // namespace finevox

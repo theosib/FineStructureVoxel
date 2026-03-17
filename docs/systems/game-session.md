@@ -48,6 +48,7 @@ actions->sendPlayerState(entityState);  // player position update
 actions->placeFluid(pos, fluidTypeId, level);
 actions->removeFluid(pos);
 actions->setWorldTime(ticks);
+actions->attackEntity(attackerId, targetId, damageInfoValue);  // combat
 
 // WorldTime — read from any thread (atomic)
 int64_t ticks = session->worldTime().totalTicks();  // atomic read

@@ -546,6 +546,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_ai_goal_params.cpp
         tests/test_ai_driver.cpp
         tests/test_entity_spatial_index.cpp
+        tests/test_combat_bridge.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

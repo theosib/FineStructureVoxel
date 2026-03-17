@@ -114,6 +114,12 @@ public:
     const Entity* getEntity(EntityId id) const;
 
     /**
+     * @brief Get a MobEntity by ID (returns nullptr if not found or not a MobEntity)
+     */
+    MobEntity* getMob(EntityId id);
+    const MobEntity* getMob(EntityId id) const;
+
+    /**
      * @brief Check if entity exists
      */
     bool hasEntity(EntityId id) const;

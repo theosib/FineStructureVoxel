@@ -9,6 +9,7 @@
 #include "finevox/core/pathfinder.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include <finescript/map_data.h>
+#include <cmath>
 #include <iostream>
 
 namespace finevox::script {
@@ -97,6 +98,7 @@ GameScriptEngine::GameScriptEngine(World& world)
     registerNativeFunctions();
     registerMobNativeFunctions();
     registerSpatialNativeFunctions();
+    registerCombatNativeFunctions();
 }
 
 GameScriptEngine::~GameScriptEngine() = default;
@@ -1205,6 +1207,175 @@ void GameScriptEngine::registerSpatialNativeFunctions() {
             map->set(si.intern("hit_z"), finescript::Value::number(hit.hitPoint.z));
             map->set(si.intern("face"), finescript::Value::integer(static_cast<int64_t>(hit.face)));
             return finescript::Value::map(map);
+        });
+}
+
+// ============================================================================
+// Combat Native Functions
+// ============================================================================
+
+void GameScriptEngine::registerCombatNativeFunctions() {
+
+    // attack_entity(target_id, damage_info_map)
+    // Looks up the target mob and calls damage() directly (game thread only).
+    // damage_info_map: {:amount 5.0 :type "slash" :knockback 0.4 ...}
+    engine_->registerFunction("attack_entity",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.size() < 2)
+                return finescript::Value::boolean(false);
+
+            EntityId targetId = static_cast<EntityId>(args[0].asInt());
+            MobEntity* target = ud->entityManager->getMob(targetId);
+            if (!target) return finescript::Value::boolean(false);
+
+            // Get attacker ID from current entity context if available
+            EntityId attackerId = INVALID_ENTITY_ID;
+            if (ud->entityCtx) {
+                attackerId = ud->entityCtx->id();
+            }
+
+            // Parse damage from the info map
+            float amount = 0.0f;
+            float knockback = 0.0f;
+            if (args[1].isMap()) {
+                auto& si = StringInterner::global();
+                auto amtVal = args[1].asMap().get(si.intern("amount"));
+                if (amtVal.isFloat()) amount = static_cast<float>(amtVal.asFloat());
+                else if (amtVal.isInt()) amount = static_cast<float>(amtVal.asInt());
+
+                auto kbVal = args[1].asMap().get(si.intern("knockback"));
+                if (kbVal.isFloat()) knockback = static_cast<float>(kbVal.asFloat());
+                else if (kbVal.isInt()) knockback = static_cast<float>(kbVal.asInt());
+            } else if (args[1].isFloat() || args[1].isInt()) {
+                // Simple form: attack_entity(target, amount)
+                amount = toFloatVal(args[1]);
+            }
+
+            if (amount > 0.0f) {
+                target->damage(amount, attackerId);
+            }
+
+            // Apply knockback if specified
+            if (knockback > 0.0f && ud->entityCtx) {
+                Vec3 dir = target->position() - ud->entityCtx->position();
+                float len = glm::length(dir);
+                if (len > 0.01f) {
+                    dir /= len;
+                    Vec3 vel = target->velocity();
+                    vel.x += dir.x * knockback * 10.0f;
+                    vel.y += knockback * 4.0f;
+                    vel.z += dir.z * knockback * 10.0f;
+                    target->setVelocity(vel);
+                }
+            }
+
+            return finescript::Value::boolean(true);
+        });
+
+    // entity_in_cone(x, y, z, dx, dy, dz, half_angle_deg, range)
+    // Returns array of entity IDs within a cone defined by position, direction,
+    // half-angle (degrees), and range. Useful for melee sweep detection.
+    engine_->registerFunction("entity_in_cone",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.size() < 8)
+                return finescript::Value::array(std::vector<finescript::Value>{});
+
+            Vec3 origin(toFloatVal(args[0]), toFloatVal(args[1]), toFloatVal(args[2]));
+            Vec3 dir(toFloatVal(args[3]), toFloatVal(args[4]), toFloatVal(args[5]));
+            float halfAngleDeg = toFloatVal(args[6]);
+            float range = toFloatVal(args[7]);
+
+            float dirLen = glm::length(dir);
+            if (dirLen < 0.001f)
+                return finescript::Value::array(std::vector<finescript::Value>{});
+            dir /= dirLen;
+
+            float cosHalfAngle = std::cos(halfAngleDeg * 3.14159265f / 180.0f);
+
+            // First get all entities in radius (fast spatial query)
+            auto candidates = ud->entityManager->spatialIndex().queryRadius(origin, range);
+
+            // Filter by cone angle
+            std::vector<finescript::Value> result;
+            for (EntityId id : candidates) {
+                Entity* e = ud->entityManager->getEntity(id);
+                if (!e) continue;
+
+                Vec3 toEntity = e->position() - origin;
+                float dist = glm::length(toEntity);
+                if (dist < 0.01f) {
+                    result.push_back(finescript::Value::integer(static_cast<int64_t>(id)));
+                    continue;
+                }
+
+                float dot = glm::dot(toEntity / dist, dir);
+                if (dot >= cosHalfAngle) {
+                    result.push_back(finescript::Value::integer(static_cast<int64_t>(id)));
+                }
+            }
+
+            return finescript::Value::array(std::move(result));
+        });
+
+    // entity_position(id) → [x, y, z] array or nil
+    // Get position of any entity by ID (not just current context entity)
+    engine_->registerFunction("entity_position",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.empty())
+                return finescript::Value::nil();
+
+            EntityId id = static_cast<EntityId>(args[0].asInt());
+            Entity* e = ud->entityManager->getEntity(id);
+            if (!e) return finescript::Value::nil();
+
+            Vec3 pos = e->position();
+            std::vector<finescript::Value> arr;
+            arr.push_back(finescript::Value::number(pos.x));
+            arr.push_back(finescript::Value::number(pos.y));
+            arr.push_back(finescript::Value::number(pos.z));
+            return finescript::Value::array(std::move(arr));
+        });
+
+    // entity_health(id) → float or nil
+    // Get health of any entity by ID
+    engine_->registerFunction("entity_health",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.empty())
+                return finescript::Value::nil();
+
+            EntityId id = static_cast<EntityId>(args[0].asInt());
+            const MobEntity* mob = ud->entityManager->getMob(id);
+            if (!mob) return finescript::Value::nil();
+
+            return finescript::Value::number(mob->health());
+        });
+
+    // entity_is_alive(id) → bool
+    engine_->registerFunction("entity_is_alive",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.empty())
+                return finescript::Value::boolean(false);
+
+            EntityId id = static_cast<EntityId>(args[0].asInt());
+            Entity* e = ud->entityManager->getEntity(id);
+            if (!e) return finescript::Value::boolean(false);
+
+            return finescript::Value::boolean(e->isAlive());
         });
 }
 

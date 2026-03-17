@@ -9,9 +9,9 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 24A/B — Entity System Fixes & Player Entity Unification |
-| Test count | **2112** |
-| In-progress | Phase 24 — Player Survival & Combat (sub-phases C-F remaining) |
+| Last completed phase | Phase 24D — Combat Bridge |
+| Test count | **2121** |
+| In-progress | Phase 24 — Player Survival & Combat (sub-phases E-F remaining) |
 | Libraries | 5 shared libraries (see Architecture) |
 
 ---
@@ -75,7 +75,7 @@
   - [x] 24-A: Entity system fixes & script wiring — MobEventHooks interface, AI goal parameterization (all magic numbers → param structs), EntityManager auto-configures AI presets on spawn, ScriptMobEventHooks adapter, hooks provider wiring, mob native functions (add\_goal, clear\_goals, apply\_impulse, get/set\_data, remove)
   - [x] 24-B: Player entity unification — AIDriver adapter pattern (BrainAIDriver, PlayerInputDriver), player is MobEntity with PlayerInputDriver, virtual isPlayerEntity(), landing detection (preLandingVelocityY), player.entity type definition, HUD bridge natives (mob\_is\_player, mob\_fall\_velocity, mob\_yaw/pitch, mob\_last\_attacker, mob\_time\_since\_damage)
   - [x] 24-C: AI acceleration primitives — `EntitySpatialIndex` (grid-based, cell=16), wired into EntityManager (insert/update/remove), spatial query natives (`entities_in_radius`, `entities_in_box`, `nearest_entity`), LOS natives (`mob_can_see`, `raycast_blocks`)
-  - [ ] 24-D: Combat bridge — attack action, melee sweep, knockback, damage types
+  - [x] 24-D: Combat bridge — `GameActions::attackEntity`, `attack_entity` native (damage + auto-knockback), `entity_in_cone` native (melee sweep), `entity_position`/`entity_health`/`entity_is_alive` cross-entity query natives, `EntityManager::getMob()`
   - [ ] 24-E: Death + respawn — death screen, respawn point, inventory drop
   - [ ] 24-F: HUD — health/hunger/stamina bars, XP bar (all scripted UI with C++ bridge)
 

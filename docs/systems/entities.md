@@ -314,6 +314,15 @@ mob_last_attacker      -- entity id of last attacker (or nil)
 mob_time_since_damage  -- seconds since last damage
 ```
 
+Combat natives (Phase 24D):
+```
+attack_entity target_id damage_info  -- attack entity; damage_info is map {:amount 5.0 :knockback 0.4 :type "slash"} or plain number
+entity_in_cone x y z dx dy dz half_angle_deg range -- entities in cone, returns array of EntityIds
+entity_position id     -- [x,y,z] position of any entity by ID (or nil)
+entity_health id       -- health of any mob entity by ID (or nil)
+entity_is_alive id     -- bool, whether entity exists and is alive
+```
+
 ---
 
 ## Gotchas

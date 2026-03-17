@@ -15,6 +15,7 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/data_container.hpp"
+#include "finevox/core/mob_entity.hpp"
 #include "finevox/script/event_value.hpp"
 
 #include <finescript/value.h>
@@ -79,6 +80,10 @@ void GameActions::setWorldTime(int64_t ticks) {
 bool GameActions::craftItem(BlockCoord stationPos, RecipeId recipe) {
     sendAction(makeCraftItemValue(stationPos, recipe));
     return true;
+}
+
+void GameActions::attackEntity(EntityId attacker, EntityId target, finescript::Value damageInfo) {
+    sendAction(makeAttackEntityValue(attacker, target, std::move(damageInfo)));
 }
 
 // ============================================================================
@@ -264,6 +269,28 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
     else if (typeStr == EVT_CRAFT_ITEM) {
         // Stub: recipe validation and station-block inventory wiring
         // will be implemented in Phase 22-3 (station block handlers).
+    }
+    else if (typeStr == EVT_ATTACK_ENTITY) {
+        const auto& s = EventSymbols::instance();
+        EntityId attackerId = static_cast<EntityId>(readInt(cmd, s.attacker_id));
+        EntityId targetId = static_cast<EntityId>(readInt(cmd, s.target_id));
+
+        // Look up target mob and apply damage
+        if (auto* mob = dynamic_cast<MobEntity*>(entityManager.getEntity(targetId))) {
+            // Read damage amount from the damage_info sub-map
+            auto damageInfoVal = cmd.asMap().get(s.damage_info);
+            float amount = 0.0f;
+            if (damageInfoVal.isMap()) {
+                auto amountSym = StringInterner::global().intern("amount");
+                auto amtVal = damageInfoVal.asMap().get(amountSym);
+                if (amtVal.isFloat()) amount = static_cast<float>(amtVal.asFloat());
+                else if (amtVal.isInt()) amount = static_cast<float>(amtVal.asInt());
+            }
+
+            if (amount > 0.0f) {
+                mob->damage(amount, attackerId);
+            }
+        }
     }
 }
 

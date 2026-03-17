@@ -75,6 +75,7 @@ private:
     void registerNativeFunctions();
     void registerMobNativeFunctions();
     void registerSpatialNativeFunctions();
+    void registerCombatNativeFunctions();
 
     std::unique_ptr<finescript::ScriptEngine> engine_;
     FineVoxInterner interner_;

@@ -11,6 +11,7 @@
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/physics.hpp"
 #include "finevox/core/position.hpp"
+#include "finevox/core/entity_spatial_index.hpp"
 
 #include <finescript/value.h>
 #include <functional>
@@ -258,6 +259,10 @@ public:
     PhysicsSystem& physics() { return physics_; }
     const PhysicsSystem& physics() const { return physics_; }
 
+    /// Spatial index for fast proximity queries
+    EntitySpatialIndex& spatialIndex() { return spatialIndex_; }
+    const EntitySpatialIndex& spatialIndex() const { return spatialIndex_; }
+
     /// Set sound queue for fluid/entity sound events (optional)
     void setSoundQueue(SoundEventQueue* queue) { soundQueue_ = queue; }
 
@@ -274,6 +279,7 @@ private:
     PhysicsSystem physics_;
 
     // Entity storage
+    EntitySpatialIndex spatialIndex_;
     std::unordered_map<EntityId, std::unique_ptr<Entity>> entities_;
     EntityId nextEntityId_ = 1;
     uint64_t currentTick_ = 0;

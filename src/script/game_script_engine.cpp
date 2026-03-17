@@ -96,6 +96,7 @@ GameScriptEngine::GameScriptEngine(World& world)
     userData_.world = &world_;
     registerNativeFunctions();
     registerMobNativeFunctions();
+    registerSpatialNativeFunctions();
 }
 
 GameScriptEngine::~GameScriptEngine() = default;
@@ -1065,6 +1066,145 @@ void GameScriptEngine::registerMobNativeFunctions() {
                 return finescript::Value::number(ud->entityCtx->timeSinceLastDamage());
             }
             return finescript::Value::number(999.0);
+        });
+}
+
+// ============================================================================
+// Spatial Query & LOS Native Functions
+// ============================================================================
+
+void GameScriptEngine::registerSpatialNativeFunctions() {
+
+    // entities_in_radius(x, y, z, radius) → array of entity IDs
+    engine_->registerFunction("entities_in_radius",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.size() < 4)
+                return finescript::Value::array(std::vector<finescript::Value>{});
+
+            float x = toFloatVal(args[0]);
+            float y = toFloatVal(args[1]);
+            float z = toFloatVal(args[2]);
+            float radius = toFloatVal(args[3]);
+
+            auto ids = ud->entityManager->spatialIndex().queryRadius(
+                Vec3(x, y, z), radius);
+
+            std::vector<finescript::Value> result;
+            result.reserve(ids.size());
+            for (EntityId id : ids) {
+                result.push_back(finescript::Value::integer(static_cast<int64_t>(id)));
+            }
+            return finescript::Value::array(std::move(result));
+        });
+
+    // entities_in_box(x1, y1, z1, x2, y2, z2) → array of entity IDs
+    engine_->registerFunction("entities_in_box",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.size() < 6)
+                return finescript::Value::array(std::vector<finescript::Value>{});
+
+            Vec3 min(toFloatVal(args[0]), toFloatVal(args[1]), toFloatVal(args[2]));
+            Vec3 max(toFloatVal(args[3]), toFloatVal(args[4]), toFloatVal(args[5]));
+
+            auto ids = ud->entityManager->spatialIndex().queryAABB(min, max);
+
+            std::vector<finescript::Value> result;
+            result.reserve(ids.size());
+            for (EntityId id : ids) {
+                result.push_back(finescript::Value::integer(static_cast<int64_t>(id)));
+            }
+            return finescript::Value::array(std::move(result));
+        });
+
+    // nearest_entity(x, y, z, radius) → entity ID or nil
+    engine_->registerFunction("nearest_entity",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityManager || args.size() < 4)
+                return finescript::Value::nil();
+
+            float x = toFloatVal(args[0]);
+            float y = toFloatVal(args[1]);
+            float z = toFloatVal(args[2]);
+            float radius = toFloatVal(args[3]);
+
+            EntityId nearest = ud->entityManager->spatialIndex().findNearest(
+                Vec3(x, y, z), radius);
+
+            if (nearest != INVALID_ENTITY_ID) {
+                return finescript::Value::integer(static_cast<int64_t>(nearest));
+            }
+            return finescript::Value::nil();
+        });
+
+    // mob_can_see(target_id) → bool (raycast between eye positions)
+    engine_->registerFunction("mob_can_see",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || !ud->entityManager || !ud->world || args.empty())
+                return finescript::Value::boolean(false);
+
+            EntityId targetId = static_cast<EntityId>(args[0].asInt());
+            Entity* target = ud->entityManager->getEntity(targetId);
+            if (!target) return finescript::Value::boolean(false);
+
+            Vec3 origin = ud->entityCtx->eyePosition();
+            Vec3 targetPos = target->eyePosition();
+            Vec3 dir = targetPos - origin;
+            float dist = glm::length(dir);
+            if (dist < 0.01f) return finescript::Value::boolean(true);
+            dir /= dist;
+
+            auto shapeProvider = createBlockShapeProvider(*ud->world);
+            auto hit = raycastBlocks(origin, dir, dist, RaycastMode::Collision, shapeProvider);
+
+            // Can see if no block was hit before reaching the target
+            return finescript::Value::boolean(!hit.hit || hit.distance >= dist - 0.5f);
+        });
+
+    // raycast_blocks(x, y, z, dx, dy, dz, max_dist) → hit info map or nil
+    engine_->registerFunction("raycast_blocks",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->world || args.size() < 7)
+                return finescript::Value::nil();
+
+            Vec3 origin(toFloatVal(args[0]), toFloatVal(args[1]), toFloatVal(args[2]));
+            Vec3 dir(toFloatVal(args[3]), toFloatVal(args[4]), toFloatVal(args[5]));
+            float maxDist = toFloatVal(args[6]);
+
+            float dirLen = glm::length(dir);
+            if (dirLen < 0.001f) return finescript::Value::nil();
+            dir /= dirLen;
+
+            auto shapeProvider = createBlockShapeProvider(*ud->world);
+            auto hit = raycastBlocks(origin, dir, maxDist, RaycastMode::Interaction, shapeProvider);
+
+            if (!hit.hit) return finescript::Value::nil();
+
+            auto& si = StringInterner::global();
+            auto map = std::make_shared<finescript::MapData>();
+            map->set(si.intern("x"), finescript::Value::integer(hit.blockPos.x));
+            map->set(si.intern("y"), finescript::Value::integer(hit.blockPos.y));
+            map->set(si.intern("z"), finescript::Value::integer(hit.blockPos.z));
+            map->set(si.intern("distance"), finescript::Value::number(hit.distance));
+            map->set(si.intern("hit_x"), finescript::Value::number(hit.hitPoint.x));
+            map->set(si.intern("hit_y"), finescript::Value::number(hit.hitPoint.y));
+            map->set(si.intern("hit_z"), finescript::Value::number(hit.hitPoint.z));
+            map->set(si.intern("face"), finescript::Value::integer(static_cast<int64_t>(hit.face)));
+            return finescript::Value::map(map);
         });
 }
 

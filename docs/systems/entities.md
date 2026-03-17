@@ -39,6 +39,7 @@ Phase 24A/B complete (2099 tests). Entities use `EntityTypeId` (interned), loade
 | `ScriptEntityHandler` | `BlockHandler`-like for entities; caches finescript event closures |
 | `EntityContextProxy` | `finescript::ProxyMap` wrapping `MobEntity` for script access |
 | `EntitySerializer` | CBOR serialization to/from `SerializedEntity` |
+| `EntitySpatialIndex` | Grid-based spatial index (cell=16); O(cells_in_range) queries; auto-updated by EntityManager |
 | `AIDriver` | Top-level decision-maker adapter (base class); `BrainAIDriver` wraps goal system, `PlayerInputDriver` consumes input events |
 | `MobEventHooks` | Virtual interface for entity lifecycle callbacks (onSpawn/onTick/onDamage/onDeath/onInteract/onStrike) |
 | `ScriptMobEventHooks` | Header-only adapter bridging `MobEventHooks` → `ScriptEntityHandler` |
@@ -261,6 +262,12 @@ manager.loadColumnEntities(column);
 
 // Graphics snapshots (called from game thread)
 manager.publishEntitySnapshots();  // writes to GraphicsEventQueue
+
+// Spatial queries (O(cells_in_range) via grid index)
+auto& idx = manager.spatialIndex();
+auto nearby = idx.queryRadius(center, radius);       // → vector<EntityId>
+auto inBox = idx.queryAABB(min, max);                 // → vector<EntityId>
+EntityId closest = idx.findNearest(center, radius);   // → EntityId or INVALID
 ```
 
 ---

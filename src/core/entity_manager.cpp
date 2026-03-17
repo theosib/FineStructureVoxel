@@ -41,6 +41,7 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
         script::makeEntitySpawnValue(id, static_cast<uint16_t>(type),
                                       position, entity->yaw(), entity->pitch())));
 
+    spatialIndex_.insert(id, position);
     entities_[id] = std::move(entity);
     return id;
 }
@@ -59,6 +60,7 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
                                       entity->position(), entity->yaw(), entity->pitch())));
 
     Entity* rawPtr = entity.get();
+    spatialIndex_.insert(id, rawPtr->position());
     entities_[id] = std::move(entity);
 
     // Wire up MobEntity-specific hooks and AI presets
@@ -94,6 +96,9 @@ bool EntityManager::despawnEntity(EntityId id) {
 
     // Publish despawn event to graphics
     graphicsQueue_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id)));
+
+    // Remove from spatial index
+    spatialIndex_.remove(id);
 
     // Remove from player authorities if applicable
     playerAuthorities_.erase(id);
@@ -258,6 +263,9 @@ void EntityManager::physicsPass(float tickDt) {
 
 void EntityManager::processEntityTransfers() {
     for (auto& [id, entity] : entities_) {
+        // Update spatial index with current position
+        spatialIndex_.update(id, entity->position());
+
         ChunkPos newChunk = ChunkPos::fromBlock(toBlockCoord(entity->position()));
         if (newChunk != entity->currentChunk()) {
             // Entity moved to a new chunk

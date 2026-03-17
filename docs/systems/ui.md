@@ -37,6 +37,8 @@ All UI is driven by finegui `MapRenderer` + finescript `.fs` files. The UI defin
 | `resources/ui/workbench.fs` | Workbench crafting window (3x3 crafting grid + output + bag) |
 | `resources/ui/container.fs` | Generic container window template (configurable owner/section/dimensions) |
 | `resources/ui/recipe_browser.fs` | Scrollable recipe list showing available recipes + ingredients |
+| `resources/ui/hud.fs` | Health + hunger bars (progress_bar widgets, per-frame update via findById) |
+| `resources/ui/death_screen.fs` | Death screen with respawn button |
 
 ---
 
@@ -93,6 +95,16 @@ build_recipe_list [station]          -- build recipe list widgets
 craft_find owner section w h [station]   -- preview recipe match → {=recipe =output =count} or nil
 craft_execute owner section w h [station]  -- consume ingredients → {=type =count} or nil
 craft_recipes [station]              -- list recipes → [{=recipe =output =count =ingredients}]
+```
+
+### Player stats bridge (`PlayerStatsBridge`)
+```
+player_health()           -- current health (float)
+player_max_health()       -- max health (float)
+player_get_stat(name)     -- read stat from DataContainer (float)
+player_set_stat(name, v)  -- write stat to DataContainer
+player_is_alive()         -- bool
+player_position()         -- [x, y, z] array
 ```
 
 ### Console commands (also registered as native functions)

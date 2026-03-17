@@ -171,6 +171,7 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/entity_context_proxy.cpp
         src/script/script_entity_handler.cpp
         src/script/inventory_bridge.cpp
+        src/script/player_stats_bridge.cpp
     )
 
     # finevox already provides include dirs and finescript PUBLIC
@@ -567,6 +568,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_hotbar_bridge.cpp
             tests/test_inventory_natives.cpp
             tests/test_entity_script_wiring.cpp
+            tests/test_player_stats_bridge.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

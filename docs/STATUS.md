@@ -9,9 +9,9 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 24D — Combat Bridge |
-| Test count | **2121** |
-| In-progress | Phase 24 — Player Survival & Combat (sub-phases E-F remaining) |
+| Last completed phase | Phase 24E — Survival Stats & HUD Bridge |
+| Test count | **2130** |
+| In-progress | Phase 24 — Player Survival & Combat (sub-phase F remaining) |
 | Libraries | 5 shared libraries (see Architecture) |
 
 ---
@@ -76,8 +76,8 @@
   - [x] 24-B: Player entity unification — AIDriver adapter pattern (BrainAIDriver, PlayerInputDriver), player is MobEntity with PlayerInputDriver, virtual isPlayerEntity(), landing detection (preLandingVelocityY), player.entity type definition, HUD bridge natives (mob\_is\_player, mob\_fall\_velocity, mob\_yaw/pitch, mob\_last\_attacker, mob\_time\_since\_damage)
   - [x] 24-C: AI acceleration primitives — `EntitySpatialIndex` (grid-based, cell=16), wired into EntityManager (insert/update/remove), spatial query natives (`entities_in_radius`, `entities_in_box`, `nearest_entity`), LOS natives (`mob_can_see`, `raycast_blocks`)
   - [x] 24-D: Combat bridge — `GameActions::attackEntity`, `attack_entity` native (damage + auto-knockback), `entity_in_cone` native (melee sweep), `entity_position`/`entity_health`/`entity_is_alive` cross-entity query natives, `EntityManager::getMob()`
-  - [ ] 24-E: Death + respawn — death screen, respawn point, inventory drop
-  - [ ] 24-F: HUD — health/hunger/stamina bars, XP bar (all scripted UI with C++ bridge)
+  - [x] 24-E: Survival stats & HUD bridge — `PlayerStatsBridge` (`player_health`, `player_max_health`, `player_get_stat`, `player_set_stat`, `player_is_alive`, `player_position`), HUD overlay script (`hud.fs`), death screen script (`death_screen.fs`)
+  - [ ] 24-F: Entity animation audit (deferred)
 
 ---
 

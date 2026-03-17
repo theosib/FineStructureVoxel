@@ -99,6 +99,7 @@ add_library(finevox SHARED
     src/core/entity_type_registry.cpp
     src/core/entity_type_loader.cpp
     src/core/ai_brain.cpp
+    src/core/ai_driver.cpp
     src/core/mob_entity.cpp
     src/core/pathfinder.cpp
     src/core/entity_senses.cpp
@@ -540,6 +541,9 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_crafting_helper.cpp
         tests/test_input_action_system.cpp
         tests/test_label_registry.cpp
+        tests/test_mob_event_hooks.cpp
+        tests/test_ai_goal_params.cpp
+        tests/test_ai_driver.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -559,6 +563,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_event_value.cpp
             tests/test_hotbar_bridge.cpp
             tests/test_inventory_natives.cpp
+            tests/test_entity_script_wiring.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

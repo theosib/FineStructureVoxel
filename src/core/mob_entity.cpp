@@ -1,4 +1,6 @@
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/mob_event_hooks.hpp"
+#include "finevox/core/ai_driver.hpp"
 #include "finevox/core/entity_type_def.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/entity_manager.hpp"
@@ -16,6 +18,12 @@ MobEntity::MobEntity(EntityId id, EntityTypeId typeId)
     , typeId_(typeId)
 {
     initFromTypeDef();
+}
+
+MobEntity::~MobEntity() = default;
+
+void MobEntity::setDriver(std::unique_ptr<AIDriver> driver) {
+    driver_ = std::move(driver);
 }
 
 void MobEntity::initFromTypeDef() {
@@ -41,6 +49,16 @@ std::string MobEntity::typeName() const {
 }
 
 void MobEntity::tick(float dt, World& world) {
+    // Landing detection — capture velocity before ground state changes
+    if (!onGround_) {
+        preLandingVelocityY_ = velocity_.y;
+    }
+    if (onGround_ && !wasOnGround_) {
+        // Just landed — preLandingVelocityY_ holds the impact velocity
+        // Fall damage is computed by scripts via preLandingVelocityY()
+    }
+    wasOnGround_ = onGround_;
+
     // Update timers
     timeSinceLastDamage_ += dt;
     animationTime_ += dt;
@@ -80,7 +98,11 @@ void MobEntity::tick(float dt, World& world) {
     updateMovement(dt);
 
     // Check for death
-    if (isDead()) {
+    if (isDead() && !deathHookFired_) {
+        deathHookFired_ = true;
+        if (eventHooks_) {
+            eventHooks_->onDeath(*this, lastAttacker_);
+        }
         markForRemoval();
     }
 }
@@ -130,6 +152,10 @@ void MobEntity::damage(float amount, EntityId source) {
     health_ = std::max(0.0f, health_ - amount);
     lastAttacker_ = source;
     timeSinceLastDamage_ = 0.0f;
+
+    if (eventHooks_) {
+        eventHooks_->onDamage(*this, amount, source);
+    }
 }
 
 void MobEntity::heal(float amount) {

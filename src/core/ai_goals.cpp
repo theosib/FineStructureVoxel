@@ -27,9 +27,9 @@ bool IdleGoal::canStart(MobEntity& /*mob*/) {
 
 void IdleGoal::start(MobEntity& mob) {
     idleTimer_ = 0.0f;
-    idleDuration_ = randomFloat(2.0f, 5.0f);
+    idleDuration_ = randomFloat(params_.minDuration, params_.maxDuration);
     mob.clearMoveTarget();
-    mob.setAnimation(0);  // Idle animation
+    mob.setAnimation(params_.animSlot);
 }
 
 void IdleGoal::tick(MobEntity& /*mob*/, float dt) {
@@ -48,17 +48,17 @@ void IdleGoal::stop(MobEntity& /*mob*/) {
 // ============================================================================
 
 bool WanderGoal::canStart(MobEntity& /*mob*/) {
-    return randomFloat(0.0f, 1.0f) < 0.1f;  // 10% chance each tick
+    return randomFloat(0.0f, 1.0f) < params_.startChance;
 }
 
 void WanderGoal::start(MobEntity& mob) {
     auto pos = mob.position();
-    float dx = randomFloat(-wanderRange_, wanderRange_);
-    float dz = randomFloat(-wanderRange_, wanderRange_);
+    float dx = randomFloat(-params_.range, params_.range);
+    float dz = randomFloat(-params_.range, params_.range);
     target_ = glm::dvec3(pos.x + dx, pos.y, pos.z + dz);
 
     mob.moveTo(target_);
-    mob.setAnimation(1);  // Walk animation
+    mob.setAnimation(params_.animSlot);
     timeout_ = 0.0f;
 }
 
@@ -67,7 +67,7 @@ void WanderGoal::tick(MobEntity& /*mob*/, float dt) {
 }
 
 bool WanderGoal::isComplete(MobEntity& mob) {
-    if (timeout_ >= MAX_WANDER_TIME) return true;
+    if (timeout_ >= params_.maxTime) return true;
     return !mob.hasMoveTarget();
 }
 
@@ -105,7 +105,7 @@ void ChaseGoal::start(MobEntity& mob) {
         targetId_ = mob.lastAttacker();
     }
     repathTimer_ = 0.0f;
-    mob.setAnimation(1);  // Walk/run animation
+    mob.setAnimation(params_.animSlot);
 }
 
 void ChaseGoal::tick(MobEntity& mob, float dt) {
@@ -125,7 +125,7 @@ void ChaseGoal::tick(MobEntity& mob, float dt) {
     if (!target) return;
 
     // Re-path periodically
-    if (repathTimer_ >= REPATH_INTERVAL || !mob.hasMoveTarget()) {
+    if (repathTimer_ >= params_.repathInterval || !mob.hasMoveTarget()) {
         repathTimer_ = 0.0f;
         mob.moveTo(glm::dvec3(target->position()));
     }
@@ -146,7 +146,7 @@ bool ChaseGoal::isComplete(MobEntity& mob) {
 
     // Neutral mobs stop chasing after a while
     const auto* def = mob.typeDef();
-    if (def && def->aiType == AIType::Neutral && !mob.wasRecentlyDamaged(10.0f)) {
+    if (def && def->aiType == AIType::Neutral && !mob.wasRecentlyDamaged(params_.damageMemory)) {
         return true;
     }
 
@@ -200,7 +200,7 @@ void AttackGoal::start(MobEntity& mob) {
         }
     }
 
-    mob.setAnimation(2);  // Attack animation
+    mob.setAnimation(params_.animSlot);
 }
 
 void AttackGoal::tick(MobEntity& mob, float dt) {
@@ -246,7 +246,7 @@ bool AttackGoal::isComplete(MobEntity& mob) {
         auto diff = e->position() - mob.position();
         float dist = static_cast<float>(std::sqrt(
             diff.x * diff.x + diff.y * diff.y + diff.z * diff.z));
-        return dist > range * 1.5f;  // Some hysteresis
+        return dist > range * params_.rangeHysteresis;
     }
 
     return true;  // Target not visible
@@ -264,7 +264,7 @@ bool FleeGoal::canStart(MobEntity& mob) {
     // Flee when recently damaged (for passive mobs)
     const auto* def = mob.typeDef();
     if (def && def->aiType == AIType::Passive) {
-        return mob.wasRecentlyDamaged(2.0f);
+        return mob.wasRecentlyDamaged(params_.damageMemory);
     }
     return false;
 }
@@ -274,12 +274,12 @@ void FleeGoal::start(MobEntity& mob) {
 
     // Run in a random direction away from attacker (or random if no attacker)
     auto pos = mob.position();
-    float dx = randomFloat(-fleeDistance_, fleeDistance_);
-    float dz = randomFloat(-fleeDistance_, fleeDistance_);
+    float dx = randomFloat(-params_.distance, params_.distance);
+    float dz = randomFloat(-params_.distance, params_.distance);
 
     mob.moveTo(glm::dvec3(pos.x + dx, pos.y, pos.z + dz));
-    mob.setSpeedMultiplier(1.5f);  // Run faster when fleeing
-    mob.setAnimation(1);  // Walk/run animation
+    mob.setSpeedMultiplier(params_.speedMult);
+    mob.setAnimation(params_.animSlot);
 }
 
 void FleeGoal::tick(MobEntity& /*mob*/, float dt) {
@@ -287,7 +287,7 @@ void FleeGoal::tick(MobEntity& /*mob*/, float dt) {
 }
 
 bool FleeGoal::isComplete(MobEntity& /*mob*/) {
-    return fleeTimer_ >= FLEE_DURATION;
+    return fleeTimer_ >= params_.duration;
 }
 
 void FleeGoal::stop(MobEntity& mob) {
@@ -307,7 +307,7 @@ bool LookAtPlayerGoal::canStart(MobEntity& mob) {
     float dist = static_cast<float>(std::sqrt(
         diff.x * diff.x + diff.y * diff.y + diff.z * diff.z));
 
-    return dist <= lookRange_;
+    return dist <= params_.range;
 }
 
 void LookAtPlayerGoal::start(MobEntity& /*mob*/) {
@@ -323,7 +323,7 @@ void LookAtPlayerGoal::tick(MobEntity& mob, float dt) {
 }
 
 bool LookAtPlayerGoal::isComplete(MobEntity& mob) {
-    if (lookTimer_ >= LOOK_DURATION) return true;
+    if (lookTimer_ >= params_.duration) return true;
     return mob.senses().nearestPlayer() == nullptr;
 }
 
@@ -335,35 +335,35 @@ void LookAtPlayerGoal::stop(MobEntity& /*mob*/) {
 // ============================================================================
 
 bool PanicGoal::canStart(MobEntity& mob) {
-    return mob.wasRecentlyDamaged(1.0f);
+    return mob.wasRecentlyDamaged(params_.damageMemory);
 }
 
 void PanicGoal::start(MobEntity& mob) {
     panicTimer_ = 0.0f;
 
     auto pos = mob.position();
-    float dx = randomFloat(-12.0f, 12.0f);
-    float dz = randomFloat(-12.0f, 12.0f);
+    float dx = randomFloat(-params_.wanderRange, params_.wanderRange);
+    float dz = randomFloat(-params_.wanderRange, params_.wanderRange);
 
     mob.moveTo(glm::dvec3(pos.x + dx, pos.y, pos.z + dz));
-    mob.setSpeedMultiplier(1.5f);
-    mob.setAnimation(1);  // Run
+    mob.setSpeedMultiplier(params_.speedMult);
+    mob.setAnimation(params_.animSlot);
 }
 
 void PanicGoal::tick(MobEntity& mob, float dt) {
     panicTimer_ += dt;
 
     // Pick new random direction if we've reached target
-    if (!mob.hasMoveTarget() && panicTimer_ < PANIC_DURATION) {
+    if (!mob.hasMoveTarget() && panicTimer_ < params_.duration) {
         auto pos = mob.position();
-        float dx = randomFloat(-12.0f, 12.0f);
-        float dz = randomFloat(-12.0f, 12.0f);
+        float dx = randomFloat(-params_.wanderRange, params_.wanderRange);
+        float dz = randomFloat(-params_.wanderRange, params_.wanderRange);
         mob.moveTo(glm::dvec3(pos.x + dx, pos.y, pos.z + dz));
     }
 }
 
 bool PanicGoal::isComplete(MobEntity& /*mob*/) {
-    return panicTimer_ >= PANIC_DURATION;
+    return panicTimer_ >= params_.duration;
 }
 
 void PanicGoal::stop(MobEntity& mob) {

@@ -18,12 +18,14 @@
 namespace finevox {
 
 struct EntityTypeDef;
+struct MobEventHooks;
+class AIDriver;
 class EntityManager;
 
 class MobEntity : public Entity {
 public:
     MobEntity(EntityId id, EntityTypeId typeId);
-    ~MobEntity() override = default;
+    ~MobEntity() override;
 
     void tick(float dt, World& world) override;
     [[nodiscard]] std::string typeName() const override;
@@ -47,6 +49,35 @@ public:
 
     /// Set entity manager reference (for senses to scan entities)
     void setEntityManager(EntityManager* em) { entityManager_ = em; }
+
+    // ========================================================================
+    // AI Driver (top-level decision-maker)
+    // ========================================================================
+
+    /// Set the AI driver (takes ownership)
+    void setDriver(std::unique_ptr<AIDriver> driver);
+
+    /// Get the AI driver (may be nullptr — falls back to brain.tick())
+    [[nodiscard]] AIDriver* driver() { return driver_.get(); }
+    [[nodiscard]] const AIDriver* driver() const { return driver_.get(); }
+
+    // ========================================================================
+    // Player Flag
+    // ========================================================================
+
+    /// Mark this mob as the player entity
+    void setIsPlayer(bool isPlayer) { isPlayer_ = isPlayer; }
+    [[nodiscard]] bool isPlayerEntity() const override { return isPlayer_; }
+
+    // ========================================================================
+    // Event Hooks (script/native callbacks)
+    // ========================================================================
+
+    /// Set event hooks (non-owning; lifetime managed by GameScriptEngine)
+    void setEventHooks(MobEventHooks* hooks) { eventHooks_ = hooks; }
+
+    /// Get event hooks (may be nullptr)
+    [[nodiscard]] MobEventHooks* eventHooks() const { return eventHooks_; }
 
     // ========================================================================
     // Health & Combat
@@ -102,11 +133,22 @@ public:
     [[nodiscard]] float speedMultiplier() const { return speedMultiplier_; }
     void setSpeedMultiplier(float mult) { speedMultiplier_ = mult; }
 
+    /// Get the Y velocity just before the most recent landing (for fall damage)
+    [[nodiscard]] float preLandingVelocityY() const { return preLandingVelocityY_; }
+
 private:
     EntityTypeId typeId_;
     AIBrain brain_;
+    std::unique_ptr<AIDriver> driver_;
     EntitySenses senses_;
     EntityManager* entityManager_ = nullptr;
+    MobEventHooks* eventHooks_ = nullptr;
+    bool deathHookFired_ = false;
+    bool isPlayer_ = false;
+
+    // Landing detection (for fall damage)
+    bool wasOnGround_ = true;
+    float preLandingVelocityY_ = 0.0f;
 
     // Health
     float health_ = 20.0f;

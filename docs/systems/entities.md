@@ -8,7 +8,9 @@
 
 ## Overview
 
-Phase 20 complete (1570 tests: 1526 main + 44 script). Entities use `EntityTypeId` (interned), loaded from `.entity` files. `MobEntity` extends `Entity` with AI brain, senses, health, and movement commands. AI uses priority-based goal selection with built-in goals. A* pathfinding over block grid. Skeletal animation with crossfade blending. EntityRenderer on graphics thread interpolates snapshots. CBOR serialization per-column. Full script event handler support.
+Phase 24A/B complete (2099 tests). Entities use `EntityTypeId` (interned), loaded from `.entity` files. `MobEntity` extends `Entity` with AI brain, senses, health, and movement commands. AI uses priority-based goal selection with configurable param structs. A* pathfinding over block grid. Skeletal animation with crossfade blending. EntityRenderer on graphics thread interpolates snapshots. CBOR serialization per-column. Full script event handler support.
+
+**Phase 24A/B additions:** AIDriver adapter pattern (BrainAIDriver, PlayerInputDriver), MobEventHooks for script lifecycle callbacks, AI goal parameterization (all magic numbers replaced with param structs), player is now a MobEntity with PlayerInputDriver, landing detection for fall damage, entity-to-script bridge natives for HUD.
 
 ---
 
@@ -37,7 +39,10 @@ Phase 20 complete (1570 tests: 1526 main + 44 script). Entities use `EntityTypeI
 | `ScriptEntityHandler` | `BlockHandler`-like for entities; caches finescript event closures |
 | `EntityContextProxy` | `finescript::ProxyMap` wrapping `MobEntity` for script access |
 | `EntitySerializer` | CBOR serialization to/from `SerializedEntity` |
-| `EntityManager` | Owns all entities; tick AI/physics; manage transfers/despawns; persist |
+| `AIDriver` | Top-level decision-maker adapter (base class); `BrainAIDriver` wraps goal system, `PlayerInputDriver` consumes input events |
+| `MobEventHooks` | Virtual interface for entity lifecycle callbacks (onSpawn/onTick/onDamage/onDeath/onInteract/onStrike) |
+| `ScriptMobEventHooks` | Header-only adapter bridging `MobEventHooks` → `ScriptEntityHandler` |
+| `EntityManager` | Owns all entities; tick AI/physics; manage transfers/despawns; persist; auto-configures AI presets on mob spawn |
 
 ---
 
@@ -71,8 +76,9 @@ def.behaviorConfig; // variant per mob type
 // Base Entity
 entity.position();
 entity.velocity();
-entity.bounds();  // AABB in world space
-entity.id();      // EntityId
+entity.boundingBox();  // AABB in world space
+entity.id();           // EntityId
+entity.isPlayerEntity(); // virtual — works for both Entity and MobEntity players
 
 // MobEntity extensions
 mob.health();
@@ -82,11 +88,26 @@ mob.setMaxHealth(100.0f); // CALL THIS FIRST before setHealth!
 mob.isAlive();
 mob.isDead();
 
+// Player flag (set by EntityManager::spawnPlayer)
+mob.setIsPlayer(true);
+mob.isPlayerEntity();  // overrides Entity::isPlayerEntity()
+
+// AI Driver
+mob.setDriver(std::make_unique<PlayerInputDriver>());
+mob.driver();  // AIDriver* (may be nullptr)
+
+// Event hooks (set by EntityManager from hooks provider)
+mob.setEventHooks(hooks);
+mob.eventHooks();  // MobEventHooks* (may be nullptr)
+
 // Movement commands (consumed by AI/physics)
 mob.moveTo(targetPos);
 mob.lookAt(target);
 mob.jump();
-mob.stopMoving();
+mob.clearMoveTarget();
+
+// Landing detection (for fall damage scripts)
+mob.preLandingVelocityY();  // Y velocity at last landing
 
 // Senses
 mob.senses().canSee(otherEntity);
@@ -95,20 +116,53 @@ mob.senses().canHear(position, volume);
 
 ---
 
+## AIDriver
+
+```cpp
+#include <finevox/core/ai_driver.hpp>
+
+// AIDriver is the top-level decision-maker adapter.
+// MobEntity holds optional AIDriver; falls back to brain.tick() if nullptr.
+
+// BrainAIDriver — wraps existing goal system (default for NPC mobs)
+mob.setDriver(std::make_unique<BrainAIDriver>());
+
+// PlayerInputDriver — consumes input events from graphics thread
+mob.setDriver(std::make_unique<PlayerInputDriver>());
+// Handles: player_look, player_jump, player_sprint, player_sneak
+
+// AIDriver::subscribesTo(eventType) for event filtering
+// AIDriver::onEvent(mob, event) dispatches finescript::Value event maps
+```
+
+---
+
 ## AIBrain & Goals
 
 ```cpp
 #include <finevox/core/ai_brain.hpp>
+#include <finevox/core/ai_goals.hpp>
 
 // AIBrain selects highest-priority valid goal each tick
 AIBrain brain;
-brain.addGoal(std::make_unique<WanderGoal>(speed=1.0f, priority=1));
-brain.addGoal(std::make_unique<ChaseGoal>(target, speed=2.0f, priority=5));
-brain.addGoal(std::make_unique<AttackGoal>(attackRange=2.0f, damage=5.0f, priority=10));
-brain.addGoal(std::make_unique<FleeGoal>(threat, fleeDistance=16.0f, priority=8));
+brain.addGoal(1, std::make_unique<WanderGoal>(1));
+brain.addGoal(5, std::make_unique<ChaseGoal>(5));
+brain.addGoal(6, std::make_unique<AttackGoal>(6));
 
-// Each tick (called by EntityManager)
-brain.tick(mob, senses, dt);
+// Goals accept optional param structs (defaults match original hardcoded values)
+WanderGoalParams wp;
+wp.range = 20.0f;        // default: 10.0f
+wp.startChance = 0.2f;   // default: 0.1f
+brain.addGoal(1, std::make_unique<WanderGoal>(1, wp));
+
+// Param structs: IdleGoalParams, WanderGoalParams, ChaseGoalParams,
+//   AttackGoalParams, FleeGoalParams, LookAtPlayerGoalParams, PanicGoalParams
+
+// configureAIPreset(mob, AIType) — auto-populates brain with preset goals
+// Called automatically by EntityManager on spawn if brain is empty
+
+// Each tick (called by MobEntity::tick)
+brain.tick(mob, dt);
 
 // Built-in goals (priority = higher → selected first when valid)
 IdleGoal           // stand still, look around
@@ -215,13 +269,42 @@ manager.publishEntitySnapshots();  // writes to GraphicsEventQueue
 
 Entity events in finescript handlers: `:spawn`, `:tick`, `:damage`, `:death`, `:interact`, `:strike`
 
-Native mob functions (underscore naming, NOT dot):
+These fire via MobEventHooks → ScriptMobEventHooks → ScriptEntityHandler (adapter chain).
+EntityManager auto-wires hooks on spawn via `MobEventHooksProvider` callback from GameScriptEngine.
+
+Native mob functions (underscore naming, NOT dot; operate on current entity context):
 ```
-mob_health id         -- get health (float)
-mob_set_health id h   -- set health
-mob_position id       -- {x,y,z} map
-mob_move_to id x y z  -- move entity to position
-mob_spawn type x y z  -- spawn mob, returns EntityId
+mob_health             -- get health (float)
+mob_set_health hp      -- set health
+mob_max_health         -- get max health (float)
+mob_position           -- [x,y,z] array
+mob_velocity           -- [vx,vy,vz] array
+mob_move_to x y z      -- move entity to position
+mob_look_at x y z      -- face a position
+mob_jump               -- jump (if on ground)
+mob_damage amount [src] -- apply damage
+mob_heal amount        -- heal
+mob_set_animation id   -- set animation slot
+mob_is_dead            -- bool
+mob_is_on_ground       -- bool
+mob_id                 -- entity id (int)
+mob_type               -- type symbol
+mob_spawn type x y z   -- spawn mob, returns EntityId
+mob_find_path x y z    -- pathfind, returns bool
+mob_set_speed mult     -- set speed multiplier
+mob_add_goal type prio [params] -- add AI goal from name + params map
+mob_clear_goals        -- clear all AI goals
+mob_apply_impulse vx vy vz -- add to velocity
+mob_get_data key       -- read entity DataContainer
+mob_set_data key val   -- write entity DataContainer
+mob_remove             -- mark for removal
+mob_is_player          -- bool (is this the player entity?)
+mob_fall_velocity      -- Y velocity at last landing (for fall damage)
+mob_speed_multiplier   -- get current speed multiplier
+mob_yaw                -- get yaw (radians)
+mob_pitch              -- get pitch (radians)
+mob_last_attacker      -- entity id of last attacker (or nil)
+mob_time_since_damage  -- seconds since last damage
 ```
 
 ---

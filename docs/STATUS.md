@@ -9,9 +9,9 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 23 — Inventory UI & Crafting Integration (6 sub-phases) |
-| Test count | **2061** |
-| In-progress | None — see Roadmap for next steps |
+| Last completed phase | Phase 24A/B — Entity System Fixes & Player Entity Unification |
+| Test count | **2099** |
+| In-progress | Phase 24 — Player Survival & Combat (sub-phases C-F remaining) |
 | Libraries | 5 shared libraries (see Architecture) |
 
 ---
@@ -71,6 +71,13 @@
   - [x] 23-D: Inventory UI scripts — `inventory.fs` (4x9 bag + 2x2 crafting grid + output), `container.fs` (generic container template), `slot_widget.fsc` (reusable slot builder), open/close via `open_inventory` action
   - [x] 23-E: Recipe browser — `recipe_browser.fs` (scrollable recipe list), `build_recipe_list` native, ingredient display in `craft_recipes`, craft output preview in per-frame update
   - [x] 23-F: Workbench crafting station — `workbench.model` block definition, `workbench.fs` (3x3 crafting grid UI), right-click interaction opens workbench UI, `open_workbench` action
+- [ ] **Phase 24** — Player Survival + Combat:
+  - [x] 24-A: Entity system fixes & script wiring — MobEventHooks interface, AI goal parameterization (all magic numbers → param structs), EntityManager auto-configures AI presets on spawn, ScriptMobEventHooks adapter, hooks provider wiring, mob native functions (add\_goal, clear\_goals, apply\_impulse, get/set\_data, remove)
+  - [x] 24-B: Player entity unification — AIDriver adapter pattern (BrainAIDriver, PlayerInputDriver), player is MobEntity with PlayerInputDriver, virtual isPlayerEntity(), landing detection (preLandingVelocityY), player.entity type definition, HUD bridge natives (mob\_is\_player, mob\_fall\_velocity, mob\_yaw/pitch, mob\_last\_attacker, mob\_time\_since\_damage)
+  - [ ] 24-C: Survival stats — hunger, saturation, stamina, stat drain scripts
+  - [ ] 24-D: Damage + combat — damage types, fall damage script, melee/ranged, weapon range from entity data
+  - [ ] 24-E: Death + respawn — death screen, respawn point, inventory drop
+  - [ ] 24-F: HUD — health/hunger/stamina bars, XP bar (all scripted UI with C++ bridge)
 
 ---
 
@@ -97,7 +104,7 @@ Known design issue:
 
 See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
-- **Phase 24: Player Survival + Combat** — hunger, stamina, damage types, fall damage, death/respawn, melee/ranged combat, HUD bars
+- **Phase 24C-F: Player Survival + Combat** — hunger, stamina, damage types, fall damage scripts, death/respawn, melee/ranged combat, HUD bars (24A/B complete: entity system wiring + player unification)
 - **Phase 23 polish** — config-driven input bindings, block-break drops, icon-based slots, container UI (see ROADMAP.md deferred items)
 
 ---

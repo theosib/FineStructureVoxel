@@ -4,9 +4,11 @@
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/ai_goals.hpp"
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/pathfinder.hpp"
 #include "finevox/core/fluid_type_id.hpp"
+#include <finescript/map_data.h>
 #include <iostream>
 
 namespace finevox::script {
@@ -782,6 +784,322 @@ void GameScriptEngine::registerMobNativeFunctions() {
             }
             return finescript::Value::nil();
         });
+
+    // mob_add_goal(goal_type_string, priority, params_map)
+    engine_->registerFunction("mob_add_goal",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || args.size() < 2) return finescript::Value::boolean(false);
+
+            std::string goalType;
+            if (args[0].isString()) {
+                goalType = args[0].asString();
+            } else if (args[0].isSymbol()) {
+                goalType = StringInterner::global().lookup(args[0].asSymbol());
+            } else {
+                return finescript::Value::boolean(false);
+            }
+
+            int prio = static_cast<int>(args[1].asInt());
+
+            // Optional params map (arg 2)
+            const finescript::Value* paramsMap = nullptr;
+            if (args.size() >= 3 && args[2].isMap()) {
+                paramsMap = &args[2];
+            }
+
+            auto& si = StringInterner::global();
+            auto getFloat = [&](const char* key, float def) -> float {
+                if (!paramsMap) return def;
+                auto symId = si.intern(key);
+                const auto& map = paramsMap->asMap();
+                if (map.has(symId)) return toFloatVal(map.get(symId));
+                return def;
+            };
+            auto getInt = [&](const char* key, int def) -> int {
+                if (!paramsMap) return def;
+                auto symId = si.intern(key);
+                const auto& map = paramsMap->asMap();
+                if (map.has(symId)) return static_cast<int>(map.get(symId).asInt());
+                return def;
+            };
+
+            std::unique_ptr<AIGoal> goal;
+            if (goalType == "idle") {
+                IdleGoalParams p;
+                p.minDuration = getFloat("min_duration", p.minDuration);
+                p.maxDuration = getFloat("max_duration", p.maxDuration);
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                goal = std::make_unique<IdleGoal>(prio, p);
+            } else if (goalType == "wander") {
+                WanderGoalParams p;
+                p.range = getFloat("range", p.range);
+                p.maxTime = getFloat("max_time", p.maxTime);
+                p.startChance = getFloat("start_chance", p.startChance);
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                goal = std::make_unique<WanderGoal>(prio, p);
+            } else if (goalType == "chase") {
+                ChaseGoalParams p;
+                p.maxRange = getFloat("max_range", p.maxRange);
+                p.repathInterval = getFloat("repath_interval", p.repathInterval);
+                p.damageMemory = getFloat("damage_memory", p.damageMemory);
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                goal = std::make_unique<ChaseGoal>(prio, p);
+            } else if (goalType == "attack") {
+                AttackGoalParams p;
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                p.rangeHysteresis = getFloat("range_hysteresis", p.rangeHysteresis);
+                goal = std::make_unique<AttackGoal>(prio, p);
+            } else if (goalType == "flee") {
+                FleeGoalParams p;
+                p.distance = getFloat("distance", p.distance);
+                p.duration = getFloat("duration", p.duration);
+                p.speedMult = getFloat("speed_mult", p.speedMult);
+                p.damageMemory = getFloat("damage_memory", p.damageMemory);
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                goal = std::make_unique<FleeGoal>(prio, p);
+            } else if (goalType == "look_at_player") {
+                LookAtPlayerGoalParams p;
+                p.range = getFloat("range", p.range);
+                p.duration = getFloat("duration", p.duration);
+                goal = std::make_unique<LookAtPlayerGoal>(prio, p);
+            } else if (goalType == "panic") {
+                PanicGoalParams p;
+                p.duration = getFloat("duration", p.duration);
+                p.speedMult = getFloat("speed_mult", p.speedMult);
+                p.wanderRange = getFloat("wander_range", p.wanderRange);
+                p.damageMemory = getFloat("damage_memory", p.damageMemory);
+                p.animSlot = getInt("anim_slot", p.animSlot);
+                goal = std::make_unique<PanicGoal>(prio, p);
+            } else {
+                return finescript::Value::boolean(false);
+            }
+
+            ud->entityCtx->brain().addGoal(prio, std::move(goal));
+            return finescript::Value::boolean(true);
+        });
+
+    // mob_clear_goals()
+    engine_->registerFunction("mob_clear_goals",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                ud->entityCtx->brain().clear();
+            }
+            return finescript::Value::nil();
+        });
+
+    // mob_apply_impulse(vx, vy, vz)
+    engine_->registerFunction("mob_apply_impulse",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx) return finescript::Value::nil();
+
+            float vx = 0, vy = 0, vz = 0;
+            if (args.size() >= 3) {
+                vx = toFloatVal(args[0]);
+                vy = toFloatVal(args[1]);
+                vz = toFloatVal(args[2]);
+            } else if (args.size() == 1 && args[0].isArray()) {
+                const auto& arr = args[0].asArray();
+                if (arr.size() >= 3) {
+                    vx = toFloatVal(arr[0]);
+                    vy = toFloatVal(arr[1]);
+                    vz = toFloatVal(arr[2]);
+                }
+            }
+
+            auto vel = ud->entityCtx->velocity();
+            ud->entityCtx->setVelocity(vel + Vec3(vx, vy, vz));
+            return finescript::Value::nil();
+        });
+
+    // mob_get_data(key) → value or nil
+    engine_->registerFunction("mob_get_data",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || args.empty()) return finescript::Value::nil();
+
+            std::string key;
+            if (args[0].isString()) key = args[0].asString();
+            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
+            else return finescript::Value::nil();
+
+            auto& extra = ud->entityCtx->getOrCreateEntityData();
+            // Try common types
+            auto fval = extra.get<float>(key, 0.0f);
+            if (fval != 0.0f) return finescript::Value::number(fval);
+            auto ival = extra.get<int64_t>(key, 0);
+            if (ival != 0) return finescript::Value::integer(ival);
+            auto sval = extra.get<std::string>(key, "");
+            if (!sval.empty()) return finescript::Value::string(sval);
+            return finescript::Value::nil();
+        });
+
+    // mob_set_data(key, value)
+    engine_->registerFunction("mob_set_data",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || args.size() < 2) return finescript::Value::nil();
+
+            std::string key;
+            if (args[0].isString()) key = args[0].asString();
+            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
+            else return finescript::Value::nil();
+
+            auto& extra = ud->entityCtx->getOrCreateEntityData();
+            const auto& val = args[1];
+            if (val.isFloat()) extra.set<float>(key, static_cast<float>(val.asFloat()));
+            else if (val.isInt()) extra.set<int64_t>(key, val.asInt());
+            else if (val.isString()) extra.set<std::string>(key, std::string(val.asString()));
+            else if (val.isBool()) extra.set<int64_t>(key, val.asBool() ? 1 : 0);
+
+            return finescript::Value::nil();
+        });
+
+    // mob_remove() — marks entity for removal
+    engine_->registerFunction("mob_remove",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                ud->entityCtx->markForRemoval();
+            }
+            return finescript::Value::nil();
+        });
+
+    // mob_is_player() → bool
+    engine_->registerFunction("mob_is_player",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::boolean(ud->entityCtx->isPlayerEntity());
+            }
+            return finescript::Value::boolean(false);
+        });
+
+    // mob_fall_velocity() → float (Y velocity at last landing, for fall damage)
+    engine_->registerFunction("mob_fall_velocity",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::number(
+                    ud->entityCtx->preLandingVelocityY());
+            }
+            return finescript::Value::number(0.0);
+        });
+
+    // mob_speed_multiplier() → float
+    engine_->registerFunction("mob_speed_multiplier",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::number(ud->entityCtx->speedMultiplier());
+            }
+            return finescript::Value::number(1.0);
+        });
+
+    // mob_yaw() → float
+    engine_->registerFunction("mob_yaw",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::number(ud->entityCtx->yaw());
+            }
+            return finescript::Value::number(0.0);
+        });
+
+    // mob_pitch() → float
+    engine_->registerFunction("mob_pitch",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::number(ud->entityCtx->pitch());
+            }
+            return finescript::Value::number(0.0);
+        });
+
+    // mob_last_attacker() → entity_id or nil
+    engine_->registerFunction("mob_last_attacker",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                EntityId attacker = ud->entityCtx->lastAttacker();
+                if (attacker != INVALID_ENTITY_ID) {
+                    return finescript::Value::integer(static_cast<int64_t>(attacker));
+                }
+            }
+            return finescript::Value::nil();
+        });
+
+    // mob_time_since_damage() → float (seconds since last damage)
+    engine_->registerFunction("mob_time_since_damage",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->entityCtx) {
+                return finescript::Value::number(ud->entityCtx->timeSinceLastDamage());
+            }
+            return finescript::Value::number(999.0);
+        });
+}
+
+// ============================================================================
+// Entity Script Loading & Hooks Provider
+// ============================================================================
+
+void GameScriptEngine::loadEntityScriptsFromRegistry() {
+    EntityTypeRegistry::global().forEachType(
+        [this](EntityTypeId /*id*/, const EntityTypeDef& def) {
+            if (def.script.empty()) return;
+            if (entityHandlers_.count(def.name)) return;  // Already loaded
+
+            loadEntityScript(def.script, def.name);
+        });
+}
+
+MobEventHooksProvider GameScriptEngine::createHooksProvider() {
+    return [this](const std::string& typeName) -> MobEventHooks* {
+        // Check if adapter already exists
+        auto it = hooksAdapters_.find(typeName);
+        if (it != hooksAdapters_.end()) {
+            return it->second.get();
+        }
+
+        // Find handler for this type
+        auto* handler = getEntityHandler(typeName);
+        if (!handler) return nullptr;
+
+        // Create adapter
+        auto adapter = std::make_unique<ScriptMobEventHooks>(*handler);
+        auto* ptr = adapter.get();
+        hooksAdapters_[typeName] = std::move(adapter);
+        return ptr;
+    };
 }
 
 }  // namespace finevox::script

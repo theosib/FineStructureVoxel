@@ -1,0 +1,9 @@
+# Player entity type definition
+name: finevox:player
+half_extents: 0.35 0.925 0.35
+max_speed: 4.317
+max_health: 20
+ai: none
+follow_range: 0
+jump_strength: 0.42
+gravity: true

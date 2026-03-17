@@ -1,6 +1,10 @@
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/item_drop_entity.hpp"
+#include "finevox/core/mob_entity.hpp"
+#include "finevox/core/mob_event_hooks.hpp"
+#include "finevox/core/ai_driver.hpp"
+#include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/event_queue.hpp"
 #include "finevox/core/chunk_column.hpp"
@@ -54,7 +58,31 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
         script::makeEntitySpawnValue(id, static_cast<uint16_t>(entity->type()),
                                       entity->position(), entity->yaw(), entity->pitch())));
 
+    Entity* rawPtr = entity.get();
     entities_[id] = std::move(entity);
+
+    // Wire up MobEntity-specific hooks and AI presets
+    if (auto* mob = dynamic_cast<MobEntity*>(rawPtr)) {
+        mob->setEntityManager(this);
+
+        // Auto-configure AI preset if brain is empty
+        if (const auto* def = mob->typeDef(); def && mob->brain().goalCount() == 0) {
+            configureAIPreset(*mob, def->aiType);
+        }
+
+        // Attach script hooks
+        if (hooksProvider_) {
+            if (auto* hooks = hooksProvider_(mob->typeName())) {
+                mob->setEventHooks(hooks);
+            }
+        }
+
+        // Fire onSpawn
+        if (mob->eventHooks()) {
+            mob->eventHooks()->onSpawn(*mob);
+        }
+    }
+
     return id;
 }
 
@@ -98,7 +126,27 @@ bool EntityManager::hasEntity(EntityId id) const {
 // ============================================================================
 
 EntityId EntityManager::spawnPlayer(Vec3 position) {
-    EntityId id = spawnEntity(EntityType::Player, position);
+    // Try to use a registered player entity type; fall back to defaults
+    auto playerTypeId = EntityTypeId::fromName("finevox:player");
+    std::unique_ptr<MobEntity> mob;
+
+    if (!playerTypeId.isEmpty() && EntityTypeRegistry::global().hasType(playerTypeId)) {
+        mob = std::make_unique<MobEntity>(INVALID_ENTITY_ID, playerTypeId);
+    } else {
+        // No registered player type — create with defaults
+        mob = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId{});
+        mob->setMaxHealth(20.0f);
+        mob->setHealth(20.0f);
+    }
+
+    mob->setPosition(position);
+    mob->setHalfExtents(Vec3(0.35f, 0.925f, 0.35f));
+    mob->setEyeHeight(1.65f);
+    mob->setMaxStepHeight(0.6f);
+    mob->setIsPlayer(true);
+    mob->setDriver(std::make_unique<PlayerInputDriver>());
+
+    EntityId id = spawnEntity(std::move(mob));
 
     // Set up player authority tracking
     auto& auth = getPlayerAuthority(id);
@@ -128,6 +176,11 @@ void EntityManager::tick(float tickDt) {
         if (entity->isAlive()) {
             entity->tick(tickDt, world_);
             entity->advanceAnimation(tickDt);
+
+            // Fire script onTick after built-in AI
+            if (auto* mob = dynamic_cast<MobEntity*>(entity.get()); mob && mob->eventHooks()) {
+                mob->eventHooks()->onTick(*mob, tickDt);
+            }
         }
     }
 
@@ -443,7 +496,7 @@ void EntityManager::saveColumnEntities(ChunkColumn& column) {
     std::vector<const Entity*> toSave;
     for (const auto& [id, entity] : entities_) {
         // Skip players — they are managed separately
-        if (entity->type() == EntityType::Player) continue;
+        if (isPlayer(*entity)) continue;
 
         auto eColPos = ColumnPos::fromChunk(entity->currentChunk());
         if (eColPos.x == colPos.x && eColPos.z == colPos.z) {

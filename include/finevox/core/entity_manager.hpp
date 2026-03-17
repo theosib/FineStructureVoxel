@@ -24,9 +24,14 @@ namespace finevox {
 class World;
 class UpdateScheduler;
 class ChunkColumn;
+class MobEntity;
+struct MobEventHooks;
 struct SoundEvent;
 template<typename T> class Queue;
 using SoundEventQueue = Queue<finescript::Value>;
+
+/// Provider callback: given a mob type name, returns the hooks (or nullptr)
+using MobEventHooksProvider = std::function<MobEventHooks*(const std::string&)>;
 
 // ============================================================================
 // PlayerAuthority - Server-side tracking of player state for validation
@@ -256,10 +261,16 @@ public:
     /// Set sound queue for fluid/entity sound events (optional)
     void setSoundQueue(SoundEventQueue* queue) { soundQueue_ = queue; }
 
+    /// Set provider for mob event hooks (called on spawn to attach script hooks)
+    void setMobEventHooksProvider(MobEventHooksProvider provider) {
+        hooksProvider_ = std::move(provider);
+    }
+
 private:
     World& world_;
     GraphicsEventQueue& graphicsQueue_;
     SoundEventQueue* soundQueue_ = nullptr;
+    MobEventHooksProvider hooksProvider_;
     PhysicsSystem physics_;
 
     // Entity storage

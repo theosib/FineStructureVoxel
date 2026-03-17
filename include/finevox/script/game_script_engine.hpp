@@ -13,6 +13,8 @@
 #include "finevox/script/script_cache.hpp"
 #include "finevox/script/script_block_handler.hpp"
 #include "finevox/script/script_entity_handler.hpp"
+#include "finevox/script/script_mob_event_hooks.hpp"
+#include "finevox/core/entity_manager.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -63,6 +65,12 @@ public:
     /// Set entity manager reference (for mob.spawn etc.)
     void setEntityManager(EntityManager* em);
 
+    /// Load entity scripts for all registered entity types with script fields
+    void loadEntityScriptsFromRegistry();
+
+    /// Create a MobEventHooksProvider that looks up handlers by entity type name
+    MobEventHooksProvider createHooksProvider();
+
 private:
     void registerNativeFunctions();
     void registerMobNativeFunctions();
@@ -78,6 +86,9 @@ private:
 
     // Owns all script entity handlers (keyed by entity name)
     std::unordered_map<std::string, std::unique_ptr<ScriptEntityHandler>> entityHandlers_;
+
+    // Owns hook adapters (keyed by entity name, lazy-created by hooks provider)
+    std::unordered_map<std::string, std::unique_ptr<ScriptMobEventHooks>> hooksAdapters_;
 };
 
 }  // namespace finevox::script

@@ -86,6 +86,11 @@ public:
     void setId(EntityId id) { id_ = id; }
     [[nodiscard]] EntityType type() const { return type_; }
 
+    /// Check if this entity is a player (overridden by MobEntity)
+    [[nodiscard]] virtual bool isPlayerEntity() const {
+        return type_ == EntityType::Player;
+    }
+
     // Human-readable type name (for debugging)
     [[nodiscard]] virtual std::string typeName() const;
 
@@ -272,8 +277,9 @@ inline bool isPlayer(EntityType type) {
     return type == EntityType::Player;
 }
 
+/// Check if an entity is a player (supports both plain Entity and MobEntity players)
 inline bool isPlayer(const Entity& entity) {
-    return entity.type() == EntityType::Player;
+    return entity.isPlayerEntity();
 }
 
 }  // namespace finevox

@@ -63,6 +63,10 @@ std::optional<EntityTypeDef> EntityTypeLoader::loadFromString(std::string_view c
             def.model = StringInterner::global().intern(entry.value.asString());
         } else if (entry.key == "default_animation") {
             def.defaultAnimation = StringInterner::global().intern(entry.value.asString());
+        } else if (entry.key == "anim" && entry.hasSuffix()) {
+            // Animation state: anim:name: slot_id  (e.g., anim:idle: 0)
+            uint8_t slot = static_cast<uint8_t>(entry.value.asInt(0));
+            def.animationStates[entry.suffix] = slot;
         } else if (entry.key == "spawn_weight") {
             def.spawnWeight = entry.value.asFloat(def.spawnWeight);
         } else if (entry.key == "spawn_group_min") {

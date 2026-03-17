@@ -12,6 +12,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <cstdint>
 
 namespace finevox {
@@ -62,6 +63,17 @@ struct EntityTypeDef {
     // Visual
     InternedId model;              // Skeleton/mesh reference (interned)
     InternedId defaultAnimation;   // Default animation name (interned)
+
+    /// Named animation states: "idle" → 0, "walk" → 1, "attack" → 2, etc.
+    /// Loaded from `animation_states` block in .entity files.
+    /// Scripts use names; C++ goals use the resolved slot ID.
+    std::unordered_map<std::string, uint8_t> animationStates;
+
+    /// Resolve an animation name to its slot ID. Returns defaultSlot if not found.
+    [[nodiscard]] uint8_t resolveAnimation(std::string_view name, uint8_t defaultSlot = 0) const {
+        auto it = animationStates.find(std::string(name));
+        return it != animationStates.end() ? it->second : defaultSlot;
+    }
 
     // Spawning
     float spawnWeight = 1.0f;

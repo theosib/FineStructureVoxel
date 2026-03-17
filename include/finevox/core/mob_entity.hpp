@@ -37,6 +37,13 @@ public:
     [[nodiscard]] EntityTypeId typeId() const { return typeId_; }
     [[nodiscard]] const EntityTypeDef* typeDef() const;
 
+    /// Resolve an animation name to its slot ID via the EntityTypeDef.
+    /// Returns defaultSlot if no mapping exists for the name.
+    [[nodiscard]] uint8_t resolveAnimation(std::string_view name, uint8_t defaultSlot = 0) const;
+
+    /// Play a named animation (resolves name → slot, then calls setAnimation)
+    void playAnimation(std::string_view name);
+
     // ========================================================================
     // AI
     // ========================================================================

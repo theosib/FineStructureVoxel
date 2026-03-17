@@ -142,3 +142,81 @@ TEST_F(MobEventHooksTest, EventHooksAccessor) {
     mob.setEventHooks(&hooks);
     EXPECT_EQ(mob.eventHooks(), &hooks);
 }
+
+// ============================================================================
+// Named Animation State Tests
+// ============================================================================
+
+class MobAnimationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        EntityTypeRegistry::global().clear();
+
+        EntityTypeDef def;
+        def.name = "test_anim_mob";
+        def.aiType = AIType::None;
+        def.maxHealth = 20.0f;
+        def.animationStates["idle"] = 0;
+        def.animationStates["walk"] = 1;
+        def.animationStates["attack"] = 2;
+        def.animationStates["death"] = 3;
+        EntityTypeRegistry::global().registerType("test_anim_mob", std::move(def));
+    }
+
+    void TearDown() override {
+        EntityTypeRegistry::global().clear();
+    }
+};
+
+TEST_F(MobAnimationTest, ResolveKnownAnimation) {
+    auto typeId = EntityTypeId::fromName("test_anim_mob");
+    MobEntity mob(1, typeId);
+
+    EXPECT_EQ(mob.resolveAnimation("idle"), 0);
+    EXPECT_EQ(mob.resolveAnimation("walk"), 1);
+    EXPECT_EQ(mob.resolveAnimation("attack"), 2);
+    EXPECT_EQ(mob.resolveAnimation("death"), 3);
+}
+
+TEST_F(MobAnimationTest, ResolveUnknownReturnsDefault) {
+    auto typeId = EntityTypeId::fromName("test_anim_mob");
+    MobEntity mob(1, typeId);
+
+    EXPECT_EQ(mob.resolveAnimation("swim", 99), 99);
+    EXPECT_EQ(mob.resolveAnimation("nonexistent"), 0);
+}
+
+TEST_F(MobAnimationTest, PlayAnimationSetsSlot) {
+    auto typeId = EntityTypeId::fromName("test_anim_mob");
+    MobEntity mob(1, typeId);
+
+    mob.playAnimation("attack");
+    EXPECT_EQ(mob.animationId(), 2);
+
+    mob.playAnimation("walk");
+    EXPECT_EQ(mob.animationId(), 1);
+
+    mob.playAnimation("idle");
+    EXPECT_EQ(mob.animationId(), 0);
+}
+
+TEST_F(MobAnimationTest, PlayUnknownKeepsCurrent) {
+    auto typeId = EntityTypeId::fromName("test_anim_mob");
+    MobEntity mob(1, typeId);
+
+    mob.playAnimation("walk");  // Set to 1
+    EXPECT_EQ(mob.animationId(), 1);
+
+    mob.playAnimation("nonexistent");  // Unknown — keeps current
+    EXPECT_EQ(mob.animationId(), 1);
+}
+
+TEST_F(MobAnimationTest, ResolveWithNoTypeDef) {
+    // Use an unregistered type
+    auto typeId = EntityTypeId::fromName("test_unregistered_type");
+    MobEntity mob(1, typeId);
+
+    // No type def → always returns defaultSlot
+    EXPECT_EQ(mob.resolveAnimation("idle"), 0);
+    EXPECT_EQ(mob.resolveAnimation("walk", 5), 5);
+}

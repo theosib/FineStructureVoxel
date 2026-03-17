@@ -642,7 +642,7 @@ void GameScriptEngine::registerMobNativeFunctions() {
             return finescript::Value::nil();
         });
 
-    // mob.set_animation(anim_id)
+    // mob_set_animation(anim_id) — set by raw slot ID
     engine_->registerFunction("mob_set_animation",
         [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
             -> finescript::Value
@@ -653,6 +653,43 @@ void GameScriptEngine::registerMobNativeFunctions() {
                     static_cast<uint8_t>(args[0].asInt()));
             }
             return finescript::Value::nil();
+        });
+
+    // mob_play_animation(name) — play a named animation (resolves via EntityTypeDef)
+    engine_->registerFunction("mob_play_animation",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || args.empty()) return finescript::Value::nil();
+
+            std::string name;
+            if (args[0].isString()) name = args[0].asString();
+            else if (args[0].isSymbol()) name = StringInterner::global().lookup(args[0].asSymbol());
+            else return finescript::Value::nil();
+
+            ud->entityCtx->playAnimation(name);
+            return finescript::Value::nil();
+        });
+
+    // mob_resolve_animation(name) → slot ID or nil
+    engine_->registerFunction("mob_resolve_animation",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (!ud || !ud->entityCtx || args.empty()) return finescript::Value::nil();
+
+            std::string name;
+            if (args[0].isString()) name = args[0].asString();
+            else if (args[0].isSymbol()) name = StringInterner::global().lookup(args[0].asSymbol());
+            else return finescript::Value::nil();
+
+            const auto* def = ud->entityCtx->typeDef();
+            if (!def) return finescript::Value::nil();
+            auto it = def->animationStates.find(name);
+            if (it == def->animationStates.end()) return finescript::Value::nil();
+            return finescript::Value::integer(static_cast<int64_t>(it->second));
         });
 
     // mob.is_dead() → bool

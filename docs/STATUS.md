@@ -9,9 +9,9 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 24E — Survival Stats & HUD Bridge |
-| Test count | **2130** |
-| In-progress | Phase 24 — Player Survival & Combat (sub-phase F remaining) |
+| Last completed phase | Phase 24F — Entity Animation Audit |
+| Test count | **2137** |
+| In-progress | — |
 | Libraries | 5 shared libraries (see Architecture) |
 
 ---
@@ -77,7 +77,7 @@
   - [x] 24-C: AI acceleration primitives — `EntitySpatialIndex` (grid-based, cell=16), wired into EntityManager (insert/update/remove), spatial query natives (`entities_in_radius`, `entities_in_box`, `nearest_entity`), LOS natives (`mob_can_see`, `raycast_blocks`)
   - [x] 24-D: Combat bridge — `GameActions::attackEntity`, `attack_entity` native (damage + auto-knockback), `entity_in_cone` native (melee sweep), `entity_position`/`entity_health`/`entity_is_alive` cross-entity query natives, `EntityManager::getMob()`
   - [x] 24-E: Survival stats & HUD bridge — `PlayerStatsBridge` (`player_health`, `player_max_health`, `player_get_stat`, `player_set_stat`, `player_is_alive`, `player_position`), HUD overlay script (`hud.fs`), death screen script (`death_screen.fs`)
-  - [ ] 24-F: Entity animation audit (deferred)
+  - [x] 24-F: Entity animation audit — named animation states in EntityTypeDef (`anim:name: slot` in `.entity` files), `MobEntity::resolveAnimation(name)`/`playAnimation(name)`, `mob_play_animation`/`mob_resolve_animation` script natives
 
 ---
 
@@ -104,7 +104,7 @@ Known design issue:
 
 See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
-- **Phase 24C-F: Player Survival + Combat** — hunger, stamina, damage types, fall damage scripts, death/respawn, melee/ranged combat, HUD bars (24A/B complete: entity system wiring + player unification)
+- **Phase 24 complete** — entity system fixes, player unification, spatial index, combat bridge, survival stats, animation audit
 - **Phase 23 polish** — config-driven input bindings, block-break drops, icon-based slots, container UI (see ROADMAP.md deferred items)
 
 ---

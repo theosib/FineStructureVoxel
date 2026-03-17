@@ -48,6 +48,16 @@ std::string MobEntity::typeName() const {
     return std::string(typeId_.name());
 }
 
+uint8_t MobEntity::resolveAnimation(std::string_view name, uint8_t defaultSlot) const {
+    const auto* def = typeDef();
+    if (def) return def->resolveAnimation(name, defaultSlot);
+    return defaultSlot;
+}
+
+void MobEntity::playAnimation(std::string_view name) {
+    setAnimation(resolveAnimation(name, animationId_));
+}
+
 void MobEntity::tick(float dt, World& world) {
     // Landing detection — capture velocity before ground state changes
     if (!onGround_) {

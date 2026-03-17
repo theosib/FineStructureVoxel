@@ -12,6 +12,8 @@ Phase 24A/B complete (2099 tests). Entities use `EntityTypeId` (interned), loade
 
 **Phase 24A/B additions:** AIDriver adapter pattern (BrainAIDriver, PlayerInputDriver), MobEventHooks for script lifecycle callbacks, AI goal parameterization (all magic numbers replaced with param structs), player is now a MobEntity with PlayerInputDriver, landing detection for fall damage, entity-to-script bridge natives for HUD.
 
+**Phase 24F additions:** Named animation states in EntityTypeDef (`animationStates` map loaded from `anim:name: slot` entries in `.entity` files). `MobEntity::resolveAnimation(name)` and `playAnimation(name)` for script-friendly animation control. `mob_play_animation` and `mob_resolve_animation` script natives.
+
 ---
 
 ## Key Types
@@ -237,6 +239,32 @@ for (int i = 0; i < skeleton.boneCount(); i++) {
 
 **Note:** `skeleton.evaluateTransform(boneId)` returns parent-relative transform. Caller must multiply up the parent chain to get world space.
 
+### Named Animation States
+
+EntityTypeDef supports named animation states loaded from `.entity` files:
+
+```
+# In .entity file:
+anim:idle: 0
+anim:walk: 1
+anim:attack: 2
+anim:death: 3
+```
+
+Scripts use names instead of numeric slots:
+
+```
+{mob_play_animation "attack"}   # resolves "attack" → slot 2
+{mob_resolve_animation "walk"}  # returns 1 (or nil if unknown)
+```
+
+C++ access:
+```cpp
+mob.resolveAnimation("attack");       // → 2 (or defaultSlot if not found)
+mob.playAnimation("attack");          // resolves + sets animation
+def.resolveAnimation("walk", 99);     // EntityTypeDef level
+```
+
 ---
 
 ## EntityManager
@@ -291,7 +319,9 @@ mob_look_at x y z      -- face a position
 mob_jump               -- jump (if on ground)
 mob_damage amount [src] -- apply damage
 mob_heal amount        -- heal
-mob_set_animation id   -- set animation slot
+mob_set_animation id   -- set animation slot (by number)
+mob_play_animation name -- set animation by name (resolves via EntityTypeDef)
+mob_resolve_animation name -- resolve name → slot ID (or nil)
 mob_is_dead            -- bool
 mob_is_on_ground       -- bool
 mob_id                 -- entity id (int)

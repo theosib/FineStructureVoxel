@@ -299,6 +299,38 @@ swims: true
     EXPECT_TRUE(def->swims);
 }
 
+TEST(EntityTypeLoaderTest, AnimationStates) {
+    const char* content = R"(
+name: test_loader_anim
+anim:idle: 0
+anim:walk: 1
+anim:attack: 2
+anim:death: 3
+)";
+
+    auto def = EntityTypeLoader::loadFromString(content);
+    ASSERT_TRUE(def.has_value());
+    EXPECT_EQ(def->animationStates.size(), 4u);
+    EXPECT_EQ(def->resolveAnimation("idle"), 0);
+    EXPECT_EQ(def->resolveAnimation("walk"), 1);
+    EXPECT_EQ(def->resolveAnimation("attack"), 2);
+    EXPECT_EQ(def->resolveAnimation("death"), 3);
+}
+
+TEST(EntityTypeLoaderTest, AnimationResolveDefault) {
+    const char* content = R"(
+name: test_loader_anim_default
+anim:idle: 0
+anim:walk: 1
+)";
+
+    auto def = EntityTypeLoader::loadFromString(content);
+    ASSERT_TRUE(def.has_value());
+    // Unknown name returns defaultSlot
+    EXPECT_EQ(def->resolveAnimation("attack", 5), 5);
+    EXPECT_EQ(def->resolveAnimation("nonexistent"), 0);
+}
+
 TEST(EntityTypeLoaderTest, NoneAIType) {
     const char* content = R"(
 name: test_loader_scripted

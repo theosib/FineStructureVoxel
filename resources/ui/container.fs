@@ -15,12 +15,17 @@ set on_slot_click fn [owner section index] do
     {swap_or_stack "player" "cursor" 0 owner section index}
 end
 
+# Right-click handler: deposit one or pick up half
+set on_slot_right_click fn [owner section index] do
+    {right_click_slot "player" "cursor" 0 owner section index}
+end
+
 # Build container grid
 set container_grid {build_inv_grid container_owner container_section
-    container_rows container_cols 48 on_slot_click}
+    container_rows container_cols 48 on_slot_click on_slot_right_click}
 
 # Build player bag grid (4x9) below
-set player_bag {build_inv_grid "player" "bag" 4 9 48 on_slot_click}
+set player_bag {build_inv_grid "player" "bag" 4 9 48 on_slot_click on_slot_right_click}
 
 # Layout
 set container_window {ui.window container_title

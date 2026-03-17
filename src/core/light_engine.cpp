@@ -830,6 +830,59 @@ void LightEngine::onFluidRemoved(const BlockCoord& pos, FluidTypeId fluidTypeId)
 // Batch Operations
 // ============================================================================
 
+void LightEngine::initializeColumnLighting(const ColumnPos& columnPos) {
+    ChunkColumn* column = world_.getColumn(columnPos);
+    if (!column) return;
+
+    auto bounds = column->getYBounds();
+    if (!bounds) return;
+
+    for (int32_t chunkY = bounds->first; chunkY <= bounds->second; ++chunkY) {
+        SubChunk* sub = column->getSubChunk(chunkY);
+        if (!sub) continue;
+
+        bool hasFluid = sub->hasFluidLayer();
+
+        for (int32_t y = 0; y < 16; ++y) {
+            for (int32_t z = 0; z < 16; ++z) {
+                for (int32_t x = 0; x < 16; ++x) {
+                    uint8_t blockEmission = 0;
+                    BlockTypeId block = sub->getBlock(x, y, z);
+                    if (!block.isAir()) {
+                        blockEmission = getLightEmission(block);
+                    }
+
+                    FluidTypeId fluid;
+                    uint8_t fluidEmission = 0;
+                    if (hasFluid) {
+                        fluid = sub->getFluid(x, y, z);
+                        if (!fluid.isEmpty()) {
+                            const FluidType* ft = FluidRegistry::global().getType(fluid);
+                            if (ft) fluidEmission = ft->lightEmission;
+                        }
+                    }
+
+                    if (blockEmission > 0 || fluidEmission > 0) {
+                        BlockCoord worldPos{
+                            columnPos.x * 16 + x,
+                            chunkY * 16 + y,
+                            columnPos.z * 16 + z
+                        };
+                        LightingUpdate update;
+                        update.pos = worldPos;
+                        update.oldType = AIR_BLOCK_TYPE;
+                        update.newType = blockEmission > 0 ? block : AIR_BLOCK_TYPE;
+                        update.oldFluid = FluidTypeId{};
+                        update.newFluid = fluidEmission > 0 ? fluid : FluidTypeId{};
+                        update.triggerMeshRebuild = true;
+                        enqueue(std::move(update));
+                    }
+                }
+            }
+        }
+    }
+}
+
 void LightEngine::recalculateSubChunk(const ChunkPos& chunkPos) {
     SubChunk* subChunk = world_.getSubChunk(chunkPos);
     if (!subChunk) {
@@ -838,12 +891,28 @@ void LightEngine::recalculateSubChunk(const ChunkPos& chunkPos) {
 
     subChunk->clearLight();
 
-    // Find all light-emitting blocks and propagate
+    bool hasFluid = subChunk->hasFluidLayer();
+
+    // Find all light-emitting blocks and fluids, then propagate
     for (int32_t y = 0; y < 16; ++y) {
         for (int32_t z = 0; z < 16; ++z) {
             for (int32_t x = 0; x < 16; ++x) {
+                uint8_t emission = 0;
+
                 BlockTypeId block = subChunk->getBlock(x, y, z);
-                uint8_t emission = getLightEmission(block);
+                emission = getLightEmission(block);
+
+                // Check fluid light emission if no block emission
+                if (emission == 0 && hasFluid) {
+                    FluidTypeId fid = subChunk->getFluid(x, y, z);
+                    if (!fid.isEmpty()) {
+                        const FluidType* ft = FluidRegistry::global().getType(fid);
+                        if (ft && ft->lightEmission > emission) {
+                            emission = ft->lightEmission;
+                        }
+                    }
+                }
+
                 if (emission > 0) {
                     BlockCoord worldPos{
                         chunkPos.x * 16 + x,

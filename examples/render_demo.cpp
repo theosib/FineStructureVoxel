@@ -61,7 +61,10 @@
 #include <finevox/core/world_time.hpp>
 #include <finevox/core/sky.hpp>
 #include <finevox/core/fluid_type_id.hpp>
+#include <finevox/core/fluid_type.hpp>
+#include <finevox/core/fluid_registry.hpp>
 #include <finevox/core/fluid_loader.hpp>
+#include <finevox/core/subchunk.hpp>
 #include <finevox/render/engine.hpp>
 #include <finevox/render/world_render_layer.hpp>
 #include <finevox/render/overlay_render_layer.hpp>
@@ -891,19 +894,21 @@ int main(int argc, char* argv[]) {
         //     }
         // }
 
-        // Propagate block light from luminite blocks
-        // Note: We can't use recalculateSubChunk in a loop because it clears light,
-        // which destroys cross-chunk propagation. Instead, directly propagate from
-        // known light source positions.
-        int32_t baseX = startAtLargeCoords ? 1000000 : 0;
-        int32_t baseZ = startAtLargeCoords ? 1000000 : 0;
+        // Enqueue lighting events for all emitting blocks/fluids in each column.
+        // The light engine thread processes these asynchronously via the queue.
+        // NOTE: We collect column positions first, then iterate outside the lock,
+        // to avoid deadlock with the light thread (which may need unique_lock on
+        // columnMutex_ via getOrCreateColumn while forEachColumn holds shared_lock).
         if (!singleBlockMode) {
-            lightEngine.propagateBlockLight({baseX + 3, 7, baseZ + 3}, 15);
-            lightEngine.propagateBlockLight({baseX + 5, 7, baseZ + 5}, 15);
-            lightEngine.propagateBlockLight({baseX + 20, 50, baseZ + 20}, 15);
-            lightEngine.propagateBlockLight({baseX - 10, 5, baseZ - 10}, 15);
+            std::vector<ColumnPos> colPositions;
+            world.forEachColumn([&colPositions](const ColumnPos& colPos, ChunkColumn&) {
+                colPositions.push_back(colPos);
+            });
+            for (const auto& colPos : colPositions) {
+                lightEngine.initializeColumnLighting(colPos);
+            }
         }
-        std::cout << "Block light propagated.\n";
+        std::cout << "Block light events enqueued.\n";
 
         // Set up light provider for lighting calculations
         // Returns packed byte: sky in high nibble, block in low nibble
@@ -2165,27 +2170,30 @@ int main(int argc, char* argv[]) {
             guiManager.processPendingMessages();
             mapRenderer.renderAll();
 
-            // Draw cursor item overlay near mouse pointer
+            // Draw cursor item overlay near mouse pointer (foreground draw list = always on top)
             if (inventoryWindowId >= 0 || workbenchWindowId >= 0) {
                 auto* cursorDC = playerInventoryDC->getChild("cursor");
                 if (cursorDC) {
                     InventoryView cursorView(*cursorDC, itemNameRegistry);
                     auto cursorStack = cursorView.getSlot(0);
                     if (!cursorStack.isEmpty()) {
+                        std::string cursorText = std::string(cursorStack.type.name());
+                        if (cursorStack.count > 1)
+                            cursorText += " x" + std::to_string(cursorStack.count);
+
                         auto mousePos = ImGui::GetMousePos();
-                        ImGui::SetNextWindowPos(ImVec2(mousePos.x + 16, mousePos.y + 16));
-                        ImGui::SetNextWindowBgAlpha(0.8f);
-                        if (ImGui::Begin("##cursor_overlay", nullptr,
-                                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
-                                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                                ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs)) {
-                            std::string cursorText = std::string(cursorStack.type.name());
-                            if (cursorStack.count > 1)
-                                cursorText += " x" + std::to_string(cursorStack.count);
-                            ImGui::Text("%s", cursorText.c_str());
-                        }
-                        ImGui::End();
+                        ImVec2 textPos(mousePos.x + 16, mousePos.y + 16);
+                        ImVec2 textSize = ImGui::CalcTextSize(cursorText.c_str());
+                        ImVec2 padding(6, 4);
+                        ImVec2 bgMin(textPos.x - padding.x, textPos.y - padding.y);
+                        ImVec2 bgMax(textPos.x + textSize.x + padding.x,
+                                     textPos.y + textSize.y + padding.y);
+
+                        auto* fg = ImGui::GetForegroundDrawList();
+                        fg->AddRectFilled(bgMin, bgMax,
+                            IM_COL32(30, 30, 30, 200), 4.0f);
+                        fg->AddText(textPos, IM_COL32(255, 255, 255, 255),
+                            cursorText.c_str());
                     }
                 }
             }

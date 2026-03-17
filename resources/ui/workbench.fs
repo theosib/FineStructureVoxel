@@ -12,8 +12,13 @@ set on_slot_click fn [owner section index] do
     {swap_or_stack "player" "cursor" 0 owner section index}
 end
 
+# Right-click handler: deposit one or pick up half
+set on_slot_right_click fn [owner section index] do
+    {right_click_slot "player" "cursor" 0 owner section index}
+end
+
 # Build 3x3 workbench crafting grid
-set wb_craft_slots {build_inv_grid "player" "wb_craft_grid" 3 3 48 on_slot_click}
+set wb_craft_slots {build_inv_grid "player" "wb_craft_grid" 3 3 48 on_slot_click on_slot_right_click}
 
 # Craft output slot — clicking executes craft with workbench station
 set wb_craft_output {ui.button "" =width 48 =height 48 =id "slot_wb_craft_output_0"
@@ -25,7 +30,7 @@ set wb_craft_output {ui.button "" =width 48 =height 48 =id "slot_wb_craft_output
     end}
 
 # Build player bag grid (4x9) below
-set wb_bag_slots {build_inv_grid "player" "bag" 4 9 48 on_slot_click}
+set wb_bag_slots {build_inv_grid "player" "bag" 4 9 48 on_slot_click on_slot_right_click}
 
 # Layout
 set workbench_window {ui.window "Workbench"

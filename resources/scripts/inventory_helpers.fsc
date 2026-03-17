@@ -56,6 +56,37 @@ set quick_transfer fn [owner src_section src_slot dst_section] do
     remaining
 end
 
+# right_click_slot — Right-click behavior for inventory slots
+# If holding items: deposit one item into the target slot
+# If not holding items: pick up half the stack from the target slot
+set right_click_slot fn [cursor_owner cursor_section cursor_slot
+                         target_owner target_section target_slot] do
+    set cursor {inv_get cursor_owner cursor_section cursor_slot}
+    set target {inv_get target_owner target_section target_slot}
+
+    if (cursor != nil) do
+        # Holding items — deposit one into target
+        if (target == nil) do
+            # Target empty — move 1 item from cursor to target
+            {inv_move cursor_owner cursor_section cursor_slot
+                      target_owner target_section target_slot 1}
+        else do
+            # Target has items — only deposit if same type
+            if (cursor.type == target.type) do
+                {inv_move cursor_owner cursor_section cursor_slot
+                          target_owner target_section target_slot 1}
+            end
+        end
+    else do
+        # Not holding items — pick up half the stack
+        if (target != nil) do
+            set half ((target.count + 1) / 2)
+            {inv_move target_owner target_section target_slot
+                      cursor_owner cursor_section cursor_slot half}
+        end
+    end
+end
+
 # swap_or_stack — Attempt to stack, or swap if types differ
 # This is the typical left-click behavior with a cursor item
 # Returns the new cursor item (nil if fully placed, or the swapped-out item)

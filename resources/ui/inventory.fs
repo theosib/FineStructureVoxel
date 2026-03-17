@@ -12,11 +12,16 @@ set on_slot_click fn [owner section index] do
     {swap_or_stack "player" "cursor" 0 owner section index}
 end
 
+# Right-click handler: deposit one or pick up half
+set on_slot_right_click fn [owner section index] do
+    {right_click_slot "player" "cursor" 0 owner section index}
+end
+
 # Build inventory bag grid (4 rows x 9 cols)
-set bag_slots {build_inv_grid "player" "bag" 4 9 48 on_slot_click}
+set bag_slots {build_inv_grid "player" "bag" 4 9 48 on_slot_click on_slot_right_click}
 
 # Build 2x2 hand-crafting grid
-set craft_slots {build_inv_grid "player" "craft_grid" 2 2 48 on_slot_click}
+set craft_slots {build_inv_grid "player" "craft_grid" 2 2 48 on_slot_click on_slot_right_click}
 
 # Craft output slot — clicking executes craft and places result in cursor
 set craft_output {ui.button "" =width 48 =height 48 =id "slot_craft_output_0"

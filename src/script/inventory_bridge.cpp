@@ -823,7 +823,7 @@ void InventoryBridge::registerNativeFunctions(finescript::ScriptEngine& engine) 
     // ========================================================================
     // build_inv_grid — Build a grid of inventory slot button widgets
     // ========================================================================
-    // {build_inv_grid "owner" "section" rows cols slot_size} → array of widgets
+    // {build_inv_grid "owner" "section" rows cols slot_size on_click [on_right_click]} → array of widgets
     // Each slot is a button with id "slot_{section}_{index}"
     // Arranged in a grid with same_line between columns, newlines between rows
     engine.registerFunction("build_inv_grid",
@@ -845,6 +845,12 @@ void InventoryBridge::registerNativeFunctions(finescript::ScriptEngine& engine) 
                 clickHandler = args[5];
             }
 
+            // Optional on_right_click handler (arg 6)
+            finescript::Value rightClickHandler = finescript::Value::nil();
+            if (args.size() > 6 && args[6].isCallable()) {
+                rightClickHandler = args[6];
+            }
+
             auto& si = StringInterner::global();
             uint32_t symType = si.intern("type");
             uint32_t symButton = si.intern("button");
@@ -854,6 +860,7 @@ void InventoryBridge::registerNativeFunctions(finescript::ScriptEngine& engine) 
             uint32_t symWidth = si.intern("width");
             uint32_t symHeight = si.intern("height");
             uint32_t symOnClick = si.intern("on_click");
+            uint32_t symOnRightClick = si.intern("on_right_click");
             uint32_t symOffset = si.intern("offset");
 
             std::vector<finescript::Value> widgets;
@@ -925,6 +932,31 @@ void InventoryBridge::registerNativeFunctions(finescript::ScriptEngine& engine) 
                                 return finescript::Value::nil();
                             });
                         m.set(symOnClick,
+                            finescript::Value::nativeFunction(fn));
+                    }
+
+                    // Attach right-click handler if provided
+                    if (rightClickHandler.isCallable()) {
+                        auto ownerVal = finescript::Value::string(owner);
+                        auto secVal = finescript::Value::string(section);
+                        auto idxVal = finescript::Value::integer(index);
+                        auto handler = rightClickHandler;
+                        auto fn = std::make_shared<
+                            finescript::SimpleLambdaFunction>(
+                            [handler, ownerVal, secVal, idxVal](
+                                finescript::ExecutionContext& innerCtx,
+                                const std::vector<finescript::Value>&)
+                                -> finescript::Value
+                            {
+                                std::vector<finescript::Value> callArgs;
+                                callArgs.push_back(ownerVal);
+                                callArgs.push_back(secVal);
+                                callArgs.push_back(idxVal);
+                                innerCtx.engine().callFunction(
+                                    handler, std::move(callArgs), innerCtx);
+                                return finescript::Value::nil();
+                            });
+                        m.set(symOnRightClick,
                             finescript::Value::nativeFunction(fn));
                     }
 

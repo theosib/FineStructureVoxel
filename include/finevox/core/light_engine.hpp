@@ -271,6 +271,13 @@ public:
     // Batch Operations
     // ========================================================================
 
+    /// Initialize block lighting for a newly generated column
+    /// Scans all subchunks for light-emitting blocks and fluids,
+    /// enqueuing LightingUpdate events for async processing.
+    /// Thread-safe: can be called from any thread (uses enqueue()).
+    /// @param columnPos Column position
+    void initializeColumnLighting(const ColumnPos& columnPos);
+
     /// Recalculate all lighting for a subchunk
     /// @param chunkPos Subchunk position
     void recalculateSubChunk(const ChunkPos& chunkPos);

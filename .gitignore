@@ -20,3 +20,10 @@ cmake-build-*/
 
 # Generated files
 compile_commands.json
+
+# Screenshots captured via FrameCapture (F12 hotkey path, future phase).
+# Goldens committed under tests/golden/ are intentionally tracked.
+screenshots/
+
+# Failed-visual-test actual dumps (see test_visual_sparks.cpp).
+tests/golden/*.actual.png

@@ -230,6 +230,90 @@ fenceWaiter.stop();  // 2-phase shutdown: requestStop() then join()
 
 ---
 
+## Visual Capture & Golden-Image Tests
+
+Two companion components in `finevox_render` provide headless GPU → PNG
+capture and byte-tolerant golden comparison.
+
+| Component | Header | Purpose |
+|-----------|--------|---------|
+| `FrameCapture` | `finevox/render/frame_capture.hpp` | Readback from an `OffscreenSurface` + PNG encode via vendored `stb_image_write` |
+| `VisualTestHarness` | `finevox/render/visual_test_harness.hpp` | Load golden PNG, per-channel byte compare with tolerance, regeneration escape hatch |
+
+```cpp
+// Headless capture path (tests / future F12 hotkey)
+auto surface = finevk::OffscreenSurface::create(device)
+    .extent(256, 256).colorFormat(VK_FORMAT_R8G8B8A8_UNORM)
+    .enableDepth().build();
+auto pool = finevk::StagingPool::create(device).build();
+
+surface->beginFrame();
+surface->beginRenderPass({0.02f, 0.02f, 0.05f, 1.0f});
+particleRenderer.render(*surface->currentCommandBuffer());
+surface->endRenderPass();
+surface->endFrame();
+
+// Save full image:
+FrameCapture::captureSurface(*surface, *pool, "out.png");
+
+// Or a small ROI (faster readback, smaller golden):
+FrameCapture::CaptureRect roi{80, 80, 96, 96};
+std::vector<uint8_t> rgba;
+uint32_t w, h;
+FrameCapture::readbackRGBA(*surface, *pool, roi, rgba, w, h);
+```
+
+**Golden-image tests** render a deterministic scene into an
+`OffscreenSurface`, read an ROI back, and compare against a committed PNG:
+
+```cpp
+auto r = VisualTestHarness::compareAgainstGolden(
+    rgba, width, height, "tests/golden/sparks_basic.png",
+    /*maxAbsDiffPerChannel=*/4);
+EXPECT_TRUE(r.passed) << r.failureReason;
+```
+
+Currently wired: `tests/test_visual_sparks.cpp`
+(`VisualSparks.GoldenBasic`, `VisualSparks.DeterministicAcrossRuns`) —
+VelocityStretched spark burst, fixed RNG seed, fixed camera, 3 ticks at 30
+TPS, 96×96 ROI, tolerance 4.  The companion deterministic-rerun test catches
+state leaks independent of whether the golden matches.
+
+**Regenerating goldens.**  If a golden is missing or pixels legitimately
+change, re-run the test with `FINEVOX_UPDATE_GOLDENS=1`:
+
+```sh
+FINEVOX_UPDATE_GOLDENS=1 ./finevox_render_tests \
+    --gtest_filter='VisualSparks.*'
+```
+
+This writes the current output as the new golden and passes.  Commit the
+updated PNG.  Failing tests also dump the last actual result to
+`tests/golden/<name>.actual.png` (gitignored) for side-by-side inspection.
+
+**Renderer generality.**  `ParticleRenderer` accepts any `RenderSurface*`
+(either `SimpleRenderer` for on-screen rendering or `OffscreenSurface` for
+capture / tests).  Its one previous `defaultSampler()` dep on
+`SimpleRenderer` is now a locally-built linear `Sampler`.  `WorldRenderer`
+is still `SimpleRenderer`-bound as of this writing; live-world F12 capture
+will ship in a follow-up phase once a swapchain `TRANSFER_SRC` path lands
+in finevk.
+
+**Pitfalls.**
+
+- `OffscreenSurface` forward-declares `CommandBuffer`, `Fence`, and
+  `Sampler` but stores them as `unique_ptr` members — any TU that
+  constructs or destroys one must include the full headers
+  (`finevk/device/command.hpp`, `finevk/rendering/sync.hpp`,
+  `finevk/device/sampler.hpp`).
+- `OffscreenSurface::framesInFlight() == 1` — descriptor pools / uniform
+  buffers sized to `framesInFlight()` collapse to single-buffered
+  automatically.  No code change needed, but don't hard-code a
+  frames-in-flight count when porting.
+- `FINEVOX_UPDATE_GOLDENS=1` is a sharp tool: if the scene is accidentally
+  broken, rerunning with it codifies the breakage.  Always diff the new
+  golden against the old one before committing.
+
 ## Gotchas
 
 - `frame.extent` is a field (not function), `frame.frameIndex()` is a function

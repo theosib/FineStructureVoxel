@@ -1,0 +1,19 @@
+# Grass loot — policy call:
+# Matches classic voxel-game convention where grass blocks degrade to dirt
+# when mined without a precise-break tool. A precise-break tool preserves
+# the grass block. Reason it's not "always drop grass": grass is biome-
+# coupled (tints from biome colormap); dropping it freely would let players
+# carry biome-specific grass across climates. This keeps that coupling
+# aesthetic rather than mechanical.
+pool:default:
+rolls: 1
+entry:precise:
+type: item
+item: finevox:grass
+count: 1
+condition: precise-break
+entry:normal:
+type: item
+item: finevox:dirt
+count: 1
+condition: not precise-break

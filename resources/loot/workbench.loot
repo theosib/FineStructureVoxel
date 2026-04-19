@@ -1,0 +1,7 @@
+# Workbench drops itself.
+pool:default:
+rolls: 1
+entry:workbench:
+type: item
+item: finevox:workbench
+count: 1

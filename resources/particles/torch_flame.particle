@@ -1,0 +1,14 @@
+# Small flickering flame above a light-emitting block.
+name: finevox:torch_flame
+lifetime: 0.4-0.8
+initial_speed: 0.1-0.4
+velocity_bias: 0 0.3 0
+gravity: -2.0
+drag: 0.5
+size: 0.08-0.14
+size_end_scale: 0.5
+start_tint: 1.0 0.8 0.3 1.0
+end_tint: 1.0 0.2 0.0 0.0
+atlas_region: flame
+billboard: camera
+collides: false

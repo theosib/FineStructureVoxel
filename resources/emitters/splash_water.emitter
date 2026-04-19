@@ -1,0 +1,7 @@
+# Water-tinted splash (overrides fluid_splash when a water fluid type is registered).
+name: finevox:splash_water
+shape: point
+burst: 14
+duration: 0.0
+particle: finevox:splash_drop
+tint: 0.7 0.85 1.0 1.0

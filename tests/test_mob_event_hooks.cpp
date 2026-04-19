@@ -132,6 +132,89 @@ TEST_F(MobEventHooksTest, DeathHookFiredFlagPreventsDoubleFire) {
     EXPECT_EQ(hooks.deathCount, 1);
 }
 
+TEST_F(MobEventHooksTest, NonPlayerDeathMarksForRemoval) {
+    // Regression-guard for the "player corpses stay in world" carve-out:
+    // regular mobs must still auto-despawn on death.
+    auto typeId = EntityTypeId::fromName("test_hooks_mob");
+    MobEntity mob(1, typeId);
+
+    mob.damage(25.0f, 0);
+    World world;
+    mob.tick(0.05f, world);
+    EXPECT_TRUE(mob.isDead());
+    EXPECT_TRUE(mob.isMarkedForRemoval());
+}
+
+TEST_F(MobEventHooksTest, PlayerDeathDoesNotMarkForRemoval) {
+    // Players must remain in the world after death so fluid / physics
+    // detection continues to run until outer gameplay logic decides what
+    // to do (respawn, death screen, etc).
+    auto typeId = EntityTypeId::fromName("test_hooks_mob");
+    MobEntity mob(1, typeId);
+    mob.setIsPlayer(true);
+    RecordingHooks hooks;
+    mob.setEventHooks(&hooks);
+
+    mob.damage(25.0f, 0);
+    World world;
+    mob.tick(0.05f, world);
+    EXPECT_TRUE(mob.isDead());
+    EXPECT_FALSE(mob.isMarkedForRemoval())
+        << "player must not auto-despawn on death";
+    EXPECT_EQ(hooks.deathCount, 1);
+    // Repeated ticks still don't mark the player for removal.
+    mob.tick(0.05f, world);
+    mob.tick(0.05f, world);
+    EXPECT_FALSE(mob.isMarkedForRemoval());
+    EXPECT_EQ(hooks.deathCount, 1);  // still exactly one death event
+}
+
+TEST_F(MobEventHooksTest, ReviveViaSetHealthClearsDeathLatch) {
+    // After revive the onDeath hook must fire again on a second death —
+    // otherwise respawn loops would be silent the second time around.
+    auto typeId = EntityTypeId::fromName("test_hooks_mob");
+    MobEntity mob(1, typeId);
+    mob.setIsPlayer(true);
+    RecordingHooks hooks;
+    mob.setEventHooks(&hooks);
+
+    World world;
+    mob.damage(25.0f, 0);
+    mob.tick(0.05f, world);
+    EXPECT_EQ(hooks.deathCount, 1);
+    EXPECT_TRUE(mob.isDead());
+
+    // Revive
+    mob.setHealth(mob.maxHealth());
+    EXPECT_FALSE(mob.isDead());
+
+    // Kill again
+    mob.damage(25.0f, 0);
+    mob.tick(0.05f, world);
+    EXPECT_EQ(hooks.deathCount, 2)
+        << "onDeath should fire again after revive";
+}
+
+TEST_F(MobEventHooksTest, ReviveViaHealClearsDeathLatch) {
+    auto typeId = EntityTypeId::fromName("test_hooks_mob");
+    MobEntity mob(1, typeId);
+    mob.setIsPlayer(true);
+    RecordingHooks hooks;
+    mob.setEventHooks(&hooks);
+
+    World world;
+    mob.damage(25.0f, 0);
+    mob.tick(0.05f, world);
+    EXPECT_EQ(hooks.deathCount, 1);
+
+    mob.heal(mob.maxHealth());
+    EXPECT_FALSE(mob.isDead());
+
+    mob.damage(25.0f, 0);
+    mob.tick(0.05f, world);
+    EXPECT_EQ(hooks.deathCount, 2);
+}
+
 TEST_F(MobEventHooksTest, EventHooksAccessor) {
     auto typeId = EntityTypeId::fromName("test_hooks_mob");
     MobEntity mob(1, typeId);

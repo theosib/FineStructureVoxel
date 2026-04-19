@@ -95,6 +95,11 @@ BlockType& BlockType::setLootTable(LootTableId lootTable) {
     return *this;
 }
 
+BlockType& BlockType::setParticleEmitter(EmitterPresetId preset) {
+    particleEmitter_ = preset;
+    return *this;
+}
+
 BlockType& BlockType::setPropagationPolicy(PropagationPolicy policy) {
     propagationPolicy_ = policy;
     return *this;

@@ -1,0 +1,7 @@
+# Continuous column of rising smoke — good for chimneys or fires.
+name: finevox:smoke_column
+shape: sphere
+shape_size: 0.12 0.12 0.12
+spawn_rate: 5.0
+duration: -1
+particle: finevox:smoke_puff

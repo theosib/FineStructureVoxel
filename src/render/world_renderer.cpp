@@ -1,4 +1,5 @@
 #include "finevox/render/world_renderer.hpp"
+#include "finevox/render/particle_renderer.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
@@ -252,6 +253,13 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
             underwaterFogStart_ = 0.0f;
         }
     }
+
+    // Forward camera state to particle renderer so it can build view-relative
+    // quads with the same camera basis.  Sky params are pushed inside render()
+    // alongside other translucent pipeline state.
+    if (particleRenderer_) {
+        particleRenderer_->updateCamera(cameraState_, highPrecisionPos);
+    }
 }
 
 void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
@@ -465,6 +473,32 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             lastRenderedVertices_ += entry.view->fluidVertexCount();
             lastRenderedTriangles_ += entry.view->fluidIndexCount() / 3;
         }
+    }
+
+    // ====================================================================
+    // Particle pass (alpha-blended, depth-write OFF, back-to-front sorted
+    // inside ParticleRenderer).  Drawn after fluid so particles correctly
+    // overlay water surfaces — see docs/systems/particles.md for the
+    // choice-rationale.
+    // ====================================================================
+    if (particleRenderer_) {
+        // Forward current sky/fog state so particle fog matches world fog.
+        const glm::vec3 activeFogColor = isUnderwater_
+            ? underwaterFogColor_
+            : (config_.fog.enabled ? config_.fog.color
+                                    : glm::vec3(skyParams_.fogColor));
+        const float activeFogStart = isUnderwater_
+            ? underwaterFogStart_
+            : (config_.fog.enabled ? config_.fog.startDistance : 0.0f);
+        const float activeFogEnd = isUnderwater_
+            ? underwaterFogEnd_
+            : (config_.fog.enabled ? config_.fog.endDistance : 0.0f);
+
+        particleRenderer_->setSkyParameters(
+            skyParams_.sunDirection,
+            activeFogColor, activeFogStart, activeFogEnd,
+            skyParams_.skyBrightness, skyParams_.ambientLevel);
+        particleRenderer_->render(cmd);
     }
 }
 

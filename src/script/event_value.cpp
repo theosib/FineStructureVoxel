@@ -62,6 +62,12 @@ const EventSymbols& EventSymbols::instance() {
         s.attacker_id     = si.intern("attacker_id");
         s.target_id       = si.intern("target_id");
         s.damage_info     = si.intern("damage_info");
+        s.tool_type       = si.intern("tool_type");
+        s.precise_break   = si.intern("precise_break");
+        s.preset          = si.intern("preset");
+        s.emitter_id      = si.intern("emitter_id");
+        s.duration        = si.intern("duration");
+        s.count           = si.intern("count");
         return s;
     }();
     return syms;
@@ -128,13 +134,20 @@ finescript::Value makeBlockPlacedValue(BlockCoord pos, BlockTypeId newType,
     return v;
 }
 
-finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType) {
+finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType,
+                                        ItemTypeId tool, bool preciseBreak) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_BLOCK_BROKEN);
     setPos(m, pos);
     setBlockType(m, s.previous_type, oldType);
+    if (!tool.isEmpty()) {
+        setStr(m, s.tool_type, tool.name());
+    }
+    if (preciseBreak) {
+        setBool(m, s.precise_break, true);
+    }
     return v;
 }
 
@@ -365,6 +378,54 @@ finescript::Value makeBlockCorrectionValue(BlockCoord pos, BlockTypeId correct, 
     return v;
 }
 
+// ============================================================================
+// Particle Event Builders
+// ============================================================================
+
+finescript::Value makeParticleSpawnValue(std::string_view preset,
+                                          glm::dvec3 pos,
+                                          EntityId attached,
+                                          float duration)
+{
+    const auto& s = EventSymbols::instance();
+    auto v = makeMap();
+    auto& m = v.asMap();
+    setType(m, EVT_PARTICLE_SPAWN);
+    setStr(m, s.preset, preset);
+    setFloat(m, s.pos_x, pos.x);
+    setFloat(m, s.pos_y, pos.y);
+    setFloat(m, s.pos_z, pos.z);
+    if (attached != INVALID_ENTITY_ID) {
+        setInt(m, s.entity_id, static_cast<int64_t>(attached));
+    }
+    // Only write duration if the caller passed a real value (not NaN)
+    if (duration == duration) {  // NaN check
+        setFloat(m, s.duration, duration);
+    }
+    return v;
+}
+
+finescript::Value makeParticleDespawnValue(uint32_t emitterId) {
+    const auto& s = EventSymbols::instance();
+    auto v = makeMap();
+    auto& m = v.asMap();
+    setType(m, EVT_PARTICLE_DESPAWN);
+    setInt(m, s.emitter_id, static_cast<int64_t>(emitterId));
+    return v;
+}
+
+finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos) {
+    const auto& s = EventSymbols::instance();
+    auto v = makeMap();
+    auto& m = v.asMap();
+    setType(m, EVT_PARTICLE_BURST);
+    setStr(m, s.preset, preset);
+    setFloat(m, s.pos_x, pos.x);
+    setFloat(m, s.pos_y, pos.y);
+    setFloat(m, s.pos_z, pos.z);
+    return v;
+}
+
 finescript::Value makeEntityAnimationValue(EntityId id, uint8_t animId, float time) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
@@ -423,6 +484,14 @@ BlockTypeId readBlockTypeId(const finescript::Value& event, uint32_t fieldSymbol
         return BlockTypeId::fromName(v.asString());
     }
     return AIR_BLOCK_TYPE;
+}
+
+ItemTypeId readItemTypeId(const finescript::Value& event, uint32_t fieldSymbol) {
+    auto v = event.asMap().get(fieldSymbol);
+    if (v.isString()) {
+        return ItemTypeId::fromName(v.asString());
+    }
+    return ItemTypeId{};
 }
 
 FluidTypeId readFluidTypeId(const finescript::Value& event) {

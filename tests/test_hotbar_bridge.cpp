@@ -126,11 +126,11 @@ TEST(HotbarBridgeTest, ScriptDefinesHotbarOverlay) {
     auto children = hotbar.asMap().get(childrenSym);
     ASSERT_TRUE(children.isArray()) << "hotbar_overlay should have children array";
 
-    // Each slot = push_color + push_color + button + pop_color = 4 widgets
-    // 7 same_line spacers between slots
-    // Total: 8*4 + 7 = 39
+    // Each slot = push_color + push_color + button + pop_color = 4 widgets.
+    // N-1 same_line spacers between N slots.
+    // Current hotbar.fs has 9 slots (slot_0..slot_8), so 9*4 + 8 = 44.
     const auto& arr = children.asArray();
-    EXPECT_EQ(arr.size(), 39u) << "Expected 39 child widgets (8 slots with style + 7 spacers)";
+    EXPECT_EQ(arr.size(), 44u) << "Expected 44 child widgets (9 slots with style + 8 spacers)";
 }
 
 TEST(HotbarBridgeTest, SlotButtonsHaveIds) {
@@ -166,13 +166,13 @@ TEST(HotbarBridgeTest, SlotButtonsHaveIds) {
         }
     }
 
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 9; i++) {
         std::string expected = "slot_" + std::to_string(i);
         EXPECT_NE(std::find(ids.begin(), ids.end(), expected), ids.end())
             << "Missing button ID: " << expected;
     }
 
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 9; i++) {
         std::string btnCol = "s" + std::to_string(i) + "_btn_col";
         EXPECT_NE(std::find(ids.begin(), ids.end(), btnCol), ids.end())
             << "Missing color ID: " << btnCol;

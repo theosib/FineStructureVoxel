@@ -3,3 +3,4 @@ include: base/slab
 texture: blocks/slab
 sounds: stone
 hardness: 1.0
+loot: slab

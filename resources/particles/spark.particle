@@ -1,0 +1,15 @@
+# Bright, short-lived particle for impacts and combat.
+name: finevox:spark
+lifetime: 0.2-0.5
+initial_speed: 3.0-7.0
+gravity: 14.0
+drag: 0.2
+size: 0.04-0.08
+size_end_scale: 0.3
+start_tint: 1.0 0.95 0.7 1.0
+end_tint: 1.0 0.4 0.0 0.0
+atlas_region: spark
+billboard: velocity
+collides: true
+kill_on_collision: false
+restitution: 0.5

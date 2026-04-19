@@ -1,0 +1,7 @@
+# Dirt drops itself unconditionally.
+pool:default:
+rolls: 1
+entry:dirt:
+type: item
+item: finevox:dirt
+count: 1

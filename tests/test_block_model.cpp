@@ -415,6 +415,34 @@ sounds: stone
     EXPECT_EQ(model->rotationSet(), RotationSet::Horizontal);
 }
 
+TEST(BlockModelLoaderTest, ParticleFieldPreservesNamespacePrefix) {
+    // Regression: ConfigParser splits "particle: finevox:ember_burst" into
+    // key=particle, suffix=finevox, value=ember_burst.  The loader must
+    // reconstruct the full namespaced name so the block's preset lookup
+    // matches what ParticleLoader registers.
+    BlockModelLoader loader;
+    std::string modelStr = R"(
+collision: full
+particle: finevox:ember_burst
+)";
+    auto model = loader.parseModelFromString(modelStr);
+    ASSERT_TRUE(model.has_value());
+    EXPECT_TRUE(model->hasParticle());
+    EXPECT_EQ(model->particle(), "finevox:ember_burst");
+}
+
+TEST(BlockModelLoaderTest, ParticleFieldWithoutPrefixIsUnchanged) {
+    // Unprefixed values should pass through as-is.
+    BlockModelLoader loader;
+    std::string modelStr = R"(
+collision: full
+particle: my_bare_preset
+)";
+    auto model = loader.parseModelFromString(modelStr);
+    ASSERT_TRUE(model.has_value());
+    EXPECT_EQ(model->particle(), "my_bare_preset");
+}
+
 TEST(BlockModelLoaderTest, ParseTriangleFace) {
     BlockModelLoader loader;
 

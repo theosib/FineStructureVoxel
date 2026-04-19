@@ -1,0 +1,18 @@
+# Luminite loot.
+# Design goal was: precise-break preserves the block, otherwise drop a
+# granular "glow dust" product. No "glow dust" item exists yet (Phase 25
+# scope excludes inventing new items), so the non-precise branch drops
+# nothing. TODO: once glow_dust (or similar) is added to ItemRegistry,
+# enable the commented-out entry below and adjust the count range.
+pool:default:
+rolls: 1
+entry:precise:
+type: item
+item: finevox:luminite
+count: 1
+condition: precise-break
+# entry:glow_dust:
+# type: item
+# item: finevox:glow_dust
+# count: 2-4
+# condition: not precise-break

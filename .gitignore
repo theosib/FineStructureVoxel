@@ -2,6 +2,12 @@
 build/
 cmake-build-*/
 
+# CTest working directory
+Testing/
+
+# Ad-hoc scratch logs (never commit)
+out.txt
+
 # IDE
 .idea/
 .vscode/

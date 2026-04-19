@@ -1,0 +1,14 @@
+# Water droplet kicked up by an entity entering a fluid.
+name: finevox:splash_drop
+lifetime: 0.3-0.8
+initial_speed: 2.0-5.0
+velocity_bias: 0 3.5 0
+gravity: 14.0
+drag: 0.2
+size: 0.06-0.10
+size_end_scale: 0.4
+start_tint: 0.6 0.8 1.0 0.9
+end_tint: 0.6 0.8 1.0 0.0
+atlas_region: splash_drop
+billboard: velocity
+collides: false

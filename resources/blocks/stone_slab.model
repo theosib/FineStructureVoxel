@@ -2,3 +2,4 @@
 include: base/slab
 texture: blocks/stone
 sounds: stone
+loot: stone_slab

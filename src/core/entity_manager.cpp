@@ -13,7 +13,11 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/sound_event.hpp"
+#include "finevox/core/particle_system.hpp"
+#include "finevox/core/particle_registry.hpp"
 #include "finevox/script/event_value.hpp"
+
+#include <string>
 
 namespace finevox {
 
@@ -62,6 +66,11 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     Entity* rawPtr = entity.get();
     spatialIndex_.insert(id, rawPtr->position());
     entities_[id] = std::move(entity);
+
+    // ItemDropEntity needs the EntityManager for pickup/magnetism queries
+    if (auto* drop = dynamic_cast<ItemDropEntity*>(rawPtr)) {
+        drop->setEntityManager(this);
+    }
 
     // Wire up MobEntity-specific hooks and AI presets
     if (auto* mob = dynamic_cast<MobEntity*>(rawPtr)) {
@@ -180,6 +189,16 @@ const Entity* EntityManager::getLocalPlayer() const {
 }
 
 // ============================================================================
+// Item Pickup
+// ============================================================================
+
+bool EntityManager::tryDeliverItemToPlayer(EntityId playerId, ItemStack& stack) {
+    if (!itemPickupCallback_) return false;
+    if (stack.isEmpty()) return false;
+    return itemPickupCallback_(playerId, stack);
+}
+
+// ============================================================================
 // Tick Processing
 // ============================================================================
 
@@ -243,6 +262,32 @@ void EntityManager::physicsPass(float tickDt) {
                     auto pos = entity->position();
                     soundQueue_->push(script::makeSoundEventValue(
                         ft->soundSet, "splash", "effects", pos.x, pos.y, pos.z));
+                }
+            }
+
+            // Splash particles on dry→wet transition.  We try a
+            // fluid-specific preset first (e.g. "finevox:splash_water"),
+            // falling back to a generic "finevox:fluid_splash" preset.
+            // Missing presets are silently skipped so engines without
+            // particle resources loaded behave as before.
+            if (!wasInFluid && contact.inFluid && particleSystem_) {
+                auto pos = entity->position();
+                glm::dvec3 dp(pos.x, pos.y, pos.z);
+                std::string specific;
+                if (contact.fluidType.isValid()) {
+                    auto fname = contact.fluidType.name();
+                    // strip any "finevox:" prefix for the suffix
+                    auto colon = fname.rfind(':');
+                    std::string_view bare =
+                        colon == std::string_view::npos ? fname : fname.substr(colon + 1);
+                    specific = "finevox:splash_" + std::string(bare);
+                }
+                if (!specific.empty() &&
+                    EmitterPresetRegistry::global().has(specific)) {
+                    particleSystem_->burst(specific, dp);
+                } else if (EmitterPresetRegistry::global()
+                               .has("finevox:fluid_splash")) {
+                    particleSystem_->burst("finevox:fluid_splash", dp);
                 }
             }
         }

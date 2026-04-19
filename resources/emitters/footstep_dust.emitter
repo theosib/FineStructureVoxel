@@ -1,0 +1,7 @@
+# Short puff at the player's feet, biased toward loose surfaces.
+name: finevox:footstep_dust
+shape: box
+shape_size: 0.15 0.05 0.15
+burst: 4
+duration: 0.0
+particle: finevox:footstep_dust

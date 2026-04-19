@@ -1,0 +1,7 @@
+# Wedge drops itself.
+pool:default:
+rolls: 1
+entry:wedge:
+type: item
+item: finevox:wedge
+count: 1

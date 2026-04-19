@@ -1,0 +1,7 @@
+# Slab drops itself.
+pool:default:
+rolls: 1
+entry:slab:
+type: item
+item: finevox:slab
+count: 1

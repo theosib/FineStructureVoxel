@@ -3,3 +3,4 @@ include: base/solid_cube
 texture: blocks/grass
 sounds: grass
 hardness: 0.6
+loot: grass

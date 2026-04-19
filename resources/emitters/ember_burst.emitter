@@ -1,0 +1,6 @@
+# Burst of bright sparks for combat impacts / fire events.
+name: finevox:ember_burst
+shape: point
+burst: 18
+duration: 0.0
+particle: finevox:spark

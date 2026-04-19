@@ -209,6 +209,11 @@ public:
     /// Set loot table name (references a .loot file)
     BlockModel& setLoot(const std::string& loot);
 
+    /// Set particle emitter preset name (references a .emitter file).
+    /// When set, triggers like block-break route through this preset instead
+    /// of the engine's default material-tinted burst.
+    BlockModel& setParticle(const std::string& particle);
+
     // ========================================================================
     // Accessors
     // ========================================================================
@@ -264,6 +269,12 @@ public:
     /// Check if this model has a loot table
     [[nodiscard]] bool hasLoot() const { return !loot_.empty(); }
 
+    /// Get particle emitter preset name (empty if none)
+    [[nodiscard]] const std::string& particle() const { return particle_; }
+
+    /// Check if this model overrides the default break emitter
+    [[nodiscard]] bool hasParticle() const { return !particle_.empty(); }
+
     /// Check if this model has custom geometry (non-cube)
     [[nodiscard]] bool hasCustomGeometry() const { return !geometry_.isEmpty(); }
 
@@ -280,6 +291,7 @@ private:
     std::string sounds_;
     std::string script_;
     std::string loot_;
+    std::string particle_;
     uint8_t lightEmission_ = 0;
     uint8_t lightAttenuation_ = 15;  // Default: blocks all light
 

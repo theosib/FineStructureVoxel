@@ -12,6 +12,7 @@
 #include "finevox/core/physics.hpp"
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/loot_table.hpp"
+#include "finevox/core/particle_type.hpp"
 
 #include <vector>
 #include <unordered_map>
@@ -106,6 +107,10 @@ public:
     /// Set the loot table for this block type
     BlockType& setLootTable(LootTableId lootTable);
 
+    /// Set the particle emitter preset for this block type.
+    /// Used by the engine's block-break path and any script that queries it.
+    BlockType& setParticleEmitter(EmitterPresetId preset);
+
     /// Set propagation policy for cross-chunk neighbor notifications
     BlockType& setPropagationPolicy(PropagationPolicy policy);
 
@@ -158,6 +163,9 @@ public:
     /// Get the loot table for this block type
     [[nodiscard]] LootTableId lootTable() const { return lootTable_; }
 
+    /// Get the particle emitter preset for this block type (empty if none).
+    [[nodiscard]] EmitterPresetId particleEmitter() const { return particleEmitter_; }
+
     /// Get propagation policy for cross-chunk neighbor notifications
     [[nodiscard]] PropagationPolicy propagationPolicy() const { return propagationPolicy_; }
 
@@ -179,6 +187,7 @@ private:
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
     SoundSetId soundSet_;            // Sound set for this block type
     LootTableId lootTable_;          // Loot table for this block type
+    EmitterPresetId particleEmitter_;// Particle emitter preset (empty = default)
     PropagationPolicy propagationPolicy_ = PropagationPolicy::Drop;
 };
 

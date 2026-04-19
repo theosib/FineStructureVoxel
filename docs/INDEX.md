@@ -37,6 +37,7 @@
 | [systems/worldgen.md](systems/worldgen.md) | Noise, biomes, generation pipeline | `finevox_worldgen` | World generation, biome/feature system |
 | [systems/entities.md](systems/entities.md) | Entity, MobEntity, AI, animation | `finevox` | Entity behavior, spawning, AI goals |
 | [systems/fluids.md](systems/fluids.md) | FluidType, simulation, mesh, light | `finevox` | Fluid behavior, rendering, physics |
+| [systems/particles.md](systems/particles.md) | Particle system: data model, simulation, event wiring, natives | `finevox` | Visual particle effects, weather/combat feedback |
 | [systems/audio.md](systems/audio.md) | AudioEngine, SoundRegistry | `finevox_audio` | Sound events, 3D audio, footsteps |
 | [systems/scripting.md](systems/scripting.md) | GameScriptEngine, proxies, native fns | `finevox_script` | Script integration, .fsc blocks/entities |
 | [systems/ui.md](systems/ui.md) | finegui, MapRenderer, console | apps | UI layout, in-game console, settings |

@@ -3,3 +3,4 @@ include: base/wedge
 texture: blocks/wedge
 sounds: stone
 hardness: 1.0
+loot: wedge

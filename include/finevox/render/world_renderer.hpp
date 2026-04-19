@@ -38,6 +38,8 @@
 
 namespace finevox::render {
 
+class ParticleRenderer;  // fwd-declared for setter
+
 // ============================================================================
 // ChunkUniform - Per-subchunk push constant data
 // ============================================================================
@@ -191,6 +193,21 @@ public:
      * @brief Initialize rendering resources (call after shaders and atlas are set)
      */
     void initialize();
+
+    /**
+     * @brief Attach a ParticleRenderer to run after the fluid pass.
+     *
+     * The WorldRenderer does not own the pointer — the caller must keep it
+     * alive for the WorldRenderer's lifetime.  Pass nullptr to disable.
+     *
+     * The particle renderer is invoked inside render() after all opaque and
+     * fluid geometry has been drawn, so particles correctly blend over
+     * world geometry and fluid surfaces.
+     */
+    void setParticleRenderer(ParticleRenderer* particleRenderer) {
+        particleRenderer_ = particleRenderer;
+    }
+    [[nodiscard]] ParticleRenderer* particleRenderer() const { return particleRenderer_; }
 
     // ========================================================================
     // Mesh Worker Pool
@@ -707,6 +724,10 @@ private:
     // Async meshing (optional)
     std::unique_ptr<MeshRebuildQueue> meshRebuildQueue_;
     std::unique_ptr<MeshWorkerPool> meshWorkerPool_;
+
+    // Particle renderer (non-owning; set via setParticleRenderer).
+    // Drawn inside render() after the fluid pass.
+    ParticleRenderer* particleRenderer_ = nullptr;
 
     // Frame timing and wake signal for deadline-based waiting
     WakeSignal wakeSignal_;

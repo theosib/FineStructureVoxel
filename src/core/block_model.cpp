@@ -292,6 +292,11 @@ BlockModel& BlockModel::setLoot(const std::string& loot) {
     return *this;
 }
 
+BlockModel& BlockModel::setParticle(const std::string& particle) {
+    particle_ = particle;
+    return *this;
+}
+
 const CollisionShape& BlockModel::resolvedCollision() const {
     if (!collisionResolved_) {
         if (hasExplicitCollision_) {

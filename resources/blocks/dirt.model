@@ -3,3 +3,4 @@ include: base/solid_cube
 texture: blocks/dirt
 sounds: gravel
 hardness: 0.5
+loot: dirt

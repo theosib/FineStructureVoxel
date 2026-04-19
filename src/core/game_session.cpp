@@ -16,6 +16,11 @@
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/item_drop_entity.hpp"
+#include "finevox/core/loot_registry.hpp"
+#include "finevox/core/particle_system.hpp"
+#include "finevox/core/particle_subsystem.hpp"
+#include "finevox/core/particle_registry.hpp"
 #include "finevox/script/event_value.hpp"
 
 #include <finescript/value.h>
@@ -26,6 +31,8 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
+#include <random>
 
 namespace finevox {
 
@@ -84,6 +91,19 @@ bool GameActions::craftItem(BlockCoord stationPos, RecipeId recipe) {
 
 void GameActions::attackEntity(EntityId attacker, EntityId target, finescript::Value damageInfo) {
     sendAction(makeAttackEntityValue(attacker, target, std::move(damageInfo)));
+}
+
+void GameActions::spawnParticleEmitter(std::string_view preset, glm::dvec3 pos,
+                                        EntityId attached, float duration) {
+    sendAction(makeParticleSpawnValue(preset, pos, attached, duration));
+}
+
+void GameActions::despawnParticleEmitter(uint32_t emitterId) {
+    sendAction(makeParticleDespawnValue(emitterId));
+}
+
+void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos) {
+    sendAction(makeParticleBurstValue(preset, pos));
 }
 
 // ============================================================================
@@ -188,11 +208,75 @@ private:
 static void executeCommand(World& world, UpdateScheduler& scheduler,
                            EntityManager& entityManager, WorldTime& worldTime,
                            FluidTickManager* fluidTickManager,
+                           ParticleSystem* particles,
                            const finescript::Value& cmd) {
     auto typeStr = readEventType(cmd);
 
     if (typeStr == EVT_BLOCK_BROKEN) {
         auto pos = readBlockCoord(cmd);
+
+        // Roll loot table while block is still present.
+        // The subsequent world.breakBlock() → onDestroy handler may depend on
+        // block-state; we observe loot here so default-drop behavior is
+        // engine-mechanism (data/.loot files are the policy).
+        BlockTypeId oldType = world.getBlock(pos);
+        if (!oldType.isAir()) {
+            const BlockType& bt = BlockRegistry::global().getType(oldType);
+            LootTableId tableId = bt.lootTable();
+            if (tableId.isValid()) {
+                const auto& s = EventSymbols::instance();
+                LootContext lootCtx;
+                lootCtx.brokenBlock = oldType;
+                lootCtx.position = pos;
+                lootCtx.toolUsed = readItemTypeId(cmd, s.tool_type);
+                lootCtx.preciseBreak = readBool(cmd, s.precise_break, false);
+
+                auto drops = LootRegistry::global().roll(tableId, lootCtx);
+                if (!drops.empty()) {
+                    // Deterministic-ish scatter: use world tick as seed bias so
+                    // back-to-back breaks of identical blocks don't stack perfectly.
+                    std::mt19937 scatterRng(
+                        static_cast<uint32_t>(pos.x * 73856093u)
+                        ^ static_cast<uint32_t>(pos.y * 19349663u)
+                        ^ static_cast<uint32_t>(pos.z * 83492791u));
+                    std::uniform_real_distribution<float> angleDist(0.0f, 6.2831853f);
+                    std::uniform_real_distribution<float> speedDist(0.8f, 1.6f);
+
+                    for (auto& stack : drops) {
+                        if (stack.isEmpty()) continue;
+                        auto drop = std::make_unique<ItemDropEntity>(
+                            INVALID_ENTITY_ID, std::move(stack));
+                        drop->setPosition(Vec3(
+                            static_cast<float>(pos.x) + 0.5f,
+                            static_cast<float>(pos.y) + 0.2f,
+                            static_cast<float>(pos.z) + 0.5f));
+                        float theta = angleDist(scatterRng);
+                        float horiz = speedDist(scatterRng);
+                        drop->setVelocity(Vec3(
+                            std::cos(theta) * horiz,
+                            2.5f,
+                            std::sin(theta) * horiz));
+                        entityManager.spawnEntity(std::move(drop));
+                    }
+                }
+            }
+        }
+
+        // Particles: per-block-type emitter override, else the generic
+        // default. Policy lives in .model files; the engine only checks
+        // whether a preset is registered.
+        if (particles && !oldType.isAir()) {
+            const BlockType& bt = BlockRegistry::global().getType(oldType);
+            EmitterPresetId presetId = bt.particleEmitter();
+            std::string_view presetName =
+                presetId.isValid() ? presetId.name()
+                                   : std::string_view("finevox:block_break");
+            if (EmitterPresetRegistry::global().has(presetName)) {
+                glm::dvec3 center(pos.x + 0.5, pos.y + 0.5, pos.z + 0.5);
+                particles->burst(presetName, center);
+            }
+        }
+
         world.breakBlock(pos);
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
     }
@@ -292,6 +376,42 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
             }
         }
     }
+    else if (typeStr == EVT_PARTICLE_SPAWN) {
+        if (!particles) return;
+        const auto& s = EventSymbols::instance();
+        std::string preset(readString(cmd, s.preset));
+        if (preset.empty()) return;
+
+        glm::dvec3 position = readDVec3(cmd, s.pos_x, s.pos_y, s.pos_z);
+        EntityId attached = static_cast<EntityId>(
+            readInt(cmd, s.entity_id, static_cast<int64_t>(INVALID_ENTITY_ID)));
+
+        // Duration: if field missing, pass sentinel (-2) to use preset default
+        float duration = -2.0f;
+        if (cmd.asMap().get(s.duration).isNumeric()) {
+            duration = readFloat(cmd, s.duration, -2.0f);
+        }
+
+        if (attached != INVALID_ENTITY_ID) {
+            particles->spawnEmitterAttached(preset, attached, duration);
+        } else {
+            particles->spawnEmitter(preset, position, duration);
+        }
+    }
+    else if (typeStr == EVT_PARTICLE_DESPAWN) {
+        if (!particles) return;
+        const auto& s = EventSymbols::instance();
+        auto id = static_cast<EmitterId>(readInt(cmd, s.emitter_id, 0));
+        if (id != INVALID_EMITTER_ID) particles->despawnEmitter(id);
+    }
+    else if (typeStr == EVT_PARTICLE_BURST) {
+        if (!particles) return;
+        const auto& s = EventSymbols::instance();
+        std::string preset(readString(cmd, s.preset));
+        if (preset.empty()) return;
+        glm::dvec3 position = readDVec3(cmd, s.pos_x, s.pos_y, s.pos_z);
+        particles->burst(preset, position);
+    }
 }
 
 // ============================================================================
@@ -359,6 +479,7 @@ struct GameSession::Impl {
     std::unique_ptr<EntityManager> entityManager;
     std::unique_ptr<WorldTime> worldTime;
     std::unique_ptr<FluidTickManager> fluidTickManager;
+    std::unique_ptr<ParticleSystem> particleSystem;
 
     // EventBus
     std::shared_ptr<EventBus> eventBus;
@@ -397,7 +518,7 @@ struct GameSession::Impl {
 
         for (const auto& cmd : commands) {
             executeCommand(*world, *scheduler, *entityManager, *worldTime,
-                           fluidTickManager.get(), cmd);
+                           fluidTickManager.get(), particleSystem.get(), cmd);
         }
         scheduler->processEvents();
     }
@@ -508,6 +629,10 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
         impl.fluidTickManager->simulator().setLightEngine(impl.lightEngine.get());
     }
 
+    // Particle simulation (CPU, game-thread authoritative)
+    impl.particleSystem = std::make_unique<ParticleSystem>(*impl.world);
+    impl.entityManager->setParticleSystem(impl.particleSystem.get());
+
     // Command interface
     impl.actions = std::make_unique<LocalGameActions>(
         *impl.world, *impl.soundQueue, *impl.commandQueue);
@@ -520,6 +645,10 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     if (impl.fluidTickManager) {
         session->addSubsystem(std::make_shared<FluidSubsystem>(*impl.fluidTickManager));
     }
+
+    // Particles run in LateTick so attached emitters see post-physics positions.
+    session->addSubsystem(std::make_shared<ParticleSubsystem>(
+        *impl.particleSystem, impl.entityManager.get()));
 
     return session;
 }
@@ -534,6 +663,7 @@ LightEngine& GameSession::lightEngine() { return *impl_->lightEngine; }
 EntityManager& GameSession::entities() { return *impl_->entityManager; }
 WorldTime& GameSession::worldTime() { return *impl_->worldTime; }
 FluidTickManager& GameSession::fluidTicks() { return *impl_->fluidTickManager; }
+ParticleSystem& GameSession::particles() { return *impl_->particleSystem; }
 
 SoundEventQueue& GameSession::soundEvents() { return *impl_->soundQueue; }
 GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue; }

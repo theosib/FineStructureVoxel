@@ -1,0 +1,7 @@
+# Stairs drop themselves.
+pool:default:
+rolls: 1
+entry:stairs:
+type: item
+item: finevox:stairs
+count: 1

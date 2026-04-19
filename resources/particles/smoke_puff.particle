@@ -1,0 +1,14 @@
+# Slow upward-drifting gray puff.
+name: finevox:smoke_puff
+lifetime: 1.2-2.0
+initial_speed: 0.1-0.4
+velocity_bias: 0 0.5 0
+gravity: -1.0
+drag: 0.8
+size: 0.15-0.3
+size_end_scale: 2.2
+start_tint: 0.4 0.4 0.4 0.7
+end_tint: 0.2 0.2 0.2 0.0
+atlas_region: smoke_puff
+billboard: axis
+collides: false

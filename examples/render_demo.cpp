@@ -39,6 +39,9 @@
 #include <finevox/core/game_session.hpp>
 #include <finevox/render/world_renderer.hpp>
 #include <finevox/render/block_atlas.hpp>
+#include <finevox/render/particle_atlas.hpp>
+#include <finevox/render/particle_renderer.hpp>
+#include <finevox/core/mob_entity.hpp>
 #include <finevox/render/icon_atlas.hpp>
 #include <finevox/core/block_type.hpp>
 #include <finevox/core/block_model.hpp>
@@ -103,6 +106,17 @@
 #include <finevox/core/recipe_registry.hpp>
 #include <finevox/core/recipe_loader.hpp>
 #endif
+
+#include <finevox/core/loot_table.hpp>
+#include <finevox/core/loot_registry.hpp>
+#include <finevox/core/loot_table_loader.hpp>
+#include <finevox/core/particle_registry.hpp>
+#include <finevox/core/particle_system.hpp>
+#include <finevox/core/particle_type.hpp>
+#include <finevox/core/tag_registry.hpp>
+#include <finevox/core/unification.hpp>
+#include <finevox/core/item_drop_entity.hpp>
+#include <finevox/core/item_stack.hpp>
 
 #ifdef FINEVOX_HAS_AUDIO
 #include <finevox/audio/audio_engine.hpp>
@@ -178,7 +192,7 @@ std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
     // List of blocks to load
     std::vector<std::string> blockNames = {
         "stone", "dirt", "grass", "cobble", "luminite",
-        "slab", "stairs", "wedge"
+        "slab", "stairs", "wedge", "stone_slab", "workbench"
     };
 
     for (const auto& name : blockNames) {
@@ -216,6 +230,19 @@ std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
             // Set sound set from model (e.g., "stone", "grass")
             if (!model->sounds().empty()) {
                 blockType.setSoundSet(SoundSetId::fromName(model->sounds()));
+            }
+
+            // Set loot table (name references a .loot file in resources/loot/)
+            if (model->hasLoot()) {
+                blockType.setLootTable(LootTableId::fromName(model->loot()));
+            }
+
+            // Set particle emitter preset (name references a .emitter file
+            // in resources/emitters/). When unset, the engine falls back to
+            // the generic "finevox:block_break" preset at break time.
+            if (model->hasParticle()) {
+                blockType.setParticleEmitter(
+                    EmitterPresetId::fromName(model->particle()));
             }
 
             registry.registerType(blockId, blockType);
@@ -726,9 +753,67 @@ int main(int argc, char* argv[]) {
             std::cout << "Loaded " << fluidCount << " fluid types from " << fluidsDir << "\n";
         }
 
+        // Load loot tables from .loot files (referenced by block models via loot:)
+        std::string lootDir = resourcePath + "/loot";
+        if (std::filesystem::exists(lootDir)) {
+            size_t lootCount = LootTableLoader::loadDirectory(lootDir);
+            std::cout << "Loaded " << lootCount << " loot tables from " << lootDir << "\n";
+        }
+
+        // Load particle types and emitter presets (Phase 26)
+        std::string particlesDir = resourcePath + "/particles";
+        if (std::filesystem::exists(particlesDir)) {
+            size_t typeCount = ParticleLoader::loadTypesFromDirectory(particlesDir);
+            std::cout << "Loaded " << typeCount << " particle types from "
+                      << particlesDir << "\n";
+        }
+        std::string emittersDir = resourcePath + "/emitters";
+        if (std::filesystem::exists(emittersDir)) {
+            size_t presetCount = ParticleLoader::loadPresetsFromDirectory(emittersDir);
+            std::cout << "Loaded " << presetCount << " emitter presets from "
+                      << emittersDir << "\n";
+        }
+
+        // Load tool-classification tags (precise-break, pickaxe, etc.)
+        std::string tagsDir = resourcePath + "/tags";
+        if (std::filesystem::exists(tagsDir)) {
+            size_t tagFiles = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(tagsDir)) {
+                if (!entry.is_regular_file()) continue;
+                if (entry.path().extension() != ".tag") continue;
+                int n = loadTagFile(entry.path().string(),
+                                    TagRegistry::global(),
+                                    UnificationRegistry::global());
+                if (n > 0) ++tagFiles;
+            }
+            TagRegistry::global().rebuild();
+            std::cout << "Loaded " << tagFiles << " tag file(s) from " << tagsDir << "\n";
+        }
+
         // Create game session (owns World, UpdateScheduler, LightEngine, EntityManager, WorldTime, event queues)
         auto session = GameSession::createLocal();
         World& world = session->world();
+
+        // Wire up item-drop pickup: when a player is close enough to an ItemDropEntity,
+        // deposit the stack into the bag. InventoryView mutates the DC directly, so
+        // the UI picks this up on its next frame without extra plumbing.
+        session->entities().setItemPickupCallback(
+            [&playerInventoryDC, &itemNameRegistry](EntityId /*playerId*/, ItemStack& stack) -> bool {
+                if (stack.isEmpty()) return false;
+                auto& bag = playerInventoryDC->getOrCreateChild("bag");
+                InventoryView bagView(bag, itemNameRegistry);
+                int32_t leftover = bagView.addItem(stack.type, stack.count);
+                if (leftover == stack.count) {
+                    // Nothing fit — leave the stack unchanged, keep the drop alive.
+                    return false;
+                }
+                if (leftover <= 0) {
+                    stack.clear();
+                } else {
+                    stack.count = leftover;
+                }
+                return true;
+            });
 
         if (useWorldGen) {
             buildGeneratedWorld(world, resourcePath);
@@ -832,6 +917,39 @@ int main(int argc, char* argv[]) {
         });
 
         worldRenderer.initialize();
+
+        // Phase 26-B: Particle atlas + renderer.  If there's a
+        // resources/textures/particles directory with PNGs we load them;
+        // otherwise we fall back to a 1×1 white placeholder so particles
+        // still draw as tinted quads.
+        render::ParticleAtlas particleAtlas;
+        {
+            std::string particleTexDir = resourcePath + "/textures/particles";
+            size_t loaded = particleAtlas.loadFromDirectory(
+                &device, renderer.commandPool(), particleTexDir);
+            if (loaded == 0) {
+                std::cout << "No particle textures found in " << particleTexDir
+                          << " — using placeholder atlas\n";
+                particleAtlas.createPlaceholder(&device, renderer.commandPool());
+            } else {
+                std::cout << "Loaded " << loaded << " particle textures from "
+                          << particleTexDir << "\n";
+            }
+            // Patch particle type defs so the simulator stamps correct UVs at spawn.
+            std::vector<std::string> warnings;
+            particleAtlas.applyToRegistry(ParticleTypeRegistry::global(), &warnings);
+            for (const auto& w : warnings) {
+                std::cout << "[particle-atlas] " << w << "\n";
+            }
+        }
+
+        render::ParticleRenderer particleRenderer(
+            &device, &renderer, session->particles());
+        particleRenderer.loadShaders(
+            "shaders/particle.vert.spv", "shaders/particle.frag.spv");
+        particleRenderer.setAtlas(&particleAtlas);
+        particleRenderer.initialize();
+        worldRenderer.setParticleRenderer(&particleRenderer);
 
         // Convenience references to session subsystems
         LightEngine& lightEngine = session->lightEngine();
@@ -2264,6 +2382,28 @@ int main(int argc, char* argv[]) {
                           << "\r" << std::flush;
                 frameCount = 0;
                 fpsTimer = 0.0f;
+            }
+
+            // Demo respawn: if the authoritative game-thread player entity
+            // has died (e.g. in lava), teleport the client-side body back
+            // to spawn and restore full health.  Without this, death would
+            // silently disable fluid detection (splash / buoyancy / damage)
+            // and there's no HUD or death screen wired into the demo to
+            // give the player visible feedback.  This is demo-only — a
+            // real game wires a proper death→respawn UI.
+            if (MobEntity* gameMob = entityManager.getMob(playerId)) {
+                if (gameMob->isDead()) {
+                    Vec3 respawn(
+                        static_cast<float>(startPos.x),
+                        static_cast<float>(startPos.y - playerController.eyeHeight()),
+                        static_cast<float>(startPos.z));
+                    playerBody.setPosition(respawn);
+                    playerBody.setVelocity(Vec3(0.0f));
+                    gameMob->setHealth(gameMob->maxHealth());
+                    std::cout << "\n[respawn] Player died — restored to spawn "
+                              << "(" << respawn.x << ", " << respawn.y
+                              << ", " << respawn.z << ").\n";
+                }
             }
 
             // Player/camera update

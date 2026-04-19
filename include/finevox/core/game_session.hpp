@@ -17,6 +17,7 @@ class PhysicsSystem;
 class FluidTickManager;
 class GameSubsystem;
 class EventBus;
+class ParticleSystem;
 template<typename T> class Queue;
 using SoundEventQueue = Queue<finescript::Value>;
 struct GraphicsMessage;
@@ -78,6 +79,7 @@ public:
     EntityManager& entities();
     WorldTime& worldTime();
     FluidTickManager& fluidTicks();
+    ParticleSystem& particles();
 
     // === Event Channels (events come OUT) ===
     SoundEventQueue& soundEvents();

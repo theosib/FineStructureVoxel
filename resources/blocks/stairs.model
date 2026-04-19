@@ -3,3 +3,4 @@ include: base/stairs
 texture: blocks/stairs
 sounds: stone
 hardness: 1.0
+loot: stairs

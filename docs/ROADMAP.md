@@ -26,7 +26,7 @@ These items were designed and partially scoped but deferred during implementatio
 
 ### From Phase 23 (Inventory UI & Crafting)
 - **Config-driven input bindings** — Sub-Phase A designed a `.bindings` file format and `InputActionSystem` class. Currently render_demo uses `ActionDispatch` with hardcoded listener chains. The config-driven system would make bindings rebindable and serializable.
-- **Block breaking → inventory** — Breaking blocks removes them from the world but doesn't add items to the player's bag. Needs a loot/drop system.
+- ~~**Block breaking → inventory**~~ ✓ — Phase 25 wires default break → `LootTable` roll → `ItemDropEntity` spawn; ItemDropEntity.tick handles pickup (via EntityManager ItemPickupCallback) and magnetism using the spatial index.
 - **Generic container UI** — `container.fs` for chests/barrels/etc. with shared inventory interaction.
 - **Icon-based slot rendering** — `IconAtlas` and `item_icon` exist but inventory slots show text labels not block preview icons. Wire icon UVs into slot button images.
 - **Cursor item visual** — Currently a text tooltip near mouse. Should be a dragged icon sprite following the cursor.
@@ -68,14 +68,27 @@ Crafting/recipe system and inventory UI are complete (Phases 22-23).
 
 These add environmental depth: the world changes around the player.
 
-#### Phase 25: Particle System (GPU)
-**Priority: High** — Pervasive dependency (weather, combat, fire, environment all need it)
+#### Phase 26-A: Particle System — CPU sim (✓ complete)
+- CPU simulation on the game thread (`ParticleSystem` in core), data-driven
+  via `.particle` / `.emitter` files, event-queue integration, finescript
+  natives, wired fire points (block break, fluid splash). See
+  [systems/particles.md](systems/particles.md).
 
-- **GPU particle emitter/updater** — compute shader particle simulation, billboard rendering.
-- **Emitter types** — point, sphere, box, cone, mesh-surface. Rate, burst, lifetime, velocity, gravity, drag.
-- **Renderers** — billboard, stretched billboard (sparks), mesh (debris). Texture atlas animation.
-- **Physics interaction** — particles collide with voxel terrain (rain hits ground, sparks bounce).
-- **Standard emitters** — block-break fragments, torch flame, hit sparks, footstep dust, fluid splash.
+#### Phase 26-B: Particle Rendering (✓ complete)
+- `ParticleAtlas` packs PNGs from `resources/textures/particles/` into a
+  single atlas; `applyToRegistry` patches `ParticleTypeDef::atlasUV` so
+  the sim stamps correct UVs without any renderer-side string lookup.
+- `ParticleRenderer` (CPU orients 6 verts/quad for all three billboard
+  modes, sorts back-to-front, single draw call via `RawMesh` with
+  in-place update).  Invoked from `WorldRenderer::render` after the
+  fluid pass.
+- `shaders/particle.vert`/`.frag` — pass-through transform (CPU already
+  did the billboard math) + atlas sample × tint + distance fog.
+- CPU perf: 500-particle vertex-gen = 0.21 ms/iter (~1 % of 16.67 ms
+  frame at 60 FPS); GPU compute still not warranted.
+- Remaining polish (not blocking): real art to replace placeholder PNGs,
+  footstep-dust cross-library wiring, luminite continuous-flame
+  handler.  See [systems/particles.md](systems/particles.md).
 
 #### Phase 26: Weather + Temperature + Seasons
 **Priority: High**

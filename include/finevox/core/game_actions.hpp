@@ -7,6 +7,10 @@
 #include "finevox/core/recipe.hpp"         // RecipeId
 #include <finescript/value.h>
 
+#include <glm/glm.hpp>
+#include <limits>
+#include <string_view>
+
 namespace finevox {
 
 /// Abstract command interface for gameplay mutations.
@@ -54,6 +58,18 @@ public:
     /// Attack an entity with a flexible damage info map.
     /// damageInfo is a Value map: {:type "slash" :amount 5.0 :knockback 0.4 ...}
     virtual void attackEntity(EntityId attacker, EntityId target, finescript::Value damageInfo);
+
+    /// Spawn a particle emitter at a world position. attached=INVALID_ENTITY_ID
+    /// gives a world-space emitter; otherwise the emitter follows that entity.
+    virtual void spawnParticleEmitter(std::string_view preset, glm::dvec3 pos,
+                                       EntityId attached = INVALID_ENTITY_ID,
+                                       float durationOverride = std::numeric_limits<float>::quiet_NaN());
+
+    /// Despawn a previously spawned emitter by ID.
+    virtual void despawnParticleEmitter(uint32_t emitterId);
+
+    /// Fire a one-shot particle burst at a world position.
+    virtual void particleBurst(std::string_view preset, glm::dvec3 pos);
 };
 
 }  // namespace finevox

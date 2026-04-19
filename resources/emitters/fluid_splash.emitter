@@ -1,0 +1,6 @@
+# Generic splash burst used when an entity enters any fluid.
+name: finevox:fluid_splash
+shape: point
+burst: 10
+duration: 0.0
+particle: finevox:splash_drop

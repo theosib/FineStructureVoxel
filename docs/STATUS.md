@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 24F — Entity Animation Audit |
-| Test count | **2137** |
+| Last completed phase | Phase 26-B — Particle Rendering |
+| Test count | **2179** (2027 core + 120 script + 31 render; 26-B added +3 core + 8 render = +11) |
 | In-progress | — |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -78,6 +78,82 @@
   - [x] 24-D: Combat bridge — `GameActions::attackEntity`, `attack_entity` native (damage + auto-knockback), `entity_in_cone` native (melee sweep), `entity_position`/`entity_health`/`entity_is_alive` cross-entity query natives, `EntityManager::getMob()`
   - [x] 24-E: Survival stats & HUD bridge — `PlayerStatsBridge` (`player_health`, `player_max_health`, `player_get_stat`, `player_set_stat`, `player_is_alive`, `player_position`), HUD overlay script (`hud.fs`), death screen script (`death_screen.fs`)
   - [x] 24-F: Entity animation audit — named animation states in EntityTypeDef (`anim:name: slot` in `.entity` files), `MobEntity::resolveAnimation(name)`/`playAnimation(name)`, `mob_play_animation`/`mob_resolve_animation` script natives
+- [x] **Phase 26-B** — Particle Rendering: Vulkan billboard renderer
+  closes the loop on 26-A. `ParticleAtlas`
+  (`src/render/particle_atlas.cpp`) loads PNGs from
+  `resources/textures/particles/` via stb_image, packs them into a single
+  atlas texture at startup (grid-based, 32×32 cells with 2-px filter
+  border — mirrors `BlockAtlas`), then calls `applyToRegistry(...)` to
+  patch `ParticleTypeDef::atlasUV` so the simulator stamps correct UVs
+  into `Particle::atlasUV` at spawn without any per-particle string
+  lookup in the render path.  `ParticleRenderer`
+  (`src/render/particle_renderer.cpp`) drains
+  `ParticleSystem::snapshot()` each frame, sorts back-to-front by
+  squared distance, builds 6 vertices per particle on the CPU (three
+  billboard modes: camera-facing, velocity-stretched, axis-locked),
+  uploads to a single `RawMesh` (in-place update with 2× capacity
+  reserve, one draw call), and draws into `WorldRenderer::render`
+  after the fluid pass — correctly blending particles over water
+  surfaces.  Pipeline is alpha-blended with depth test on / depth
+  write off, cull none; a 0.02 alpha cutoff in the fragment shader
+  avoids edge artefacts on cut-out sprites.  Fog parameters (including
+  underwater variants) are forwarded from `WorldRenderer` so particles
+  fade into the distance consistently with terrain.  Shaders:
+  `shaders/particle.vert` (pass-through transform; CPU already did the
+  billboard math) + `shaders/particle.frag` (atlas sample × tint +
+  distance fog).  Resources: 6 placeholder 28×28 PNGs in
+  `resources/textures/particles/` (one per atlas region referenced by
+  the shipped `.particle` files — generated with a small Pillow
+  script; obvious temp art).  Tests (+11 total): `test_particle_uv_patch`
+  (3 tests) verifies `setAtlasUV` → registry → simulator path end-to-end;
+  `test_particle_renderer` (8 tests) validates `buildParticleQuad`
+  vertex generation for all three billboard modes, view-relative
+  camera math, UV propagation, tint interpolation, and CPU-side
+  perf (500 particles × 60 iters = 0.21 ms/iter, ~1% of a 16.67 ms
+  frame budget at 60 FPS).  See
+  [systems/particles.md](systems/particles.md).
+- [x] **Phase 26-A** — Particle System (engine side): CPU-simulated
+  particles on the game thread. Data-driven policy via `.particle` /
+  `.emitter` config files parsed into `ParticleTypeRegistry` /
+  `EmitterPresetRegistry` (`src/core/particle_registry.cpp`). Runtime
+  state in `Particle` / `ParticleEmitter`, simulated by `ParticleSystem`
+  (`src/core/particle_system.cpp`) behind a `shared_mutex` so the
+  renderer can copy snapshots without contention. `ParticleSubsystem`
+  ticks at `TickPhase::LateTick` so attached emitters see post-physics
+  positions. Event plumbing: `EVT_PARTICLE_SPAWN` / `_DESPAWN` / `_BURST`
+  in `event_value.hpp`, handled in `game_session.cpp::executeCommand`;
+  `GameActions::spawnParticleEmitter/particleBurst/despawnParticleEmitter`
+  convenience methods; `ParticleBridge` registers finescript natives
+  (`spawn_particle_emitter`, `particle_burst`, `active_particle_count`,
+  etc.). Wired fire points: block-break reads `BlockType::particleEmitter()`
+  (set from `.model particle:` field) or falls back to `finevox:block_break`;
+  splash path in `EntityManager::physicsPass` tries
+  `finevox:splash_<fluid>` then `finevox:fluid_splash`. Voxel collision
+  sub-steps (0.25-block max per step) with kill-or-reflect policy.
+  Global cap (default 8192) evicts oldest when exceeded. Profile: 8192
+  particles × 30 ticks costs 0.37 ms/tick (~1% of 33 ms budget) so GPU
+  compute is not warranted yet. Resources: 6 `.particle` + 8 `.emitter`
+  starter files in `resources/{particles,emitters}/`; luminite block
+  overrides with `particle: finevox:ember_burst`. Tests: +17 in
+  `test_particle_system.cpp` (parsing, registry lookup, burst counts,
+  velocity distribution, lifetime expiry, cap eviction, continuous-
+  emitter spawn rate, despawn-stops-spawn, collide-kills, reflect-
+  preserves, air passes through, and event-value round-trips for spawn/
+  despawn/burst); plus a profile smoke in `test_particle_perf.cpp`.
+  **Deferred to 26-B**: Vulkan billboard renderer (ParticleAtlas +
+  particle.vert/frag + integration into renderTranslucent) — kept out of
+  this phase because finevk currently exposes only `GraphicsPipeline`
+  and building out compute / new pipeline plumbing is its own project.
+  Footstep-dust firing deferred (requires cross-library coupling or an
+  event-queue refactor). See [systems/particles.md](systems/particles.md).
+- [x] **Phase 25** — Block-Drop & Loot Pipeline:
+  - Default break path rolls `BlockType::lootTable()` in `executeCommand` (`src/core/game_session.cpp`) with `LootContext{brokenBlock, position, toolUsed, preciseBreak}` sourced from the `block_broken` event Value; each resulting `ItemStack` spawns an `ItemDropEntity` with small randomized outward velocity
+  - `ItemDropEntity::tick` now queries `EntitySpatialIndex` for nearby players (local player fast path + spatial scan fallback), performs pickup inside `pickupRadius_` (1.25m) via `EntityManager::tryDeliverItemToPlayer`, and applies magnetism inside `attractRadius_` (3m) — clamped to `maxAttractSpeed_`
+  - `EntityManager::setItemPickupCallback` lets outer layers (render_demo, tests) plug in inventory policy without the engine owning storage; on spawn, `EntityManager` wires itself onto any `ItemDropEntity` (same pattern as `MobEntity::setEntityManager`)
+  - Event-value additions: `makeBlockBrokenValue(..., tool, preciseBreak)` with `tool_type` + `precise_break` symbol fields and `readItemTypeId` helper
+  - Data: `.loot` files for dirt, grass (precise→grass, otherwise dirt), cobble, luminite (precise-only; non-precise path TODO when a "glow dust" item exists), workbench, slab, stairs, wedge, stone_slab; stone.loot updated to finevox:-prefixed items; every block `.model` gained `loot: <name>`; `resources/tags/tools.tag` defines `finevox:tool.{pickaxe,axe,shovel,precise}`
+  - Render_demo boots `LootTableLoader::loadDirectory(resources/loot)`, walks `resources/tags/*.tag` into `TagRegistry::global()` + `rebuild()`, applies `model.loot()` during block registration, and installs a pickup callback that deposits into the player's bag `DataContainer`
+  - Tests (+13 in `test_block_drop_pipeline.cpp`): loot-table rolling under precise/default, break→drop integration, air/unlooted-block paths, precise event routing, pickup with room/delay/full-inventory, magnetism distance + speed clamp, no-callback lingering
 
 ---
 
@@ -104,8 +180,9 @@ Known design issue:
 
 See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
-- **Phase 24 complete** — entity system fixes, player unification, spatial index, combat bridge, survival stats, animation audit
-- **Phase 23 polish** — config-driven input bindings, block-break drops, icon-based slots, container UI (see ROADMAP.md deferred items)
+- **Phase 27 — Structure template system + puzzle-block stitcher** (pending planner confirmation)
+- **Phase 23 polish (remaining)** — config-driven input bindings, icon-based slots, container UI (see ROADMAP.md deferred items)
+- **Particle polish (minor)** — footstep-dust cross-library wiring, luminite continuous-flame handler, real art to replace placeholder PNGs (see `docs/systems/particles.md` deferred list)
 
 ---
 
@@ -113,8 +190,8 @@ See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
 | Library | Namespace | Major Contents |
 |---------|-----------|----------------|
-| `libfinevox` | `finevox::` | World, SubChunk, BlockType, Physics, Persistence, Events, Items, Tags, GameSession, Fluids |
+| `libfinevox` | `finevox::` | World, SubChunk, BlockType, Physics, Persistence, Events, Items, Tags, GameSession, Fluids, Particles |
 | `libfinevox_worldgen` | `finevox::worldgen::` | Noise, BiomeRegistry, FeatureRegistry, GenerationPipeline, Schematics |
-| `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD |
+| `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD, ParticleAtlas, ParticleRenderer |
 | `libfinevox_audio` | `finevox::audio::` | AudioEngine (miniaudio), SoundLoader, FootstepTracker |
-| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders |
+| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders, InventoryBridge, PlayerStatsBridge, ParticleBridge |

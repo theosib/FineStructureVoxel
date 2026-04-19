@@ -5,3 +5,7 @@ sounds: glass
 hardness: 0.3
 light-emission: 15
 light-attenuation: 0
+loot: luminite
+# Override the default break burst with an ember burst suited to
+# light-emitting blocks.
+particle: finevox:ember_burst

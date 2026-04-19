@@ -19,8 +19,10 @@
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/recipe.hpp"
+#include "finevox/core/item_type.hpp"
 #include <finescript/value.h>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace finevox {
@@ -92,6 +94,12 @@ struct EventSymbols {
     // Combat fields
     uint32_t attacker_id, target_id, damage_info;
 
+    // Block-break tool context
+    uint32_t tool_type, precise_break;
+
+    // Particle fields
+    uint32_t preset, emitter_id, duration, count;
+
     /// Get the singleton instance (lazily initialized).
     static const EventSymbols& instance();
 };
@@ -139,6 +147,11 @@ constexpr const char* EVT_PLAYER_CORRECTION = "player_correction";
 constexpr const char* EVT_BLOCK_CORRECTION = "block_correction";
 constexpr const char* EVT_ENTITY_ANIMATION = "entity_animation";
 
+// Particles
+constexpr const char* EVT_PARTICLE_SPAWN = "particle_spawn";
+constexpr const char* EVT_PARTICLE_DESPAWN = "particle_despawn";
+constexpr const char* EVT_PARTICLE_BURST = "particle_burst";
+
 // ============================================================================
 // Command/Action Event Builders (Graphics thread → Game thread)
 // ============================================================================
@@ -147,8 +160,12 @@ constexpr const char* EVT_ENTITY_ANIMATION = "entity_animation";
 finescript::Value makeBlockPlacedValue(BlockCoord pos, BlockTypeId newType,
                                        BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
 
-/** Build a block-broken action. */
-finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType);
+/** Build a block-broken action.
+ *  @param tool Item type held by the breaker (empty = bare hand).
+ *  @param preciseBreak True if the tool performs a "precise" break (silk-touch equivalent). */
+finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType,
+                                        ItemTypeId tool = {},
+                                        bool preciseBreak = false);
 
 /** Build a block-changed event. */
 finescript::Value makeBlockChangedValue(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType);
@@ -225,6 +242,27 @@ finescript::Value makeBlockCorrectionValue(BlockCoord pos, BlockTypeId correct, 
 finescript::Value makeEntityAnimationValue(EntityId id, uint8_t animId, float time);
 
 // ============================================================================
+// Particle Event Builders (command + notification)
+// ============================================================================
+
+/** Build a particle-emitter spawn command.
+ *  @param preset  Emitter preset name (e.g. "finevox:block_break").
+ *  @param pos     World position (ignored when attached != INVALID_ENTITY_ID).
+ *  @param attached Attach emitter to this entity (position follows). Pass
+ *                  INVALID_ENTITY_ID for a world-space emitter.
+ *  @param duration Override preset duration. Pass NaN to use preset default. */
+finescript::Value makeParticleSpawnValue(std::string_view preset,
+                                          glm::dvec3 pos,
+                                          EntityId attached = INVALID_ENTITY_ID,
+                                          float duration = std::numeric_limits<float>::quiet_NaN());
+
+/** Build a particle-emitter despawn command. */
+finescript::Value makeParticleDespawnValue(uint32_t emitterId);
+
+/** Build a one-shot particle burst command at a world position. */
+finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos);
+
+// ============================================================================
 // BlockCoord convenience overload for sound events
 // ============================================================================
 
@@ -252,6 +290,9 @@ Face readFace(const finescript::Value& event);
 
 /** Read a BlockTypeId from a named field. */
 BlockTypeId readBlockTypeId(const finescript::Value& event, uint32_t fieldSymbol);
+
+/** Read an ItemTypeId from a named field (empty if field missing or not a string). */
+ItemTypeId readItemTypeId(const finescript::Value& event, uint32_t fieldSymbol);
 
 /** Read a FluidTypeId from the fluid_type field. */
 FluidTypeId readFluidTypeId(const finescript::Value& event);

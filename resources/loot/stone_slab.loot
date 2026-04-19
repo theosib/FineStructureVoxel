@@ -1,0 +1,7 @@
+# Stone slab drops itself.
+pool:default:
+rolls: 1
+entry:stone_slab:
+type: item
+item: finevox:stone_slab
+count: 1

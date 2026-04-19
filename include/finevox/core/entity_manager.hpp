@@ -26,6 +26,9 @@ class World;
 class UpdateScheduler;
 class ChunkColumn;
 class MobEntity;
+class ItemDropEntity;
+class ParticleSystem;
+struct ItemStack;
 struct MobEventHooks;
 struct SoundEvent;
 template<typename T> class Queue;
@@ -33,6 +36,13 @@ using SoundEventQueue = Queue<finescript::Value>;
 
 /// Provider callback: given a mob type name, returns the hooks (or nullptr)
 using MobEventHooksProvider = std::function<MobEventHooks*(const std::string&)>;
+
+/// Pickup callback: asked whether a player can absorb a dropped ItemStack.
+/// The callback may mutate `stack` in place — reducing `count` to reflect
+/// partial absorption — and returns true if any portion was absorbed.
+/// When it returns false (e.g. inventory full), the drop remains in the world.
+using ItemPickupCallback =
+    std::function<bool(EntityId playerId, ItemStack& stack)>;
 
 // ============================================================================
 // PlayerAuthority - Server-side tracking of player state for validation
@@ -272,16 +282,40 @@ public:
     /// Set sound queue for fluid/entity sound events (optional)
     void setSoundQueue(SoundEventQueue* queue) { soundQueue_ = queue; }
 
+    /// Set particle system for splash / in-fluid particle emitters (optional).
+    /// When set, EntityManager fires a fluid-specific burst on dry→wet transition.
+    void setParticleSystem(ParticleSystem* particles) { particleSystem_ = particles; }
+
     /// Set provider for mob event hooks (called on spawn to attach script hooks)
     void setMobEventHooksProvider(MobEventHooksProvider provider) {
         hooksProvider_ = std::move(provider);
     }
 
+    /// Set the callback used by ItemDropEntity when a player is in range.
+    /// The callback is responsible for inserting the stack into the player's
+    /// inventory (or whatever "pickup" means for this game). When unset,
+    /// item drops simply linger on the ground.
+    void setItemPickupCallback(ItemPickupCallback callback) {
+        itemPickupCallback_ = std::move(callback);
+    }
+
+    /// True if a pickup callback has been registered.
+    [[nodiscard]] bool hasItemPickupCallback() const {
+        return static_cast<bool>(itemPickupCallback_);
+    }
+
+    /// Attempt to deliver an item stack to a player. Returns true if any
+    /// portion was absorbed; `stack` is mutated in place to reflect what
+    /// remains. No-op (returns false) when no callback is registered.
+    bool tryDeliverItemToPlayer(EntityId playerId, ItemStack& stack);
+
 private:
     World& world_;
     GraphicsEventQueue& graphicsQueue_;
     SoundEventQueue* soundQueue_ = nullptr;
+    ParticleSystem* particleSystem_ = nullptr;
     MobEventHooksProvider hooksProvider_;
+    ItemPickupCallback itemPickupCallback_;
     PhysicsSystem physics_;
 
     // Entity storage

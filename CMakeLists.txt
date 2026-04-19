@@ -125,6 +125,10 @@ add_library(finevox SHARED
     src/core/recipe_loader.cpp
     src/core/crafting_helper.cpp
     src/core/label_registry.cpp
+    src/core/particle_type.cpp
+    src/core/particle_registry.cpp
+    src/core/particle_system.cpp
+    src/core/particle_subsystem.cpp
     src/script/event_value.cpp
 )
 
@@ -172,6 +176,7 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/script_entity_handler.cpp
         src/script/inventory_bridge.cpp
         src/script/player_stats_bridge.cpp
+        src/script/particle_bridge.cpp
     )
 
     # finevox already provides include dirs and finescript PUBLIC
@@ -266,6 +271,10 @@ if(FINEVOX_BUILD_RENDER)
         src/render/engine.cpp
         src/render/world_render_layer.cpp
         src/render/overlay_render_layer.cpp
+        src/render/particle_atlas.cpp
+        src/render/particle_renderer.cpp
+        src/render/frame_capture.cpp
+        src/render/visual_test_harness.cpp
     )
 
     target_include_directories(finevox_render PUBLIC
@@ -273,6 +282,20 @@ if(FINEVOX_BUILD_RENDER)
         $<INSTALL_INTERFACE:include>
         ${FINEVK_DIR}/include
     )
+
+    # stb_image (header-only) for ParticleAtlas PNG loading.
+    # finevk's texture.cpp provides the STB_IMAGE_IMPLEMENTATION symbols; we
+    # only need the declarations here.
+    if(EXISTS "${FINEVK_DIR}/external/stb/stb_image.h")
+        target_include_directories(finevox_render PRIVATE
+            ${FINEVK_DIR}/external/stb)
+    endif()
+
+    # stb_image_write (header-only) for FrameCapture PNG writing.  Vendored
+    # at external/stb/ in this repo; STB_IMAGE_WRITE_IMPLEMENTATION is defined
+    # in frame_capture.cpp (exactly one TU, matching the MINIAUDIO pattern).
+    target_include_directories(finevox_render PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/stb)
 
     # Need GLFW for FineStructureVK headers
     find_package(glfw3 REQUIRED)
@@ -315,6 +338,8 @@ if(FINEVOX_BUILD_RENDER)
             ${SHADER_DIR}/fluid.frag
             ${SHADER_DIR}/overlay.vert
             ${SHADER_DIR}/overlay.frag
+            ${SHADER_DIR}/particle.vert
+            ${SHADER_DIR}/particle.frag
         )
 
         foreach(SHADER ${SHADER_SOURCES})
@@ -548,6 +573,10 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_ai_driver.cpp
         tests/test_entity_spatial_index.cpp
         tests/test_combat_bridge.cpp
+        tests/test_block_drop_pipeline.cpp
+        tests/test_particle_system.cpp
+        tests/test_particle_perf.cpp
+        tests/test_particle_uv_patch.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE
@@ -585,12 +614,24 @@ if(FINEVOX_BUILD_TESTS)
         add_executable(finevox_render_tests
             tests/test_frame_fence_waiter.cpp
             tests/test_icon_atlas.cpp
+            tests/test_particle_renderer.cpp
+            tests/test_visual_sparks.cpp
         )
 
         target_link_libraries(finevox_render_tests PRIVATE
             finevox_render
             GTest::gtest_main
         )
+
+        # Visual test needs shader SPIR-V built by finevox_shaders and knows
+        # the repo source dir so it can locate tests/golden/*.png regardless
+        # of where CTest sets the working directory.
+        if(TARGET finevox_shaders)
+            add_dependencies(finevox_render_tests finevox_shaders)
+        endif()
+        target_compile_definitions(finevox_render_tests PRIVATE
+            FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders"
+            FINEVOX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
         gtest_discover_tests(finevox_render_tests)
     endif()

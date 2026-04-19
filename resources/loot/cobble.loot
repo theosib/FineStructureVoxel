@@ -1,0 +1,7 @@
+# Cobblestone drops itself.
+pool:default:
+rolls: 1
+entry:cobble:
+type: item
+item: finevox:cobble
+count: 1

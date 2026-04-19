@@ -1,13 +1,13 @@
-# Stone loot table — precise break returns stone, otherwise cobble
+# Stone loot table — precise break returns stone, otherwise cobble.
 pool:default:
 rolls: 1
 entry:precise:
 type: item
-item: stone
+item: finevox:stone
 count: 1
 condition: precise-break
 entry:normal:
 type: item
-item: cobble
+item: finevox:cobble
 count: 1
 condition: not precise-break

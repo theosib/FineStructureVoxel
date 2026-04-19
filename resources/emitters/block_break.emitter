@@ -1,0 +1,7 @@
+# Default block-break emitter: one-shot burst of block fragments.
+name: finevox:block_break
+shape: box
+shape_size: 0.3 0.1 0.3
+burst: 14
+duration: 0.0
+particle: finevox:block_fragment

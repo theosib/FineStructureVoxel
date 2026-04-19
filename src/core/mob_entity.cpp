@@ -107,13 +107,19 @@ void MobEntity::tick(float dt, World& world) {
     // Apply movement toward target
     updateMovement(dt);
 
-    // Check for death
+    // Check for death.  The hook fires exactly once per death (latch reset
+    // by heal()/setHealth when HP climbs back above zero so respawn works).
+    // Players are NOT auto-despawned — gameplay code owns the respawn
+    // decision.  For other entities, the default is the historical
+    // behaviour: drop a corpse-event and markForRemoval.
     if (isDead() && !deathHookFired_) {
         deathHookFired_ = true;
         if (eventHooks_) {
             eventHooks_->onDeath(*this, lastAttacker_);
         }
-        markForRemoval();
+        if (!isPlayerEntity()) {
+            markForRemoval();
+        }
     }
 }
 
@@ -154,7 +160,14 @@ void MobEntity::updateMovement(float dt) {
 }
 
 void MobEntity::setHealth(float hp) {
-    health_ = std::clamp(hp, 0.0f, maxHealth_);
+    float newHp = std::clamp(hp, 0.0f, maxHealth_);
+    // If the mob was dead and is being revived, clear the one-shot death
+    // latch so the onDeath hook fires again if it dies a second time.
+    if (health_ <= 0.0f && newHp > 0.0f) {
+        deathHookFired_ = false;
+        fluidDamageAccumulator_ = 0.0f;
+    }
+    health_ = newHp;
 }
 
 void MobEntity::damage(float amount, EntityId source) {
@@ -169,7 +182,12 @@ void MobEntity::damage(float amount, EntityId source) {
 }
 
 void MobEntity::heal(float amount) {
+    float oldHp = health_;
     health_ = std::min(maxHealth_, health_ + amount);
+    if (oldHp <= 0.0f && health_ > 0.0f) {
+        deathHookFired_ = false;
+        fluidDamageAccumulator_ = 0.0f;
+    }
 }
 
 void MobEntity::moveTo(const glm::dvec3& target) {

@@ -69,6 +69,7 @@
 #include <finevox/core/fluid_loader.hpp>
 #include <finevox/core/subchunk.hpp>
 #include <finevox/render/engine.hpp>
+#include <finevox/render/frame_capture.hpp>
 #include <finevox/render/world_render_layer.hpp>
 #include <finevox/render/overlay_render_layer.hpp>
 #include <finevox/worldgen/world_generator.hpp>
@@ -78,10 +79,14 @@
 #include <finevox/worldgen/feature_registry.hpp>
 
 #include <finevk/finevk.hpp>
+#include <finevk/device/image.hpp>
+#include <finevk/device/staging_pool.hpp>
 #include <finevk/high/simple_renderer.hpp>
 #include <finevk/engine/camera.hpp>
 #include <finevk/engine/overlay2d.hpp>
 #include <finevk/engine/input_manager.hpp>
+#include <finevk/rendering/swapchain.hpp>
+#include <finevk/window/window.hpp>
 
 #ifdef FINEVOX_HAS_GUI
 #include <finegui/finegui.hpp>
@@ -498,6 +503,14 @@ int main(int argc, char* argv[]) {
         auto& device = engine.device();
         auto& renderer = engine.renderer();
         auto& inputManager = engine.inputManager();
+
+        // StagingPool for swap-chain readback (F12 screenshot hotkey).  One
+        // pool lives for the lifetime of the demo — per-screenshot allocation
+        // would thrash a staging buffer for each capture.
+        auto screenshotStagingPool = finevk::StagingPool::create(&device)
+            .initialSize(4 * 1024 * 1024)
+            .build();
+        bool captureScreenshotRequested = false;
 
         // Create 2D overlay for crosshair
         auto overlay = finevk::Overlay2D::create(&device, renderer.renderPass())
@@ -1401,6 +1414,13 @@ int main(int argc, char* argv[]) {
             playerBody.setPosition(Vec3(0.0f, 32.0f - playerController.eyeHeight(), 0.0f));
             playerBody.setVelocity(Vec3(0.0f));
             std::cout << "Teleported to origin\n";
+        });
+
+        actionDispatch.registerAction("screenshot", [&](const ActionArgs&) {
+            // Defer to the post-render callback; the readback must run on the
+            // main/graphics thread after endFrame() so the swap-chain image
+            // has been presented and is in PRESENT_SRC_KHR layout.
+            captureScreenshotRequested = true;
         });
 
         actionDispatch.registerAction("toggle_face_culling", [&](const ActionArgs&) {
@@ -2460,6 +2480,26 @@ int main(int argc, char* argv[]) {
         };
         callbacks.getClearColor = [&]() -> glm::vec4 {
             return currentSkyParams.skyColor;
+        };
+        callbacks.onPostRender = [&]() {
+            if (!captureScreenshotRequested) return;
+            captureScreenshotRequested = false;
+
+            finevk::SwapChain* sc = renderer.swapChain();
+            if (!sc) {
+                std::cout << "Screenshot FAILED: no swap chain\n";
+                return;
+            }
+            const uint32_t idx = window.currentImageIndex();
+            const std::string path = finevox::render::FrameCapture::timestampedName(
+                "screenshots/", ".png");
+            const bool ok = finevox::render::FrameCapture::captureImage(
+                sc->image(idx),
+                *screenshotStagingPool,
+                path,
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            std::cout << (ok ? "Screenshot saved: " : "Screenshot FAILED: ")
+                      << path << "\n";
         };
         engine.setFrameCallbacks(std::move(callbacks));
         engine.setFenceWakeSignal(worldRenderer.wakeSignal());

@@ -295,9 +295,17 @@ updated PNG.  Failing tests also dump the last actual result to
 (either `SimpleRenderer` for on-screen rendering or `OffscreenSurface` for
 capture / tests).  Its one previous `defaultSampler()` dep on
 `SimpleRenderer` is now a locally-built linear `Sampler`.  `WorldRenderer`
-is still `SimpleRenderer`-bound as of this writing; live-world F12 capture
-will ship in a follow-up phase once a swapchain `TRANSFER_SRC` path lands
-in finevk.
+is still `SimpleRenderer`-bound as of this writing.
+
+**Live F12 screenshot (Phase 1d).**  `render_demo` binds `key_f12:
+screenshot` (see `resources/input/default.bindings`).  The action sets a
+deferred flag; the engine's `onPostRender` callback reads the just-presented
+swap-chain image via `renderer.swapChain()->image(window.currentImageIndex())`
+and forwards it to `FrameCapture::captureImage(Image&, StagingPool&, path,
+VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)`.  Output lands at
+`screenshots/YYYYMMDD-HHMMSS.png` (gitignored).  `FrameCapture`'s public
+API is now `finevk::Image&`-primary; the `OffscreenSurface&` overloads are
+thin one-liner forwarders that pass `surface.colorImage()` through.
 
 **Pitfalls.**
 

@@ -63,6 +63,7 @@ context: gameplay
   key_v: print_mesh_stats
   key_t: cycle_time_speed
   key_b: toggle_lighting
+  key_f12: screenshot
 
 context: inventory
   key_e: close_inventory

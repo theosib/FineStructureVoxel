@@ -112,23 +112,24 @@ std::string FrameCapture::timestampedName(std::string_view prefix,
     return out;
 }
 
-bool FrameCapture::readbackRGBA(finevk::OffscreenSurface& surface,
+// =============================================================================
+// Image& primary API
+// =============================================================================
+
+bool FrameCapture::readbackRGBA(finevk::Image& image,
                                  finevk::StagingPool& pool,
                                  const CaptureRect& rect,
                                  std::vector<uint8_t>& out,
                                  uint32_t& outWidth, uint32_t& outHeight,
                                  VkImageLayout layout)
 {
-    auto* image = surface.colorImage();
-    if (!image) return false;
-
     try {
         if (rect.empty()) {
-            image->readbackToCPU(out, &pool, layout);
-            outWidth = image->width();
-            outHeight = image->height();
+            image.readbackToCPU(out, &pool, layout);
+            outWidth = image.width();
+            outHeight = image.height();
         } else {
-            image->readbackRegionToCPU(out, &pool,
+            image.readbackRegionToCPU(out, &pool,
                                        rect.x, rect.y, rect.width, rect.height,
                                        layout);
             outWidth = rect.width;
@@ -139,10 +140,46 @@ bool FrameCapture::readbackRGBA(finevk::OffscreenSurface& surface,
         return false;
     }
 
-    if (isBGRA(image->format())) {
+    if (isBGRA(image.format())) {
         swizzleBGRAtoRGBA(out);
     }
     return true;
+}
+
+bool FrameCapture::captureImage(finevk::Image& image,
+                                 finevk::StagingPool& pool,
+                                 const std::string& path,
+                                 VkImageLayout layout)
+{
+    return captureImageRegion(image, pool, CaptureRect{}, path, layout);
+}
+
+bool FrameCapture::captureImageRegion(finevk::Image& image,
+                                       finevk::StagingPool& pool,
+                                       const CaptureRect& rect,
+                                       const std::string& path,
+                                       VkImageLayout layout)
+{
+    std::vector<uint8_t> rgba;
+    uint32_t w = 0, h = 0;
+    if (!readbackRGBA(image, pool, rect, rgba, w, h, layout)) return false;
+    return savePNG(path, w, h, rgba);
+}
+
+// =============================================================================
+// OffscreenSurface& convenience overloads (forward to Image& primary API)
+// =============================================================================
+
+bool FrameCapture::readbackRGBA(finevk::OffscreenSurface& surface,
+                                 finevk::StagingPool& pool,
+                                 const CaptureRect& rect,
+                                 std::vector<uint8_t>& out,
+                                 uint32_t& outWidth, uint32_t& outHeight,
+                                 VkImageLayout layout)
+{
+    auto* image = surface.colorImage();
+    if (!image) return false;
+    return readbackRGBA(*image, pool, rect, out, outWidth, outHeight, layout);
 }
 
 bool FrameCapture::captureSurface(finevk::OffscreenSurface& surface,
@@ -150,7 +187,9 @@ bool FrameCapture::captureSurface(finevk::OffscreenSurface& surface,
                                    const std::string& path,
                                    VkImageLayout layout)
 {
-    return captureSurfaceRegion(surface, pool, CaptureRect{}, path, layout);
+    auto* image = surface.colorImage();
+    if (!image) return false;
+    return captureImage(*image, pool, path, layout);
 }
 
 bool FrameCapture::captureSurfaceRegion(finevk::OffscreenSurface& surface,
@@ -159,10 +198,9 @@ bool FrameCapture::captureSurfaceRegion(finevk::OffscreenSurface& surface,
                                          const std::string& path,
                                          VkImageLayout layout)
 {
-    std::vector<uint8_t> rgba;
-    uint32_t w = 0, h = 0;
-    if (!readbackRGBA(surface, pool, rect, rgba, w, h, layout)) return false;
-    return savePNG(path, w, h, rgba);
+    auto* image = surface.colorImage();
+    if (!image) return false;
+    return captureImageRegion(*image, pool, rect, path, layout);
 }
 
 } // namespace finevox::render

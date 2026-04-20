@@ -2493,11 +2493,35 @@ int main(int argc, char* argv[]) {
             const uint32_t idx = window.currentImageIndex();
             const std::string path = finevox::render::FrameCapture::timestampedName(
                 "screenshots/", ".png");
-            const bool ok = finevox::render::FrameCapture::captureImage(
+
+            // Read back raw pixels (swizzled to RGBA if the swap-chain was
+            // BGRA) and then force every pixel's alpha byte to 255.  The GUI
+            // pipelines (finegui ImGui backend, finevk Overlay2D / TextRenderer)
+            // use an alphaBlending() state whose alpha-channel blend
+            // (src=ONE, dst=ZERO) *replaces* the destination alpha with the
+            // source alpha — so text glyphs leave alpha = color.a * coverage
+            // and the empty padding around each glyph leaves alpha = 0 in
+            // the swap-chain image.  The compositor ignores alpha at
+            // present time, so the live window looks fine, but a raw PNG
+            // copy looks broken (glyph padding renders as transparent →
+            // white from the viewer's background, glyphs render
+            // semi-transparent → faint).  Making the output opaque matches
+            // what the user actually sees on screen.  The root-cause fix
+            // for the alpha-blend state belongs upstream in the pipeline
+            // builders, not here.
+            std::vector<uint8_t> rgba;
+            uint32_t w = 0, h = 0;
+            const bool readOK = finevox::render::FrameCapture::readbackRGBA(
                 sc->image(idx),
                 *screenshotStagingPool,
-                path,
+                finevox::render::CaptureRect{},
+                rgba, w, h,
                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            bool ok = false;
+            if (readOK) {
+                for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = 255;
+                ok = finevox::render::FrameCapture::savePNG(path, w, h, rgba);
+            }
             std::cout << (ok ? "Screenshot saved: " : "Screenshot FAILED: ")
                       << path << "\n";
         };

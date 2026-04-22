@@ -634,6 +634,19 @@ if(FINEVOX_BUILD_TESTS)
             FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders"
             FINEVOX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-        gtest_discover_tests(finevox_render_tests)
+        # Two-label visual-test policy (see docs/systems/rendering.md).  The
+        # render binary mixes curated visual tests (VisualSparks.*) with
+        # non-visual unit tests (FrameCapture, ParticleRenderer, IconAtlas,
+        # FrameFenceWaiter); split discovery so labels only apply to the
+        # visual cases.
+        #   ctest -L visual-curated     → small, deliberately-chosen matrix
+        #   ctest -L visual-regression  → empty today; reserved for future use
+        gtest_discover_tests(finevox_render_tests
+            TEST_FILTER "VisualSparks.*"
+            PROPERTIES LABELS "visual-curated"
+        )
+        gtest_discover_tests(finevox_render_tests
+            TEST_FILTER "-VisualSparks.*"
+        )
     endif()
 endif()

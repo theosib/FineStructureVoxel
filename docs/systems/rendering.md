@@ -273,11 +273,14 @@ auto r = VisualTestHarness::compareAgainstGolden(
 EXPECT_TRUE(r.passed) << r.failureReason;
 ```
 
-Currently wired: `tests/test_visual_sparks.cpp`
-(`VisualSparks.GoldenBasic`, `VisualSparks.DeterministicAcrossRuns`) —
-VelocityStretched spark burst, fixed RNG seed, fixed camera, 3 ticks at 30
-TPS, 96×96 ROI, tolerance 4.  The companion deterministic-rerun test catches
-state leaks independent of whether the golden matches.
+Currently wired: `tests/test_visual_sparks.cpp` — billboard-mode matrix
+covering all three `BillboardMode` branches.  All three scenes share: fixed
+RNG seed, 3 ticks at 30 TPS, 96×96 ROI, tolerance 4.  Scene variations:
+`GoldenBasic` (VelocityStretched, on-axis camera), `GoldenCameraFacing`
+(CameraFacing, off-axis pose), `GoldenAxisLocked` (AxisLocked, same off-axis
+pose so the two goldens differ because of billboard math, not camera pose).
+`DeterministicAcrossRuns` re-runs the basic scene twice in one process and
+byte-compares — catches state leaks independent of whether the golden matches.
 
 **Regenerating goldens.**  If a golden is missing or pixels legitimately
 change, re-run the test with `FINEVOX_UPDATE_GOLDENS=1`:
@@ -306,6 +309,31 @@ VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)`.  Output lands at
 `screenshots/YYYYMMDD-HHMMSS.png` (gitignored).  `FrameCapture`'s public
 API is now `finevk::Image&`-primary; the `OffscreenSurface&` overloads are
 thin one-liner forwarders that pass `surface.colorImage()` through.
+
+**Visual test policy.**
+
+Visual tests render real GPU output and byte-compare against committed PNGs.
+They are slow, fragile under driver drift, and expensive to maintain, so we
+keep the curated set deliberately tiny.  Two CTest labels partition them:
+
+| Label | Purpose | How it grows |
+|-------|---------|--------------|
+| `visual-curated` | Hand-picked matrix covering distinct render code paths (one per billboard mode, one per renderer, etc.).  Runs on every local build. | Only when a planner-approved phase adds a new branch that is not already covered (e.g., a new billboard mode, a new fluid pass variant). |
+| `visual-regression` | Targeted tests pinned to specific bugs we have already fixed.  Empty today.  Reserved for future use. | When a visual bug is fixed and we want a permanent tripwire against its return — one test per incident, named after the bug. |
+
+```sh
+ctest -L visual-curated       # small; run on every build
+ctest -L visual-regression    # empty today; reserved
+```
+
+Token-economy rationale: every golden is a blob the next reviewer has to
+diff-inspect on failure.  Prefer deleting a redundant curated test over
+adding a marginal one.  If a change would push the curated count above ~10,
+stop and reconsider scope.
+
+Current curated set (post-phase-2a): `VisualSparks.GoldenBasic` (velocity-
+stretched), `VisualSparks.GoldenCameraFacing`, `VisualSparks.GoldenAxisLocked`,
+`VisualSparks.DeterministicAcrossRuns`.
 
 **Pitfalls.**
 

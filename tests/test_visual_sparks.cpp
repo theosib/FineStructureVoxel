@@ -1,22 +1,24 @@
 /**
  * @file test_visual_sparks.cpp
- * @brief Golden-image visual test — VelocityStretched "spark" particles.
+ * @brief Golden-image visual tests — particle billboard-mode matrix.
  *
- * Renders a deterministic spark burst (fixed RNG seed, fixed camera, fixed
+ * Renders deterministic particle bursts (fixed RNG seed, fixed camera, fixed
  * number of ticks) into a headless OffscreenSurface and byte-compares a small
- * ROI readback against a committed PNG at tests/golden/sparks_basic.png.
+ * ROI readback against committed PNGs at tests/golden/sparks_*.png.
  *
- * This is the first concrete consumer of the finevox::render::FrameCapture /
- * finevox::render::VisualTestHarness library components.  Success here proves:
+ * Three curated tests cover the three BillboardMode branches:
+ *   - GoldenBasic          — VelocityStretched (spark-style)
+ *   - GoldenCameraFacing   — CameraFacing      (block-fragment-style)
+ *   - GoldenAxisLocked     — AxisLocked        (smoke-puff-style)
+ * Plus GoldenDeterministicAcrossRuns which re-runs the basic scene twice and
+ * byte-compares the two captures (catches nondeterminism independent of
+ * whether the committed golden matches).
  *
- *  - Headless Vulkan works (no GLFW, no window, no display).
- *  - ParticleRenderer renders correctly into an OffscreenSurface (no
- *    SimpleRenderer coupling).
- *  - VelocityStretched particles draw deterministically given seeded RNG.
- *  - Readback → PNG encode → PNG decode → byte compare round-trips within
- *    tolerance.
+ * Shared scaffolding lives in this file; when/if a fourth consumer appears,
+ * lift it to VisualTestHarness.
  *
- * On the first run, set FINEVOX_UPDATE_GOLDENS=1 to mint the golden:
+ * On the first run (or after an intentional visual change), set
+ * FINEVOX_UPDATE_GOLDENS=1 to mint / refresh the golden:
  *
  *     FINEVOX_UPDATE_GOLDENS=1 ./finevox_render_tests \
  *         --gtest_filter='VisualSparks.*'
@@ -88,12 +90,28 @@ constexpr uint32_t kSurfaceHeight = 256;
 // Deterministic simulation parameters.
 constexpr uint64_t kRngSeed = 0xfeedbeefcafe1234ULL;
 constexpr float    kTickDt = 1.0f / 30.0f;  // 30 TPS
-constexpr int      kTicksBeforeCapture = 3; // enough for sparks to spread
 
-// Test-only particle + emitter names.  Prefixed with "visual_test:" so they
-// never collide with production types in the shared global registry.
-constexpr const char* kParticleType = "visual_test:spark_basic";
-constexpr const char* kEmitterPreset = "visual_test:spark_burst_basic";
+// Scene config for a single visual test case.  Keeps the RNG seed, tick count,
+// and camera pose explicit per-mode so a regression in the billboard-selection
+// code path actually changes captured pixels for the mode it breaks.
+struct SceneConfig {
+    const char* particleType;
+    const char* emitterPreset;
+    BillboardMode billboard;
+    Range lifetime{1.0f, 1.0f};
+    Range initialSpeed{0.0f, 0.0f};
+    glm::vec3 velocityBias{0.0f};
+    float gravity = 0.0f;
+    float drag = 0.0f;
+    Range size{0.2f, 0.2f};
+    float sizeEndScale = 1.0f;
+    glm::vec4 startTint{1.0f};
+    glm::vec4 endTint{1.0f};
+    uint32_t burstCount = 16;
+    glm::vec3 cameraPos{0.0f, 0.0f, 8.0f};
+    glm::vec3 cameraTarget{0.0f, 0.0f, 0.0f};
+    int ticksBeforeCapture = 3;
+};
 
 struct HeadlessCtx {
     finevk::InstancePtr instance;
@@ -122,50 +140,49 @@ HeadlessCtx makeHeadlessContext() {
     return c;
 }
 
-void registerDeterministicSpark() {
-    // Register once per process.  Multiple TEST() bodies will call this; the
-    // registry's registerType returns false on collision and we simply treat
-    // that as "already installed".
+void registerScene(const SceneConfig& s) {
+    // Register once per process.  registerType/registerPreset are idempotent —
+    // a second call with the same name is a no-op, so TEST() bodies can
+    // blindly re-register without worrying about ordering.
     ParticleTypeDef def;
-    def.name = kParticleType;
-    def.lifetime = Range{1.0f, 1.0f};          // fixed, not a range, so RNG
-    def.initialSpeed = Range{6.0f, 6.0f};       // is only consumed by
-    def.velocityBias = glm::vec3(0.0f, 0.0f, 0.0f); // direction sampling.
-    def.gravity = 0.0f;                         // gravity-off for stable frame
-    def.drag = 0.0f;
-    def.size = Range{0.2f, 0.2f};
-    def.sizeEndScale = 0.5f;
-    def.startTint = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f); // yellow-orange
-    def.endTint   = glm::vec4(1.0f, 0.2f, 0.05f, 0.0f); // fades to red + alpha 0
+    def.name = s.particleType;
+    def.lifetime = s.lifetime;
+    def.initialSpeed = s.initialSpeed;
+    def.velocityBias = s.velocityBias;
+    def.gravity = s.gravity;
+    def.drag = s.drag;
+    def.size = s.size;
+    def.sizeEndScale = s.sizeEndScale;
+    def.startTint = s.startTint;
+    def.endTint = s.endTint;
     def.atlasRegion = "";                       // placeholder atlas → full UV
-    def.billboard = BillboardMode::VelocityStretched;
+    def.billboard = s.billboard;
     def.collidesWithTerrain = false;
-    ParticleTypeRegistry::global().registerType(kParticleType, def);
+    ParticleTypeRegistry::global().registerType(s.particleType, def);
 
     EmitterPresetDef preset;
-    preset.name = kEmitterPreset;
+    preset.name = s.emitterPreset;
     preset.shape = EmitterShape::Point;
-    preset.burstCount = 24;                     // enough for visible spread
+    preset.burstCount = s.burstCount;
     preset.duration = 0.0f;                     // one-shot
-    preset.particleType = kParticleType;
-    EmitterPresetRegistry::global().registerPreset(kEmitterPreset, preset);
+    preset.particleType = s.particleType;
+    EmitterPresetRegistry::global().registerPreset(s.emitterPreset, preset);
 }
 
-// Build a fixed camera state looking down -Z at the origin.
-finevk::CameraState makeFixedCamera() {
+finevk::CameraState makeCamera(const SceneConfig& s) {
     finevk::Camera cam;
     cam.setPerspective(/*fov=*/60.0f,
                         /*aspect=*/float(kSurfaceWidth) / kSurfaceHeight,
                         /*near=*/0.1f,
                         /*far=*/100.0f);
-    cam.moveTo(glm::vec3(0.0f, 0.0f, 8.0f));
-    cam.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
+    cam.moveTo(s.cameraPos);
+    cam.lookAt(s.cameraTarget);
     cam.updateState();
     return cam.state();
 }
 
-void tickToCapturePoint(ParticleSystem& sim) {
-    for (int i = 0; i < kTicksBeforeCapture; ++i) {
+void tickToCapturePoint(ParticleSystem& sim, int ticks) {
+    for (int i = 0; i < ticks; ++i) {
         sim.tick(kTickDt, /*entities=*/nullptr);
     }
 }
@@ -189,15 +206,15 @@ struct CapturedFrame {
 // Run the entire scene end-to-end: register types, tick, render, read back.
 // Returns the captured ROI as an RGBA byte vector.  Caller owns the context
 // so it can be reused for the determinism repeat.
-CapturedFrame renderOneFrame(HeadlessCtx& ctx) {
+CapturedFrame renderOneFrame(HeadlessCtx& ctx, const SceneConfig& scene) {
     World world;
     ParticleSystem sim(world);
     sim.setSeed(kRngSeed);
 
-    registerDeterministicSpark();
+    registerScene(scene);
 
-    sim.burst(kEmitterPreset, glm::dvec3(0.0, 0.0, 0.0));
-    tickToCapturePoint(sim);
+    sim.burst(scene.emitterPreset, glm::dvec3(0.0, 0.0, 0.0));
+    tickToCapturePoint(sim, scene.ticksBeforeCapture);
 
     // Placeholder atlas: 1×1 white, full-[0,1]² UV per region.  The test
     // cares about *geometry* and *tint interpolation*, not texture fidelity.
@@ -212,8 +229,8 @@ CapturedFrame renderOneFrame(HeadlessCtx& ctx) {
     renderer.setAtlas(&atlas);
     renderer.initialize();
 
-    finevk::CameraState camState = makeFixedCamera();
-    renderer.updateCamera(camState, glm::dvec3(0.0, 0.0, 8.0));
+    finevk::CameraState camState = makeCamera(scene);
+    renderer.updateCamera(camState, glm::dvec3(scene.cameraPos));
     renderer.setSkyParameters(
         /*sunDir=*/glm::vec3(0.0f, 1.0f, 0.0f),
         /*fogColor=*/glm::vec3(0.05f, 0.05f, 0.08f),
@@ -237,31 +254,93 @@ CapturedFrame renderOneFrame(HeadlessCtx& ctx) {
     return out;
 }
 
-} // anonymous namespace
+// Scene presets.  Each one exercises one BillboardMode branch; poses are
+// chosen so the rendered pixels would change if the branch were misrouted.
 
-TEST(VisualSparks, GoldenBasic) {
+SceneConfig basicScene() {
+    SceneConfig s;
+    s.particleType = "visual_test:spark_basic";
+    s.emitterPreset = "visual_test:spark_burst_basic";
+    s.billboard = BillboardMode::VelocityStretched;
+    s.initialSpeed = Range{6.0f, 6.0f};
+    s.size = Range{0.2f, 0.2f};
+    s.sizeEndScale = 0.5f;
+    s.startTint = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f);
+    s.endTint   = glm::vec4(1.0f, 0.2f, 0.05f, 0.0f);
+    s.burstCount = 24;
+    // Camera down -Z — velocity-stretched quads show their radial spread.
+    s.cameraPos = glm::vec3(0.0f, 0.0f, 8.0f);
+    s.cameraTarget = glm::vec3(0.0f);
+    s.ticksBeforeCapture = 3;
+    return s;
+}
+
+SceneConfig cameraFacingScene() {
+    SceneConfig s;
+    s.particleType = "visual_test:puff_camera";
+    s.emitterPreset = "visual_test:puff_camera_burst";
+    s.billboard = BillboardMode::CameraFacing;
+    // Slow drift so particles spread a little but stay on-screen at tick 3.
+    s.initialSpeed = Range{1.2f, 1.2f};
+    s.velocityBias = glm::vec3(0.0f, 0.6f, 0.0f);
+    s.size = Range{0.35f, 0.35f};
+    s.sizeEndScale = 1.0f;
+    s.startTint = glm::vec4(0.6f, 0.8f, 1.0f, 1.0f);
+    s.endTint   = glm::vec4(0.2f, 0.4f, 0.8f, 0.4f);
+    s.burstCount = 16;
+    // Off-axis camera: if the mode were (wrongly) AxisLocked, quads would
+    // rotate around world Y and project differently from CameraFacing.
+    s.cameraPos = glm::vec3(3.5f, 2.0f, 6.0f);
+    s.cameraTarget = glm::vec3(0.0f);
+    s.ticksBeforeCapture = 3;
+    return s;
+}
+
+SceneConfig axisLockedScene() {
+    SceneConfig s;
+    s.particleType = "visual_test:column_axis";
+    s.emitterPreset = "visual_test:column_axis_burst";
+    s.billboard = BillboardMode::AxisLocked;
+    // Mostly vertical motion so the axis-locked (Y) quads stay visible.
+    s.initialSpeed = Range{0.5f, 0.5f};
+    s.velocityBias = glm::vec3(0.0f, 1.2f, 0.0f);
+    s.size = Range{0.35f, 0.35f};
+    s.sizeEndScale = 1.4f;
+    s.startTint = glm::vec4(0.8f, 0.8f, 0.8f, 0.9f);
+    s.endTint   = glm::vec4(0.4f, 0.4f, 0.4f, 0.2f);
+    s.burstCount = 16;
+    // Same off-axis pose as CameraFacing so the two goldens differ because of
+    // the billboard math, not a different camera.  An AxisLocked quad's X
+    // vector lies in the world XZ plane; a CameraFacing quad's X vector lies
+    // in the view plane — from this pose the projected footprints differ.
+    s.cameraPos = glm::vec3(3.5f, 2.0f, 6.0f);
+    s.cameraTarget = glm::vec3(0.0f);
+    s.ticksBeforeCapture = 3;
+    return s;
+}
+
+void runGoldenTest(const SceneConfig& scene, const char* goldenName) {
     HeadlessCtx ctx = makeHeadlessContext();
-    CapturedFrame frame = renderOneFrame(ctx);
+    CapturedFrame frame = renderOneFrame(ctx, scene);
     ASSERT_EQ(frame.rgba.size(),
               static_cast<size_t>(kCaptureWidth) * kCaptureHeight * 4);
 
     const std::string goldenPath =
-        std::string(FINEVOX_SOURCE_DIR) + "/tests/golden/sparks_basic.png";
+        std::string(FINEVOX_SOURCE_DIR) + "/tests/golden/" + goldenName + ".png";
 
     GoldenCompareResult r = VisualTestHarness::compareAgainstGolden(
         frame.rgba, frame.width, frame.height,
         goldenPath, kMaxAbsDiffPerChannel);
 
-    std::cerr << "[VisualSparks] tolerance=" << int(kMaxAbsDiffPerChannel)
+    std::cerr << "[VisualSparks] golden=" << goldenName
+              << " tolerance=" << int(kMaxAbsDiffPerChannel)
               << " maxAbsDiff=" << int(r.maxAbsDiff)
-              << " failingPixels=" << r.failingPixelCount
-              << " goldenPath=" << goldenPath << "\n";
+              << " failingPixels=" << r.failingPixelCount << "\n";
 
     if (!r.passed) {
-        // Drop a "last actual" PNG next to the golden so the failure is easy
-        // to inspect without re-running the test.
         const std::string lastActual =
-            std::string(FINEVOX_SOURCE_DIR) + "/tests/golden/sparks_basic.actual.png";
+            std::string(FINEVOX_SOURCE_DIR) + "/tests/golden/" + goldenName +
+            ".actual.png";
         FrameCapture::savePNG(lastActual, frame.width, frame.height, frame.rgba);
         std::cerr << "[VisualSparks] wrote last actual to " << lastActual << "\n";
     }
@@ -271,19 +350,34 @@ TEST(VisualSparks, GoldenBasic) {
                            << r.firstFailY << ")";
 }
 
+} // anonymous namespace
+
+TEST(VisualSparks, GoldenBasic) {
+    runGoldenTest(basicScene(), "sparks_basic");
+}
+
+TEST(VisualSparks, GoldenCameraFacing) {
+    runGoldenTest(cameraFacingScene(), "sparks_camera_facing");
+}
+
+TEST(VisualSparks, GoldenAxisLocked) {
+    runGoldenTest(axisLockedScene(), "sparks_axis_locked");
+}
+
 TEST(VisualSparks, DeterministicAcrossRuns) {
     // Render the same scene twice in the same process and verify the two
     // captures are byte-identical.  This catches nondeterminism sources
     // (unsorted iteration, frame-index state leaking between runs, etc.)
     // independent of whether the golden matches.
     HeadlessCtx ctx = makeHeadlessContext();
-    CapturedFrame a = renderOneFrame(ctx);
+    const SceneConfig scene = basicScene();
+    CapturedFrame a = renderOneFrame(ctx, scene);
     // Reset the OffscreenSurface before the second run so its internal
     // single-buffered state starts fresh.  Building a second ctx also works
     // but would double the test's Vulkan-init cost; resize-to-same-size is a
     // cheap way to drive OffscreenSurface through its recreate path.
     ctx.surface->resize(kSurfaceWidth, kSurfaceHeight);
-    CapturedFrame b = renderOneFrame(ctx);
+    CapturedFrame b = renderOneFrame(ctx, scene);
 
     ASSERT_EQ(a.rgba.size(), b.rgba.size());
     size_t mismatches = 0;

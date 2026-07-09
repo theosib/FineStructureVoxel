@@ -617,6 +617,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_icon_atlas.cpp
             tests/test_particle_renderer.cpp
             tests/test_visual_sparks.cpp
+            tests/test_visual_scene.cpp
         )
 
         target_link_libraries(finevox_render_tests PRIVATE
@@ -635,18 +636,25 @@ if(FINEVOX_BUILD_TESTS)
             FINEVOX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
         # Two-label visual-test policy (see docs/systems/rendering.md).  The
-        # render binary mixes curated visual tests (VisualSparks.*) with
-        # non-visual unit tests (FrameCapture, ParticleRenderer, IconAtlas,
-        # FrameFenceWaiter); split discovery so labels only apply to the
-        # visual cases.
+        # render binary mixes curated golden visual tests with non-visual unit
+        # tests (FrameCapture, ParticleRenderer, IconAtlas, FrameFenceWaiter);
+        # split discovery so the visual-curated label only tags the hand-picked
+        # golden cases.
         #   ctest -L visual-curated     → small, deliberately-chosen matrix
         #   ctest -L visual-regression  → empty today; reserved for future use
+        #
+        # Curated = the four VisualSparks.* billboard-mode goldens plus the one
+        # VisualScene.GoldenBasicBlocks world-render golden (phase 2b) = 5.
+        # VisualScene.DeterministicAcrossRuns is a GPU determinism guard with no
+        # committed golden (compares two in-process renders), so it is NOT
+        # driver-fragile and rides in the general bucket rather than inflating
+        # the curated count.
         gtest_discover_tests(finevox_render_tests
-            TEST_FILTER "VisualSparks.*"
+            TEST_FILTER "VisualSparks.*:VisualScene.GoldenBasicBlocks"
             PROPERTIES LABELS "visual-curated"
         )
         gtest_discover_tests(finevox_render_tests
-            TEST_FILTER "-VisualSparks.*"
+            TEST_FILTER "-VisualSparks.*:VisualScene.GoldenBasicBlocks"
         )
     endif()
 endif()

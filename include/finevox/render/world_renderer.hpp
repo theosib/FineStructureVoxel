@@ -25,8 +25,10 @@
 // FineStructureVK types
 #include <finevk/engine/camera.hpp>
 #include <finevk/high/simple_renderer.hpp>
+#include <finevk/rendering/render_surface.hpp>
 #include <finevk/rendering/pipeline.hpp>
 #include <finevk/rendering/descriptors.hpp>
+#include <finevk/device/sampler.hpp>
 #include <finevk/high/uniform_buffer.hpp>
 #include <finevk/high/texture.hpp>
 
@@ -105,7 +107,7 @@ struct WorldRendererConfig {
  * atlas.createPlaceholderAtlas(device, commandPool, 16, 16);
  * atlas.setBlockTexture(stoneId, 0, 0);
  *
- * WorldRenderer renderer(device, simpleRenderer, world, config);
+ * WorldRenderer renderer(device, surface, world, config);  // surface: SimpleRenderer* or OffscreenSurface*
  * renderer.loadShaders("shaders/chunk.vert.spv", "shaders/chunk.frag.spv");
  * renderer.setBlockAtlas(atlas.texture());
  * renderer.setTextureProvider(atlas.createProvider());
@@ -118,7 +120,7 @@ struct WorldRendererConfig {
  * textures.loadAtlas("game://textures/blocks.atlas");
  * textures.loadBlockTextureConfig("game://config/block_textures.cbor");
  *
- * WorldRenderer renderer(device, simpleRenderer, world, config);
+ * WorldRenderer renderer(device, surface, world, config);  // surface: SimpleRenderer* or OffscreenSurface*
  * renderer.loadShaders("shaders/chunk.vert.spv", "shaders/chunk.frag.spv");
  * renderer.setBlockAtlas(textures.getAtlasTexture(0));  // Primary atlas
  * renderer.setTextureProvider([&](BlockTypeId id, Face face) {
@@ -143,13 +145,16 @@ public:
     /**
      * @brief Create a WorldRenderer
      * @param device FineStructureVK logical device
-     * @param renderer SimpleRenderer for render pass and frame info
+     * @param surface Render surface for render pass and frame info.  May be a
+     *        SimpleRenderer (window/swap-chain rendering) or an
+     *        OffscreenSurface (headless capture / visual tests) — anything
+     *        implementing the finevk::RenderSurface interface.
      * @param world The World to render
      * @param config Configuration options
      */
     WorldRenderer(
         finevk::LogicalDevice* device,
-        finevk::SimpleRenderer* renderer,
+        finevk::RenderSurface* surface,
         World& world,
         const WorldRendererConfig& config = {}
     );
@@ -670,8 +675,16 @@ private:
 
     // External references
     finevk::LogicalDevice* device_;
-    finevk::SimpleRenderer* renderer_;
+    finevk::RenderSurface* renderer_;
     World& world_;
+
+    // Locally-owned sampler for the block atlas.  Previously this came from
+    // SimpleRenderer::defaultSampler(), which the generalized RenderSurface
+    // interface does not expose; we build an identical one (linear filter,
+    // linear mipmap, repeat address, anisotropy when supported) so window
+    // rendering is byte-for-byte unchanged.  Mirrors ParticleRenderer's
+    // locally-built sampler (Phase 1a).
+    finevk::SamplerPtr blockSampler_;
 
     // Camera state
     finevk::CameraState cameraState_;       // Includes viewRelativeFrustumPlanes for culling

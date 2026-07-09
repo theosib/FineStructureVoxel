@@ -294,11 +294,38 @@ This writes the current output as the new golden and passes.  Commit the
 updated PNG.  Failing tests also dump the last actual result to
 `tests/golden/<name>.actual.png` (gitignored) for side-by-side inspection.
 
-**Renderer generality.**  `ParticleRenderer` accepts any `RenderSurface*`
-(either `SimpleRenderer` for on-screen rendering or `OffscreenSurface` for
-capture / tests).  Its one previous `defaultSampler()` dep on
-`SimpleRenderer` is now a locally-built linear `Sampler`.  `WorldRenderer`
-is still `SimpleRenderer`-bound as of this writing.
+**Renderer generality.**  Both `ParticleRenderer` and `WorldRenderer` accept
+any `finevk::RenderSurface*` — either a `SimpleRenderer` (on-screen / window)
+or an `OffscreenSurface` (headless capture / tests).  `SimpleRenderer` and
+`OffscreenSurface` both derive from `RenderSurface`, so window call sites pass
+through unchanged.  Each renderer's one former `SimpleRenderer::defaultSampler()`
+dependency is now a locally-owned `finevk::Sampler` member: `ParticleRenderer`
+builds a linear sampler; `WorldRenderer` builds one that replicates
+`defaultSampler()` exactly (linear min/mag, linear mipmaps, repeat addressing,
+anisotropy when the device enables it) so block-atlas filtering is byte-for-byte
+identical to prior window rendering.
+
+**Scene-level visual tests (phase 2b).**  With `WorldRenderer` on the
+`RenderSurface` interface, a full world render can be driven headlessly into an
+`OffscreenSurface`.  `tests/test_visual_scene.cpp` constructs a small
+deterministic world (a stone platform with a stacked block cluster), fixes the
+camera pose, drives the async mesh pipeline to quiescence *synchronously*, then
+renders one frame and golden-compares a 96×96 ROI
+(`tests/golden/scene_basic_blocks.png`).  This is Tier-2 coverage: block
+meshing, greedy merge, AO, and per-face shading through the real GPU pipeline.
+
+*Driving async meshing to quiescence in a test.*  `WorldRenderer` schedules
+rebuilds onto `MeshRebuildQueue`; `MeshWorkerPool` threads build them and push
+to the upload queue; `updateMeshes()` drains uploads to the GPU.  The test calls
+`rebuildAllMeshes()`, then loops `updateMeshes()` (with a 5 ms sleep) until the
+input queue is empty, the upload queue is empty, and `loadedMeshCount()` reaches
+the world's subchunk count — requiring several consecutive "settled" passes and
+bounded by a 10 s timeout so a stall fails loudly.  Determinism comes from using
+no light provider (constant baked sky-light, no BFS to settle), disabled fog,
+and order-independent per-subchunk mesh content; the golden mints at
+`maxAbsDiff = 0` and repeats identically 10/10.  A `DeterministicAcrossRuns`
+companion re-renders in a fresh context and byte-compares to guard determinism
+independently of the committed golden.
 
 **Live F12 screenshot (Phase 1d).**  `render_demo` binds `key_f12:
 screenshot` (see `resources/input/default.bindings`).  The action sets a
@@ -331,9 +358,13 @@ diff-inspect on failure.  Prefer deleting a redundant curated test over
 adding a marginal one.  If a change would push the curated count above ~10,
 stop and reconsider scope.
 
-Current curated set (post-phase-2a): `VisualSparks.GoldenBasic` (velocity-
-stretched), `VisualSparks.GoldenCameraFacing`, `VisualSparks.GoldenAxisLocked`,
-`VisualSparks.DeterministicAcrossRuns`.
+Current curated set (post-phase-2b, 5 tests): `VisualSparks.GoldenBasic`
+(velocity-stretched), `VisualSparks.GoldenCameraFacing`,
+`VisualSparks.GoldenAxisLocked`, `VisualSparks.DeterministicAcrossRuns`, and
+`VisualScene.GoldenBasicBlocks` (world render path — blocks / meshing / AO).
+`VisualScene.DeterministicAcrossRuns` is intentionally *not* curated: it commits
+no golden (it compares two in-process renders), so it is not driver-fragile and
+rides in the general test bucket.
 
 **Pitfalls.**
 

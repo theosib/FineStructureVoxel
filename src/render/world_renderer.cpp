@@ -5,6 +5,7 @@
 #include "finevox/core/fluid_registry.hpp"
 
 #include <finevk/device/logical_device.hpp>
+#include <finevk/device/physical_device.hpp>
 #include <finevk/device/command.hpp>
 #include <finevk/device/sampler.hpp>
 
@@ -15,7 +16,7 @@ namespace finevox::render {
 
 WorldRenderer::WorldRenderer(
     finevk::LogicalDevice* device,
-    finevk::SimpleRenderer* renderer,
+    finevk::RenderSurface* renderer,
     World& world,
     const WorldRendererConfig& config
 )
@@ -81,6 +82,26 @@ void WorldRenderer::initialize() {
     descriptorSets_ = descriptorPool_->allocate(
         descriptorLayout_.get(), renderer_->framesInFlight());
 
+    // Build the block-atlas sampler locally.  This replaces the former
+    // SimpleRenderer::defaultSampler() dependency (not part of the generalized
+    // RenderSurface interface).  We replicate defaultSampler()'s configuration
+    // exactly so window rendering is unchanged: linear min/mag filter, linear
+    // mipmaps, repeat addressing, and anisotropy when the device supports it.
+    {
+        auto builder = finevk::Sampler::create(device_)
+            .filter(VK_FILTER_LINEAR, VK_FILTER_LINEAR)
+            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+            .addressMode(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+            .mipLod(0.0f, VK_LOD_CLAMP_NONE);
+        auto* physDevice = device_->physicalDevice();
+        if (physDevice && physDevice->capabilities().supportsAnisotropy()) {
+            float maxAnisotropy =
+                physDevice->capabilities().properties.limits.maxSamplerAnisotropy;
+            builder.anisotropy(maxAnisotropy);
+        }
+        blockSampler_ = builder.build();
+    }
+
     // Write descriptor sets
     finevk::DescriptorWriter writer(device_);
     for (uint32_t i = 0; i < renderer_->framesInFlight(); ++i) {
@@ -91,7 +112,7 @@ void WorldRenderer::initialize() {
         if (blockAtlas_) {
             writer.writeImage(descriptorSets_[i], 1,
                              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                             blockAtlas_->view(), renderer_->defaultSampler());
+                             blockAtlas_->view(), blockSampler_.get());
         }
     }
     writer.update();

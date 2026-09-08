@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Phase 26-B — Particle Rendering |
-| Test count | **2179** (2027 core + 120 script + 31 render; 26-B added +3 core + 8 render = +11) |
+| Last completed phase | Visual-test framework — `WorldRenderer` `RenderSurface&` generalization + scene visual test (commit `a9d0594`) |
+| Test count | **2196**, 100% green (4 self-skip when run outside the repo tree) |
 | In-progress | — |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -165,11 +165,11 @@ From **Phase 9**:
 - Network quiescence protocol for connected blocks
 
 From **Phase 2**:
-- LZ4 compression for chunk data (infrastructure ready, not implemented)
+- ~~LZ4 compression for chunk data~~ ✓ — implemented in `src/core/region_file.cpp` (`ChunkFlags::COMPRESSED_LZ4`, encode in `saveColumnRaw`, decode in `loadColumn`, honours `ConfigManager::compressionEnabled()`); 4 tests in `tests/test_region_file.cpp`
 - Region file corruption recovery
 
 From **Phase 10**:
-- Schematic file I/O (CBOR format designed, not yet wired to disk)
+- ~~Schematic file I/O~~ ✓ — implemented in `src/worldgen/schematic_io.cpp`: `serializeSchematic`/`deserializeSchematic`/`saveSchematic`/`loadSchematic`; format is 4-byte magic `"VXSC"` + 4-byte compressed size + LZ4-compressed CBOR; tests in `tests/test_schematic.cpp`
 
 Known design issue:
 - Native finescript functions crossing contexts is awkward (show_main_menu etc.) — should revisit with message-passing or state-machine approach

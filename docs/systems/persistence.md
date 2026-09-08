@@ -170,4 +170,4 @@ entityManager.loadColumnEntities(column);          // reads from column.data()["
 - Per-block data uses sparse index map — don't iterate all 4096 blocks looking for data
 - CBOR integer keys not used (strings for portability) but DataContainer is uint32_t in-memory
 - `RegionFile` is NOT thread-safe; IOManager serializes access via dedicated save/load threads
-- `LZ4 compression`: flag infrastructure in place (ChunkFlags bit in region header), not yet activated (see ROADMAP.md)
+- `LZ4 compression`: active. `saveColumnRaw` compresses the CBOR payload (4-byte uncompressed size prefix) and sets `ChunkFlags::COMPRESSED_LZ4` only when the compressed form is smaller; `loadColumn` decompresses transparently. Gated on `ConfigManager::compressionEnabled()`, default on when config is uninitialised.

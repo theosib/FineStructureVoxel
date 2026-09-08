@@ -18,11 +18,11 @@ These items were designed and partially scoped but deferred during implementatio
 - **Network quiescence protocol** — For connected blocks (wires, pipes), a way to detect when an update wave has settled before snapshotting for network sync.
 
 ### From Phase 2 (Persistence)
-- **LZ4 compression** — Infrastructure in place (ChunkFlags compression bit in region file header). Just needs actual LZ4 encode/decode wired in.
+- ~~**LZ4 compression**~~ ✓ — Implemented in `src/core/region_file.cpp`. `saveColumnRaw` LZ4-compresses the CBOR payload (prefixed with a 4-byte uncompressed size) and sets `ChunkFlags::COMPRESSED_LZ4` when the result is smaller; `loadColumn` decompresses transparently. Honours `ConfigManager::compressionEnabled()`, defaulting to on when config is uninitialised. Four tests in `tests/test_region_file.cpp` cover default-on, disabled, mixed round-trip, and size reduction.
 - **Region file corruption recovery** — If a region file's TOC is corrupted (truncated write), no recovery path. Needs checksum validation and fallback to previous TOC backup.
 
 ### From Phase 10 (World Generation)
-- **Schematic file I/O** — CBOR format designed (see old_docs/21-clipboard-schematic.md). Clipboard/copy-paste in-memory works; disk save/load not wired.
+- ~~**Schematic file I/O**~~ ✓ — Implemented in `src/worldgen/schematic_io.cpp`. Public API: `serializeSchematic` / `deserializeSchematic` / `saveSchematic` / `loadSchematic` (`include/finevox/worldgen/schematic_io.hpp`). On-disk format is a 4-byte magic `"VXSC"` + 4-byte compressed size + LZ4-compressed CBOR body. Tests in `tests/test_schematic.cpp`.
 
 ### From Phase 23 (Inventory UI & Crafting)
 - **Config-driven input bindings** — Sub-Phase A designed a `.bindings` file format and `InputActionSystem` class. Currently render_demo uses `ActionDispatch` with hardcoded listener chains. The config-driven system would make bindings rebindable and serializable.

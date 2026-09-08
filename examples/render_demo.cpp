@@ -11,6 +11,8 @@
  * - Smooth lighting with LightEngine (sky + block light)
  *
  * Command line:
+ * - --game-root <dir>: Load game content from <dir> instead of ./resources
+ *   (must exist; no fallback). See docs/systems/content-roots.md.
  * - --worldgen: Use procedural world generation instead of test world
  * - --single-block: Place only a single block for testing
  * - --large-coords: Start at large coordinates (tests precision)
@@ -135,6 +137,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 
 using namespace finevox;
 using namespace finevox::worldgen;
@@ -469,6 +472,7 @@ int main(int argc, char* argv[]) {
     bool startAtLargeCoords = false;
     bool singleBlockMode = false;
     bool useWorldGen = false;
+    std::string gameRootFlag;  // empty = not supplied
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--large-coords") {
             startAtLargeCoords = true;
@@ -479,12 +483,33 @@ int main(int argc, char* argv[]) {
         if (std::string(argv[i]) == "--worldgen") {
             useWorldGen = true;
         }
+        if (std::string(argv[i]) == "--game-root") {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --game-root requires a directory path\n";
+                return 1;
+            }
+            gameRootFlag = argv[++i];
+        }
     }
 
     try {
-        // Setup resource locator - handle running from build directory
+        // Setup resource locator.
+        // --game-root <dir> overrides the content root outright: the path must
+        // exist, and there is deliberately no fallback to the engine's own
+        // resources/ — silently booting engine content when a game directory is
+        // mistyped hides the mistake until something is missing much later.
+        // Without the flag, behaviour is unchanged: ./resources, falling back to
+        // ../resources when run from the build directory.
         std::string resourcePath = "resources";
-        if (!std::filesystem::exists(resourcePath) && std::filesystem::exists("../resources")) {
+        if (!gameRootFlag.empty()) {
+            if (!std::filesystem::is_directory(gameRootFlag)) {
+                throw std::runtime_error(
+                    "--game-root is not an existing directory: " + gameRootFlag);
+            }
+            resourcePath = gameRootFlag;
+            std::cout << "Game content root: " << resourcePath << "\n";
+        } else if (!std::filesystem::exists(resourcePath) &&
+                   std::filesystem::exists("../resources")) {
             resourcePath = "../resources";
             std::cout << "Running from build directory, using " << resourcePath << "\n";
         }
@@ -2035,7 +2060,8 @@ int main(int argc, char* argv[]) {
         std::cout << "  V: Print mesh statistics\n";
         std::cout << "  Escape: Toggle pause menu\n";
         std::cout << "  ` (backtick): Toggle console\n";
-        std::cout << "\nFlags: --single-block, --large-coords, --sync (async is default)\n\n";
+        std::cout << "\nFlags: --game-root <dir>, --single-block, --large-coords,"
+                     " --worldgen, --sync (async is default)\n\n";
 
         // ================================================================
         // RenderLayers

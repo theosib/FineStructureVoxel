@@ -1,12 +1,21 @@
 #include "finevox/core/region_file.hpp"
 #include "finevox/core/config.hpp"
 #include "finevox/core/serialization.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <utility>
 #include <lz4.h>
 
 namespace finevox {
+
+namespace {
+// Size of the per-chunk header written by writeChunkData / parsed by readChunkData:
+// magic (4) + flags (4) + size (4). A ToC entry claiming less than this cannot
+// describe a real chunk, and readChunkData's `size - 12` would underflow.
+constexpr uint32_t DAT_CHUNK_HEADER_BYTES = 12;
+}  // namespace
 
 // ============================================================================
 // TocEntry serialization
@@ -182,24 +191,69 @@ bool RegionFile::loadToc() {
     while (tocFile_.read(reinterpret_cast<char*>(entryBuf.data()), TocEntry::SERIALIZED_SIZE)) {
         auto entry = TocEntry::fromBytes(entryBuf.data(), entryBuf.size());
         if (entry) {
+            // Reject entries that cannot describe real storage before they reach the
+            // index. fromBytes only checks that 24 bytes parse, so a torn or garbage
+            // ToC would otherwise (a) let readChunkData compute `size - 12` on a
+            // uint32_t and underflow to ~4 GiB, sizing an allocation from it,
+            // (b) alias a legitimate column's slot via localKey, or (c) make the
+            // free-list rebuild below synthesize a span that runs past end-of-file.
+            // Subtraction, not addition, so offset + size cannot wrap.
+            const bool sane =
+                entry->localX >= 0 && entry->localX < REGION_SIZE &&
+                entry->localZ >= 0 && entry->localZ < REGION_SIZE &&
+                entry->size >= DAT_CHUNK_HEADER_BYTES &&
+                entry->offset <= dataFileEnd_ &&
+                entry->size <= dataFileEnd_ - entry->offset;
+            // Skipped, not repaired: the .dat payload is never truncated on the basis
+            // of a damaged index, and the bytes simply fall out as free space below.
+            if (!sane) {
+                continue;
+            }
+
             uint32_t key = localKey(entry->localX, entry->localZ);
 
-            // Check if this is newer than existing entry
+            // Check if this is newer than existing entry.
+            // Superseded entries are NOT freed here; see the free-list rebuild below.
             auto it = index_.find(key);
             if (it == index_.end() || entry->timestamp > it->second.timestamp) {
-                // If replacing, add old span to free list
-                if (it != index_.end()) {
-                    addFreeSpan(it->second.offset, it->second.size);
-                }
                 index_[key] = *entry;
-            } else {
-                // Older entry, add to free list
-                addFreeSpan(entry->offset, entry->size);
             }
         }
     }
 
     tocFile_.clear();  // Clear EOF flag
+
+    // Rebuild the free list as the complement of the live spans, rather than by
+    // tombstoning each superseded entry's span as the journal is replayed.
+    //
+    // MECHANISM OF THE BUG THIS AVOIDS: saveColumnRaw legitimately re-uses a
+    // reclaimed offset, so one offset can occur in several ToC entries. Save a
+    // column three times and the journal reads (off=0), (off=S), (off=0) - the
+    // third save re-occupied the span freed by the first. Freeing per superseded
+    // entry marks offset 0 free even though the live entry lives there, so the
+    // next save (of any column with a payload that fits) is handed offset 0 and
+    // overwrites live data in place: the column comes back as a different one.
+    // Only the latest entry per (localX,localZ) owns storage, so derive free
+    // space from index_ alone - anything else in the file is reusable.
+    freeSpans_.clear();
+    std::vector<std::pair<uint64_t, uint64_t>> liveSpans;  // [begin, end)
+    liveSpans.reserve(index_.size());
+    for (const auto& [key, entry] : index_) {
+        liveSpans.emplace_back(entry.offset, entry.offset + entry.size);
+    }
+    std::sort(liveSpans.begin(), liveSpans.end());
+
+    uint64_t cursor = 0;
+    for (const auto& [begin, end] : liveSpans) {
+        if (begin > cursor) {
+            addFreeSpan(cursor, begin - cursor);
+        }
+        cursor = std::max(cursor, end);  // max(): tolerate overlaps in damaged files
+    }
+    if (dataFileEnd_ > cursor) {
+        addFreeSpan(cursor, dataFileEnd_ - cursor);
+    }
+
     return true;
 }
 

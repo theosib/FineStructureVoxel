@@ -90,6 +90,11 @@ ChunkColumn col = future.get();
 - `ToC::compact()` removes superseded entries to reclaim space
 - Crash-safe: incomplete writes leave old entry valid
 - Free space tracking: best-fit allocation; tombstoned spans reused on next write
+- Because freed spans are reused, the *same* .dat offset legitimately appears in
+  several ToC entries. Only the latest entry per (x,z) owns storage: the free list
+  must be derived from the live index (complement of the live spans), never by
+  tombstoning each superseded entry as the journal is replayed - that frees an
+  offset a later entry has re-occupied and the next write clobbers live data.
 
 ---
 
@@ -170,4 +175,6 @@ entityManager.loadColumnEntities(column);          // reads from column.data()["
 - Per-block data uses sparse index map — don't iterate all 4096 blocks looking for data
 - CBOR integer keys not used (strings for portability) but DataContainer is uint32_t in-memory
 - `RegionFile` is NOT thread-safe; IOManager serializes access via dedicated save/load threads
+- Save the same column 3x, restart, save another column: used to hand out the live
+  column's offset (see TOC semantics above). Regression tests: `tests/test_region_freespace.cpp`
 - `LZ4 compression`: active. `saveColumnRaw` compresses the CBOR payload (4-byte uncompressed size prefix) and sets `ChunkFlags::COMPRESSED_LZ4` only when the compressed form is smaller; `loadColumn` decompresses transparently. Gated on `ConfigManager::compressionEnabled()`, default on when config is uninitialised.

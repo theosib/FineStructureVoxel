@@ -132,10 +132,42 @@ private:
 // Transformation utilities
 // ============================================================================
 
-/// Rotate schematic by a rotation (typically 90-degree Y-axis increments)
+/// Rotate schematic by a rotation (typically 90-degree Y-axis increments).
+///
+/// The result extent is the bounding box of the rotated cell-index box, shifted so
+/// its minimum corner is (0,0,0). Each non-air cell `p` moves to
+/// `rotation.apply(p) - minCorner`.
+///
+/// Per-block state is transformed too:
+/// - `rotation`: composed so the block's own orientation applies first, then the
+///   schematic rotation, i.e. `dst.rotation.apply(v) == rotation.apply(src.rotation.apply(v))`
+///   for every vector `v`.
+/// - `displacement`: rotated as a vector in block-local axes (exact; matrix entries
+///   are only -1/0/+1).
+/// - `typeName` is copied verbatim and `extraData` is deep-copied.
 [[nodiscard]] Schematic rotateSchematic(const Schematic& schematic, Rotation rotation);
 
-/// Mirror schematic along an axis
+/// Mirror schematic along an axis.
+///
+/// The extent is unchanged; a non-air cell at `p` moves to the cell with `p[axis]`
+/// replaced by `size[axis] - 1 - p[axis]`.
+///
+/// Per-block state is transformed by the reflection matrix `M` (identity with -1 in
+/// the `axis` slot) using the same rule as rotateSchematic() -- the block's own
+/// orientation applies first, then the schematic transform:
+/// - `rotation`: `M.compose(src.rotation)`, so
+///   `dst.rotation.apply(v) == M.apply(src.rotation.apply(v))` for every vector `v`.
+/// - `displacement`: transformed by `M`, i.e. its `axis` component is negated.
+/// - `typeName` is copied verbatim and `extraData` is deep-copied.
+///
+/// @warning `M` has determinant -1, so `dst.rotation` is generally NOT one of the 24
+/// proper rotations. `Rotation` can hold it and compose/inverse/apply all behave
+/// correctly, but `Rotation::index()` has no entry for it and returns 0 (identity).
+/// Both the world storage (`SubChunk::rotations_`, a uint8_t index array) and the
+/// schematic file format encode orientation as that index, so a mirrored block's
+/// orientation is silently lost if the result is stamped into the world or saved.
+/// Mirroring is currently correct only as an in-memory transform; see
+/// docs/systems/worldgen.md for the follow-up needed before production use.
 [[nodiscard]] Schematic mirrorSchematic(const Schematic& schematic, Axis axis);
 
 /// Crop schematic to smallest bounding box containing non-air blocks

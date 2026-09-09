@@ -206,6 +206,62 @@ FeatureRegistry::global().registerFeature("finevox:oak_tree", std::make_unique<T
 FeatureRegistry::global().addPlacement(rule);
 ```
 
+### Schematic Rotation Semantics
+
+`rotateSchematic(s, R)` (in `finevox/worldgen/schematic.hpp`) is the canonical way to
+orient a structure template. It transforms three things, not just positions:
+
+- **Cells** — the result extent is the bounding box of `R` applied to the eight corners of
+  the source cell-index box, shifted so the minimum corner is `(0,0,0)`. A non-air cell at
+  `p` lands at `R.apply(p) - minCorner`.
+- **Block orientation** — the block's own `rotation` applies *first*, then the schematic
+  rotation: `dst.rotation.apply(v) == R.apply(src.rotation.apply(v))` for every `v`.
+  Since `Rotation::compose` is the matrix product `this * other`, that means
+  `R.compose(src.rotation)` — getting this order backwards makes rotated stairs/doors face
+  the wrong way while positions still look correct.
+- **Sub-block displacement** — `displacement` is in block-local axes, so it is rotated as a
+  vector by `R`'s matrix. `Rotation::matrix()` entries are only -1/0/+1, so the transform is
+  exact in float; no epsilon comparisons are needed or wanted.
+
+`typeName` is copied verbatim, `extraData` is deep-copied via `DataContainer::clone()`, and
+`name()`/`author()` carry over. Rotation is invertible cell-for-cell
+(`rotate(rotate(s, R), R.inverse())` reproduces `s`) and composes
+(`rotate(rotate(s, R), R) == rotate(s, R.compose(R))`). See
+`tests/test_schematic_transform.cpp` for the pinned contract.
+
+### Schematic Mirror Semantics
+
+`mirrorSchematic(s, axis)` follows the same rule as `rotateSchematic`, with the
+transform being the reflection matrix `M` — identity with `-1` in the `axis` slot:
+
+- **Cells** — the extent is unchanged; a non-air cell at `p` moves to `p` with its
+  `axis` component replaced by `size[axis] - 1 - p[axis]`.
+- **Block orientation** — the block's own `rotation` applies *first*, then the
+  reflection: `dst.rotation == M.compose(src.rotation)`, so
+  `dst.rotation.apply(v) == M.apply(src.rotation.apply(v))` for every `v`. Leaving
+  `rotation` untouched (the pre-S2 behaviour) mirrors the layout of a structure while
+  every stair, door and wedge inside it keeps facing its original way.
+- **Sub-block displacement** — transformed by `M`, i.e. the `axis` component is
+  negated. For a pure axis reflection this coincides with the old hand-rolled
+  negation, so the displacement half was already correct; the defect was the
+  untransformed `rotation`.
+
+Mirroring is an involution: `mirror(mirror(s, axis), axis) == s`.
+
+> **Reflections are not yet persistable.** `M` has determinant −1, so
+> `M.compose(src.rotation)` is generally *not* one of the 24 proper rotations.
+> `Rotation` stores a general −1/0/+1 matrix and `compose`/`apply`/`inverse` all behave
+> correctly on it (`inverse()` is the transpose, which is a true inverse for any
+> orthogonal matrix). But `Rotation::index()` has no table entry for a reflection and
+> silently returns `0` (identity), and **both** the world storage
+> (`SubChunk::rotations_`, a `uint8_t` index array written via `setRotation()`) and the
+> schematic file format (`schematic_io.cpp`, which encodes `rotation.index()`) store
+> orientation as that index. A mirrored schematic is therefore correct in memory but
+> loses per-block orientation the moment it is stamped into the world or saved.
+> Widening those two encodings to carry a full orientation (or adding a mirrored-model
+> concept per block type) is a prerequisite for using `mirrorSchematic` in generation,
+> and is deliberately out of scope for S2 — it is an on-disk format change.
+
 ---
 
 ## .biome File Format

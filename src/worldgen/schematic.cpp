@@ -8,6 +8,7 @@
 #include "finevox/worldgen/schematic.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <stdexcept>
 
@@ -26,6 +27,44 @@ void copySnapshotTo(BlockSnapshot& dst, const BlockSnapshot& src) {
     } else {
         dst.extraData.reset();
     }
+}
+
+/// Rotate a sub-block displacement as a vector in block-local axes.
+/// Each output component is the corresponding row of the rotation matrix dotted
+/// with the input. Matrix entries are only -1/0/+1, so this is exact in float.
+glm::vec3 rotateDisplacement(const Rotation& rotation, glm::vec3 displacement) {
+    const auto& m = rotation.matrix();
+    glm::vec3 out{0.0f};
+    for (int row = 0; row < 3; ++row) {
+        out[row] = static_cast<float>(m[row][0]) * displacement.x +
+                   static_cast<float>(m[row][1]) * displacement.y +
+                   static_cast<float>(m[row][2]) * displacement.z;
+    }
+    return out;
+}
+
+/// Deep copy a BlockSnapshot, transforming its orientation and displacement
+/// by `rotation`. The block's own orientation applies first, then the schematic
+/// rotation, i.e. for every vector v:
+///     dst.rotation.apply(v) == rotation.apply(src.rotation.apply(v))
+/// Rotation::compose is a matrix product (`this * other`), so the schematic
+/// rotation must be the left-hand operand.
+void rotateSnapshotTo(BlockSnapshot& dst, const BlockSnapshot& src, const Rotation& rotation) {
+    copySnapshotTo(dst, src);
+    dst.rotation = rotation.compose(src.rotation);
+    dst.displacement = rotateDisplacement(rotation, src.displacement);
+}
+
+/// The reflection that negates `axis` and leaves the other two axes alone.
+/// `Rotation` stores a general 3x3 matrix of -1/0/+1 and its constructor accepts
+/// any such matrix, so a determinant -1 transform is representable even though it
+/// is not one of the 24 proper rotations. See the note in schematic.hpp: such a
+/// value has no index() and therefore cannot survive the index-based world and
+/// file encodings.
+Rotation reflectionFor(Axis axis) {
+    std::array<std::array<int8_t, 3>, 3> m{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    m[static_cast<size_t>(axis)][static_cast<size_t>(axis)] = -1;
+    return Rotation(m);
 }
 
 }  // namespace
@@ -86,12 +125,14 @@ std::unordered_set<std::string> Schematic::uniqueBlockTypes() const {
 
 Schematic rotateSchematic(const Schematic& schematic, Rotation rotation) {
     if (rotation.isIdentity()) {
-        // Copy without transformation
+        // Fast path: cell mapping is the identity, so skip the bounding-box math.
+        // Snapshots still go through rotateSnapshotTo so this stays observably
+        // identical to the general path below.
         Schematic result(schematic.sizeX(), schematic.sizeY(), schematic.sizeZ());
         result.setName(schematic.name());
         result.setAuthor(schematic.author());
         schematic.forEachBlock([&](glm::ivec3 pos, const BlockSnapshot& snap) {
-            copySnapshotTo(result.at(pos), snap);
+            rotateSnapshotTo(result.at(pos), snap, rotation);
         });
         return result;
     }
@@ -132,14 +173,7 @@ Schematic rotateSchematic(const Schematic& schematic, Rotation rotation) {
         glm::ivec3 newPos(rx - minCorner.x, ry - minCorner.y, rz - minCorner.z);
 
         if (result.contains(newPos)) {
-            auto& dst = result.at(newPos);
-            dst.typeName = snap.typeName;
-            dst.rotation = snap.rotation.compose(rotation);
-            dst.displacement = snap.displacement;
-            if (snap.extraData.has_value()) {
-                auto cloned = snap.extraData->clone();
-                dst.extraData = std::move(*cloned);
-            }
+            rotateSnapshotTo(result.at(newPos), snap, rotation);
         }
     });
 
@@ -151,6 +185,8 @@ Schematic mirrorSchematic(const Schematic& schematic, Axis axis) {
     result.setName(schematic.name());
     result.setAuthor(schematic.author());
 
+    const Rotation mirror = reflectionFor(axis);
+
     schematic.forEachBlock([&](glm::ivec3 pos, const BlockSnapshot& snap) {
         glm::ivec3 newPos = pos;
         switch (axis) {
@@ -159,17 +195,13 @@ Schematic mirrorSchematic(const Schematic& schematic, Axis axis) {
             case Axis::Z: newPos.z = schematic.sizeZ() - 1 - pos.z; break;
         }
 
-        auto& dst = result.at(newPos);
-        dst.typeName = snap.typeName;
-        dst.rotation = snap.rotation;
-        dst.displacement = snap.displacement;
-        if (axis == Axis::X) dst.displacement.x = -dst.displacement.x;
-        else if (axis == Axis::Y) dst.displacement.y = -dst.displacement.y;
-        else if (axis == Axis::Z) dst.displacement.z = -dst.displacement.z;
-        if (snap.extraData.has_value()) {
-            auto cloned = snap.extraData->clone();
-            dst.extraData = std::move(*cloned);
-        }
+        // Same composition rule as rotateSchematic: the block's own orientation
+        // applies first, then the schematic transform. Reusing rotateSnapshotTo
+        // keeps the two transforms on one code path -- for a pure axis reflection
+        // rotateDisplacement(M, d) reduces to negating d's component along `axis`,
+        // which is what the previous hand-rolled path did, but the orientation was
+        // being copied through untransformed.
+        rotateSnapshotTo(result.at(newPos), snap, mirror);
     });
 
     return result;

@@ -527,6 +527,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_queue_primitives.cpp
         tests/test_noise.cpp
         tests/test_schematic.cpp
+        tests/test_schematic_transform.cpp
         tests/test_biome.cpp
         tests/test_feature.cpp
         tests/test_generation.cpp

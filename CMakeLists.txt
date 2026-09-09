@@ -507,6 +507,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_data_container.cpp
         tests/test_serialization.cpp
         tests/test_region_file.cpp
+        tests/test_region_freespace.cpp
         tests/test_io_manager.cpp
         tests/test_config.cpp
         tests/test_resource_locator.cpp

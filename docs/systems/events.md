@@ -220,7 +220,8 @@ if (sc.blockVersion() != cachedBlockVer || sc.lightVersion() != cachedLightVer) 
 
 - `onDestroy` called **BEFORE** block is removed — handler can inspect the block being broken
 - `onPlace` called **AFTER** placement — use `ctx.previousType()` + `ctx.setBlock()` to undo
-- `LightingUpdate` extended in Phase 21 with `FluidTypeId oldFluid`/`newFluid` fields
-- Scheduled tick persistence across save/load is **not yet implemented** (see ROADMAP.md)
+- `LightingUpdate` extended in Phase 21 with `FluidTypeId oldFluid`/`newFluid` fields; `LightingQueue` wraps `KeyedQueue<BlockCoord, LightingUpdate>` and preserves `oldType`/`oldFluid` while ORing `triggerMeshRebuild`
+- Scheduled tick persistence across save/load is implemented via `TickJournal` and wired into `IOManager` and `ColumnManager`
+- `GameSession::executeCommand` publishes typed events from `include/finevox/core/block_events.hpp` (`BlockPlacedEvent`, `BlockBrokenEvent`, `FluidPlacedEvent`, `FluidRemovedEvent`, `PlayerUseEvent`, `PlayerHitEvent`, `PlayerPositionEvent`, `PlayerLookEvent`, `PlayerJumpEvent`, `PlayerSprintEvent`, `PlayerSneakEvent`, `SetWorldTimeEvent`, `CraftItemEvent`) onto `session.eventBus()`
 - `EventType::SetWorldTime` + `GameActions::setWorldTime()` added in Phase 19
 - `EventType::FluidPlaced` / `FluidRemoved` added in Phase 21

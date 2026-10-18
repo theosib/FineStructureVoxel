@@ -150,10 +150,10 @@ Signal propagation via scheduled ticks and neighbor updates. Each block stores m
 
 ### Tier 4 — Scale + Polish
 
-#### finenet Migration
-**Priority: Low** | See [old_docs/PLAN-network-layer.md](../old_docs/PLAN-network-layer.md) and [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)
+#### finenet Migration & In-Process Client-Server Split (Phase R3)
+**Priority: Immediate** | See [old_docs/PLAN-network-layer.md](../old_docs/PLAN-network-layer.md) and [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)
 
-Extract `Queue<T>`, `KeyedQueue<K,D>`, and `WakeSignal` into standalone `finenet` library. Local single-player uses same `Connection` API as multiplayer — identical code paths.
+`finenet` provides `Queue<T>`, `KeyedQueue<K,D>`, `WakeSignal`, `MessageBuilder`/`MessageReader`, `Channel`, and `Connection::createLocalPair()` (with optional `debugSerialize = true` wire verification). Next step (Phase R3) splits `GameSession` into `ServerSession` and `ClientSession` communicating over `finenet::Connection` so single-player and multiplayer share the exact same Universal Smart-Client architecture.
 
 #### Multiplayer / Network Layer
 **Priority: Low (requires finenet)** | See [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)

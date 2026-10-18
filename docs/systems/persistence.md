@@ -73,16 +73,22 @@ Region files cover 64×64 columns each. Two files per region: `.dat` (data) + `.
 ```cpp
 #include <finevox/core/io_manager.hpp>
 
-// Async save/load
-IOManager io;
-io.init(worldPath);
+// Async save/load (LRU-cached open region files)
+IOManager io(worldPath);
+io.start();
 
-// Save (fire-and-forget; callback on complete)
+// Save (serializes column CBOR on calling thread; callback on save thread)
 io.queueSave(columnPos, column, [](ColumnPos pos, bool success){});
 
-// Load (returns future)
-auto future = io.queueLoad(columnPos);
-ChunkColumn col = future.get();
+// Block until all queued and in-flight disk writes + callbacks complete
+io.flush();
+
+// Async load (callback invoked on load thread)
+io.requestLoad(columnPos, [](ColumnPos pos, std::unique_ptr<ChunkColumn> col) {
+    // col is nullptr if column does not exist on disk
+});
+
+io.stop();
 ```
 
 **TOC semantics:**
@@ -156,11 +162,11 @@ bool compress = wc.compressionEnabled();
 // EntitySerializer — stores entities in ChunkColumn DataContainer
 // under "entity_data" key as CBOR byte array
 
-EntitySerializer serializer;
-auto bytes = serializer.serialize(*entity);        // → CBOR bytes
-auto entity = serializer.deserialize(bytes);       // → unique_ptr<Entity>
+std::vector<const Entity*> entities = {entityPtr};
+auto bytes = EntitySerializer::serialize(entities);          // → CBOR bytes
+auto restored = EntitySerializer::deserialize(bytes);        // → vector<unique_ptr<Entity>>
 
-// EntityManager manages per-chunk entity persistence
+// EntityManager manages per-chunk entity persistence (auto-wired into ColumnManager by GameSession)
 entityManager.saveColumnEntities(column);          // writes to column.data()["entity_data"]
 entityManager.loadColumnEntities(column);          // reads from column.data()["entity_data"]
 ```

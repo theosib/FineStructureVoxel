@@ -21,6 +21,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Layer diagram, 5 libraries, namespaces, external deps, tech decisions | Understanding overall structure |
 | [PATTERNS.md](PATTERNS.md) | Code conventions, common patterns, recurring gotchas | Writing or reviewing code |
 | [ROADMAP.md](ROADMAP.md) | Future phases not yet started, deferred design decisions | Planning next work |
+| [ARCHIVED_CODE.md](ARCHIVED_CODE.md) | Git commit SHA ledger and restoration commands for retired/superseded code | Inspecting or restoring removed files |
 
 ---
 

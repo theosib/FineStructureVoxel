@@ -57,7 +57,7 @@
 
 | Library | CMake Target | Namespace | Links |
 |---------|-------------|-----------|-------|
-| `libfinevox` | `finevox` | `finevox::` | — |
+| `libfinevox` | `finevox` | `finevox::` | `lz4_static`, `glm::glm`, `finescript` |
 | `libfinevox_worldgen` | `finevox_worldgen` | `finevox::worldgen::` | `finevox` PUBLIC |
 | `libfinevox_render` | `finevox_render` | `finevox::render::` | `finevox` PUBLIC, finevk |
 | `libfinevox_audio` | `finevox_audio` | `finevox::audio::` | `finevox`, miniaudio |
@@ -107,6 +107,7 @@ FineStructureVoxel/
 | FineStructureVK (finevk) | `/Users/theosib/projects/FineStructure/FineStructureVK/` | Vulkan wrapper |
 | finegui | `/Users/theosib/projects/FineStructure/finegui/` | GUI toolkit |
 | finescript (game-language) | `/Users/theosib/projects/FineStructure/game-language/` | Scripting language |
+| finenet | `/Users/theosib/projects/FineStructure/finenet/` | Multiplexed channel & queue transport (local + network) |
 
 finescript headers use `.h` not `.hpp`. finegui links: `libfinegui.a` + `libfinegui-script.a` + `libfinegui-retained.a`.
 

@@ -18,6 +18,8 @@
 #include <shared_mutex>
 #include <functional>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace finevox {
@@ -61,6 +63,12 @@ public:
     void setBlock(BlockCoord pos, BlockTypeId type);
     void setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type);
 
+    /// Set multiple blocks directly without triggering events (bulk)
+    /// Groups changes by ColumnPos and SubChunk Y so the column/subchunk map lock
+    /// is acquired once and each SubChunk is resolved once per subchunk.
+    /// @return Number of blocks whose type actually changed
+    size_t setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> changes);
+
     // ========================================================================
     // External Block API (Event-Driven)
     // ========================================================================
@@ -97,6 +105,17 @@ public:
 
     // Remove a column (for unloading)
     bool removeColumn(ColumnPos pos);
+
+    // Insert an externally loaded column into the world
+    void insertColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column);
+
+    // Extract a column out of the world (transfers ownership to caller/ColumnManager)
+    std::unique_ptr<ChunkColumn> extractColumn(ColumnPos pos);
+
+    // Attach optional ColumnManager for column lifecycle and dirty tracking
+    void setColumnManager(ColumnManager* manager);
+    [[nodiscard]] ColumnManager* columnManager() { return columnManager_; }
+    [[nodiscard]] const ColumnManager* columnManager() const { return columnManager_; }
 
     // Column iteration
     void forEachColumn(const std::function<void(ColumnPos, ChunkColumn&)>& callback);
@@ -278,6 +297,9 @@ private:
 
     // Optional update scheduler for external API (not owned)
     UpdateScheduler* updateScheduler_ = nullptr;
+
+    // Optional column manager for column lifecycle / persistence (not owned)
+    ColumnManager* columnManager_ = nullptr;
 
     // Config: always defer mesh rebuilds to lighting thread (for testing)
     bool alwaysDeferMeshRebuild_ = false;

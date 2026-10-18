@@ -13,108 +13,80 @@
 namespace finevox {
 
 // ============================================================================
-// LightingQueue Implementation
+// LightingQueue Implementation (backed by KeyedQueue<BlockCoord, LightingUpdate>)
 // ============================================================================
 
 void LightingQueue::enqueue(LightingUpdate update) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        // Consolidate by position: preserve the original oldType/oldFluid from the
-        // first update in this batch, update newType/newFluid to the latest, and
-        // OR triggerMeshRebuild so a deferred remesh request is never lost.
-        auto it = pending_.find(update.pos);
-        if (it != pending_.end()) {
-            it->second.newType = update.newType;
-            it->second.newFluid = update.newFluid;
-            it->second.triggerMeshRebuild =
-                it->second.triggerMeshRebuild || update.triggerMeshRebuild;
-        } else {
-            pending_.emplace(update.pos, std::move(update));
-        }
+    BlockCoord pos = update.pos;
+    queue_.push(std::move(pos), std::move(update));
+}
+
+void LightingQueue::enqueueBatch(std::vector<LightingUpdate> updates) {
+    if (updates.empty()) return;
+    std::vector<std::pair<BlockCoord, LightingUpdate>> pairs;
+    pairs.reserve(updates.size());
+    for (auto& u : updates) {
+        BlockCoord pos = u.pos;
+        pairs.emplace_back(pos, std::move(u));
     }
-    cv_.notify_one();
+    queue_.pushBatch(std::move(pairs));
 }
 
 std::vector<LightingUpdate> LightingQueue::dequeueBatch(size_t maxCount, bool* alarmFired) {
-    std::unique_lock<std::mutex> lock(mutex_);
-
     if (alarmFired) *alarmFired = false;
 
-    if (alarmSet_) {
-        // Wait until updates, stopped, or alarm fires
-        cv_.wait_until(lock, alarmTime_, [this] {
-            return !pending_.empty() || stopped_.load(std::memory_order_acquire);
-        });
-
-        // Check if alarm fired (time expired without data or stop)
-        if (pending_.empty() && !stopped_.load(std::memory_order_acquire)) {
-            if (alarmFired) *alarmFired = true;
-            alarmSet_ = false;
-            return {};
+    bool running = queue_.waitForWork();
+    auto pairs = queue_.drainUpTo(maxCount);
+    if (!pairs.empty()) {
+        if (queue_.hasAlarm() && std::chrono::steady_clock::now() >= queue_.alarmTime()) {
+            queue_.clearAlarm();
         }
-    } else {
-        // No alarm — wait indefinitely for updates or stop
-        cv_.wait(lock, [this] {
-            return !pending_.empty() || stopped_.load(std::memory_order_acquire);
-        });
+        std::vector<LightingUpdate> batch;
+        batch.reserve(pairs.size());
+        for (auto& [pos, update] : pairs) {
+            batch.push_back(std::move(update));
+        }
+        return batch;
     }
 
-    if (stopped_.load(std::memory_order_acquire) && pending_.empty()) {
-        return {};  // Stopped and no more work
+    if (running && !queue_.isShutdown()) {
+        if (alarmFired) *alarmFired = true;
     }
-
-    return tryDequeueBatchUnlocked(maxCount);
+    return {};
 }
 
 void LightingQueue::setAlarm(std::chrono::steady_clock::time_point tp) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        alarmTime_ = tp;
-        alarmSet_ = true;
-    }
-    cv_.notify_all();
+    queue_.setAlarm(tp);
 }
 
 void LightingQueue::clearAlarm() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    alarmSet_ = false;
+    queue_.clearAlarm();
 }
 
 std::vector<LightingUpdate> LightingQueue::tryDequeueBatch(size_t maxCount) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return tryDequeueBatchUnlocked(maxCount);
-}
-
-std::vector<LightingUpdate> LightingQueue::tryDequeueBatchUnlocked(size_t maxCount) {
+    auto pairs = queue_.drainUpTo(maxCount);
     std::vector<LightingUpdate> batch;
-    batch.reserve(std::min(maxCount, pending_.size()));
-
-    auto it = pending_.begin();
-    while (it != pending_.end() && batch.size() < maxCount) {
-        batch.push_back(it->second);
-        it = pending_.erase(it);
+    batch.reserve(pairs.size());
+    for (auto& [pos, update] : pairs) {
+        batch.push_back(std::move(update));
     }
-
     return batch;
 }
 
 bool LightingQueue::empty() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return pending_.empty();
+    return queue_.empty();
 }
 
 size_t LightingQueue::size() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return pending_.size();
+    return queue_.size();
 }
 
 void LightingQueue::stop() {
-    stopped_.store(true, std::memory_order_release);
-    cv_.notify_all();
+    queue_.shutdown();
 }
 
 void LightingQueue::reset() {
-    stopped_.store(false, std::memory_order_release);
+    queue_.resetShutdown();
 }
 
 // ============================================================================

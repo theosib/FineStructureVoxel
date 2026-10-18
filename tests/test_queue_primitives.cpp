@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "finevox/core/wake_signal.hpp"
-#include "finevox/core/deprecated/simple_queue.hpp"
-#include "finevox/core/deprecated/coalescing_queue.hpp"
+#include "finevox/core/queue.hpp"
+#include "finevox/core/keyed_queue.hpp"
 #include "finevox/core/position.hpp"
 #include <thread>
 #include <chrono>
@@ -9,6 +9,12 @@
 #include <vector>
 
 using namespace finevox;
+
+template<typename T>
+using SimpleQueue = Queue<T>;
+
+template<typename K, typename V>
+using CoalescingQueue = KeyedQueue<K, V>;
 
 // ============================================================================
 // WakeSignal tests

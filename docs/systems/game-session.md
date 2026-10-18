@@ -39,16 +39,22 @@ session->stopGameThread();
 session->tick(float dt);
 
 // GameActions — used from render/input thread
-GameActions* actions = session->gameActions();
-actions->breakBlock(pos);
-actions->placeBlock(pos, blockTypeId);
-actions->interactBlock(pos);
-actions->strikeBlock(pos);
-actions->sendPlayerState(entityState);  // player position update
-actions->placeFluid(pos, fluidTypeId, level);
-actions->removeFluid(pos);
-actions->setWorldTime(ticks);
-actions->attackEntity(attackerId, targetId, damageInfoValue);  // combat
+GameActions& actions = session->actions();
+actions.breakBlock(pos);
+actions.placeBlock(pos, blockTypeId);
+actions.useBlock(pos, face);
+actions.hitBlock(pos, face);
+actions.sendPlayerState(playerId, entityState);  // player position + yaw/pitch update
+actions.placeFluid(pos, fluidTypeId, level);
+actions.removeFluid(pos);
+actions.setWorldTime(ticks);
+actions.craftItem(stationPos, recipeId);
+actions.attackEntity(attackerId, targetId, damageInfoValue);  // combat
+
+// EventBus & Persistence access
+EventBus& bus = session->eventBus();
+ColumnManager& cm = session->columnManager();
+IOManager* io = session->ioManager();  // non-null when GameSessionConfig::worldSaveDir is set
 
 // WorldTime — read from any thread (atomic)
 int64_t ticks = session->worldTime().totalTicks();  // atomic read

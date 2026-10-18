@@ -301,6 +301,87 @@ TEST_F(IOManagerTest, RegionEviction) {
     io.stop();
 }
 
+TEST_F(IOManagerTest, TrueLRURegionEviction) {
+    IOManager io(tempDir);
+    io.setMaxOpenRegions(2);
+    io.start();
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+
+    // 1. Save to Region (0, 0) and Region (1, 0)
+    {
+        ChunkColumn col0(ColumnPos{0, 0});
+        col0.setBlock(0, 0, 0, stone);
+        io.queueSave(ColumnPos{0, 0}, col0);
+
+        ChunkColumn col1(ColumnPos{64, 0});  // Region (1, 0)
+        col1.setBlock(0, 0, 0, stone);
+        io.queueSave(ColumnPos{64, 0}, col1);
+    }
+    io.flush();
+
+    EXPECT_EQ(io.regionFileCount(), 2u);
+    EXPECT_TRUE(io.isRegionOpen(RegionPos{0, 0}));
+    EXPECT_TRUE(io.isRegionOpen(RegionPos{1, 0}));
+
+    // 2. Touch Region (0, 0) again so Region (1, 0) becomes the least-recently-used
+    {
+        ChunkColumn col0b(ColumnPos{1, 0});  // Still in Region (0, 0)
+        col0b.setBlock(0, 0, 0, stone);
+        io.queueSave(ColumnPos{1, 0}, col0b);
+    }
+    io.flush();
+
+    // 3. Save to Region (2, 0) — must evict Region (1, 0), NOT Region (0, 0)
+    {
+        ChunkColumn col2(ColumnPos{128, 0});  // Region (2, 0)
+        col2.setBlock(0, 0, 0, stone);
+        io.queueSave(ColumnPos{128, 0}, col2);
+    }
+    io.flush();
+
+    EXPECT_EQ(io.regionFileCount(), 2u);
+    EXPECT_TRUE(io.isRegionOpen(RegionPos{0, 0}));
+    EXPECT_FALSE(io.isRegionOpen(RegionPos{1, 0}));
+    EXPECT_TRUE(io.isRegionOpen(RegionPos{2, 0}));
+
+    io.stop();
+}
+
+TEST_F(IOManagerTest, FlushWaitsForInFlightSaveAndCallback) {
+    IOManager io(tempDir);
+    io.start();
+
+    BlockTypeId stone = BlockTypeId::fromName("test:stone");
+    ChunkColumn col(ColumnPos{0, 0});
+    col.setBlock(0, 0, 0, stone);
+
+    std::atomic<bool> callbackEntered{false};
+    std::atomic<bool> callbackFinished{false};
+
+    io.queueSave(ColumnPos{0, 0}, col, [&](ColumnPos, bool success) {
+        EXPECT_TRUE(success);
+        callbackEntered.store(true, std::memory_order_release);
+        // Simulate a slow in-flight operation after saveQueue_ is already empty
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        callbackFinished.store(true, std::memory_order_release);
+    });
+
+    // Wait until the save thread has popped the item from saveQueue_ and is inside the callback
+    while (!callbackEntered.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // At this exact moment saveQueue_ is empty, but the save is still in-flight!
+    // flush() MUST block until callbackFinished becomes true.
+    io.flush();
+    EXPECT_TRUE(callbackFinished.load(std::memory_order_acquire));
+    EXPECT_FALSE(io.hasPendingSaves());
+    EXPECT_EQ(io.pendingSaveCount(), 0u);
+
+    io.stop();
+}
+
 // ============================================================================
 // Round-trip test: create world -> save -> load -> verify identical
 // ============================================================================

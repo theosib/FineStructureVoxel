@@ -10,7 +10,7 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/lru_cache.hpp"
-#include "finevox/core/deprecated/blocking_queue.hpp"
+#include "finevox/core/queue.hpp"
 #include <memory>
 #include <shared_mutex>
 #include <chrono>
@@ -179,6 +179,16 @@ public:
     using PreEvictionCallback = std::function<void(ColumnPos)>;
     void setPreEvictionCallback(PreEvictionCallback callback);
 
+    // Callback invoked on a column right before it is serialized for saving
+    // Used by EntityManager to serialize column entities into column.data()["entity_data"]
+    using BeforeSaveCallback = std::function<void(ChunkColumn&)>;
+    void setBeforeSaveCallback(BeforeSaveCallback callback);
+
+    // Callback invoked on a column when it is loaded/added with persisted data
+    // Used by EntityManager to deserialize entities from column.data()["entity_data"]
+    using ColumnLoadedCallback = std::function<void(ChunkColumn&)>;
+    void setColumnLoadedCallback(ColumnLoadedCallback callback);
+
 private:
     mutable std::shared_mutex mutex_;
 
@@ -186,7 +196,7 @@ private:
     std::unordered_map<uint64_t, std::unique_ptr<ManagedColumn>> active_;
 
     // Save queue - dirty columns with refs == 0
-    BlockingQueue<uint64_t> saveQueue_;
+    Queue<uint64_t> saveQueue_;
 
     // Currently being saved - CRITICAL: don't load from disk while here!
     std::unordered_set<uint64_t> currentlySaving_;
@@ -213,9 +223,11 @@ private:
     // IOManager for persistence (optional, not owned)
     IOManager* ioManager_ = nullptr;
 
-    // Tick persistence callbacks
+    // Tick and entity persistence callbacks
     TickExtractCallback tickExtractCallback_;
     PreEvictionCallback preEvictionCallback_;
+    BeforeSaveCallback beforeSaveCallback_;
+    ColumnLoadedCallback columnLoadedCallback_;
 
     // Internal helper to move column between states
     void transitionToSaveQueue(uint64_t key);

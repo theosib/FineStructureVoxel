@@ -517,7 +517,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_block_model.cpp
         tests/test_config_parser.cpp
         tests/test_config_file.cpp
-        tests/test_blocking_queue.cpp
+        tests/test_unified_queue.cpp
         tests/test_mesh_worker_pool.cpp
         tests/test_lod.cpp
         tests/test_module.cpp

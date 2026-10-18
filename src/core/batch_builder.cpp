@@ -77,18 +77,17 @@ std::vector<ColumnPos> BatchBuilder::getAffectedColumns() const {
 }
 
 size_t BatchBuilder::commit(World& world) {
-    size_t changed = 0;
-
-    for (const auto& [packed, newType] : changes_) {
-        BlockCoord pos = BlockCoord::unpack(packed);
-        BlockTypeId oldType = world.getBlock(pos);
-
-        if (oldType != newType) {
-            world.setBlock(pos, newType);
-            ++changed;
-        }
+    if (changes_.empty()) {
+        return 0;
     }
 
+    std::vector<std::pair<BlockCoord, BlockTypeId>> batch;
+    batch.reserve(changes_.size());
+    for (const auto& [packed, newType] : changes_) {
+        batch.emplace_back(BlockCoord::unpack(packed), newType);
+    }
+
+    size_t changed = world.setBlocks(batch);
     clear();
     return changed;
 }

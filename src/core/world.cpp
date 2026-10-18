@@ -1,4 +1,5 @@
 #include "finevox/core/world.hpp"
+#include "finevox/core/column_manager.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/event_queue.hpp"
 #include "finevox/core/block_event.hpp"
@@ -26,10 +27,15 @@ BlockTypeId World::getBlock(int32_t x, int32_t y, int32_t z) const {
 
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(colPos.pack());
-    if (it == columns_.end()) {
-        return AIR_BLOCK_TYPE;
+    if (it != columns_.end()) {
+        return it->second->getBlock(x, y, z);
     }
-    return it->second->getBlock(x, y, z);
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+            return mc->column->getBlock(x, y, z);
+        }
+    }
+    return AIR_BLOCK_TYPE;
 }
 
 void World::setBlock(BlockCoord pos, BlockTypeId type) {
@@ -43,6 +49,13 @@ void World::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
 
     auto it = columns_.find(colPos.pack());
     if (it == columns_.end()) {
+        if (columnManager_) {
+            if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+                mc->column->setBlock(x, y, z, type);
+                columnManager_->markDirty(colPos);
+                return;
+            }
+        }
         // Create new column
         auto column = std::make_unique<ChunkColumn>(colPos);
         if (columnGenerator_) {
@@ -52,18 +65,118 @@ void World::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
     }
 
     it->second->setBlock(x, y, z, type);
+    if (columnManager_) {
+        columnManager_->markDirty(colPos);
+    }
+}
+
+size_t World::setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> changes) {
+    if (changes.empty()) {
+        return 0;
+    }
+
+    // Group changes by ChunkPos (subchunk coordinate) so we resolve each
+    // ChunkColumn and SubChunk once per subchunk under a single columnMutex_ lock.
+    struct LocalChange {
+        int32_t lx;
+        int32_t ly;
+        int32_t lz;
+        BlockTypeId type;
+    };
+    std::unordered_map<ChunkPos, std::vector<LocalChange>> bySubChunk;
+    bySubChunk.reserve(std::min<size_t>(changes.size(), 64));
+
+    for (const auto& [pos, type] : changes) {
+        ChunkPos chunkPos = ChunkPos::fromBlock(pos);
+        bySubChunk[chunkPos].push_back(LocalChange{
+            pos.x & (SubChunk::SIZE - 1),
+            ChunkColumn::worldYToLocalY(pos.y),
+            pos.z & (SubChunk::SIZE - 1),
+            type
+        });
+    }
+
+    size_t changedCount = 0;
+    std::unique_lock lock(columnMutex_);
+
+    for (auto& [chunkPos, subChanges] : bySubChunk) {
+        ColumnPos colPos = ColumnPos::fromChunk(chunkPos);
+        ChunkColumn* colPtr = nullptr;
+
+        auto colIt = columns_.find(colPos.pack());
+        if (colIt != columns_.end()) {
+            colPtr = colIt->second.get();
+        } else if (columnManager_) {
+            if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+                colPtr = mc->column.get();
+            }
+        }
+
+        // Resolve SubChunk once for this subchunk batch
+        SubChunk* sub = colPtr ? colPtr->getSubChunk(chunkPos.y) : nullptr;
+        bool columnChanged = false;
+
+        for (const auto& lc : subChanges) {
+            if (!sub) {
+                if (lc.type.isAir()) {
+                    continue;  // Setting air in non-existent column/subchunk is a no-op
+                }
+                if (!colPtr) {
+                    auto column = std::make_unique<ChunkColumn>(colPos);
+                    if (columnGenerator_) {
+                        columnGenerator_(*column);
+                    }
+                    colPtr = column.get();
+                    columns_.emplace(colPos.pack(), std::move(column));
+                }
+                sub = &colPtr->getOrCreateSubChunk(chunkPos.y);
+            }
+            BlockTypeId oldType = sub->getBlock(lc.lx, lc.ly, lc.lz);
+            if (oldType != lc.type) {
+                sub->setBlock(lc.lx, lc.ly, lc.lz, lc.type);
+                ++changedCount;
+                columnChanged = true;
+            }
+        }
+
+        if (sub && sub->isEmpty()) {
+            colPtr->pruneEmptySubChunks();
+        }
+
+        if (columnChanged && columnManager_) {
+            columnManager_->markDirty(colPos);
+        }
+    }
+
+    return changedCount;
 }
 
 ChunkColumn* World::getColumn(ColumnPos pos) {
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(pos.pack());
-    return it != columns_.end() ? it->second.get() : nullptr;
+    if (it != columns_.end()) {
+        return it->second.get();
+    }
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(pos); mc && mc->column) {
+            return mc->column.get();
+        }
+    }
+    return nullptr;
 }
 
 const ChunkColumn* World::getColumn(ColumnPos pos) const {
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(pos.pack());
-    return it != columns_.end() ? it->second.get() : nullptr;
+    if (it != columns_.end()) {
+        return it->second.get();
+    }
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(pos); mc && mc->column) {
+            return mc->column.get();
+        }
+    }
+    return nullptr;
 }
 
 ChunkColumn& World::getOrCreateColumn(ColumnPos pos) {
@@ -72,6 +185,12 @@ ChunkColumn& World::getOrCreateColumn(ColumnPos pos) {
     auto it = columns_.find(pos.pack());
     if (it != columns_.end()) {
         return *it->second;
+    }
+
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(pos); mc && mc->column) {
+            return *mc->column;
+        }
     }
 
     auto column = std::make_unique<ChunkColumn>(pos);
@@ -85,12 +204,44 @@ ChunkColumn& World::getOrCreateColumn(ColumnPos pos) {
 
 bool World::hasColumn(ColumnPos pos) const {
     std::shared_lock lock(columnMutex_);
-    return columns_.contains(pos.pack());
+    if (columns_.contains(pos.pack())) {
+        return true;
+    }
+    if (columnManager_) {
+        return columnManager_->get(pos) != nullptr;
+    }
+    return false;
 }
 
 bool World::removeColumn(ColumnPos pos) {
     std::unique_lock lock(columnMutex_);
     return columns_.erase(pos.pack()) > 0;
+}
+
+void World::insertColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column) {
+    if (!column) return;
+    std::unique_lock lock(columnMutex_);
+    columns_[pos.pack()] = std::move(column);
+}
+
+std::unique_ptr<ChunkColumn> World::extractColumn(ColumnPos pos) {
+    std::unique_lock lock(columnMutex_);
+    auto it = columns_.find(pos.pack());
+    if (it == columns_.end()) {
+        return nullptr;
+    }
+    auto col = std::move(it->second);
+    columns_.erase(it);
+    return col;
+}
+
+void World::setColumnManager(ColumnManager* manager) {
+    columnManager_ = manager;
+    if (columnManager_) {
+        columnManager_->setCanUnloadCallback([this](ColumnPos pos) {
+            return canUnloadColumn(pos);
+        });
+    }
 }
 
 void World::forEachColumn(const std::function<void(ColumnPos, ChunkColumn&)>& callback) {
@@ -130,10 +281,15 @@ SubChunk* World::getSubChunk(ChunkPos pos) {
 
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(colPos.pack());
-    if (it == columns_.end()) {
-        return nullptr;
+    if (it != columns_.end()) {
+        return it->second->getSubChunk(pos.y);
     }
-    return it->second->getSubChunk(pos.y);
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+            return mc->column->getSubChunk(pos.y);
+        }
+    }
+    return nullptr;
 }
 
 const SubChunk* World::getSubChunk(ChunkPos pos) const {
@@ -141,10 +297,15 @@ const SubChunk* World::getSubChunk(ChunkPos pos) const {
 
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(colPos.pack());
-    if (it == columns_.end()) {
-        return nullptr;
+    if (it != columns_.end()) {
+        return it->second->getSubChunk(pos.y);
     }
-    return it->second->getSubChunk(pos.y);
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+            return mc->column->getSubChunk(pos.y);
+        }
+    }
+    return nullptr;
 }
 
 std::shared_ptr<SubChunk> World::getSubChunkShared(ChunkPos pos) {
@@ -152,10 +313,15 @@ std::shared_ptr<SubChunk> World::getSubChunkShared(ChunkPos pos) {
 
     std::shared_lock lock(columnMutex_);
     auto it = columns_.find(colPos.pack());
-    if (it == columns_.end()) {
-        return nullptr;
+    if (it != columns_.end()) {
+        return it->second->getSubChunkShared(pos.y);
     }
-    return it->second->getSubChunkShared(pos.y);
+    if (columnManager_) {
+        if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
+            return mc->column->getSubChunkShared(pos.y);
+        }
+    }
+    return nullptr;
 }
 
 std::vector<ChunkPos> World::getAllSubChunkPositions() const {
@@ -231,7 +397,11 @@ bool World::setFluid(BlockCoord pos, FluidTypeId type, uint8_t level) {
     SubChunk& sub = it->second->getOrCreateSubChunk(chunkPos.y);
 
     auto local = pos.local();
-    return sub.setFluid(local.x, local.y, local.z, type, level);
+    bool changed = sub.setFluid(local.x, local.y, local.z, type, level);
+    if (changed && columnManager_) {
+        columnManager_->markDirty(colPos);
+    }
+    return changed;
 }
 
 bool World::removeFluid(BlockCoord pos) {
@@ -240,7 +410,11 @@ bool World::removeFluid(BlockCoord pos) {
     if (!sub) return false;
 
     auto local = pos.local();
-    return sub->removeFluid(local.x, local.y, local.z);
+    bool changed = sub->removeFluid(local.x, local.y, local.z);
+    if (changed && columnManager_) {
+        columnManager_->markDirty(blockToColumn(pos));
+    }
+    return changed;
 }
 
 // ============================================================================

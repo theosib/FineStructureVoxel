@@ -8,7 +8,9 @@ ColumnManager::ColumnManager(size_t cacheCapacity)
     : unloadCache_(cacheCapacity)
     , lastPeriodicSave_(std::chrono::steady_clock::now()) {}
 
-ColumnManager::~ColumnManager() = default;
+ColumnManager::~ColumnManager() {
+    saveQueue_.shutdown();
+}
 
 ManagedColumn* ColumnManager::get(ColumnPos pos) {
     uint64_t key = pos.pack();
@@ -50,7 +52,12 @@ void ColumnManager::add(std::unique_ptr<ChunkColumn> column) {
 
     auto managed = std::make_unique<ManagedColumn>(std::move(column));
     managed->state = ColumnState::Active;
+    ChunkColumn* colPtr = managed->column.get();
     active_[key] = std::move(managed);
+
+    if (columnLoadedCallback_ && colPtr) {
+        columnLoadedCallback_(*colPtr);
+    }
 
     // Notify about newly available chunk
     if (chunkLoadCallback_) {
@@ -113,13 +120,21 @@ std::vector<ColumnPos> ColumnManager::getSaveQueue() {
     std::vector<ColumnPos> result;
 
     while (true) {
-        auto key = saveQueue_.pop();
+        auto key = saveQueue_.tryPop();
         if (!key) break;
+
+        if (currentlySaving_.contains(*key)) {
+            continue;
+        }
 
         // Find the column in active
         auto it = active_.find(*key);
         if (it == active_.end()) {
             continue;  // Column was removed while in queue
+        }
+
+        if (beforeSaveCallback_ && it->second->column) {
+            beforeSaveCallback_(*it->second->column);
         }
 
         // Mark as currently saving
@@ -249,10 +264,24 @@ void ColumnManager::setPreEvictionCallback(PreEvictionCallback callback) {
     preEvictionCallback_ = std::move(callback);
 }
 
+void ColumnManager::setBeforeSaveCallback(BeforeSaveCallback callback) {
+    std::unique_lock lock(mutex_);
+    beforeSaveCallback_ = std::move(callback);
+}
+
+void ColumnManager::setColumnLoadedCallback(ColumnLoadedCallback callback) {
+    std::unique_lock lock(mutex_);
+    columnLoadedCallback_ = std::move(callback);
+}
+
 void ColumnManager::transitionToSaveQueue(uint64_t key) {
     // Assumes lock is held
     auto it = active_.find(key);
     if (it == active_.end()) return;
+    if (it->second->state == ColumnState::SaveQueued ||
+        it->second->state == ColumnState::Saving) {
+        return;
+    }
 
     it->second->state = ColumnState::SaveQueued;
     saveQueue_.push(key);
@@ -339,7 +368,12 @@ bool ColumnManager::requestLoad(ColumnPos pos, LoadCallback callback) {
             if (!active_.contains(key) && !unloadCache_.contains(key)) {
                 auto managed = std::make_unique<ManagedColumn>(std::move(col));
                 managed->state = ColumnState::Active;
+                ChunkColumn* colPtr = managed->column.get();
                 active_[key] = std::move(managed);
+
+                if (columnLoadedCallback_ && colPtr) {
+                    columnLoadedCallback_(*colPtr);
+                }
 
                 // Notify about newly available chunk (under lock - keep callback fast!)
                 if (chunkLoadCallback_) {
@@ -368,6 +402,7 @@ bool ColumnManager::requestLoad(ColumnPos pos, LoadCallback callback) {
 void ColumnManager::processSaveQueue() {
     IOManager* io = nullptr;
     TickExtractCallback tickExtract;
+    BeforeSaveCallback beforeSave;
     struct SaveEntry {
         ColumnPos pos;
         ChunkColumn* col;
@@ -383,15 +418,24 @@ void ColumnManager::processSaveQueue() {
         }
         io = ioManager_;
         tickExtract = tickExtractCallback_;
+        beforeSave = beforeSaveCallback_;
 
         // Process save queue
         while (true) {
-            auto key = saveQueue_.pop();
+            auto key = saveQueue_.tryPop();
             if (!key) break;
+
+            if (currentlySaving_.contains(*key)) {
+                continue;
+            }
 
             auto it = active_.find(*key);
             if (it == active_.end()) {
                 continue;  // Column was removed while in queue
+            }
+
+            if (beforeSave && it->second->column) {
+                beforeSave(*it->second->column);
             }
 
             // Mark as currently saving

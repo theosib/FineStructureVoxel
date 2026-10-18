@@ -525,3 +525,62 @@ TEST(WorldForceLoadTest, CanUnloadColumn) {
     EXPECT_TRUE(world.canUnloadColumn(ColumnPos(2, 4)));
 }
 
+// ============================================================================
+// Phase R2: Bulk setBlocks & ColumnManager wiring tests
+// ============================================================================
+
+#include "finevox/core/column_manager.hpp"
+
+TEST(WorldTest, BulkSetBlocksAcrossMultipleSubChunks) {
+    World world;
+    ColumnManager cm(16);
+    world.setColumnManager(&cm);
+
+    // Pre-add a managed column at (0, 0) in ColumnManager
+    cm.add(std::make_unique<ChunkColumn>(ColumnPos{0, 0}));
+
+    BlockTypeId stone = BlockTypeId::fromName("r2_bulk:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("r2_bulk:dirt");
+
+    // Batch spanning multiple subchunks and columns:
+    // - Subchunk (0, 0, 0): (1, 2, 3) -> stone, (4, 5, 6) -> dirt
+    // - Subchunk (0, 2, 0): (1, 35, 3) -> stone
+    // - Subchunk (1, 0, 0): (20, 4, 4) -> dirt
+    // - No-op air in non-existent subchunk (2, 5, 2): (35, 80, 35) -> AIR_BLOCK_TYPE
+    std::vector<std::pair<BlockCoord, BlockTypeId>> changes = {
+        {BlockCoord{1, 2, 3}, stone},
+        {BlockCoord{4, 5, 6}, dirt},
+        {BlockCoord{1, 35, 3}, stone},
+        {BlockCoord{20, 4, 4}, dirt},
+        {BlockCoord{35, 80, 35}, AIR_BLOCK_TYPE}
+    };
+
+    size_t changed = world.setBlocks(changes);
+    EXPECT_EQ(changed, 4u);
+
+    EXPECT_EQ(world.getBlock(1, 2, 3), stone);
+    EXPECT_EQ(world.getBlock(4, 5, 6), dirt);
+    EXPECT_EQ(world.getBlock(1, 35, 3), stone);
+    EXPECT_EQ(world.getBlock(20, 4, 4), dirt);
+    EXPECT_TRUE(world.getBlock(35, 80, 35).isAir());
+
+    // Column (2, 2) should NOT have been created for an air-only change
+    EXPECT_FALSE(world.hasColumn(ColumnPos{2, 2}));
+
+    // Column (0, 0) in ColumnManager should be marked dirty
+    ManagedColumn* mc = cm.get(ColumnPos{0, 0});
+    ASSERT_NE(mc, nullptr);
+    EXPECT_TRUE(mc->dirty);
+
+    // Re-applying the exact same batch should report 0 changes
+    EXPECT_EQ(world.setBlocks(changes), 0u);
+
+    // Clearing subchunk (0, 2, 0) back to air should prune the empty subchunk
+    std::vector<std::pair<BlockCoord, BlockTypeId>> clearUpper = {
+        {BlockCoord{1, 35, 3}, AIR_BLOCK_TYPE}
+    };
+    EXPECT_EQ(world.setBlocks(clearUpper), 1u);
+    EXPECT_EQ(world.getSubChunk(ChunkPos{0, 2, 0}), nullptr);
+}
+
+

@@ -30,6 +30,9 @@ void IOManager::start() {
         return;  // Already running
     }
 
+    loadQueue_.resetShutdown();
+    saveQueue_.resetShutdown();
+
     loadThread_ = std::thread(&IOManager::loadThreadFunc, this);
     saveThread_ = std::thread(&IOManager::saveThreadFunc, this);
 }
@@ -39,15 +42,10 @@ void IOManager::stop() {
         return;  // Not running
     }
 
-    // Wake up threads
-    {
-        std::lock_guard lock(loadMutex_);
-        loadCond_.notify_all();
-    }
-    {
-        std::lock_guard lock(saveMutex_);
-        saveCond_.notify_all();
-    }
+    // Wake up queues and any flush() waiters
+    loadQueue_.shutdown();
+    saveQueue_.shutdown();
+    flushCv_.notify_all();
 
     // Wait for threads to finish
     if (loadThread_.joinable()) {
@@ -59,9 +57,7 @@ void IOManager::stop() {
 }
 
 void IOManager::requestLoad(ColumnPos pos, LoadCallback callback) {
-    std::lock_guard lock(loadMutex_);
-    loadQueue_.push_back({pos, std::move(callback)});
-    loadCond_.notify_one();
+    loadQueue_.push(LoadRequest{pos, std::move(callback)});
 }
 
 void IOManager::queueSave(ColumnPos pos, const ChunkColumn& column) {
@@ -72,24 +68,42 @@ void IOManager::queueSave(ColumnPos pos, const ChunkColumn& column, SaveCallback
     // Serialize on the calling thread to avoid holding locks during serialization
     auto serialized = ColumnSerializer::toCBOR(column, pos.x, pos.z);
 
-    std::lock_guard lock(saveMutex_);
-    saveQueue_.push_back({pos, std::move(serialized), {}, std::move(callback), false});
-    saveCond_.notify_one();
+    {
+        std::lock_guard lock(flushMutex_);
+        ++unfinishedSaves_;
+    }
+    if (!saveQueue_.push(SaveRequest{pos, std::move(serialized), {}, std::move(callback), false})) {
+        std::lock_guard lock(flushMutex_);
+        --unfinishedSaves_;
+        flushCv_.notify_all();
+    }
 }
 
 void IOManager::queueSave(ColumnPos pos, const ChunkColumn& column,
                            std::vector<ScheduledTick> ticks, SaveCallback callback) {
     auto serialized = ColumnSerializer::toCBOR(column, pos.x, pos.z);
 
-    std::lock_guard lock(saveMutex_);
-    saveQueue_.push_back({pos, std::move(serialized), std::move(ticks), std::move(callback), false});
-    saveCond_.notify_one();
+    {
+        std::lock_guard lock(flushMutex_);
+        ++unfinishedSaves_;
+    }
+    if (!saveQueue_.push(SaveRequest{pos, std::move(serialized), std::move(ticks), std::move(callback), false})) {
+        std::lock_guard lock(flushMutex_);
+        --unfinishedSaves_;
+        flushCv_.notify_all();
+    }
 }
 
 void IOManager::queueTickSave(ColumnPos pos, std::vector<ScheduledTick> ticks) {
-    std::lock_guard lock(saveMutex_);
-    saveQueue_.push_back({pos, {}, std::move(ticks), nullptr, true});
-    saveCond_.notify_one();
+    {
+        std::lock_guard lock(flushMutex_);
+        ++unfinishedSaves_;
+    }
+    if (!saveQueue_.push(SaveRequest{pos, {}, std::move(ticks), nullptr, true})) {
+        std::lock_guard lock(flushMutex_);
+        --unfinishedSaves_;
+        flushCv_.notify_all();
+    }
 }
 
 void IOManager::setTickLoadCallback(TickLoadCallback callback) {
@@ -97,33 +111,30 @@ void IOManager::setTickLoadCallback(TickLoadCallback callback) {
 }
 
 void IOManager::flush() {
-    // Wait for save queue to empty
-    std::unique_lock lock(saveMutex_);
-    while (!saveQueue_.empty() && running_) {
-        lock.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        lock.lock();
-    }
+    // Wait until both saveQueue_ is empty AND any in-flight disk write/callback has completed
+    std::unique_lock lock(flushMutex_);
+    flushCv_.wait(lock, [this] {
+        return (unfinishedSaves_ == 0 &&
+                saveQueue_.empty() &&
+                inFlightSaves_.load(std::memory_order_acquire) == 0) ||
+               !running_.load(std::memory_order_acquire);
+    });
 }
 
 bool IOManager::hasPendingLoads() const {
-    std::lock_guard lock(loadMutex_);
     return !loadQueue_.empty();
 }
 
 bool IOManager::hasPendingSaves() const {
-    std::lock_guard lock(saveMutex_);
-    return !saveQueue_.empty();
+    return !saveQueue_.empty() || inFlightSaves_.load(std::memory_order_acquire) > 0;
 }
 
 size_t IOManager::pendingLoadCount() const {
-    std::lock_guard lock(loadMutex_);
     return loadQueue_.size();
 }
 
 size_t IOManager::pendingSaveCount() const {
-    std::lock_guard lock(saveMutex_);
-    return saveQueue_.size();
+    return saveQueue_.size() + inFlightSaves_.load(std::memory_order_acquire);
 }
 
 size_t IOManager::regionFileCount() const {
@@ -131,10 +142,17 @@ size_t IOManager::regionFileCount() const {
     return regionFiles_.size();
 }
 
+bool IOManager::isRegionOpen(RegionPos pos) const {
+    uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(pos.rx)) << 32) |
+                   static_cast<uint64_t>(static_cast<uint32_t>(pos.rz));
+    std::lock_guard lock(regionMutex_);
+    return regionFiles_.find(key) != regionFiles_.end();
+}
+
 void IOManager::setMaxOpenRegions(size_t count) {
     std::lock_guard lock(regionMutex_);
     maxOpenRegions_ = count;
-    while (regionFiles_.size() > maxOpenRegions_) {
+    while (regionFiles_.size() > maxOpenRegions_ && !regionFiles_.empty()) {
         evictOldestRegion();
     }
 }
@@ -144,29 +162,10 @@ void IOManager::setMaxOpenRegions(size_t count) {
 // ============================================================================
 
 void IOManager::loadThreadFunc() {
-    while (running_) {
-        LoadRequest request;
+    while (auto optRequest = loadQueue_.popWait()) {
+        LoadRequest& request = *optRequest;
 
-        // Get next request
-        {
-            std::unique_lock lock(loadMutex_);
-            loadCond_.wait(lock, [this] {
-                return !loadQueue_.empty() || !running_;
-            });
-
-            if (!running_ && loadQueue_.empty()) {
-                break;
-            }
-
-            if (loadQueue_.empty()) {
-                continue;
-            }
-
-            request = std::move(loadQueue_.front());
-            loadQueue_.erase(loadQueue_.begin());
-        }
-
-        // Perform load (outside lock)
+        // Perform load
         std::unique_ptr<ChunkColumn> column;
 
         RegionPos regionPos = RegionPos::fromColumn(request.pos);
@@ -193,29 +192,11 @@ void IOManager::loadThreadFunc() {
 }
 
 void IOManager::saveThreadFunc() {
-    while (running_) {
-        SaveRequest request;
+    while (auto optRequest = saveQueue_.popWait()) {
+        SaveRequest& request = *optRequest;
+        inFlightSaves_.fetch_add(1, std::memory_order_acq_rel);
 
-        // Get next request
-        {
-            std::unique_lock lock(saveMutex_);
-            saveCond_.wait(lock, [this] {
-                return !saveQueue_.empty() || !running_;
-            });
-
-            if (!running_ && saveQueue_.empty()) {
-                break;
-            }
-
-            if (saveQueue_.empty()) {
-                continue;
-            }
-
-            request = std::move(saveQueue_.front());
-            saveQueue_.erase(saveQueue_.begin());
-        }
-
-        // Perform save (outside lock)
+        // Perform save
         bool success = false;
 
         if (request.ticksOnly) {
@@ -248,11 +229,20 @@ void IOManager::saveThreadFunc() {
         if (request.callback) {
             request.callback(request.pos, success);
         }
+
+        inFlightSaves_.fetch_sub(1, std::memory_order_acq_rel);
+        {
+            std::lock_guard lock(flushMutex_);
+            if (unfinishedSaves_ > 0) {
+                --unfinishedSaves_;
+            }
+        }
+        flushCv_.notify_all();
     }
 }
 
 // ============================================================================
-// Region file management
+// Region file management (LRU cached)
 // ============================================================================
 
 RegionFile* IOManager::getOrOpenRegion(RegionPos pos) {
@@ -263,28 +253,35 @@ RegionFile* IOManager::getOrOpenRegion(RegionPos pos) {
 
     auto it = regionFiles_.find(key);
     if (it != regionFiles_.end()) {
-        return it->second.get();
+        it->second.lastAccess = ++accessCounter_;
+        return it->second.file.get();
     }
 
-    // Evict if at capacity
-    while (regionFiles_.size() >= maxOpenRegions_) {
+    // Evict least-recently-used region if at capacity
+    while (regionFiles_.size() >= maxOpenRegions_ && !regionFiles_.empty()) {
         evictOldestRegion();
     }
 
     // Open new region file
     auto region = std::make_unique<RegionFile>(worldPath_, pos);
     auto* ptr = region.get();
-    regionFiles_[key] = std::move(region);
+    regionFiles_[key] = CachedRegion{std::move(region), ++accessCounter_};
 
     return ptr;
 }
 
 void IOManager::evictOldestRegion() {
-    // Simple eviction: just remove the first one
-    // A real implementation would track access time
-    if (!regionFiles_.empty()) {
-        regionFiles_.erase(regionFiles_.begin());
+    if (regionFiles_.empty()) {
+        return;
     }
+
+    auto oldestIt = regionFiles_.begin();
+    for (auto it = std::next(regionFiles_.begin()); it != regionFiles_.end(); ++it) {
+        if (it->second.lastAccess < oldestIt->second.lastAccess) {
+            oldestIt = it;
+        }
+    }
+    regionFiles_.erase(oldestIt);
 }
 
 }  // namespace finevox

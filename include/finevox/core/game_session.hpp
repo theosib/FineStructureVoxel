@@ -3,12 +3,15 @@
 #include "finevox/core/game_actions.hpp"
 #include <finescript/value.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace finevox {
 
 // Forward declarations
 class World;
+class ColumnManager;
+class IOManager;
 class UpdateScheduler;
 class LightEngine;
 class EntityManager;
@@ -36,6 +39,8 @@ struct GameSessionConfig {
     float gravity = -14.0f;
     uint32_t tickRate = 30;           // TPS
     uint32_t randomTicksPerChunk = 4;
+    size_t columnCacheCapacity = 64;
+    std::string worldSaveDir{};       // Optional world save directory for IOManager persistence
 
     /// Create a config with all defaults
     static GameSessionConfig defaults() { return {}; }
@@ -80,6 +85,9 @@ public:
     WorldTime& worldTime();
     FluidTickManager& fluidTicks();
     ParticleSystem& particles();
+    ColumnManager& columnManager();
+    IOManager* ioManager();
+    void bindIOManager(IOManager* io);
 
     // === Event Channels (events come OUT) ===
     SoundEventQueue& soundEvents();

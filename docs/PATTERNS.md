@@ -150,21 +150,29 @@ class MyClass {
 
 ---
 
-## Pattern: Queue / AlarmQueue
+## Pattern: Unified `Queue<T>` / `KeyedQueue<K, D>`
+
+All inter-thread queuing in `finevox` uses `Queue<T>` (`include/finevox/core/queue.hpp`) and `KeyedQueue<K, D>` (`include/finevox/core/keyed_queue.hpp`). Legacy queues (`AlarmQueue`, `BlockingQueue`, `SimpleQueue`, `CoalescingQueue`) were retired in Phase R2 (see [ARCHIVED_CODE.md](ARCHIVED_CODE.md)).
 
 ```cpp
-// AlarmQueue — thread-safe FIFO with alarm-based wakeup
-AlarmQueue<SubChunkPos> queue;
+// Queue<T> — thread-safe FIFO with optional capacity/backpressure, alarm, and WakeSignal
+Queue<ChunkPos> queue(/*capacity=*/0);  // 0 = unbounded
 
 // Producer
-queue.push(pos);
+queue.push(pos);              // non-blocking (returns false if full or shutdown)
+queue.pushBlocking(pos);      // blocks when at capacity until space frees or shutdown
+queue.setAlarm(alarmTime);    // keeps earliest pending deadline
 
-// Consumer (blocks until item available OR alarm fires)
-auto item = queue.waitForWork(alarmTime);  // returns nullopt on alarm/shutdown
+// Consumer (blocks until item available, alarm fires, or shutdown)
+while (queue.waitForWork()) {
+    while (auto item = queue.tryPop()) {
+        process(*item);
+    }
+}
 
-// AlarmQueueWithData<K,V> — deduplicating, keeps latest value per key
-AlarmQueueWithData<SubChunkPos, MeshRebuildRequest> meshQueue;
-meshQueue.push(pos, request);  // deduplicates by key; newer request wins
+// KeyedQueue<K, D> — deduplicating by key with MergeFn and optional PriorityFn
+KeyedQueue<ChunkPos, MeshRebuildRequest> meshQueue = createMeshRebuildQueue();
+meshQueue.push(pos, MeshRebuildRequest::immediate());  // merges duplicate keys, pops lowest priority int first
 ```
 
 ---

@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | Visual-test framework — `WorldRenderer` `RenderSurface&` generalization + scene visual test (commit `a9d0594`) |
-| Test count | **2196**, 100% green (4 self-skip when run outside the repo tree) |
+| Last completed phase | **Phase R2** — Queue Consolidation, `docs/ARCHIVED_CODE.md` Git-SHA Ledger, `ColumnManager`/`IOManager` Wiring, Bulk `World::setBlocks`, `EventBus` Wiring, and Doc Reconciliation |
+| Test count | **2220** (headless+audio build) / **2261** (with Vulkan render tests), 100% green |
 | In-progress | — |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -20,7 +20,7 @@
 
 ### Foundation (VK-Independent)
 
-- [x] **Phase 0** — Core data structures: BlockCoord, ChunkPos, StringInterner, SubChunk, ChunkColumn, DataContainer, AlarmQueue
+- [x] **Phase 0** — Core data structures: BlockCoord, ChunkPos, StringInterner, SubChunk, ChunkColumn, DataContainer, Queue/KeyedQueue/WakeSignal
 - [x] **Phase 1** — World management: World class, ColumnManager lifecycle, LRU cache, BatchBuilder
 - [x] **Phase 2** — Persistence: CBOR encoder/decoder, region files, IOManager save/load threads, ConfigManager, ResourceLocator
 - [x] **Phase 3** — Physics: AABB, CollisionShape, PhysicsSystem, raycasting (DDA), step-climbing
@@ -154,6 +154,22 @@
   - Data: `.loot` files for dirt, grass (precise→grass, otherwise dirt), cobble, luminite (precise-only; non-precise path TODO when a "glow dust" item exists), workbench, slab, stairs, wedge, stone_slab; stone.loot updated to finevox:-prefixed items; every block `.model` gained `loot: <name>`; `resources/tags/tools.tag` defines `finevox:tool.{pickaxe,axe,shovel,precise}`
   - Render_demo boots `LootTableLoader::loadDirectory(resources/loot)`, walks `resources/tags/*.tag` into `TagRegistry::global()` + `rebuild()`, applies `model.loot()` during block registration, and installs a pickup callback that deposits into the player's bag `DataContainer`
   - Tests (+13 in `test_block_drop_pipeline.cpp`): loot-table rolling under precise/default, break→drop integration, air/unlooted-block paths, precise event routing, pickup with room/delay/full-inventory, magnetism distance + speed clamp, no-callback lingering
+- [x] **Phase R0** — Critical Bug, Correctness, and Scaffolding Wiring Sweep:
+  - S3a invariants (`Rotation::index()` loud failure on non-member matrices; `RegionFile::assertNoFreeSpanOverlapsLiveExtent()` debug invariant + seeded random op-sequence test)
+  - `ScriptBlockHandler` `ud->blockCtx` wiring and lazy `DataContainer` allocation on write; `DataContainerProxy` bool/array/nested-map support
+  - `BlockContext::requestMeshRebuild()` / `markDirty()` via `SubChunk::bumpVersion()`; `notifyNeighbors()` routed through `UpdateScheduler::outbox()`
+  - Lock-free `SubChunk` fluid layer retention and `SubChunk::isEmpty()` fluid check; `ColumnSerializer::fromCBOR` direct move without duplicate parser
+  - `ConfigParser::parseLine` colon-splitting fix for namespaced values; `StringInterner` ID 0 (`""`) semantics + transparent `std::string_view` lookup
+  - `Queue::setAlarm` / `KeyedQueue::setAlarm` earliest-deadline fix + `KeyedQueue` priority ordering
+  - `LightProvider` wired into `LightEngine` BFS propagation; `LightingQueue::enqueue` coalescing fix
+  - `AudioEngine::cleanupFinished()` UAF fix + macOS build fix; entity physics grounded `velocity.y` reset, radian angle standardization, `AIDriver` tick/event wiring, `ChaseGoal` pathfinding, `ItemDropEntity` serialization, and `GameSessionConfig` wiring
+- [x] **Phase R2** — Queue Consolidation, Persistence & EventBus Wiring, and Documentation Reconciliation:
+  - Created [ARCHIVED_CODE.md](ARCHIVED_CODE.md) recording git commit SHA `09cbcb9` and restoration commands for all retired headers in `include/finevox/core/deprecated/` (`alarm_queue.hpp`, `blocking_queue.hpp`, `coalescing_queue.hpp`, `simple_queue.hpp`) and `tests/test_blocking_queue.cpp`
+  - Upgraded `Queue<T>` and `KeyedQueue<K, D>` to full parity with `finenet` (bounded capacity, `isFull()`, `pushBlocking()`, `PriorityFn`, `MergeFn`, `resetAlarm()`, `alarmTime()`)
+  - Migrated `ColumnManager::saveQueue_`, `IOManager` load/save queues, and `LightEngine::LightingQueue` onto `Queue` / `KeyedQueue`
+  - Fixed `IOManager::evictOldestRegion()` to use true LRU access tracking and `IOManager::flush()` to wait for in-flight saves and callbacks
+  - Wired `ColumnManager` and `IOManager` into `World` and `GameSession` (including `EntityManager::saveColumnEntities` / `loadColumnEntities` callbacks) and added bulk `World::setBlocks` subchunk-grouped mutation
+  - Wired `GameSession::executeCommand` to publish typed events (`BlockBrokenEvent`, `BlockPlacedEvent`, `FluidPlacedEvent`, `FluidRemovedEvent`, `PlayerUseEvent`, `PlayerHitEvent`, `PlayerPositionEvent`, `PlayerLookEvent`, `PlayerJumpEvent`, `PlayerSprintEvent`, `PlayerSneakEvent`, `SetWorldTimeEvent`, `CraftItemEvent`) onto `session.eventBus()` and implemented `EVT_CRAFT_ITEM` via `RecipeRegistry` + `CraftingHelper`
 
 ---
 

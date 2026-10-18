@@ -10,6 +10,7 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/region_file.hpp"
+#include "finevox/core/queue.hpp"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -84,7 +85,7 @@ public:
     // Queue save with callback notification
     void queueSave(ColumnPos pos, const ChunkColumn& column, SaveCallback callback);
 
-    // Flush all pending saves (blocks until complete)
+    // Flush all pending and in-flight saves (blocks until complete)
     void flush();
 
     // Set the tick journal for persisting scheduled ticks alongside region data
@@ -108,6 +109,7 @@ public:
     [[nodiscard]] size_t pendingLoadCount() const;
     [[nodiscard]] size_t pendingSaveCount() const;
     [[nodiscard]] size_t regionFileCount() const;
+    [[nodiscard]] bool isRegionOpen(RegionPos pos) const;
 
     // Configuration
     void setMaxOpenRegions(size_t count);
@@ -115,21 +117,24 @@ public:
 private:
     std::filesystem::path worldPath_;
 
-    // Region file cache
+    // Region file cache (true LRU via monotonic access counter)
+    struct CachedRegion {
+        std::unique_ptr<RegionFile> file;
+        uint64_t lastAccess = 0;
+    };
     mutable std::mutex regionMutex_;
-    std::unordered_map<uint64_t, std::unique_ptr<RegionFile>> regionFiles_;
+    std::unordered_map<uint64_t, CachedRegion> regionFiles_;
+    uint64_t accessCounter_ = 0;
     size_t maxOpenRegions_ = 16;
 
-    // Load queue
+    // Load queue (unified Queue<T>)
     struct LoadRequest {
         ColumnPos pos;
         LoadCallback callback;
     };
-    mutable std::mutex loadMutex_;
-    std::condition_variable loadCond_;
-    std::vector<LoadRequest> loadQueue_;
+    Queue<LoadRequest> loadQueue_;
 
-    // Save queue
+    // Save queue (unified Queue<T>)
     struct SaveRequest {
         ColumnPos pos;
         std::vector<uint8_t> serializedData;  // Pre-serialized CBOR (empty for tick-only saves)
@@ -137,9 +142,13 @@ private:
         SaveCallback callback;
         bool ticksOnly = false;  // If true, only write tick journal (no region data)
     };
-    mutable std::mutex saveMutex_;
-    std::condition_variable saveCond_;
-    std::vector<SaveRequest> saveQueue_;
+    Queue<SaveRequest> saveQueue_;
+
+    // In-flight save tracking for flush() synchronization
+    mutable std::mutex flushMutex_;
+    std::condition_variable flushCv_;
+    size_t unfinishedSaves_ = 0;
+    std::atomic<size_t> inFlightSaves_{0};
 
     // Threads
     std::thread loadThread_;

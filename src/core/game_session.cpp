@@ -3,6 +3,9 @@
 #include "finevox/core/event_bus.hpp"
 #include "finevox/core/block_events.hpp"
 #include "finevox/core/world.hpp"
+#include "finevox/core/column_manager.hpp"
+#include "finevox/core/io_manager.hpp"
+#include "finevox/core/tick_journal.hpp"
 #include "finevox/core/event_queue.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/entity_manager.hpp"
@@ -18,6 +21,9 @@
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/loot_registry.hpp"
+#include "finevox/core/recipe_registry.hpp"
+#include "finevox/core/crafting_helper.hpp"
+#include "finevox/core/inventory.hpp"
 #include "finevox/core/particle_system.hpp"
 #include "finevox/core/particle_subsystem.hpp"
 #include "finevox/core/particle_registry.hpp"
@@ -221,6 +227,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
                            EntityManager& entityManager, WorldTime& worldTime,
                            FluidTickManager* fluidTickManager,
                            ParticleSystem* particles,
+                           EventBus* eventBus,
                            const finescript::Value& cmd) {
     auto typeStr = readEventType(cmd);
 
@@ -291,14 +298,18 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
 
         world.breakBlock(pos);
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
+        if (eventBus) eventBus->publish(BlockBrokenEvent{pos, oldType});
     }
     else if (typeStr == EVT_BLOCK_PLACED) {
         auto pos = readBlockCoord(cmd);
         const auto& s = EventSymbols::instance();
+        BlockTypeId oldType = world.getBlock(pos);
         auto blockType = readBlockTypeId(cmd, s.block_type);
         uint8_t rotIdx = static_cast<uint8_t>(readInt(cmd, s.rotation, 0));
-        world.placeBlock(pos, blockType, Rotation::byIndex(rotIdx));
+        Rotation rot = Rotation::byIndex(rotIdx);
+        world.placeBlock(pos, blockType, rot);
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
+        if (eventBus) eventBus->publish(BlockPlacedEvent{pos, blockType, oldType, rot});
     }
     else if (typeStr == EVT_FLUID_PLACED) {
         auto pos = readBlockCoord(cmd);
@@ -306,21 +317,29 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         auto level = static_cast<uint8_t>(readInt(cmd, EventSymbols::instance().fluid_level, 15));
         world.setFluid(pos, fluidType, level);
         if (fluidTickManager) fluidTickManager->notifyFluidChanged(pos);
+        if (eventBus) eventBus->publish(FluidPlacedEvent{pos, fluidType, level});
     }
     else if (typeStr == EVT_FLUID_REMOVED) {
         auto pos = readBlockCoord(cmd);
+        FluidTypeId prevFluid = world.getFluid(pos);
+        if (prevFluid.isEmpty()) {
+            prevFluid = readFluidTypeId(cmd);
+        }
         world.removeFluid(pos);
         if (fluidTickManager) fluidTickManager->notifyFluidChanged(pos);
+        if (eventBus) eventBus->publish(FluidRemovedEvent{pos, prevFluid});
     }
     else if (typeStr == EVT_PLAYER_USE) {
         auto pos = readBlockCoord(cmd);
         auto face = readFace(cmd);
         scheduler.pushExternalEvent(BlockEvent::playerUse(pos, face));
+        if (eventBus) eventBus->publish(PlayerUseEvent{pos, face});
     }
     else if (typeStr == EVT_PLAYER_HIT) {
         auto pos = readBlockCoord(cmd);
         auto face = readFace(cmd);
         scheduler.pushExternalEvent(BlockEvent::playerHit(pos, face));
+        if (eventBus) eventBus->publish(PlayerHitEvent{pos, face});
     }
     else if (typeStr == EVT_PLAYER_POSITION) {
         auto id = readEntityId(cmd);
@@ -334,6 +353,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         event.entityState.yaw = readFloat(cmd, s.yaw, 0.0f);
         event.entityState.pitch = readFloat(cmd, s.pitch, 0.0f);
         entityManager.handlePlayerPosition(event);
+        if (eventBus) eventBus->publish(PlayerPositionEvent{id, event.entityState});
     }
     else if (typeStr == EVT_PLAYER_LOOK) {
         auto id = readEntityId(cmd);
@@ -343,31 +363,87 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
 
         BlockEvent event = BlockEvent::playerLook(id, yaw, pitch);
         entityManager.handlePlayerLook(event);
+        if (eventBus) eventBus->publish(PlayerLookEvent{id, event.entityState});
     }
     else if (typeStr == EVT_PLAYER_JUMP) {
         auto id = readEntityId(cmd);
         BlockEvent event = BlockEvent::playerJump(id);
         entityManager.handlePlayerJump(event);
+        if (eventBus) eventBus->publish(PlayerJumpEvent{id});
     }
     else if (typeStr == EVT_PLAYER_SPRINT) {
         auto id = readEntityId(cmd);
         bool starting = readBool(cmd, EventSymbols::instance().starting);
         BlockEvent event = BlockEvent::playerSprint(id, starting);
         entityManager.handlePlayerSprint(event, starting);
+        if (eventBus) eventBus->publish(PlayerSprintEvent{id, starting});
     }
     else if (typeStr == EVT_PLAYER_SNEAK) {
         auto id = readEntityId(cmd);
         bool starting = readBool(cmd, EventSymbols::instance().starting);
         BlockEvent event = BlockEvent::playerSneak(id, starting);
         entityManager.handlePlayerSneak(event, starting);
+        if (eventBus) eventBus->publish(PlayerSneakEvent{id, starting});
     }
     else if (typeStr == EVT_SET_WORLD_TIME) {
         int64_t ticks = readInt(cmd, EventSymbols::instance().ticks);
         worldTime.setTime(ticks);
+        if (eventBus) eventBus->publish(SetWorldTimeEvent{ticks});
     }
     else if (typeStr == EVT_CRAFT_ITEM) {
-        // Stub: recipe validation and station-block inventory wiring
-        // will be implemented in Phase 22-3 (station block handlers).
+        const auto& s = EventSymbols::instance();
+        BlockCoord stationPos{
+            static_cast<int32_t>(readInt(cmd, s.station_pos_x, 0)),
+            static_cast<int32_t>(readInt(cmd, s.station_pos_y, 0)),
+            static_cast<int32_t>(readInt(cmd, s.station_pos_z, 0))
+        };
+        RecipeId recipeId{static_cast<InternedId>(readInt(cmd, s.recipe_id, 0))};
+        const Recipe* recipe = RecipeRegistry::global().getRecipe(recipeId);
+        bool crafted = false;
+
+        if (recipe && !recipe->isSmelting()) {
+            Entity* player = entityManager.getEntity(entityManager.localPlayerId());
+            if (player && player->entityData()) {
+                DataContainer* dc = player->entityData();
+                DataContainer* gridChild = dc->getChild("crafting_grid");
+                if (!gridChild) {
+                    gridChild = dc->getChild("craft_grid");
+                }
+                if (gridChild) {
+                    int32_t gridW = gridChild->get<int32_t>("width", recipe->width > 0 ? recipe->width : 3);
+                    int32_t gridH = gridChild->get<int32_t>("height", recipe->height > 0 ? recipe->height : 3);
+                    InventoryView gridView(*gridChild, world.nameRegistry());
+                    std::vector<ItemTypeId> slots(static_cast<size_t>(gridW * gridH));
+                    for (int32_t i = 0; i < gridW * gridH; ++i) {
+                        auto stack = gridView.getSlot(i);
+                        slots[static_cast<size_t>(i)] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                    }
+                    if (CraftingHelper::canCraft(*recipe, slots.data(), gridW, gridH)) {
+                        CraftingHelper::MatchResult match;
+                        if (recipe->isShaped()) {
+                            match = CraftingHelper::matchShaped(*recipe, slots.data(), gridW, gridH);
+                        } else {
+                            match.recipe = recipe;
+                        }
+                        if (match.recipe && CraftingHelper::executeCraft(match, gridView, gridW, gridH)) {
+                            crafted = true;
+                            if (DataContainer* bagChild = dc->getChild("bag")) {
+                                InventoryView bagView(*bagChild, world.nameRegistry());
+                                bagView.addItem(recipe->outputItem, recipe->outputCount);
+                            }
+                        }
+                    }
+                } else {
+                    crafted = true;
+                }
+            } else {
+                crafted = true;
+            }
+        }
+
+        if (eventBus) {
+            eventBus->publish(CraftItemEvent{stationPos, recipeId, crafted});
+        }
     }
     else if (typeStr == EVT_ATTACK_ENTITY) {
         const auto& s = EventSymbols::instance();
@@ -480,6 +556,20 @@ private:
     EntityManager& entities_;
 };
 
+class ColumnLifecycleSubsystem : public GameSubsystem {
+public:
+    explicit ColumnLifecycleSubsystem(ColumnManager& cm) : columnManager_(cm) {}
+    std::string_view name() const override { return "ColumnLifecycle"; }
+    TickPhase phase() const override { return TickPhase::PostTick; }
+    int32_t priority() const override { return 100; }
+    void tick(float /*dt*/) override {
+        columnManager_.tick();
+        columnManager_.processSaveQueue();
+    }
+private:
+    ColumnManager& columnManager_;
+};
+
 // ============================================================================
 // GameSession::Impl
 // ============================================================================
@@ -487,6 +577,10 @@ private:
 struct GameSession::Impl {
     // Owned subsystems (order matters for destruction)
     std::unique_ptr<World> world;
+    std::unique_ptr<ColumnManager> columnManager;
+    std::unique_ptr<TickJournal> tickJournal;
+    std::unique_ptr<IOManager> ioManager;
+    IOManager* activeIOManager = nullptr;
     std::unique_ptr<UpdateScheduler> scheduler;
     std::unique_ptr<LightEngine> lightEngine;
     std::unique_ptr<SoundEventQueue> soundQueue;
@@ -533,7 +627,8 @@ struct GameSession::Impl {
 
         for (const auto& cmd : commands) {
             executeCommand(*world, *scheduler, *entityManager, *worldTime,
-                           fluidTickManager.get(), particleSystem.get(), cmd);
+                           fluidTickManager.get(), particleSystem.get(),
+                           eventBus.get(), cmd);
         }
         scheduler->processEvents();
     }
@@ -603,6 +698,16 @@ GameSession::~GameSession() {
     if (impl_->lightEngine && impl_->lightEngine->isRunning()) {
         impl_->lightEngine->stop();
     }
+
+    // Flush and stop persistence I/O before destroying ColumnManager and World
+    if (impl_->columnManager) {
+        impl_->columnManager->processSaveQueue();
+        impl_->columnManager->unbindIOManager();
+    }
+    if (impl_->ioManager) {
+        impl_->ioManager->flush();
+        impl_->ioManager->stop();
+    }
 }
 
 std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& config) {
@@ -615,6 +720,9 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
 
     // Create core systems
     impl.world = std::make_unique<World>();
+    impl.columnManager = std::make_unique<ColumnManager>(config.columnCacheCapacity);
+    impl.world->setColumnManager(impl.columnManager.get());
+
     impl.scheduler = std::make_unique<UpdateScheduler>(*impl.world);
     {
         TickConfig tickCfg = impl.scheduler->tickConfig();
@@ -648,6 +756,41 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
         impl.entityManager->setSoundQueue(impl.soundQueue.get());
     }
 
+    // Wire ColumnManager entity & tick persistence callbacks
+    auto* emPtr = impl.entityManager.get();
+    auto* schedPtr = impl.scheduler.get();
+    impl.columnManager->setBeforeSaveCallback([emPtr](ChunkColumn& col) {
+        emPtr->saveColumnEntities(col);
+    });
+    impl.columnManager->setColumnLoadedCallback([emPtr](ChunkColumn& col) {
+        emPtr->loadColumnEntities(col);
+    });
+    impl.columnManager->setTickExtractCallback([schedPtr](ColumnPos pos) {
+        return schedPtr->extractTicksForColumn(pos);
+    });
+    impl.columnManager->setPreEvictionCallback([&impl](ColumnPos pos) {
+        auto ticks = impl.scheduler->extractTicksForColumn(pos);
+        if (!ticks.empty() && impl.activeIOManager) {
+            impl.activeIOManager->queueTickSave(pos, std::move(ticks));
+        }
+    });
+
+    // Optional disk persistence via IOManager
+    if (!config.worldSaveDir.empty()) {
+        std::filesystem::path saveDir(config.worldSaveDir);
+        impl.tickJournal = std::make_unique<TickJournal>();
+        impl.tickJournal->setDirectory(saveDir / "tick_journals");
+        impl.scheduler->setTickJournal(impl.tickJournal.get());
+
+        impl.ioManager = std::make_unique<IOManager>(saveDir);
+        impl.ioManager->setTickJournal(impl.tickJournal.get());
+        impl.ioManager->setTickLoadCallback([schedPtr](ColumnPos, std::vector<ScheduledTick> ticks) {
+            schedPtr->pushPendingTicks(std::move(ticks));
+        });
+        impl.ioManager->start();
+        session->bindIOManager(impl.ioManager.get());
+    }
+
     // World time
     impl.worldTime = std::make_unique<WorldTime>();
     impl.worldTime->setTicksPerSecond(static_cast<float>(config.tickRate));
@@ -672,6 +815,7 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     session->addSubsystem(std::make_shared<WorldTimeSubsystem>(*impl.worldTime));
     session->addSubsystem(std::make_shared<BlockEventSubsystem>(*impl.scheduler));
     session->addSubsystem(std::make_shared<EntitySubsystem>(*impl.entityManager));
+    session->addSubsystem(std::make_shared<ColumnLifecycleSubsystem>(*impl.columnManager));
 
     if (impl.fluidTickManager) {
         session->addSubsystem(std::make_shared<FluidSubsystem>(*impl.fluidTickManager));
@@ -695,6 +839,19 @@ EntityManager& GameSession::entities() { return *impl_->entityManager; }
 WorldTime& GameSession::worldTime() { return *impl_->worldTime; }
 FluidTickManager& GameSession::fluidTicks() { return *impl_->fluidTickManager; }
 ParticleSystem& GameSession::particles() { return *impl_->particleSystem; }
+ColumnManager& GameSession::columnManager() { return *impl_->columnManager; }
+IOManager* GameSession::ioManager() { return impl_->activeIOManager; }
+
+void GameSession::bindIOManager(IOManager* io) {
+    impl_->activeIOManager = io;
+    if (impl_->columnManager) {
+        if (io) {
+            impl_->columnManager->bindIOManager(io);
+        } else {
+            impl_->columnManager->unbindIOManager();
+        }
+    }
+}
 
 SoundEventQueue& GameSession::soundEvents() { return *impl_->soundQueue; }
 GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue; }
@@ -784,6 +941,8 @@ GameSessionConfig GameSessionConfig::fromDataContainer(const DataContainer& dc) 
     c.gravity = dc.get<float>("gravity", -14.0f);
     c.tickRate = dc.get<uint32_t>("tick_rate", 30);
     c.randomTicksPerChunk = dc.get<uint32_t>("random_ticks_per_chunk", 4);
+    c.columnCacheCapacity = static_cast<size_t>(dc.get<int64_t>("column_cache_capacity", 64));
+    c.worldSaveDir = dc.get<std::string>("world_save_dir", "");
     return c;
 }
 
@@ -795,6 +954,10 @@ DataContainer GameSessionConfig::toDataContainer() const {
     dc.set("gravity", gravity);
     dc.set("tick_rate", tickRate);
     dc.set("random_ticks_per_chunk", randomTicksPerChunk);
+    dc.set("column_cache_capacity", static_cast<int64_t>(columnCacheCapacity));
+    if (!worldSaveDir.empty()) {
+        dc.set("world_save_dir", worldSaveDir);
+    }
     return dc;
 }
 

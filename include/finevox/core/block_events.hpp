@@ -18,6 +18,7 @@
 #include "finevox/core/entity_state.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/block_handler.hpp"  // TickType
+#include "finevox/core/recipe.hpp"         // RecipeId
 
 #include <cstdint>
 
@@ -81,12 +82,14 @@ struct BlockInteractEvent {
     BlockCoord pos;
     Face face;
 };
+using PlayerUseEvent = BlockInteractEvent;
 
 /// Left-click hit on a block (non-break, e.g. note block)
 struct BlockStrikeEvent {
     BlockCoord pos;
     Face face;
 };
+using PlayerHitEvent = BlockStrikeEvent;
 
 /// Request to repaint a block's visual state
 struct RepaintEvent {
@@ -160,6 +163,13 @@ struct ChunkUnloadedEvent {
 /// Set world time to absolute tick value
 struct SetWorldTimeEvent {
     int64_t ticks;
+};
+
+/// Craft item action event
+struct CraftItemEvent {
+    BlockCoord stationPos;
+    RecipeId recipeId;
+    bool crafted = false;
 };
 
 // ============================================================================

@@ -53,14 +53,29 @@ struct LightingUpdate {
 };
 
 // ============================================================================
-// LightingQueue - Thread-safe consolidating queue
+// LightingQueue - Thread-safe consolidating queue (backed by KeyedQueue)
 // ============================================================================
+
+/// Merge function for LightingUpdate coalescing:
+/// Preserves the original oldType/oldFluid from the first update,
+/// takes the latest newType/newFluid, and ORs triggerMeshRebuild.
+inline LightingUpdate mergeLightingUpdate(
+    const LightingUpdate& existing,
+    const LightingUpdate& incoming)
+{
+    LightingUpdate merged = existing;
+    merged.newType = incoming.newType;
+    merged.newFluid = incoming.newFluid;
+    merged.triggerMeshRebuild = existing.triggerMeshRebuild || incoming.triggerMeshRebuild;
+    return merged;
+}
 
 /**
  * @brief Consolidating queue for lighting thread
  *
- * If the lighting thread falls behind, only processes the latest update per
- * block position. This prevents unbounded queue growth during heavy activity.
+ * Wraps KeyedQueue<BlockCoord, LightingUpdate> with mergeLightingUpdate.
+ * If the lighting thread falls behind, only processes the consolidated update
+ * per block position. This prevents unbounded queue growth during heavy activity.
  *
  * Thread safety: All methods are thread-safe.
  *
@@ -68,7 +83,7 @@ struct LightingUpdate {
  */
 class LightingQueue {
 public:
-    LightingQueue() = default;
+    LightingQueue() : queue_(mergeLightingUpdate) {}
     ~LightingQueue() = default;
 
     // Non-copyable
@@ -78,18 +93,23 @@ public:
     /**
      * @brief Enqueue a lighting update
      *
-     * If an update already exists for this position, the new update
-     * replaces it (consolidation by position).
+     * If an update already exists for this position, it is merged using
+     * mergeLightingUpdate (preserving oldType/oldFluid, ORing triggerMeshRebuild).
      *
      * Thread-safe: Can be called from any thread.
      */
     void enqueue(LightingUpdate update);
 
     /**
+     * @brief Enqueue a batch of lighting updates atomically
+     */
+    void enqueueBatch(std::vector<LightingUpdate> updates);
+
+    /**
      * @brief Dequeue a batch of updates
      *
      * Returns up to maxCount updates. If queue is empty, blocks until
-     * updates are available, alarm fires, or stop() is called.
+     * updates are available, alarm fires, or stop()/shutdown() is called.
      *
      * @param maxCount Maximum number of updates to return
      * @param alarmFired Output parameter set to true if woken by alarm
@@ -121,11 +141,13 @@ public:
      * @brief Signal the queue to stop (wakes up waiting threads)
      */
     void stop();
+    void shutdown() { stop(); }
 
     /**
      * @brief Reset the stop flag (for reuse)
      */
     void reset();
+    void resetShutdown() { reset(); }
 
     /**
      * @brief Set an alarm time point
@@ -140,19 +162,14 @@ public:
      */
     void clearAlarm();
 
+    /**
+     * @brief Access underlying KeyedQueue
+     */
+    KeyedQueue<BlockCoord, LightingUpdate>& underlying() { return queue_; }
+    const KeyedQueue<BlockCoord, LightingUpdate>& underlying() const { return queue_; }
+
 private:
-    // Internal helper (caller must hold mutex_)
-    std::vector<LightingUpdate> tryDequeueBatchUnlocked(size_t maxCount);
-
-    // Consolidates by position - newer updates overwrite older
-    mutable std::mutex mutex_;
-    std::unordered_map<BlockCoord, LightingUpdate> pending_;
-    std::condition_variable cv_;
-    std::atomic<bool> stopped_{false};
-
-    // Alarm support for periodic background work
-    std::chrono::steady_clock::time_point alarmTime_{};
-    bool alarmSet_ = false;
+    KeyedQueue<BlockCoord, LightingUpdate> queue_;
 };
 
 // Forward declarations

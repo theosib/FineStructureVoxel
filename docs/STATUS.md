@@ -9,8 +9,8 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | **Phase R2** — Queue Consolidation, `docs/ARCHIVED_CODE.md` Git-SHA Ledger, `ColumnManager`/`IOManager` Wiring, Bulk `World::setBlocks`, `EventBus` Wiring, and Doc Reconciliation |
-| Test count | **2220** (headless+audio build) / **2261** (with Vulkan render tests), 100% green |
+| Last completed phase | **Phase R4** — `ContentPackLoader` Extraction, `sky.conf` & `GameScriptEngine` Wiring, `useBlock` Interaction Routing, and `render_demo.cpp` Simplification (completing Reclamation Phases R0–R4) |
+| Test count | **2233** (headless+audio build) / **2274** (with Vulkan render tests), 100% green |
 | In-progress | — |
 | Libraries | 5 shared libraries (see Architecture) |
 
@@ -170,6 +170,17 @@
   - Fixed `IOManager::evictOldestRegion()` to use true LRU access tracking and `IOManager::flush()` to wait for in-flight saves and callbacks
   - Wired `ColumnManager` and `IOManager` into `World` and `GameSession` (including `EntityManager::saveColumnEntities` / `loadColumnEntities` callbacks) and added bulk `World::setBlocks` subchunk-grouped mutation
   - Wired `GameSession::executeCommand` to publish typed events (`BlockBrokenEvent`, `BlockPlacedEvent`, `FluidPlacedEvent`, `FluidRemovedEvent`, `PlayerUseEvent`, `PlayerHitEvent`, `PlayerPositionEvent`, `PlayerLookEvent`, `PlayerJumpEvent`, `PlayerSprintEvent`, `PlayerSneakEvent`, `SetWorldTimeEvent`, `CraftItemEvent`) onto `session.eventBus()` and implemented `EVT_CRAFT_ITEM` via `RecipeRegistry` + `CraftingHelper`
+- [x] **Phase R3** — `finenet` In-Process Transport & Universal Smart-Client Boundary:
+  - Implemented `finenet` core (`MessageBuilder`, `MessageReader`, `Channel`, `Connection::createLocalPair()` with optional wire-serialization debug mode) and wired a `finenet::Connection` local pair inside `GameSession::createLocal()` (`clientConnection()` / `serverConnection()`)
+  - Added acting `EntityId actor` and `Rotation` propagation across `GameActions`, `World::placeBlock` / `breakBlock`, `UpdateScheduler`, `BlockContext::actor()`, `BlockContextProxy` (`:actor`), and `EventBus` events
+  - Fixed dual-physics player prediction divergence in `EntityManager::tick()` (authoritative player entity is driven by client position updates rather than double-stepped by `physicsPass`)
+  - Included `EntityTypeId` (`entity_type_id`) in `EVT_ENTITY_SPAWN` and wired `EntityRenderer` onto `session->graphicsEvents()` in `render_demo.cpp`
+  - Wired `ctx.set_block` and `world.set_block` script natives to notify `LightEngine` and `FluidTickManager`
+- [x] **Phase R4** — `ContentPackLoader` Extraction, `sky.conf` & `GameScriptEngine` Wiring, and `render_demo.cpp` Simplification:
+  - Created `finevox::ContentPackLoader` (`include/finevox/core/content_pack_loader.hpp`, `src/core/content_pack_loader.cpp`) in `libfinevox` core to encapsulate loading `blocks/*.model` (with `shapes/*.geom`, `shapes/*.collision`, and `blocks/base/*.model` includes), `fluids/*.fluid`, `recipes/*.recipe`, `loot/*.loot`, `particles/*.particle`, `emitters/*.emitter`, `entities/*.entity`, `tags/*.tag` (with `UnificationRegistry` auto-resolution), `sounds/*.sound` (`SoundLoader` now compiled into `libfinevox` core), `lang/*.lang`, and `sky.conf` (`SkyConfig::fromFile`)
+  - Registered both bare (`"stone"`) and `"finevox:"`-prefixed (`"finevox:stone"`) `BlockTypeId`s and custom `BlockGeometry` entries so worldgen, loot tables, and recipes resolve consistently, and exposed `geometryProvider()` and `faceOccludesProvider(world)` callbacks for `WorldRenderer`
+  - Wired `GameScriptEngine::loadBlockScript` to register external `BlockHandler`s on `BlockRegistry::global()` (and unregister on `~GameScriptEngine()`), added `resources/scripts/workbench.fsc` (`script: scripts/workbench.fsc` in `workbench.model`), and instantiated `GameScriptEngine` in `render_demo.cpp`
+  - Routed workbench and interactive block right-clicks in `render_demo.cpp` through `session->actions().useBlock(pos, face, playerId)` and `EventBus` `PlayerUseEvent` instead of render-thread interception, and wired `computeSkyParameters(timeOfDay, contentPack.skyConfig())` to use `resources/sky.conf`
 
 ---
 
@@ -206,7 +217,7 @@ See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
 | Library | Namespace | Major Contents |
 |---------|-----------|----------------|
-| `libfinevox` | `finevox::` | World, SubChunk, BlockType, Physics, Persistence, Events, Items, Tags, GameSession, Fluids, Particles |
+| `libfinevox` | `finevox::` | World, SubChunk, BlockType, ContentPackLoader, Physics, Persistence, Events, Items, Tags, GameSession (finenet local transport), Fluids, Particles, SoundLoader |
 | `libfinevox_worldgen` | `finevox::worldgen::` | Noise, BiomeRegistry, FeatureRegistry, GenerationPipeline, Schematics |
 | `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD, ParticleAtlas, ParticleRenderer |
 | `libfinevox_audio` | `finevox::audio::` | AudioEngine (miniaudio), SoundLoader, FootstepTracker |

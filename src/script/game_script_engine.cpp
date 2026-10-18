@@ -105,7 +105,11 @@ GameScriptEngine::GameScriptEngine(World& world)
     registerCombatNativeFunctions();
 }
 
-GameScriptEngine::~GameScriptEngine() = default;
+GameScriptEngine::~GameScriptEngine() {
+    for (const auto& [name, handler] : handlers_) {
+        BlockRegistry::global().unregisterExternalHandler(handler.get());
+    }
+}
 
 ScriptBlockHandler* GameScriptEngine::loadBlockScript(
     const std::string& scriptPath,
@@ -135,8 +139,21 @@ ScriptBlockHandler* GameScriptEngine::loadBlockScript(
         return nullptr;
     }
 
+    if (auto existingIt = handlers_.find(blockName); existingIt != handlers_.end()) {
+        BlockRegistry::global().unregisterExternalHandler(existingIt->second.get());
+    }
+
     auto* ptr = handler.get();
     handlers_[blockName] = std::move(handler);
+
+    // Register with BlockRegistry so World and UpdateScheduler dispatch to this handler
+    BlockRegistry::global().registerExternalHandler(blockName, ptr);
+    if (blockName.find(':') == std::string::npos) {
+        BlockRegistry::global().registerExternalHandler("finevox:" + blockName, ptr);
+    } else if (blockName.rfind("finevox:", 0) == 0 && blockName.size() > 8) {
+        BlockRegistry::global().registerExternalHandler(blockName.substr(8), ptr);
+    }
+
     return ptr;
 }
 

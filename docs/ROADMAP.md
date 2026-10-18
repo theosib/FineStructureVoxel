@@ -150,12 +150,12 @@ Signal propagation via scheduled ticks and neighbor updates. Each block stores m
 
 ### Tier 4 — Scale + Polish
 
-#### finenet Migration & In-Process Client-Server Split (Phase R3)
-**Priority: Immediate** | See [old_docs/PLAN-network-layer.md](../old_docs/PLAN-network-layer.md) and [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)
+#### finenet Migration & Architectural Reclamation (Phases R0–R4 — ✓ Complete)
+See [old_docs/PLAN-network-layer.md](../old_docs/PLAN-network-layer.md) and [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md).
 
-`finenet` provides `Queue<T>`, `KeyedQueue<K,D>`, `WakeSignal`, `MessageBuilder`/`MessageReader`, `Channel`, and `Connection::createLocalPair()` (with optional `debugSerialize = true` wire verification). Next step (Phase R3) splits `GameSession` into `ServerSession` and `ClientSession` communicating over `finenet::Connection` so single-player and multiplayer share the exact same Universal Smart-Client architecture.
+`finenet` provides `Queue<T>`, `KeyedQueue<K,D>`, `WakeSignal`, `MessageBuilder`/`MessageReader`, `Channel`, and `Connection::createLocalPair()` (with optional `debugSerialize = true` wire verification), wired into `GameSession` in Phase R3. `ContentPackLoader` (Phase R4) unifies content pack loading, `sky.conf`, and `GameScriptEngine` block/entity script binding.
 
-#### Multiplayer / Network Layer
+#### Multiplayer / Network Layer (UDP/TCP Transport)
 **Priority: Low (requires finenet)** | See [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)
 
 - Thin client architecture — server authoritative, client predicts and corrects

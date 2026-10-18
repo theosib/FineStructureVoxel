@@ -1,0 +1,6 @@
+# Workbench block behavior script
+# Handles player right-click (useBlock) interactions on the workbench block.
+
+on :interact do
+    true
+end

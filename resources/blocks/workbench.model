@@ -4,3 +4,4 @@ texture: blocks/wood
 sounds: wood
 hardness: 2.0
 loot: workbench
+script: scripts/workbench.fsc

@@ -41,54 +41,44 @@ Without the flag, behaviour is exactly as before the flag existed: the root is
 Every place `render_demo` reaches for a file on disk. "Game root" means the load
 follows `--game-root`; anything else does not.
 
-### Follows the game root — via the `resourcePath` variable
+### Follows the game root — via `ContentPackLoader` (`contentPack.loadAll(resourcePath)`)
 
-These build a path by string concatenation on the same variable that is handed
-to `ResourceLocator::setGameRoot()`.
+Phase R4 consolidated content loading into `finevox::ContentPackLoader` (`include/finevox/core/content_pack_loader.hpp`), which loads all content categories from `resourcePath`:
 
-| Line | Loads | Loader |
-|------|-------|--------|
-| 610 | `<root>/recipes` | `RecipeLoader::loadDirectory` |
-| 670 | `<root>/input/default.bindings` | `InputActionSystem::loadBindings` |
-| 679 | `<root>/lang/en.lang` | `LabelRegistry::loadFile` |
-| 788 | `<root>/fluids` | `FluidLoader::loadDirectory` |
-| 795 | `<root>/loot` | `LootTableLoader::loadDirectory` |
-| 802 | `<root>/particles` | `ParticleLoader::loadTypesFromDirectory` |
-| 808 | `<root>/emitters` | `ParticleLoader::loadPresetsFromDirectory` |
-| 816 | `<root>/tags/*.tag` | `loadTagFile` per entry |
-| 857 → 401 | `<root>/biomes` | `BiomeLoader::loadDirectory` (`--worldgen` only) |
-| 857 → 406 | `<root>/features` | `FeatureLoader::loadDirectory` (`--worldgen` only) |
-| 965 | `<root>/textures/particles` | `ParticleAtlas::loadFromDirectory` |
+| Path | Loader / Registry |
+|------|-------------------|
+| `<root>/tags/*.tag` | `loadTagFile` → `TagRegistry::global()` + `UnificationRegistry::global()` |
+| `<root>/sounds/*.sound` | `finevox::audio::SoundLoader::loadDirectory` → `SoundRegistry::global()` |
+| `<root>/particles/*.particle` | `ParticleLoader::loadTypesFromDirectory` → `ParticleTypeRegistry::global()` |
+| `<root>/emitters/*.emitter` | `ParticleLoader::loadPresetsFromDirectory` → `EmitterPresetRegistry::global()` |
+| `<root>/loot/*.loot` | `LootTableLoader::loadDirectory` → `LootRegistry::global()` |
+| `<root>/fluids/*.fluid` | `FluidLoader::loadDirectory` → `FluidRegistry::global()` + `FluidInteractionRegistry::global()` |
+| `<root>/blocks/*.model` + `<root>/shapes/*` | `BlockModelLoader` → `BlockRegistry::global()` (both bare `"stone"` and `"finevox:stone"`) + `ContentPackLoader::blockGeometries()` |
+| `<root>/scripts/*.fsc` | Bound via `ContentPackLoader::bindScripts(gameScriptEngine)` |
+| `<root>/entities/*.entity` | `EntityTypeLoader::loadDirectory` → `EntityTypeRegistry::global()` |
+| `<root>/recipes/*.recipe` | `RecipeLoader::loadDirectory` → `RecipeRegistry::global()` |
+| `<root>/lang/*.lang` | `LabelRegistry::global().loadFile` |
+| `<root>/sky.conf` | `SkyConfig::fromFile` → `contentPack.skyConfig()` |
 
-### Follows the game root — via `ResourceLocator::resolve("game/…")`
+### Follows the game root — direct loads in `render_demo`
 
-These go through the locator's `game/` scope, which `--game-root` sets.
-
-| Line | Loads | Notes |
-|------|-------|-------|
-| 208 | `game/blocks/<name>.model` | the 10 demo block definitions |
-| 187, 192 | `game/blocks/<path>`, then `game/<path>` | `.model` include resolver — finds `base/solid_cube`, `shapes/*.collision`, `shapes/*.geom` |
-| 152, 154, 156 | `game/<name>`, `+ .fs`, `+ .fsc` | `VoxelResourceFinder`, backing `guiEngine.resolveScript` at 621 — resolves every `loadUiScript` call (632–635, 736–738) |
-| 1014 | `game/sounds` | `SoundLoader::loadDirectory`, `FINEVOX_HAS_AUDIO` builds only |
+| Loads | Loader |
+|-------|--------|
+| `<root>/input/default.bindings` | `InputActionSystem::loadBindings` |
+| `<root>/biomes` | `BiomeLoader::loadDirectory` (`--worldgen` only) |
+| `<root>/features` | `FeatureLoader::loadDirectory` (`--worldgen` only) |
+| `<root>/textures/particles` | `ParticleAtlas::loadFromDirectory` |
+| `game/<name>`, `+ .fs`, `+ .fsc` | `VoxelResourceFinder`, backing `guiEngine.resolveScript` for UI scripts |
 
 ### Does NOT follow the game root
 
-| Line | What | Where it actually comes from |
-|------|------|------------------------------|
-| 884, 885 | `shaders/chunk.vert.spv`, `chunk.frag.spv`, `fluid.frag.spv` | Hardcoded literals, resolved relative to the **current working directory**. CMake compiles SPIR-V into `${CMAKE_CURRENT_BINARY_DIR}/shaders`, so the demo must be run from the engine build directory. |
-| 986 | `shaders/particle.vert.spv`, `particle.frag.spv` | Same — build-dir-relative literal. |
-| 2520 | `screenshots/` (F12 output) | Hardcoded literal, cwd-relative. This is a write, not a read. |
-| 889 | Block texture atlas | No file at all — `createPlaceholderAtlas` generates 16×16 solid-colour tiles procedurally. The demo never reads `resources/textures/` for block faces, so a game root cannot override block textures here. |
-| 658 | Key bindings | `loadKeyBindings()` → `ConfigManager`. `render_demo` never initialises `ConfigManager` and never calls `setUserRoot()`, so `isInitialized()` is false and the **hardcoded engine defaults** in `getDefaultKeyBindings()` are used. The `user/` scope is unset. |
-| 1372 | `physics.block_placement_mode` | Same uninitialised `ConfigManager` — returns the engine default. |
-| 2405 | Sky parameters | `computeSkyParameters(timeOfDay)` uses the one-argument overload, which holds a `static SkyConfig::defaults()` — **hardcoded**. `resources/sky.conf` exists but `render_demo` never loads it, so a game root cannot override the sky. |
-| — | finegui's `gui.vert.spv` / `gui.frag.spv` | Absolute paths baked into the finegui build tree by that library. Outside `render_demo` entirely. |
-
-### Content directories the demo never reads
-
-`resources/entities/` and `resources/scripts/` ship content but no
-`render_demo` code path loads them, so they are unaffected by the flag.
-`resources/sky.conf` is likewise shipped but unread (see line 2405 above).
+| What | Where it actually comes from |
+|------|------------------------------|
+| `shaders/chunk.vert.spv`, `chunk.frag.spv`, `fluid.frag.spv`, `particle.vert.spv`, `particle.frag.spv` | Hardcoded literals, resolved relative to the **current working directory**. CMake compiles SPIR-V into `${CMAKE_CURRENT_BINARY_DIR}/shaders`, so the demo must be run from the engine build directory. |
+| `screenshots/` (F12 output) | Hardcoded literal, cwd-relative. This is a write, not a read. |
+| Block texture atlas | `createPlaceholderAtlas` generates 16×16 solid-colour tiles procedurally. |
+| Key bindings (`loadKeyBindings()`) & `physics.block_placement_mode` | `ConfigManager` (uses engine defaults unless initialized). |
+| finegui's `gui.vert.spv` / `gui.frag.spv` | Absolute paths baked into the finegui build tree by that library. |
 
 ---
 

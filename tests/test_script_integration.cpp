@@ -7,6 +7,10 @@
 #include "finevox/script/script_block_handler.hpp"
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/core/world.hpp"
+#include "finevox/core/game_session.hpp"
+#include "finevox/core/content_pack_loader.hpp"
+#include "finevox/core/event_bus.hpp"
+#include "finevox/core/block_events.hpp"
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_model.hpp"
@@ -428,5 +432,71 @@ end
     ASSERT_NE(dc, nullptr);
     EXPECT_EQ(dc->get<int64_t>("last_actor", 0), 777);
 }
+
+TEST_F(ScriptIntegrationTest, ContentPackLoaderBindsBlockScriptsAndRoutesUseBlock) {
+    std::vector<std::filesystem::path> candidates = {
+        "resources",
+        "../resources",
+        "../../resources",
+        "/Users/theosib/projects/FineStructure/FineStructureVoxel/resources"
+    };
+    std::filesystem::path resDir;
+    for (const auto& c : candidates) {
+        if (std::filesystem::exists(c / "blocks" / "workbench.model")) {
+            resDir = std::filesystem::canonical(c);
+            break;
+        }
+    }
+    ASSERT_FALSE(resDir.empty()) << "Failed to locate resources/blocks/workbench.model";
+
+    auto session = GameSession::createLocal();
+    World& world = session->world();
+
+    {
+        GameScriptEngine gse(world);
+        ContentPackLoader loader;
+        auto stats = loader.loadAll(resDir, &gse);
+        EXPECT_EQ(stats.blocksLoaded, 10u);
+        EXPECT_GE(stats.scriptedBlocksDiscovered, 1u);
+
+        // Both "workbench" and "finevox:workbench" have handlers registered in BlockRegistry
+        EXPECT_TRUE(BlockRegistry::global().hasHandler("workbench"));
+        EXPECT_TRUE(BlockRegistry::global().hasHandler("finevox:workbench"));
+
+        BlockCoord wbPos{4, 5, 6};
+        world.setBlock(wbPos, BlockTypeId::fromName("finevox:workbench"));
+
+        bool playerUseReceived = false;
+        EntityId usedActor = INVALID_ENTITY_ID;
+        BlockCoord usedPos{};
+        session->eventBus().subscribe<PlayerUseEvent>([&](const PlayerUseEvent& ev) {
+            playerUseReceived = true;
+            usedPos = ev.pos;
+            usedActor = ev.actor;
+        });
+
+        EntityId playerId = 42;
+        EXPECT_TRUE(session->actions().useBlock(wbPos, Face::PosY, playerId));
+        session->tick(1.0f / 30.0f);
+
+        EXPECT_TRUE(playerUseReceived);
+        EXPECT_EQ(usedPos, wbPos);
+        EXPECT_EQ(usedActor, playerId);
+
+        // Also verify ScriptBlockHandler::onInteract returns true on the workbench block
+        SubChunk* sc = world.getSubChunk(ChunkPos::fromBlock(wbPos));
+        ASSERT_NE(sc, nullptr);
+        BlockContext ctx(world, *sc, wbPos, wbPos.local());
+        ctx.setActor(playerId);
+        BlockHandler* handler = BlockRegistry::global().getHandler("finevox:workbench");
+        ASSERT_NE(handler, nullptr);
+        EXPECT_TRUE(handler->onInteract(ctx, Face::PosY));
+    }
+
+    // After GameScriptEngine is destroyed, its external handlers are unregistered cleanly
+    EXPECT_FALSE(BlockRegistry::global().hasHandler("workbench"));
+    EXPECT_FALSE(BlockRegistry::global().hasHandler("finevox:workbench"));
+}
+
 
 

@@ -226,6 +226,12 @@ public:
     /// Returns false if name is already registered
     bool registerType(std::string_view name, BlockType type);
 
+    /// Register or overwrite a block type (used by ContentPackLoader)
+    void registerOrUpdateType(BlockTypeId id, BlockType type);
+
+    /// Register or overwrite a block type by name (interns the name automatically)
+    void registerOrUpdateType(std::string_view name, BlockType type);
+
     /// Get block type for given ID
     /// Returns default (full block) if not registered
     [[nodiscard]] const BlockType& getType(BlockTypeId id) const;
@@ -262,6 +268,12 @@ public:
     /// The factory is called the first time the handler is requested
     /// Returns false if a handler or factory is already registered
     bool registerHandlerFactory(std::string_view name, HandlerFactory factory);
+
+    /// Register a non-owning external block handler (e.g., owned by GameScriptEngine)
+    void registerExternalHandler(std::string_view name, BlockHandler* handler);
+
+    /// Unregister a non-owning external block handler from all names referencing it
+    void unregisterExternalHandler(BlockHandler* handler);
 
     /// Get handler for a block type (may trigger lazy loading)
     /// Returns nullptr if no handler is registered
@@ -302,12 +314,13 @@ public:
 private:
     BlockRegistry();
 
-    // Handler entry: either a loaded handler or a factory to create one
+    // Handler entry: either a loaded handler, a non-owning external handler, or a factory
     struct HandlerEntry {
         std::unique_ptr<BlockHandler> handler;
+        BlockHandler* externalHandler = nullptr;
         HandlerFactory factory;  // Used if handler is null
 
-        bool hasHandler() const { return handler != nullptr; }
+        bool hasHandler() const { return handler != nullptr || externalHandler != nullptr; }
         bool hasFactory() const { return factory != nullptr; }
     };
 

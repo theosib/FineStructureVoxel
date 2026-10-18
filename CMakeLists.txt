@@ -89,6 +89,8 @@ add_library(finevox SHARED
     src/core/world_time.cpp
     src/core/sound_event.cpp
     src/core/sound_registry.cpp
+    src/audio/sound_loader.cpp
+    src/core/content_pack_loader.cpp
     src/core/game_session.cpp
     src/core/config_serialization.cpp
     src/core/sky.cpp
@@ -392,6 +394,10 @@ if(FINEVOX_BUILD_RENDER)
             finevox_worldgen
         )
 
+        if(TARGET finevox_script)
+            target_link_libraries(finevox_render_demo PRIVATE finevox_script)
+        endif()
+
         # Link finegui if available
         if(EXISTS "${FINEGUI_DIR}/include/finegui/finegui.hpp")
             target_include_directories(finevox_render_demo PRIVATE
@@ -408,7 +414,6 @@ if(FINEVOX_BUILD_RENDER)
 
             # Script-driven GUI: requires both finegui and finevox_script
             if(TARGET finevox_script)
-                target_link_libraries(finevox_render_demo PRIVATE finevox_script)
                 if(EXISTS "${FINEGUI_DIR}/build/libfinegui-script.a")
                     target_link_libraries(finevox_render_demo PRIVATE
                         "${FINEGUI_DIR}/build/libfinegui-script.a"
@@ -455,7 +460,6 @@ if(FINEVOX_BUILD_AUDIO)
 
     add_library(finevox_audio SHARED
         src/audio/audio_engine.cpp
-        src/audio/sound_loader.cpp
         src/audio/footstep_tracker.cpp
     )
 
@@ -596,6 +600,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_particle_system.cpp
         tests/test_particle_perf.cpp
         tests/test_particle_uv_patch.cpp
+        tests/test_content_pack_loader.cpp
     )
 
     target_link_libraries(finevox_tests PRIVATE

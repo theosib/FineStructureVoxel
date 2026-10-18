@@ -372,3 +372,87 @@ TEST(SkyIntegrationTest, FullDayCycle) {
     EXPECT_TRUE(sawBright) << "Should have bright periods during the day";
     (void)prevBrightness;
 }
+
+// ============================================================================
+// SkyConfig::fromFile Tests (Phase R4)
+// ============================================================================
+
+#include <filesystem>
+#include <fstream>
+
+namespace {
+std::string findResourcesDirForSkyTest() {
+    std::vector<std::string> candidates = {
+        "resources",
+        "../resources",
+        "../../resources",
+        "/Users/theosib/projects/FineStructure/FineStructureVoxel/resources"
+    };
+    for (const auto& c : candidates) {
+        if (std::filesystem::exists(c + "/sky.conf")) {
+            return c;
+        }
+    }
+    return "";
+}
+}  // namespace
+
+TEST(SkyConfigTest, LoadsShippedSkyConfFile) {
+    std::string resDir = findResourcesDirForSkyTest();
+    ASSERT_FALSE(resDir.empty()) << "Could not locate resources/sky.conf";
+
+    SkyConfig cfg = SkyConfig::fromFile(resDir + "/sky.conf");
+    ASSERT_EQ(cfg.colorKeyframes.size(), 7u);
+    ASSERT_EQ(cfg.brightnessKeyframes.size(), 4u);
+
+    // Check dawn and noon keyframes from resources/sky.conf
+    EXPECT_FLOAT_EQ(cfg.colorKeyframes[1].time, 0.02f);
+    EXPECT_FLOAT_EQ(cfg.colorKeyframes[1].skyColor.r, 0.80f);
+    EXPECT_FLOAT_EQ(cfg.colorKeyframes[1].skyColor.g, 0.40f);
+    EXPECT_FLOAT_EQ(cfg.colorKeyframes[1].skyColor.b, 0.20f);
+
+    EXPECT_FLOAT_EQ(cfg.brightnessKeyframes[1].time, 0.04f);
+    EXPECT_FLOAT_EQ(cfg.brightnessKeyframes[1].skyBrightness, 1.0f);
+    EXPECT_FLOAT_EQ(cfg.brightnessKeyframes[1].ambientLevel, 0.40f);
+    EXPECT_FLOAT_EQ(cfg.brightnessKeyframes[1].sunIntensity, 0.6f);
+
+    SkyParameters noon = computeSkyParameters(0.25f, cfg);
+    EXPECT_NEAR(noon.skyColor.r, 0.40f, 1e-4f);
+    EXPECT_NEAR(noon.skyColor.g, 0.60f, 1e-4f);
+    EXPECT_NEAR(noon.skyColor.b, 0.90f, 1e-4f);
+    EXPECT_NEAR(noon.skyBrightness, 1.0f, 1e-4f);
+}
+
+TEST(SkyConfigTest, CustomSkyConfOverridesDefaultsAndMissingFallsBack) {
+    auto tmpPath = std::filesystem::temp_directory_path() / "finevox_custom_sky.conf";
+    {
+        std::ofstream out(tmpPath);
+        out << "[color_keyframes]\n"
+            << "0.00, 0.75, 0.10, 0.55, 0.70, 0.15, 0.50\n"
+            << "0.50, 0.75, 0.10, 0.55, 0.70, 0.15, 0.50\n"
+            << "[brightness_keyframes]\n"
+            << "0.00, 0.85, 0.55, 0.95\n"
+            << "0.50, 0.85, 0.55, 0.95\n";
+    }
+
+    SkyConfig custom = SkyConfig::fromFile(tmpPath.string());
+    std::filesystem::remove(tmpPath);
+
+    ASSERT_EQ(custom.colorKeyframes.size(), 2u);
+    ASSERT_EQ(custom.brightnessKeyframes.size(), 2u);
+
+    SkyParameters params = computeSkyParameters(0.25f, custom);
+    EXPECT_NEAR(params.skyColor.r, 0.75f, 1e-4f);
+    EXPECT_NEAR(params.skyColor.g, 0.10f, 1e-4f);
+    EXPECT_NEAR(params.skyColor.b, 0.55f, 1e-4f);
+    EXPECT_NEAR(params.skyBrightness, 0.85f, 1e-4f);
+    EXPECT_NEAR(params.ambientLevel, 0.55f, 1e-4f);
+    EXPECT_NEAR(params.sunIntensity, 0.95f, 1e-4f);
+
+    // Missing file falls back to SkyConfig::defaults()
+    SkyConfig fallback = SkyConfig::fromFile("/nonexistent/path/sky.conf");
+    SkyConfig defs = SkyConfig::defaults();
+    EXPECT_EQ(fallback.colorKeyframes.size(), defs.colorKeyframes.size());
+    EXPECT_EQ(fallback.brightnessKeyframes.size(), defs.brightnessKeyframes.size());
+}
+

@@ -167,6 +167,15 @@ bool BlockRegistry::registerType(std::string_view name, BlockType type) {
     return registerType(BlockTypeId::fromName(name), std::move(type));
 }
 
+void BlockRegistry::registerOrUpdateType(BlockTypeId id, BlockType type) {
+    std::unique_lock lock(mutex_);
+    types_[id] = std::move(type);
+}
+
+void BlockRegistry::registerOrUpdateType(std::string_view name, BlockType type) {
+    registerOrUpdateType(BlockTypeId::fromName(name), std::move(type));
+}
+
 const BlockType& BlockRegistry::getType(BlockTypeId id) const {
     std::shared_lock lock(mutex_);
 
@@ -267,6 +276,33 @@ bool BlockRegistry::registerHandlerFactory(std::string_view name, HandlerFactory
     return true;
 }
 
+void BlockRegistry::registerExternalHandler(std::string_view name, BlockHandler* handler) {
+    if (!handler || name.empty()) {
+        return;
+    }
+
+    std::unique_lock lock(mutex_);
+    handlers_[std::string(name)].externalHandler = handler;
+}
+
+void BlockRegistry::unregisterExternalHandler(BlockHandler* handler) {
+    if (!handler) {
+        return;
+    }
+
+    std::unique_lock lock(mutex_);
+    for (auto it = handlers_.begin(); it != handlers_.end(); ) {
+        if (it->second.externalHandler == handler) {
+            it->second.externalHandler = nullptr;
+            if (!it->second.hasHandler() && !it->second.hasFactory()) {
+                it = handlers_.erase(it);
+                continue;
+            }
+        }
+        ++it;
+    }
+}
+
 BlockHandler* BlockRegistry::getHandler(BlockTypeId id) {
     return getHandler(id.name());
 }
@@ -280,9 +316,14 @@ BlockHandler* BlockRegistry::getHandler(std::string_view name) {
         return nullptr;
     }
 
-    // If we have a handler, return it
-    if (it->second.hasHandler()) {
+    // If we have an owned handler, return it
+    if (it->second.handler) {
         return it->second.handler.get();
+    }
+
+    // If we have an external non-owning handler, return it
+    if (it->second.externalHandler) {
+        return it->second.externalHandler;
     }
 
     // If we have a factory, use it to create the handler (lazy loading)

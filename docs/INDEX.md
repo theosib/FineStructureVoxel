@@ -42,8 +42,8 @@
 | [systems/audio.md](systems/audio.md) | AudioEngine, SoundRegistry | `finevox_audio` | Sound events, 3D audio, footsteps |
 | [systems/scripting.md](systems/scripting.md) | GameScriptEngine, proxies, native fns | `finevox_script` | Script integration, .fsc blocks/entities |
 | [systems/ui.md](systems/ui.md) | finegui, MapRenderer, console | apps | UI layout, in-game console, settings |
-| [systems/game-session.md](systems/game-session.md) | GameSession, GameActions, game thread | `finevox` | Session lifecycle, command routing |
-| [systems/content-roots.md](systems/content-roots.md) | `--game-root` flag, resource lookup paths | apps | Loading content from outside the engine repo |
+| [systems/game-session.md](systems/game-session.md) | GameSession, GameActions, finenet local transport, game thread | `finevox` | Session lifecycle, command routing, client-server boundary |
+| [systems/content-roots.md](systems/content-roots.md) | `ContentPackLoader`, `--game-root` flag, resource lookup paths | `finevox` / apps | Loading content packs from engine or external game directories |
 
 ---
 

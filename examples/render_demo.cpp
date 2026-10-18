@@ -39,6 +39,10 @@
 
 #include <finevox/core/world.hpp>
 #include <finevox/core/game_session.hpp>
+#include <finevox/core/content_pack_loader.hpp>
+#include <finevox/core/event_bus.hpp>
+#include <finevox/core/block_events.hpp>
+#include <finevox/core/queue.hpp>
 #include <finevox/render/world_renderer.hpp>
 #include <finevox/render/block_atlas.hpp>
 #include <finevox/render/particle_atlas.hpp>
@@ -48,7 +52,6 @@
 #include <finevox/render/icon_atlas.hpp>
 #include <finevox/core/block_type.hpp>
 #include <finevox/core/block_model.hpp>
-#include <finevox/core/block_model_loader.hpp>
 #include <finevox/core/string_interner.hpp>
 #include <finevox/core/resource_locator.hpp>
 #include <finevox/core/light_engine.hpp>
@@ -69,7 +72,6 @@
 #include <finevox/core/fluid_type_id.hpp>
 #include <finevox/core/fluid_type.hpp>
 #include <finevox/core/fluid_registry.hpp>
-#include <finevox/core/fluid_loader.hpp>
 #include <finevox/core/subchunk.hpp>
 #include <finevox/render/engine.hpp>
 #include <finevox/render/frame_capture.hpp>
@@ -80,6 +82,10 @@
 #include <finevox/worldgen/biome_loader.hpp>
 #include <finevox/worldgen/feature_loader.hpp>
 #include <finevox/worldgen/feature_registry.hpp>
+
+#ifdef FINEVOX_HAS_SCRIPT
+#include <finevox/script/game_script_engine.hpp>
+#endif
 
 #include <finevk/finevk.hpp>
 #include <finevk/device/image.hpp>
@@ -112,12 +118,10 @@
 #include <finevox/core/inventory.hpp>
 #include <finevox/core/crafting_helper.hpp>
 #include <finevox/core/recipe_registry.hpp>
-#include <finevox/core/recipe_loader.hpp>
 #endif
 
 #include <finevox/core/loot_table.hpp>
 #include <finevox/core/loot_registry.hpp>
-#include <finevox/core/loot_table_loader.hpp>
 #include <finevox/core/particle_registry.hpp>
 #include <finevox/core/particle_system.hpp>
 #include <finevox/core/particle_type.hpp>
@@ -129,7 +133,6 @@
 #ifdef FINEVOX_HAS_AUDIO
 #include <finevox/audio/audio_engine.hpp>
 #include <finevox/audio/footstep_tracker.hpp>
-#include <finevox/audio/sound_loader.hpp>
 #endif
 
 #include <iostream>
@@ -172,104 +175,6 @@ BlockCoord getPlacePosition(const BlockCoord& hitPos, Face face) {
         case Face::NegZ: return BlockCoord(hitPos.x, hitPos.y, hitPos.z - 1);
         default: return hitPos;
     }
-}
-
-// Load all block definitions from spec files
-// Returns a map of block geometries for blocks with custom meshes
-std::unordered_map<uint32_t, BlockGeometry> loadBlockDefinitions() {
-    std::unordered_map<uint32_t, BlockGeometry> blockGeometries;
-    auto& registry = BlockRegistry::global();
-
-    // Set up model loader with file resolver (returns paths, not content)
-    // Try multiple search paths: blocks/ first (for includes), then root
-    BlockModelLoader modelLoader;
-    modelLoader.setFileResolver([](const std::string& path) -> std::string {
-        // Try blocks/ directory first (for includes like "base/solid_cube")
-        auto resolved = ResourceLocator::instance().resolve("game/blocks/" + path);
-        if (std::filesystem::exists(resolved)) {
-            return resolved.string();
-        }
-        // Fall back to game root (for shapes/ etc.)
-        resolved = ResourceLocator::instance().resolve("game/" + path);
-        if (std::filesystem::exists(resolved)) {
-            return resolved.string();
-        }
-        // Return empty to trigger relative path fallback in loader
-        return "";
-    });
-
-    // List of blocks to load
-    std::vector<std::string> blockNames = {
-        "stone", "dirt", "grass", "cobble", "luminite",
-        "slab", "stairs", "wedge", "stone_slab", "workbench"
-    };
-
-    for (const auto& name : blockNames) {
-        // Resolve the model file path
-        auto modelPath = ResourceLocator::instance().resolve("game/blocks/" + name + ".model");
-        std::cout << "Loading block '" << name << "' from: " << modelPath.string() << "\n";
-
-        auto model = modelLoader.loadModel(modelPath.string());
-        if (!model) {
-            std::cout << "  Warning: Failed to load model: " << modelLoader.lastError() << "\n";
-            continue;
-        }
-
-        // Create BlockType from model properties
-        BlockTypeId blockId = BlockTypeId::fromName(name);
-        if (!registry.hasType(blockId)) {
-            BlockType blockType;
-
-            // Set collision shape
-            if (model->hasExplicitCollision() || model->hasCustomGeometry()) {
-                blockType.setCollisionShape(model->resolvedCollision());
-            }
-
-            // Set light properties
-            if (model->lightEmission() > 0) {
-                blockType.setLightEmission(model->lightEmission());
-            }
-            blockType.setLightAttenuation(model->lightAttenuation());
-
-            // Mark as custom mesh if it has non-cube geometry
-            if (model->hasCustomGeometry()) {
-                blockType.setHasCustomMesh(true);
-            }
-
-            // Set sound set from model (e.g., "stone", "grass")
-            if (!model->sounds().empty()) {
-                blockType.setSoundSet(SoundSetId::fromName(model->sounds()));
-            }
-
-            // Set loot table (name references a .loot file in resources/loot/)
-            if (model->hasLoot()) {
-                blockType.setLootTable(LootTableId::fromName(model->loot()));
-            }
-
-            // Set particle emitter preset (name references a .emitter file
-            // in resources/emitters/). When unset, the engine falls back to
-            // the generic "finevox:block_break" preset at break time.
-            if (model->hasParticle()) {
-                blockType.setParticleEmitter(
-                    EmitterPresetId::fromName(model->particle()));
-            }
-
-            registry.registerType(blockId, blockType);
-            std::cout << "  Registered block type with "
-                      << (model->hasCustomGeometry() ? "custom" : "standard") << " geometry\n";
-        }
-
-        // Store geometry for custom mesh blocks
-        if (model->hasCustomGeometry()) {
-            blockGeometries[blockId.id] = model->geometry();
-            std::cout << "  Stored geometry with " << model->geometry().faces().size() << " faces\n";
-        }
-    }
-
-    std::cout << "Loaded " << blockNames.size() << " block definitions, "
-              << blockGeometries.size() << " with custom geometry\n";
-
-    return blockGeometries;
 }
 
 void buildTestWorld(World& world, bool singleBlock = false, bool largeCoords = false) {
@@ -516,6 +421,25 @@ int main(int argc, char* argv[]) {
         }
         ResourceLocator::instance().setGameRoot(resourcePath);
 
+        // Load all content pack definitions (blocks, geometries, fluids, recipes,
+        // loot tables, particles, emitters, entities, tags, sounds, lang, sky.conf)
+        ContentPackLoader contentPack;
+        ContentPackLoadStats packStats = contentPack.loadAll(resourcePath);
+        std::cout << "Loaded content pack from " << resourcePath << ": "
+                  << packStats.blocksLoaded << " blocks ("
+                  << packStats.customGeometriesLoaded << " custom geom), "
+                  << packStats.fluidsLoaded << " fluids, "
+                  << packStats.recipesLoaded << " recipes, "
+                  << packStats.lootTablesLoaded << " loot tables, "
+                  << packStats.particleTypesLoaded << " particle types, "
+                  << packStats.emitterPresetsLoaded << " emitters, "
+                  << packStats.entityTypesLoaded << " entities, "
+                  << packStats.tagFilesLoaded << " tag files, "
+                  << packStats.soundSetsLoaded << " sound sets, "
+                  << packStats.langFilesLoaded << " lang files, "
+                  << "sky.conf=" << (packStats.skyConfigLoaded ? "loaded" : "defaults")
+                  << "\n";
+
         // Create Engine (handles Vulkan instance, window, device, renderer, input)
         EngineConfig engineConfig;
         engineConfig.windowTitle = "FineVox Render Demo";
@@ -607,15 +531,8 @@ int main(int argc, char* argv[]) {
         // Separate context for console command execution (retains variables across commands)
         finescript::ExecutionContext consoleCtx(guiEngine);
 
-        // Load recipes before UI scripts (recipe_browser.fs calls build_recipe_list at load time)
-        std::string recipesDir = resourcePath + "/recipes";
-        if (std::filesystem::exists(recipesDir)) {
-            size_t recipeCount = RecipeLoader::loadDirectory(recipesDir);
-            std::cout << "Loaded " << recipeCount << " recipes from " << recipesDir << "\n";
-        }
-
-        // Deferred UI actions (for callbacks that run during renderAll)
-        std::vector<std::function<void()>> deferredUiActions;
+        // Thread-safe deferred UI actions (for callbacks from renderAll or game thread)
+        Queue<std::function<void()>> deferredUiActions;
 
         // Load UI scripts
         auto loadUiScript = [&](const char* name) {
@@ -674,13 +591,6 @@ int main(int argc, char* argv[]) {
             std::cout << "Loaded input bindings from " << bindingsPath << "\n";
         } else {
             std::cerr << "Warning: input bindings not found at " << bindingsPath << "\n";
-        }
-
-        // Load language labels
-        std::string langPath = resourcePath + "/lang/en.lang";
-        if (std::filesystem::exists(langPath)) {
-            LabelRegistry::global().loadFile(langPath);
-            std::cout << "Loaded language labels from " << langPath << "\n";
         }
 
         // Player inventory DataContainer (will be used by InventoryBridge)
@@ -781,57 +691,34 @@ int main(int argc, char* argv[]) {
             return raw;
         };
 
-        // Load all block definitions from spec files
-        // This registers block types and loads custom geometries
-        std::unordered_map<uint32_t, BlockGeometry> blockGeometries = loadBlockDefinitions();
-
-        // Load fluid definitions from .fluid files
-        std::string fluidsDir = resourcePath + "/fluids";
-        if (std::filesystem::exists(fluidsDir)) {
-            size_t fluidCount = FluidLoader::loadDirectory(fluidsDir);
-            std::cout << "Loaded " << fluidCount << " fluid types from " << fluidsDir << "\n";
-        }
-
-        // Load loot tables from .loot files (referenced by block models via loot:)
-        std::string lootDir = resourcePath + "/loot";
-        if (std::filesystem::exists(lootDir)) {
-            size_t lootCount = LootTableLoader::loadDirectory(lootDir);
-            std::cout << "Loaded " << lootCount << " loot tables from " << lootDir << "\n";
-        }
-
-        // Load particle types and emitter presets (Phase 26)
-        std::string particlesDir = resourcePath + "/particles";
-        if (std::filesystem::exists(particlesDir)) {
-            size_t typeCount = ParticleLoader::loadTypesFromDirectory(particlesDir);
-            std::cout << "Loaded " << typeCount << " particle types from "
-                      << particlesDir << "\n";
-        }
-        std::string emittersDir = resourcePath + "/emitters";
-        if (std::filesystem::exists(emittersDir)) {
-            size_t presetCount = ParticleLoader::loadPresetsFromDirectory(emittersDir);
-            std::cout << "Loaded " << presetCount << " emitter presets from "
-                      << emittersDir << "\n";
-        }
-
-        // Load tool-classification tags (precise-break, pickaxe, etc.)
-        std::string tagsDir = resourcePath + "/tags";
-        if (std::filesystem::exists(tagsDir)) {
-            size_t tagFiles = 0;
-            for (const auto& entry : std::filesystem::directory_iterator(tagsDir)) {
-                if (!entry.is_regular_file()) continue;
-                if (entry.path().extension() != ".tag") continue;
-                int n = loadTagFile(entry.path().string(),
-                                    TagRegistry::global(),
-                                    UnificationRegistry::global());
-                if (n > 0) ++tagFiles;
-            }
-            TagRegistry::global().rebuild();
-            std::cout << "Loaded " << tagFiles << " tag file(s) from " << tagsDir << "\n";
-        }
-
         // Create game session (owns World, UpdateScheduler, LightEngine, EntityManager, WorldTime, event queues)
         auto session = GameSession::createLocal();
         World& world = session->world();
+
+#ifdef FINEVOX_HAS_SCRIPT
+        // Wire GameScriptEngine to world, entities, fluid ticks, and content pack scripts
+        script::GameScriptEngine gameScriptEngine(world);
+        gameScriptEngine.setEntityManager(&session->entities());
+        gameScriptEngine.setFluidTickManager(&session->fluidTicks());
+        size_t boundScripts = contentPack.bindScripts(gameScriptEngine);
+        session->entities().setMobEventHooksProvider(gameScriptEngine.createHooksProvider());
+        std::cout << "GameScriptEngine initialized (" << boundScripts << " block script(s) bound)\n";
+#endif
+
+        // Route block right-click (useBlock) interactions from the game thread via EventBus
+        session->eventBus().subscribe<PlayerUseEvent>([&](const PlayerUseEvent& ev) {
+            BlockTypeId usedType = world.getBlock(ev.pos);
+            auto usedName = usedType.name();
+            if (usedName == "workbench" || usedName == "finevox:workbench") {
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                deferredUiActions.push([&]() {
+                    actionDispatch.dispatch("open_workbench", ActionArgs{});
+                });
+#else
+                actionDispatch.dispatch("open_workbench", ActionArgs{});
+#endif
+            }
+        });
 
         // Wire up item-drop pickup: when a player is close enough to an ItemDropEntity,
         // deposit the stack into the bag using InventoryBridge's mutex to prevent cross-thread races.
@@ -929,34 +816,9 @@ int main(int argc, char* argv[]) {
             });
 #endif
 
-        // Set geometry provider for custom mesh blocks (geometries loaded earlier)
-        worldRenderer.setGeometryProvider([&blockGeometries](BlockTypeId type) -> const BlockGeometry* {
-            auto it = blockGeometries.find(type.id);
-            if (it != blockGeometries.end()) {
-                return &it->second;
-            }
-            return nullptr;
-        });
-
-        // Set face occludes provider for directional face culling
-        // This handles slabs/stairs where only some faces are solid
-        worldRenderer.setFaceOccludesProvider([&world, &blockGeometries](const BlockCoord& pos, Face face) -> bool {
-            BlockTypeId blockType = world.getBlock(pos);
-            if (blockType.isAir()) {
-                return false;  // Air doesn't occlude anything
-            }
-
-            // Check if this block has custom geometry
-            auto it = blockGeometries.find(blockType.id);
-            if (it != blockGeometries.end()) {
-                // Custom geometry - check if this specific face is solid
-                uint8_t solidMask = it->second.solidFacesMask();
-                return (solidMask & (1 << static_cast<int>(face))) != 0;
-            }
-
-            // Standard opaque block - all faces occlude
-            return true;
-        });
+        // Set geometry and face-occlusion providers from ContentPackLoader
+        worldRenderer.setGeometryProvider(contentPack.geometryProvider());
+        worldRenderer.setFaceOccludesProvider(contentPack.faceOccludesProvider(world));
 
         worldRenderer.initialize();
 
@@ -1012,15 +874,8 @@ int main(int argc, char* argv[]) {
         float timeSpeedMultiplier = 1.0f;
         std::cout << "World time initialized (20 ticks/sec, speed 1x)\n";
 
-        // Audio system
+        // Audio system (sound sets already loaded by ContentPackLoader)
 #ifdef FINEVOX_HAS_AUDIO
-        // Load sound set definitions
-        auto soundDir = ResourceLocator::instance().resolve("game/sounds");
-        if (std::filesystem::exists(soundDir)) {
-            size_t soundSets = finevox::audio::SoundLoader::loadDirectory(soundDir.string());
-            std::cout << "Loaded " << soundSets << " sound sets\n";
-        }
-
         // Audio engine reads from session's sound event queue
         finevox::audio::AudioEngine audioEngine(session->soundEvents(), SoundRegistry::global());
         if (audioEngine.initialize()) {
@@ -1148,18 +1003,7 @@ int main(int argc, char* argv[]) {
         playerController.setFlyPosition(camera.positionD());
 
         // Block shape provider for raycasting - uses BlockRegistry for collision shapes
-        BlockShapeProvider shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
-            BlockTypeId blockType = world.getBlock(pos);
-            if (blockType.isAir()) {
-                return nullptr;  // No collision
-            }
-            const BlockType& type = BlockRegistry::global().getType(blockType);
-            if (mode == RaycastMode::Collision) {
-                return type.hasCollision() ? &type.collisionShape() : nullptr;
-            } else {
-                return type.hasHitShape() ? &type.hitShape() : nullptr;
-            }
-        };
+        BlockShapeProvider shapeProvider = createBlockShapeProvider(world);
 
         // Physics system and player body
         PhysicsSystem physicsSystem(shapeProvider);
@@ -1375,11 +1219,13 @@ int main(int argc, char* argv[]) {
             Vec3 direction = playerController.forwardVector();
             RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
             if (result.hit) {
-                // Check if the targeted block is interactive (e.g., workbench)
+                // Route interactive blocks (with a registered BlockHandler, e.g., workbench)
+                // through session->actions().useBlock(...)
                 BlockTypeId hitType = world.getBlock(result.blockPos);
-                auto hitName = StringInterner::global().lookup(hitType.id);
-                if (hitName == "workbench") {
-                    actionDispatch.dispatch("open_workbench", ActionArgs{});
+                auto hitName = hitType.name();
+                if (BlockRegistry::global().hasHandler(hitType) ||
+                    hitName == "workbench" || hitName == "finevox:workbench") {
+                    session->actions().useBlock(result.blockPos, result.face, playerId);
                     return;
                 }
 
@@ -1604,7 +1450,7 @@ int main(int argc, char* argv[]) {
 #ifdef FINEVOX_HAS_SCRIPT_GUI
             if (inventoryWindowId >= 0) {
                 // Close inventory + recipe browser
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     mapRenderer.hide(inventoryWindowId);
                     inventoryWindowId = -1;
                     if (recipeBrowserId >= 0) {
@@ -1615,7 +1461,7 @@ int main(int argc, char* argv[]) {
                 });
             } else {
                 // Open inventory + recipe browser side by side
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     auto winSz = window.windowSize();
                     float w = static_cast<float>(winSz.x);
                     float h = static_cast<float>(winSz.y);
@@ -1654,7 +1500,7 @@ int main(int argc, char* argv[]) {
 #ifdef FINEVOX_HAS_SCRIPT_GUI
             if (workbenchWindowId >= 0) {
                 // Close workbench
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     mapRenderer.hide(workbenchWindowId);
                     workbenchWindowId = -1;
                     if (recipeBrowserId >= 0) {
@@ -1665,7 +1511,7 @@ int main(int argc, char* argv[]) {
                 });
             } else {
                 // Open workbench + recipe browser side by side
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     auto winSz = window.windowSize();
                     float w = static_cast<float>(winSz.x);
                     float h = static_cast<float>(winSz.y);
@@ -1737,7 +1583,7 @@ int main(int argc, char* argv[]) {
         // ====================================================================
         guiEngine.registerFunction("resume_game",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     if (dimOverlayId >= 0) { mapRenderer.hide(dimOverlayId); dimOverlayId = -1; }
                     if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
                     if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
@@ -1748,13 +1594,13 @@ int main(int argc, char* argv[]) {
 
         guiEngine.registerFunction("quit_game",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() { window.close(); });
+                deferredUiActions.push([&]() { window.close(); });
                 return finescript::Value::nil();
             });
 
         guiEngine.registerFunction("show_settings",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     if (mainMenuId >= 0) { mapRenderer.hide(mainMenuId); mainMenuId = -1; }
                     auto settingsTree = uiCtx.get("settings_menu");
                     if (!settingsTree.isNil()) {
@@ -1782,7 +1628,7 @@ int main(int argc, char* argv[]) {
 
         guiEngine.registerFunction("show_main_menu",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     if (settingsMenuId >= 0) { mapRenderer.hide(settingsMenuId); settingsMenuId = -1; }
                     auto mainTree = uiCtx.get("main_menu");
                     if (!mainTree.isNil()) {
@@ -1896,7 +1742,7 @@ int main(int argc, char* argv[]) {
                 if (consoleLog.size() > MAX_CONSOLE_LINES) consoleLog.pop_front();
 
                 // Update console output widget children
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     auto output = mapRenderer.findById("console_output");
                     if (!output.isNil()) {
                         auto children = finescript::Value::array(std::vector<finescript::Value>{});
@@ -1952,7 +1798,7 @@ int main(int argc, char* argv[]) {
 
         guiEngine.registerFunction("close_console",
             [&](finescript::ExecutionContext&, const std::vector<finescript::Value>&) -> finescript::Value {
-                deferredUiActions.push_back([&]() {
+                deferredUiActions.push([&]() {
                     if (consoleWindowId >= 0) { mapRenderer.hide(consoleWindowId); consoleWindowId = -1; }
                     if (inputContext == InputContext::Chat) setInputContext(InputContext::Gameplay);
                     // Reset visible so re-show works
@@ -2382,8 +2228,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            for (auto& action : deferredUiActions) action();
-            deferredUiActions.clear();
+            for (auto& action : deferredUiActions.drainAll()) action();
 #endif
 
             gui.endFrame();
@@ -2421,8 +2266,8 @@ int main(int argc, char* argv[]) {
 
             auto framePeriod = worldRenderer.recordFrameStart();
 
-            // Sky parameters
-            currentSkyParams = computeSkyParameters(worldTime.timeOfDay());
+            // Sky parameters (from resources/sky.conf loaded by ContentPackLoader)
+            currentSkyParams = computeSkyParameters(worldTime.timeOfDay(), contentPack.skyConfig());
             worldRenderer.setSkyParameters(currentSkyParams);
             if (worldRenderer.fogDynamicColor()) {
                 worldRenderer.setFogColor(currentSkyParams.fogColor);

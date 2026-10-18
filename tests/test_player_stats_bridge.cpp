@@ -10,6 +10,8 @@
 #include <finescript/script_engine.h>
 #include <finescript/execution_context.h>
 #include <finescript/value.h>
+#include <atomic>
+#include <thread>
 
 using namespace finevox;
 using namespace finevox::script;
@@ -148,3 +150,37 @@ TEST_F(PlayerStatsBridgeTest, NoPlayerReturnsDefaults) {
     r = engine2.executeCommand("{player_is_alive}", ctx);
     EXPECT_FALSE(r.returnValue.asBool());
 }
+
+TEST_F(PlayerStatsBridgeTest, ConcurrentGameTickAndStatsAccessThreadSafe) {
+    std::atomic<bool> done{false};
+
+    // Game thread ticking EntityManager while mutating player health/stats
+    std::thread gameThread([&]() {
+        for (int i = 0; i < 100; ++i) {
+            session_->entities().tick(1.0f / 30.0f);
+            session_->entities().withLocalPlayerMob([&](MobEntity* mob) {
+                if (mob) {
+                    mob->setHealth(10.0f + static_cast<float>(i % 10));
+                }
+            });
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    // UI thread reading and writing stats via PlayerStatsBridge
+    int reads = 0;
+    while (!done.load(std::memory_order_acquire) || reads < 20) {
+        auto hp = eval("{player_health}");
+        EXPECT_TRUE(hp.isFloat());
+        EXPECT_GE(hp.asFloat(), 10.0);
+        EXPECT_LE(hp.asFloat(), 20.0);
+
+        eval("{player_set_stat \"stamina\" 50}");
+        auto st = eval("{player_get_stat \"stamina\" 0}");
+        EXPECT_EQ(st.asInt(), 50);
+        ++reads;
+    }
+
+    gameThread.join();
+}
+

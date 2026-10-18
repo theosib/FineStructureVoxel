@@ -1099,4 +1099,18 @@ void InventoryBridge::setIconLookup(IconLookup lookup) {
     iconLookup_ = std::move(lookup);
 }
 
+int32_t InventoryBridge::addItem(const std::string& ownerName,
+                                 const std::string& section,
+                                 ItemTypeId type,
+                                 int32_t count) {
+    if (count <= 0 || type.isEmpty()) return count;
+    std::lock_guard lock(mutex_);
+    auto* entry = findOwner(ownerName);
+    if (!entry) return count;
+
+    auto& child = entry->dc->getOrCreateChild(section);
+    InventoryView view(child, *entry->registry);
+    return view.addItem(type, count);
+}
+
 }  // namespace finevox::script

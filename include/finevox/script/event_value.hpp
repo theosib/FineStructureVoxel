@@ -58,7 +58,7 @@ struct EventSymbols {
     uint32_t neighbor_face_mask;
 
     // Entity fields
-    uint32_t entity_id, entity_type;
+    uint32_t entity_id, player_id, entity_type, entity_type_name;
     uint32_t vel_x, vel_y, vel_z;
     uint32_t on_ground;
     uint32_t yaw, pitch;
@@ -158,23 +158,28 @@ constexpr const char* EVT_PARTICLE_BURST = "particle_burst";
 
 /** Build a block-placed action. */
 finescript::Value makeBlockPlacedValue(BlockCoord pos, BlockTypeId newType,
-                                       BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
+                                       BlockTypeId oldType, Rotation rot = Rotation::IDENTITY,
+                                       EntityId actor = INVALID_ENTITY_ID);
 
 /** Build a block-broken action.
  *  @param tool Item type held by the breaker (empty = bare hand).
- *  @param preciseBreak True if the tool performs a "precise" break (silk-touch equivalent). */
+ *  @param preciseBreak True if the tool performs a "precise" break (silk-touch equivalent).
+ *  @param actor Entity ID of the actor breaking the block. */
 finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType,
                                         ItemTypeId tool = {},
-                                        bool preciseBreak = false);
+                                        bool preciseBreak = false,
+                                        EntityId actor = INVALID_ENTITY_ID);
 
 /** Build a block-changed event. */
 finescript::Value makeBlockChangedValue(BlockCoord pos, BlockTypeId oldType, BlockTypeId newType);
 
 /** Build a player-use (right-click) action. */
-finescript::Value makePlayerUseValue(BlockCoord pos, Face face);
+finescript::Value makePlayerUseValue(BlockCoord pos, Face face,
+                                     EntityId actor = INVALID_ENTITY_ID);
 
 /** Build a player-hit (left-click) action. */
-finescript::Value makePlayerHitValue(BlockCoord pos, Face face);
+finescript::Value makePlayerHitValue(BlockCoord pos, Face face,
+                                     EntityId actor = INVALID_ENTITY_ID);
 
 /** Build a player position update. */
 finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
@@ -226,7 +231,8 @@ finescript::Value makeSoundEventValue(SoundSetId soundSet, std::string_view acti
 
 /** Build an entity-spawn event. */
 finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
-                                       glm::dvec3 pos, float yaw, float pitch);
+                                       glm::dvec3 pos, float yaw, float pitch,
+                                       std::string_view entityTypeName = "");
 
 /** Build an entity-despawn event. */
 finescript::Value makeEntityDespawnValue(EntityId id);

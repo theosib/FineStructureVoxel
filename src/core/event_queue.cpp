@@ -302,6 +302,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
             if (handler) {
                 BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
                 ctx.setScheduler(this);
+                ctx.setActor(event.actorId != INVALID_ENTITY_ID ? event.actorId : event.entityId);
                 handler->onDestroy(ctx);
             }
         }
@@ -335,6 +336,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         // Create context and call handler
         BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
         ctx.setScheduler(this);
+        ctx.setActor(event.actorId != INVALID_ENTITY_ID ? event.actorId : event.entityId);
         if (handler) {
             ctx.setPreviousType(event.previousType);
             handler->onPlace(ctx);
@@ -374,6 +376,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
     // Create context for handler calls
     BlockContext ctx(world_, *subchunk, event.pos, event.localPos);
     ctx.setScheduler(this);
+    ctx.setActor(event.actorId != INVALID_ENTITY_ID ? event.actorId : event.entityId);
 
     switch (event.type) {
 

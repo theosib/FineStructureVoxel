@@ -16,7 +16,12 @@
 #include "finevox/core/inventory.hpp"
 #include "finevox/core/column_manager.hpp"
 #include "finevox/core/io_manager.hpp"
+#include "finevox/core/mob_entity.hpp"
+#include "finevox/core/physics.hpp"
 #include "finevox/script/event_value.hpp"
+#include "finevox/script/finevox_interner.hpp"
+#include <finenet/finenet.hpp>
+#include <finescript/cbor.h>
 #include <filesystem>
 
 using namespace finevox;
@@ -535,4 +540,215 @@ TEST(GameSessionTest, ColumnManagerAndEntityPersistenceWiredInGameSession) {
 
     std::filesystem::remove_all(tempDir);
 }
+
+// ============================================================================
+// Phase R3: finenet::Connection local pair, Rotation/Actor on GameActions,
+// and Player Prediction without false physics_divergence
+// ============================================================================
+
+TEST(GameSessionTest, FinenetConnectionLocalPairRoundTripWithDebugSerialization) {
+    GameSessionConfig cfg;
+    cfg.debugNetSerialization = true;
+    auto session = GameSession::createLocal(cfg);
+
+    EXPECT_TRUE(session->clientConnection().isConnected());
+    EXPECT_TRUE(session->serverConnection().isConnected());
+    EXPECT_TRUE(session->clientConnection().config().debugSerialization);
+    EXPECT_TRUE(session->serverConnection().config().debugSerialization);
+
+    auto stone = ensureTestBlock("r3_net_stone", false);
+    session->world().setBlock({0, 0, 0}, stone);
+
+    // 1. Action via GameActions traverses clientConnection -> serverConnection with wire serialization
+    uint64_t sentBefore = session->clientConnection().stats().packetsSent;
+    session->actions().placeBlock({1, 2, 3}, stone, Rotation::ROTATE_Y_180, 42);
+    EXPECT_GT(session->clientConnection().stats().packetsSent, sentBefore);
+    EXPECT_GT(session->serverConnection().stats().packetsReceived, 0u);
+
+    session->tick(0.0f);
+    EXPECT_EQ(session->world().getBlock({1, 2, 3}), stone);
+    SubChunk* sc = session->world().getSubChunk(ChunkPos::fromBlock({1, 2, 3}));
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->getRotation(1, 2, 3), Rotation::ROTATE_Y_180);
+
+    // 2. Server -> Client sound event and entity spawn event over serverConnection
+    FineVoxInterner interner;
+    auto sndVal = makeSoundEventValue(SoundSetId::fromName("r3_snd"), "break", "effects", BlockCoord{4, 5, 6});
+    auto sndCbor = finescript::cborEncode(sndVal, interner);
+    auto sndMsg = finenet::MessageBuilder(finenet::MessageType::SoundEvent).writeCBOR(sndCbor).build();
+    EXPECT_EQ(session->serverConnection().send(finenet::Channels::Effects, std::move(sndMsg)),
+              finenet::SendResult::Ok);
+
+    auto spawnVal = makeEntitySpawnValue(77, 13, glm::dvec3(10.0, 20.0, 30.0), 1.0f, 0.5f, "finevox:zombie");
+    auto spawnCbor = finescript::cborEncode(spawnVal, interner);
+    auto spawnMsg = finenet::MessageBuilder(finenet::MessageType::EntitySpawn).writeCBOR(spawnCbor).build();
+    EXPECT_EQ(session->serverConnection().send(finenet::Channels::Entities, std::move(spawnMsg)),
+              finenet::SendResult::Ok);
+
+    session->clientConnection().update();
+
+    auto sounds = session->soundEvents().drainAll();
+    ASSERT_EQ(sounds.size(), 1u);
+    EXPECT_EQ(readString(sounds[0], EventSymbols::instance().sound_set), "r3_snd");
+
+    auto gfx = session->graphicsEvents().drainAll();
+    ASSERT_EQ(gfx.size(), 1u);
+    ASSERT_EQ(gfx[0].kind, GraphicsMessage::Kind::Event);
+    EXPECT_EQ(readEntityId(gfx[0].event), 77u);
+    EXPECT_EQ(readString(gfx[0].event, EventSymbols::instance().entity_type_name), "finevox:zombie");
+}
+
+TEST(GameSessionTest, GameActionsPassesRotationAndActorToBlockHandler) {
+    class ActorRecordingHandler : public BlockHandler {
+    public:
+        std::string_view name() const override { return "r3_actor_block"; }
+        void onPlace(BlockContext& ctx) override {
+            placeActor = ctx.actor();
+            placeRot = ctx.rotation();
+        }
+        bool onInteract(BlockContext& ctx, Face face) override {
+            useActor = ctx.actor();
+            useFace = face;
+            return true;
+        }
+        bool onStrike(BlockContext& ctx, Face face) override {
+            hitActor = ctx.actor();
+            hitFace = face;
+            return true;
+        }
+        void onDestroy(BlockContext& ctx) override {
+            destroyActor = ctx.actor();
+        }
+
+        EntityId placeActor = INVALID_ENTITY_ID;
+        Rotation placeRot = Rotation::IDENTITY;
+        EntityId useActor = INVALID_ENTITY_ID;
+        Face useFace = Face::PosY;
+        EntityId hitActor = INVALID_ENTITY_ID;
+        Face hitFace = Face::PosY;
+        EntityId destroyActor = INVALID_ENTITY_ID;
+    };
+
+    auto blockId = ensureTestBlock("r3_actor_block", false);
+    auto handler = std::make_unique<ActorRecordingHandler>();
+    auto* handlerPtr = handler.get();
+    BlockRegistry::global().registerHandler("r3_actor_block", std::move(handler));
+
+    auto session = GameSession::createLocal();
+    session->world().setBlock({0, 0, 0}, blockId);
+
+    session->actions().placeBlock({2, 3, 4}, blockId, Rotation::ROTATE_Y_270, 101);
+    session->tick(0.0f);
+    EXPECT_EQ(handlerPtr->placeActor, 101u);
+    EXPECT_EQ(handlerPtr->placeRot, Rotation::ROTATE_Y_270);
+
+    session->actions().useBlock({2, 3, 4}, Face::NegZ, 202);
+    session->actions().hitBlock({2, 3, 4}, Face::PosX, 303);
+    session->tick(0.0f);
+    EXPECT_EQ(handlerPtr->useActor, 202u);
+    EXPECT_EQ(handlerPtr->useFace, Face::NegZ);
+    EXPECT_EQ(handlerPtr->hitActor, 303u);
+    EXPECT_EQ(handlerPtr->hitFace, Face::PosX);
+
+    session->actions().breakBlock({2, 3, 4}, {}, false, 404);
+    session->tick(0.0f);
+    EXPECT_EQ(handlerPtr->destroyActor, 404u);
+}
+
+TEST(GameSessionTest, PlayerPredictionDoesNotFalseCorrectOnMovementButCorrectsWallClipAndSplashesWater) {
+    auto session = GameSession::createLocal();
+    auto stoneId = BlockTypeId::fromName("r3_wall_stone");
+    if (!BlockRegistry::global().hasType(stoneId)) {
+        BlockType bt;
+        bt.setShape(CollisionShape::FULL_BLOCK).setOpaque(true);
+        BlockRegistry::global().registerType(stoneId, bt);
+    }
+
+    // Build flat floor at y=0 (top at y=1.0) and a solid wall at x=5, y=1..2, z=0
+    for (int x = -2; x <= 6; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            session->world().setBlock({x, 0, z}, stoneId);
+        }
+    }
+    session->world().setBlock({5, 1, 0}, stoneId);
+    session->world().setBlock({5, 2, 0}, stoneId);
+
+    // Register water fluid at (2, 1, 0) for splash verification
+    FluidTypeId waterId = FluidTypeId::fromName("r3_pred_water");
+    if (!FluidRegistry::global().hasType(waterId)) {
+        FluidType ft;
+        ft.name = "r3_pred_water";
+        ft.id = waterId;
+        ft.soundSet = SoundSetId::fromName("r3_water_splash");
+        FluidRegistry::global().registerType("r3_pred_water", ft);
+    }
+    session->world().setFluid({2, 1, 0}, waterId, 15);
+
+    EntityId playerId = session->entities().spawnPlayer(Vec3(0.5f, 1.0f, 0.5f));
+    session->graphicsEvents().drainAll();
+    session->soundEvents().drainAll();
+
+    // 1. Normal walking across floor into water (x = 0.5 -> 1.5 -> 2.5) with velocity (4.0, 0.0, 0.0)
+    for (int step = 1; step <= 4; ++step) {
+        EntityState state;
+        state.id = playerId;
+        state.position = glm::dvec3(0.5 + step * 0.5, 1.0, 0.5);
+        state.velocity = glm::dvec3(4.0, 0.0, 0.0);
+        state.onGround = true;
+        state.inputSequence = static_cast<uint64_t>(step);
+        session->actions().sendPlayerState(playerId, state);
+        session->tick(1.0f / 30.0f);
+    }
+
+    // Verify player velocity was NOT decayed by 0.8f and position matches client prediction
+    const Entity* player = session->entities().getEntity(playerId);
+    ASSERT_NE(player, nullptr);
+    EXPECT_FLOAT_EQ(player->position().x, 2.5f);
+    EXPECT_FLOAT_EQ(player->velocity().x, 4.0f);
+
+    // Verify NO false EVT_PLAYER_CORRECTION was emitted during normal movement
+    auto gfxEvents = session->graphicsEvents().drainAll();
+    int correctionCount = 0;
+    for (const auto& msg : gfxEvents) {
+        if (msg.kind == GraphicsMessage::Kind::Event &&
+            readEventType(msg.event) == EVT_PLAYER_CORRECTION) {
+            ++correctionCount;
+        }
+    }
+    EXPECT_EQ(correctionCount, 0);
+
+    // Verify player still triggered water splash sound on entering (2, 1, 0)
+    auto sounds = session->soundEvents().drainAll();
+    bool splashed = false;
+    for (const auto& snd : sounds) {
+        if (readString(snd, EventSymbols::instance().action) == "splash") {
+            splashed = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(splashed);
+
+    // 2. Client tries to clip into the solid wall at (5.5, 1.0, 0.5)
+    {
+        EntityState wallClip;
+        wallClip.id = playerId;
+        wallClip.position = glm::dvec3(5.5, 1.0, 0.5);
+        wallClip.velocity = glm::dvec3(4.0, 0.0, 0.0);
+        wallClip.onGround = true;
+        wallClip.inputSequence = 99;
+        session->actions().sendPlayerState(playerId, wallClip);
+        session->tick(1.0f / 30.0f);
+    }
+
+    gfxEvents = session->graphicsEvents().drainAll();
+    for (const auto& msg : gfxEvents) {
+        if (msg.kind == GraphicsMessage::Kind::Event &&
+            readEventType(msg.event) == EVT_PLAYER_CORRECTION) {
+            ++correctionCount;
+            EXPECT_LT(readFloat(msg.event, EventSymbols::instance().pos_x), 5.0f);
+        }
+    }
+    EXPECT_EQ(correctionCount, 1);
+}
+
 

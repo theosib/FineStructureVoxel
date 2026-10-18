@@ -16,6 +16,7 @@
 #include <finescript/value.h>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -61,10 +62,12 @@ struct PlayerAuthority {
     Vec3 lastReceivedVelocity{0.0f};
     bool lastReceivedOnGround = false;
     uint64_t lastInputSequence = 0;
+    bool receivedUpdateThisTick = false;
 
     // Threshold for sending corrections
     float correctionThreshold = 0.1f;  // 10 cm
 };
+using AuthoritativePlayerState = PlayerAuthority;
 
 // ============================================================================
 // EntityManager - Manages all entities in the game thread
@@ -167,8 +170,40 @@ public:
     /**
      * @brief Set which entity is the local player
      */
-    void setLocalPlayerId(EntityId id) { localPlayerId_ = id; }
-    EntityId localPlayerId() const { return localPlayerId_; }
+    void setLocalPlayerId(EntityId id) {
+        std::lock_guard<std::recursive_mutex> guard(mutex_);
+        localPlayerId_ = id;
+    }
+    EntityId localPlayerId() const {
+        std::lock_guard<std::recursive_mutex> guard(mutex_);
+        return localPlayerId_;
+    }
+
+    /**
+     * @brief Acquire a scoped lock on the entity manager's mutex for cross-thread access
+     */
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lock() const {
+        return std::unique_lock<std::recursive_mutex>(mutex_);
+    }
+
+    /**
+     * @brief Execute a callback with thread-safe access to a MobEntity by ID
+     */
+    template<typename Fn>
+    decltype(auto) withMob(EntityId id, Fn&& fn) {
+        std::lock_guard<std::recursive_mutex> guard(mutex_);
+        return std::forward<Fn>(fn)(getMob(id));
+    }
+
+    /**
+     * @brief Execute a callback with thread-safe access to the local player MobEntity
+     */
+    template<typename Fn>
+    decltype(auto) withLocalPlayerMob(Fn&& fn) {
+        std::lock_guard<std::recursive_mutex> guard(mutex_);
+        EntityId id = localPlayerId_;
+        return std::forward<Fn>(fn)(id != INVALID_ENTITY_ID ? getMob(id) : nullptr);
+    }
 
     // ========================================================================
     // Tick Processing
@@ -336,6 +371,9 @@ private:
 
     // Entities pending removal (cleaned up at end of tick)
     std::vector<EntityId> pendingRemovals_;
+
+    // Mutex protecting cross-thread reads/writes of entity and player state
+    mutable std::recursive_mutex mutex_;
 
     // ========================================================================
     // Internal Methods

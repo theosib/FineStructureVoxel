@@ -111,6 +111,7 @@ add_library(finevox SHARED
     src/core/skeleton_loader.cpp
     src/core/entity_mesh.cpp
     src/core/entity_render_state.cpp
+    src/render/entity_renderer.cpp
     src/core/spawn_manager.cpp
     src/core/spawn_predicate.cpp
     src/core/entity_serializer.cpp
@@ -148,6 +149,12 @@ if(NOT DEFINED FINESCRIPT_DIR)
         CACHE PATH "Path to finescript")
 endif()
 
+# Find finenet (in-process & network transport)
+if(NOT DEFINED FINENET_DIR)
+    set(FINENET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../finenet"
+        CACHE PATH "Path to finenet")
+endif()
+
 target_link_libraries(finevox PUBLIC lz4_static glm::glm)
 
 if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
@@ -158,6 +165,17 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.so")
     elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.a")
         target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.a")
+    endif()
+endif()
+
+if(EXISTS "${FINENET_DIR}/include/finenet/finenet.hpp")
+    target_include_directories(finevox PUBLIC ${FINENET_DIR}/include)
+    if(EXISTS "${FINENET_DIR}/build/libfinenet.dylib")
+        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.dylib")
+    elseif(EXISTS "${FINENET_DIR}/build/libfinenet.so")
+        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.so")
+    elseif(EXISTS "${FINENET_DIR}/build/libfinenet.a")
+        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.a")
     endif()
 endif()
 
@@ -267,7 +285,6 @@ if(FINEVOX_BUILD_RENDER)
         src/render/icon_atlas.cpp
         src/render/texture_manager.cpp
         src/render/frame_fence_waiter.cpp
-        src/render/entity_renderer.cpp
         src/render/engine.cpp
         src/render/world_render_layer.cpp
         src/render/overlay_render_layer.cpp

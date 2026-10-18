@@ -34,12 +34,14 @@ struct BlockPlacedEvent {
     BlockTypeId newType;
     BlockTypeId oldType;
     Rotation rotation{};
+    EntityId actor = INVALID_ENTITY_ID;
 };
 
 /// Block was broken/removed
 struct BlockBrokenEvent {
     BlockCoord pos;
     BlockTypeId oldType;
+    EntityId actor = INVALID_ENTITY_ID;
 };
 
 /// Block state changed (rotation, data)
@@ -81,6 +83,7 @@ struct BlockUpdateEvent {
 struct BlockInteractEvent {
     BlockCoord pos;
     Face face;
+    EntityId actor = INVALID_ENTITY_ID;
 };
 using PlayerUseEvent = BlockInteractEvent;
 
@@ -88,6 +91,7 @@ using PlayerUseEvent = BlockInteractEvent;
 struct BlockStrikeEvent {
     BlockCoord pos;
     Face face;
+    EntityId actor = INVALID_ENTITY_ID;
 };
 using PlayerHitEvent = BlockStrikeEvent;
 

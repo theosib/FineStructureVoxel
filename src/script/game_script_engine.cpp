@@ -9,6 +9,8 @@
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/pathfinder.hpp"
 #include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/fluid_tick_manager.hpp"
+#include "finevox/core/light_engine.hpp"
 #include <finescript/map_data.h>
 #include <finescript/native_function.h>
 #include <cmath>
@@ -184,6 +186,10 @@ void GameScriptEngine::setEntityManager(EntityManager* em) {
     userData_.entityManager = em;
 }
 
+void GameScriptEngine::setFluidTickManager(FluidTickManager* ftm) {
+    userData_.fluidTicks = ftm;
+}
+
 void GameScriptEngine::registerNativeFunctions() {
     // ========================================================================
     // ctx.* action functions
@@ -297,6 +303,17 @@ void GameScriptEngine::registerNativeFunctions() {
             return finescript::Value::nil();
         });
 
+    engine_->registerFunction("ctx.actor",
+        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>&)
+            -> finescript::Value
+        {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            if (ud && ud->blockCtx && ud->blockCtx->actor() != INVALID_ENTITY_ID) {
+                return finescript::Value::integer(static_cast<int64_t>(ud->blockCtx->actor()));
+            }
+            return finescript::Value::nil();
+        });
+
     // ========================================================================
     // world.* and world_* functions
     // ========================================================================
@@ -336,7 +353,23 @@ void GameScriptEngine::registerNativeFunctions() {
             return finescript::Value::nil();
         }
 
-        ud->world->setBlock(BlockCoord{x, y, z}, BlockTypeId(typeId));
+        BlockCoord pos{x, y, z};
+        BlockTypeId oldType = ud->world->getBlock(pos);
+        BlockTypeId newType(typeId);
+        ud->world->setBlock(pos, newType);
+        if (oldType != newType) {
+            if (ud->world->lightEngine()) {
+                ud->world->enqueueLightingUpdateWithRemesh(pos, oldType, newType);
+            }
+            if (auto* mq = ud->world->meshRebuildQueue()) {
+                for (const ChunkPos& affected : ud->world->getAffectedSubChunks(pos)) {
+                    mq->push(affected, MeshRebuildRequest::immediate());
+                }
+            }
+            if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : ud->world->fluidTickManager()) {
+                ftm->notifyBlockChanged(pos);
+            }
+        }
         return finescript::Value::nil();
     };
     engine_->registerFunction("world.set_block", setBlockFn);
@@ -433,7 +466,29 @@ void GameScriptEngine::registerNativeFunctions() {
             if (fid.isEmpty()) return finescript::Value::boolean(false);
 
             uint8_t lvl = static_cast<uint8_t>(std::clamp(level, 1, 15));
-            bool ok = ud->world->setFluid(BlockCoord{x, y, z}, fid, lvl);
+            BlockCoord pos{x, y, z};
+            FluidTypeId oldFluid = ud->world->getFluid(pos);
+            bool ok = ud->world->setFluid(pos, fid, lvl);
+            if (ok) {
+                if (auto* le = ud->world->lightEngine()) {
+                    LightingUpdate lu;
+                    lu.pos = pos;
+                    lu.oldType = ud->world->getBlock(pos);
+                    lu.newType = lu.oldType;
+                    lu.oldFluid = oldFluid;
+                    lu.newFluid = fid;
+                    lu.triggerMeshRebuild = true;
+                    le->enqueue(lu);
+                }
+                if (auto* mq = ud->world->meshRebuildQueue()) {
+                    for (const ChunkPos& affected : ud->world->getAffectedSubChunks(pos)) {
+                        mq->push(affected, MeshRebuildRequest::immediate());
+                    }
+                }
+                if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : ud->world->fluidTickManager()) {
+                    ftm->notifyFluidChanged(pos);
+                }
+            }
             return finescript::Value::boolean(ok);
         });
 
@@ -448,7 +503,29 @@ void GameScriptEngine::registerNativeFunctions() {
             int x, y, z;
             if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
 
-            bool ok = ud->world->removeFluid(BlockCoord{x, y, z});
+            BlockCoord pos{x, y, z};
+            FluidTypeId oldFluid = ud->world->getFluid(pos);
+            bool ok = ud->world->removeFluid(pos);
+            if (ok) {
+                if (auto* le = ud->world->lightEngine()) {
+                    LightingUpdate lu;
+                    lu.pos = pos;
+                    lu.oldType = ud->world->getBlock(pos);
+                    lu.newType = lu.oldType;
+                    lu.oldFluid = oldFluid;
+                    lu.newFluid = EMPTY_FLUID_TYPE;
+                    lu.triggerMeshRebuild = true;
+                    le->enqueue(lu);
+                }
+                if (auto* mq = ud->world->meshRebuildQueue()) {
+                    for (const ChunkPos& affected : ud->world->getAffectedSubChunks(pos)) {
+                        mq->push(affected, MeshRebuildRequest::immediate());
+                    }
+                }
+                if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : ud->world->fluidTickManager()) {
+                    ftm->notifyFluidChanged(pos);
+                }
+            }
             return finescript::Value::boolean(ok);
         });
 
@@ -481,6 +558,26 @@ void GameScriptEngine::registerNativeFunctions() {
 
             uint8_t lvl = static_cast<uint8_t>(std::clamp(level, 1, 15));
             bool ok = ud->world->setFluid(pos, fid, lvl);
+            if (ok) {
+                if (auto* le = ud->world->lightEngine()) {
+                    LightingUpdate lu;
+                    lu.pos = pos;
+                    lu.oldType = ud->world->getBlock(pos);
+                    lu.newType = lu.oldType;
+                    lu.oldFluid = fid;
+                    lu.newFluid = fid;
+                    lu.triggerMeshRebuild = true;
+                    le->enqueue(lu);
+                }
+                if (auto* mq = ud->world->meshRebuildQueue()) {
+                    for (const ChunkPos& affected : ud->world->getAffectedSubChunks(pos)) {
+                        mq->push(affected, MeshRebuildRequest::immediate());
+                    }
+                }
+                if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : ud->world->fluidTickManager()) {
+                    ftm->notifyFluidChanged(pos);
+                }
+            }
             return finescript::Value::boolean(ok);
         });
 }

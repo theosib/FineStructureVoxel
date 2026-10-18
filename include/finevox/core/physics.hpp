@@ -385,6 +385,9 @@ public:
                                          float maxDistance,
                                          RaycastMode mode = RaycastMode::Interaction) const;
 
+    // Collect all collision AABBs in a region
+    [[nodiscard]] std::vector<AABB> collectColliders(const AABB& region) const;
+
     // Configuration
     void setGravity(float g) { gravity_ = g; }
     [[nodiscard]] float gravity() const { return gravity_; }
@@ -396,9 +399,6 @@ private:
     BlockShapeProvider shapeProvider_;
     float gravity_ = DEFAULT_GRAVITY;
     float maxStepHeight_ = MAX_STEP_HEIGHT;
-
-    // Collect all collision AABBs in a region
-    [[nodiscard]] std::vector<AABB> collectColliders(const AABB& region) const;
 
     // Resolve collision along one axis
     // Returns the actual movement possible while maintaining COLLISION_MARGIN

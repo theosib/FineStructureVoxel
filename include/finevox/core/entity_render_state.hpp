@@ -29,6 +29,7 @@ struct EntityRenderState {
 
     // Animation
     AnimationController animator;
+    uint8_t currentAnimationId = 0;
 
     // Visibility
     bool visible = true;

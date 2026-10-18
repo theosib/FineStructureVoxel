@@ -23,6 +23,7 @@ namespace finevox {
 class World;
 class MobEntity;
 class EntityManager;
+class FluidTickManager;
 }
 
 namespace finevox::script {
@@ -33,6 +34,7 @@ struct ScriptUserData {
     World* world = nullptr;
     MobEntity* entityCtx = nullptr;
     EntityManager* entityManager = nullptr;
+    FluidTickManager* fluidTicks = nullptr;
 };
 
 class GameScriptEngine {
@@ -64,6 +66,9 @@ public:
 
     /// Set entity manager reference (for mob.spawn etc.)
     void setEntityManager(EntityManager* em);
+
+    /// Set fluid tick manager reference (for script fluid/block notifications)
+    void setFluidTickManager(FluidTickManager* ftm);
 
     /// Load entity scripts for all registered entity types with script fields
     void loadEntityScriptsFromRegistry();

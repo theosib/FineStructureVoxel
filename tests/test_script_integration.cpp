@@ -400,3 +400,33 @@ TEST_F(ScriptIntegrationTest, DataContainerProxyBoolArraysAndNestedMapsRoundTrip
     EXPECT_EQ(vNested.asMap().get(innerKey).asInt(), 42);
 }
 
+TEST_F(ScriptIntegrationTest, BlockContextProxyExposesActorToScripts) {
+    World world;
+    GameScriptEngine gse(world);
+
+    auto path = writeScript("actor_block.fsc", R"(
+on :interact do
+    set data.last_actor ctx.actor
+end
+)");
+
+    auto* handler = gse.loadBlockScript(path, "test:actor_script_block");
+    ASSERT_NE(handler, nullptr);
+
+    BlockTypeId blockId = BlockTypeId::fromName("test:actor_script_block");
+    BlockCoord pos{3, 4, 5};
+    world.setBlock(pos, blockId);
+
+    SubChunk* sc = world.getSubChunk(ChunkPos::fromBlock(pos));
+    ASSERT_NE(sc, nullptr);
+
+    BlockContext ctx(world, *sc, pos, pos.local());
+    ctx.setActor(777);
+    handler->onInteract(ctx, Face::PosY);
+
+    const DataContainer* dc = sc->blockData(pos.localIndex());
+    ASSERT_NE(dc, nullptr);
+    EXPECT_EQ(dc->get<int64_t>("last_actor", 0), 777);
+}
+
+

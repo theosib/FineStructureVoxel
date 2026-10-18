@@ -19,6 +19,7 @@ struct BlockContextFields {
     uint32_t block_light;
     uint32_t combined_light;
     uint32_t data;
+    uint32_t actor;
 
     // Action methods callable via ctx.method_name
     uint32_t notify_neighbors;
@@ -48,6 +49,7 @@ struct BlockContextFields {
                 si.intern("block_light"),
                 si.intern("combined_light"),
                 si.intern("data"),
+                si.intern("actor"),
                 si.intern("notify_neighbors"),
                 si.intern("schedule_tick"),
                 si.intern("set_repeat_tick"),
@@ -91,7 +93,7 @@ struct BlockContextFields {
     std::vector<uint32_t> allKeys() const {
         return {pos, block_type, rotation, is_air, is_opaque,
                 is_transparent, previous_type, sky_light, block_light,
-                combined_light, data};
+                combined_light, data, actor};
     }
 };
 
@@ -139,6 +141,12 @@ finescript::Value BlockContextProxy::get(uint32_t key) const {
     }
     if (key == f.data) {
         return finescript::Value::proxyMap(std::make_shared<DataContainerProxy>(ctx_));
+    }
+    if (key == f.actor) {
+        if (ctx_.actor() == INVALID_ENTITY_ID) {
+            return finescript::Value::nil();
+        }
+        return finescript::Value::integer(static_cast<int64_t>(ctx_.actor()));
     }
 
     // Action methods on ctx (invoked via ctx.set_rotation, ctx.request_rebuild, etc.)
@@ -248,6 +256,7 @@ bool BlockContextProxy::has(uint32_t key) const {
            key == f.is_air || key == f.is_opaque || key == f.is_transparent ||
            key == f.previous_type || key == f.sky_light ||
            key == f.block_light || key == f.combined_light || key == f.data ||
+           key == f.actor ||
            key == f.notify_neighbors || key == f.schedule_tick ||
            key == f.set_repeat_tick || key == f.set_rotation ||
            key == f.set_block || key == f.get_neighbor ||

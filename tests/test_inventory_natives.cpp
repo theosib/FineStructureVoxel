@@ -12,6 +12,8 @@
 #include <finescript/execution_context.h>
 #include <finescript/value.h>
 #include <finescript/map_data.h>
+#include <atomic>
+#include <thread>
 
 using namespace finevox;
 using namespace finevox::script;
@@ -474,3 +476,39 @@ TEST_F(CraftingNativesTest, CraftRecipesFiltersByStation) {
     ASSERT_TRUE(result.isArray());
     EXPECT_EQ(result.asArray().size(), 0u);
 }
+
+TEST_F(InventoryNativesTest, ConcurrentAddItemAndScriptQueriesThreadSafe) {
+    auto cobble = ItemTypeId::fromName("cobble");
+    std::atomic<bool> done{false};
+
+    // Game-thread producer: adds 1 cobble 200 times via thread-safe InventoryBridge::addItem
+    std::thread producer([&]() {
+        for (int i = 0; i < 200; ++i) {
+            bridge->addItem("player", "main", cobble, 1);
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    // Render/UI-thread consumer: queries inventory concurrently via bridge natives and lock()
+    int iterations = 0;
+    while (!done.load(std::memory_order_acquire) || iterations < 50) {
+        auto countVal = eval("inv_count \"player\" \"main\" \"cobble\"");
+        EXPECT_TRUE(countVal.isInt());
+        EXPECT_GE(countVal.asInt(), 0);
+
+        bridge->withLock([&]() {
+            auto* mainChild = playerDC->getChild("main");
+            ASSERT_NE(mainChild, nullptr);
+            InventoryView v(*mainChild, registry);
+            EXPECT_EQ(v.slotCount(), 9);
+        });
+        ++iterations;
+    }
+
+    producer.join();
+
+    auto finalCount = eval("inv_count \"player\" \"main\" \"cobble\"");
+    ASSERT_TRUE(finalCount.isInt());
+    EXPECT_EQ(finalCount.asInt(), 200);
+}
+

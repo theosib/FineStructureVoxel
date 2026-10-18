@@ -4,6 +4,9 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/fluid_tick_manager.hpp"
+#include "finevox/core/light_engine.hpp"
+#include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/string_interner.hpp"
 
 #include <finescript/script_engine.h>
@@ -124,3 +127,63 @@ TEST_F(ScriptFluidTest, FluidRemoveOnEmptyReturnsFalse) {
     EXPECT_TRUE(result.returnValue.isBool());
     EXPECT_FALSE(result.returnValue.asBool());
 }
+
+TEST_F(ScriptFluidTest, ScriptBlockAndFluidMutationsNotifyLightFluidAndRemesh) {
+    LightEngine lightEngine(*world_);
+    FluidTickManager fluidTicks(*world_);
+    MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+
+    world_->setLightEngine(&lightEngine);
+    world_->setFluidTickManager(&fluidTicks);
+    world_->setMeshRebuildQueue(&meshQueue);
+
+    // 1. world.set_block notifies LightEngine, FluidTickManager, and MeshRebuildQueue
+    auto r1 = exec("world.set_block 1 64 1 :stone");
+    EXPECT_TRUE(r1.success);
+    EXPECT_FALSE(lightEngine.queue().empty());
+    EXPECT_TRUE(fluidTicks.simulator().hasPendingUpdate({1, 64, 1}));
+    EXPECT_FALSE(meshQueue.empty());
+
+    // Clear queues before fluid mutation check
+    (void)lightEngine.queue().dequeueBatch(64);
+    fluidTicks.simulator().clearPendingUpdates();
+    meshQueue.drainAll();
+
+    // 2. fluid_place notifies LightEngine, FluidTickManager, and MeshRebuildQueue
+    auto r2 = exec("fluid_place 2 64 2 :script_water 15");
+    EXPECT_TRUE(r2.success);
+    EXPECT_TRUE(r2.returnValue.asBool());
+    EXPECT_FALSE(lightEngine.queue().empty());
+    EXPECT_TRUE(fluidTicks.simulator().hasPendingUpdate({2, 64, 2}));
+    EXPECT_FALSE(meshQueue.empty());
+
+    (void)lightEngine.queue().dequeueBatch(64);
+    fluidTicks.simulator().clearPendingUpdates();
+    meshQueue.drainAll();
+
+    // 3. fluid_set_level notifies LightEngine, FluidTickManager, and MeshRebuildQueue
+    auto r3 = exec("fluid_set_level 2 64 2 8");
+    EXPECT_TRUE(r3.success);
+    EXPECT_TRUE(r3.returnValue.asBool());
+    EXPECT_EQ(world_->getFluidLevel({2, 64, 2}), 8);
+    EXPECT_FALSE(lightEngine.queue().empty());
+    EXPECT_TRUE(fluidTicks.simulator().hasPendingUpdate({2, 64, 2}));
+    EXPECT_FALSE(meshQueue.empty());
+
+    (void)lightEngine.queue().dequeueBatch(64);
+    fluidTicks.simulator().clearPendingUpdates();
+    meshQueue.drainAll();
+
+    // 4. fluid_remove notifies LightEngine, FluidTickManager, and MeshRebuildQueue
+    auto r4 = exec("fluid_remove 2 64 2");
+    EXPECT_TRUE(r4.success);
+    EXPECT_TRUE(r4.returnValue.asBool());
+    EXPECT_FALSE(lightEngine.queue().empty());
+    EXPECT_TRUE(fluidTicks.simulator().hasPendingUpdate({2, 64, 2}));
+    EXPECT_FALSE(meshQueue.empty());
+
+    world_->setLightEngine(nullptr);
+    world_->setFluidTickManager(nullptr);
+    world_->setMeshRebuildQueue(nullptr);
+}
+

@@ -35,6 +35,7 @@ EntityManager::~EntityManager() = default;
 // ============================================================================
 
 EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     EntityId id = nextEntityId_++;
     auto entity = createEntity(type, id);
     entity->setPosition(position);
@@ -43,7 +44,8 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
     // Publish spawn event to graphics
     graphicsQueue_.push(GraphicsMessage::fromEvent(
         script::makeEntitySpawnValue(id, static_cast<uint16_t>(type),
-                                      position, entity->yaw(), entity->pitch())));
+                                      position, entity->yaw(), entity->pitch(),
+                                      entity->typeName())));
 
     spatialIndex_.insert(id, position);
     entities_[id] = std::move(entity);
@@ -51,6 +53,7 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
 }
 
 EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     EntityId id = entity->id();
     if (id == INVALID_ENTITY_ID) {
         id = nextEntityId_++;
@@ -61,7 +64,8 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     // Publish spawn event to graphics
     graphicsQueue_.push(GraphicsMessage::fromEvent(
         script::makeEntitySpawnValue(id, static_cast<uint16_t>(entity->type()),
-                                      entity->position(), entity->yaw(), entity->pitch())));
+                                      entity->position(), entity->yaw(), entity->pitch(),
+                                      entity->typeName())));
 
     Entity* rawPtr = entity.get();
     spatialIndex_.insert(id, rawPtr->position());
@@ -104,6 +108,7 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
 }
 
 bool EntityManager::despawnEntity(EntityId id) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     auto it = entities_.find(id);
     if (it == entities_.end()) {
         return false;
@@ -209,6 +214,7 @@ bool EntityManager::tryDeliverItemToPlayer(EntityId playerId, ItemStack& stack) 
 // ============================================================================
 
 void EntityManager::tick(float tickDt) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     ++currentTick_;
 
     // 1. Update all entities (AI, animations, timers)
@@ -298,6 +304,15 @@ void EntityManager::physicsPass(float tickDt) {
             }
         }
 
+        // Player movement is client-predicted and collision-validated in handlePlayerPosition;
+        // do not re-apply gravity or velocity integration on top of the client step.
+        if (entity->isPlayerEntity()) {
+            if (auto it = playerAuthorities_.find(id); it != playerAuthorities_.end()) {
+                it->second.receivedUpdateThisTick = false;
+            }
+            continue;
+        }
+
         // 2. Apply gravity
         if (entity->hasGravity()) {
             physics_.applyGravity(*entity, tickDt);
@@ -368,6 +383,7 @@ void EntityManager::validatePlayerPredictions() {
                     auth.lastInputSequence,
                     "physics_divergence"
                 )));
+            auth.lastReceivedPosition = player->position();
         }
     }
 }
@@ -408,6 +424,7 @@ void EntityManager::processPendingRemovals() {
 // ============================================================================
 
 void EntityManager::handlePlayerPosition(const BlockEvent& event) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     EntityId playerId = event.entityId;
     Entity* player = getEntity(playerId);
     if (!player) return;
@@ -423,17 +440,48 @@ void EntityManager::handlePlayerPosition(const BlockEvent& event) {
     auth.lastReceivedVelocity = vel;
     auth.lastReceivedOnGround = ground;
     auth.lastInputSequence = seq;
+    auth.receivedUpdateThisTick = true;
 
-    // Update player entity
-    player->setPosition(pos);
+    // Validate and apply client-predicted movement step against world collision
+    bool wasOnGround = player->isOnGround();
+    Vec3 prevVel = player->velocity();
+    Vec3 currentPos = player->position();
+    Vec3 delta = pos - currentPos;
+    float deltaLen = glm::length(delta);
+    if (validationEnabled_ && deltaLen > 1e-5f && deltaLen <= 8.0f) {
+        physics_.moveBody(*player, delta);
+    } else if (validationEnabled_ && deltaLen > 8.0f) {
+        Vec3 he = player->halfExtents();
+        AABB destBox(
+            pos.x - he.x + COLLISION_MARGIN,
+            pos.y + COLLISION_MARGIN,
+            pos.z - he.z + COLLISION_MARGIN,
+            pos.x + he.x - COLLISION_MARGIN,
+            pos.y + he.y * 2.0f - COLLISION_MARGIN,
+            pos.z + he.z - COLLISION_MARGIN
+        );
+        if (physics_.collectColliders(destBox).empty()) {
+            player->setPosition(pos);
+        }
+    } else {
+        player->setPosition(pos);
+    }
+
     player->setVelocity(vel);
-    player->setOnGround(ground);
+    bool nowOnGround = ground || physics_.checkOnGround(*player);
+    player->setOnGround(nowOnGround);
+    if (nowOnGround && !wasOnGround) {
+        if (auto* mob = dynamic_cast<MobEntity*>(player)) {
+            mob->recordPreLandingVelocityY(std::min(prevVel.y, vel.y));
+        }
+    }
 
     // Also update look direction if provided via sendPlayerState
     player->setLook(event.entityState.yaw, event.entityState.pitch);
 }
 
 void EntityManager::handlePlayerLook(const BlockEvent& event) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
@@ -445,6 +493,7 @@ void EntityManager::handlePlayerLook(const BlockEvent& event) {
 }
 
 void EntityManager::handlePlayerJump(const BlockEvent& event) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
@@ -454,6 +503,7 @@ void EntityManager::handlePlayerJump(const BlockEvent& event) {
 }
 
 void EntityManager::handlePlayerSprint(const BlockEvent& event, bool starting) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
@@ -463,6 +513,7 @@ void EntityManager::handlePlayerSprint(const BlockEvent& event, bool starting) {
 }
 
 void EntityManager::handlePlayerSneak(const BlockEvent& event, bool starting) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 

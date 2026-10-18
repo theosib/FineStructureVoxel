@@ -602,22 +602,22 @@ void World::setUpdateScheduler(UpdateScheduler* scheduler) {
 // External Block API (Event-Driven)
 // ============================================================================
 
-bool World::placeBlock(BlockCoord pos, BlockTypeId type, Rotation rotation) {
+bool World::placeBlock(BlockCoord pos, BlockTypeId type, Rotation rotation, EntityId actor) {
     if (!updateScheduler_) {
         return false;
     }
 
     BlockTypeId oldType = getBlock(pos);
-    updateScheduler_->pushExternalEvent(BlockEvent::blockPlaced(pos, type, oldType, rotation));
+    updateScheduler_->pushExternalEvent(BlockEvent::blockPlaced(pos, type, oldType, rotation, actor));
     return true;
 }
 
-bool World::breakBlock(BlockCoord pos) {
+bool World::breakBlock(BlockCoord pos, EntityId actor) {
     if (!updateScheduler_) {
         return false;
     }
 
-    updateScheduler_->pushExternalEvent(BlockEvent::blockBroken(pos, getBlock(pos)));
+    updateScheduler_->pushExternalEvent(BlockEvent::blockBroken(pos, getBlock(pos), actor));
     return true;
 }
 

@@ -28,7 +28,9 @@ const EventSymbols& EventSymbols::instance() {
         s.face            = si.intern("face");
         s.neighbor_face_mask = si.intern("neighbor_face_mask");
         s.entity_id       = si.intern("entity_id");
+        s.player_id       = si.intern("player_id");
         s.entity_type     = si.intern("entity_type");
+        s.entity_type_name = si.intern("entity_type_name");
         s.vel_x           = si.intern("vel_x");
         s.vel_y           = si.intern("vel_y");
         s.vel_z           = si.intern("vel_z");
@@ -122,7 +124,8 @@ void setBlockType(finescript::MapData& m, uint32_t key, BlockTypeId bt) {
 // ============================================================================
 
 finescript::Value makeBlockPlacedValue(BlockCoord pos, BlockTypeId newType,
-                                       BlockTypeId oldType, Rotation rot) {
+                                       BlockTypeId oldType, Rotation rot,
+                                       EntityId actor) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
@@ -131,11 +134,15 @@ finescript::Value makeBlockPlacedValue(BlockCoord pos, BlockTypeId newType,
     setBlockType(m, s.block_type, newType);
     setBlockType(m, s.previous_type, oldType);
     setInt(m, s.rotation, rot.index());
+    if (actor != INVALID_ENTITY_ID) {
+        setInt(m, s.entity_id, static_cast<int64_t>(actor));
+    }
     return v;
 }
 
 finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType,
-                                        ItemTypeId tool, bool preciseBreak) {
+                                        ItemTypeId tool, bool preciseBreak,
+                                        EntityId actor) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
@@ -147,6 +154,9 @@ finescript::Value makeBlockBrokenValue(BlockCoord pos, BlockTypeId oldType,
     }
     if (preciseBreak) {
         setBool(m, s.precise_break, true);
+    }
+    if (actor != INVALID_ENTITY_ID) {
+        setInt(m, s.entity_id, static_cast<int64_t>(actor));
     }
     return v;
 }
@@ -162,23 +172,29 @@ finescript::Value makeBlockChangedValue(BlockCoord pos, BlockTypeId oldType, Blo
     return v;
 }
 
-finescript::Value makePlayerUseValue(BlockCoord pos, Face face) {
+finescript::Value makePlayerUseValue(BlockCoord pos, Face face, EntityId actor) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_PLAYER_USE);
     setPos(m, pos);
     setInt(m, s.face, static_cast<int64_t>(face));
+    if (actor != INVALID_ENTITY_ID) {
+        setInt(m, s.entity_id, static_cast<int64_t>(actor));
+    }
     return v;
 }
 
-finescript::Value makePlayerHitValue(BlockCoord pos, Face face) {
+finescript::Value makePlayerHitValue(BlockCoord pos, Face face, EntityId actor) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_PLAYER_HIT);
     setPos(m, pos);
     setInt(m, s.face, static_cast<int64_t>(face));
+    if (actor != INVALID_ENTITY_ID) {
+        setInt(m, s.entity_id, static_cast<int64_t>(actor));
+    }
     return v;
 }
 
@@ -326,13 +342,17 @@ finescript::Value makeSoundEventValue(SoundSetId soundSet, std::string_view acti
 // ============================================================================
 
 finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
-                                       glm::dvec3 pos, float yaw, float pitch) {
+                                       glm::dvec3 pos, float yaw, float pitch,
+                                       std::string_view entityTypeName) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_ENTITY_SPAWN);
     setInt(m, s.entity_id, static_cast<int64_t>(id));
     setInt(m, s.entity_type, entityType);
+    if (!entityTypeName.empty()) {
+        setStr(m, s.entity_type_name, entityTypeName);
+    }
     setFloat(m, s.pos_x, pos.x);
     setFloat(m, s.pos_y, pos.y);
     setFloat(m, s.pos_z, pos.z);
@@ -468,6 +488,10 @@ EntityId readEntityId(const finescript::Value& event) {
     auto v = event.asMap().get(s.entity_id);
     if (v.isInt()) {
         return static_cast<EntityId>(v.asInt());
+    }
+    auto pv = event.asMap().get(s.player_id);
+    if (pv.isInt()) {
+        return static_cast<EntityId>(pv.asInt());
     }
     return INVALID_ENTITY_ID;
 }

@@ -28,7 +28,10 @@
 #include "finevox/core/particle_subsystem.hpp"
 #include "finevox/core/particle_registry.hpp"
 #include "finevox/script/event_value.hpp"
+#include "finevox/script/finevox_interner.hpp"
 
+#include <finenet/finenet.hpp>
+#include <finescript/cbor.h>
 #include <finescript/value.h>
 #include <finescript/map_data.h>
 
@@ -48,25 +51,27 @@ using namespace finevox::script;
 // GameActions convenience methods — build Values and call sendAction()
 // ============================================================================
 
-bool GameActions::breakBlock(BlockCoord pos) {
+bool GameActions::breakBlock(BlockCoord pos, ItemTypeId tool,
+                             bool preciseBreak, EntityId actor) {
     auto oldType = BlockTypeId::fromName("finevox:air"); // actual type checked server-side
-    sendAction(makeBlockBrokenValue(pos, oldType));
+    sendAction(makeBlockBrokenValue(pos, oldType, tool, preciseBreak, actor));
     return true;
 }
 
-bool GameActions::placeBlock(BlockCoord pos, BlockTypeId type) {
+bool GameActions::placeBlock(BlockCoord pos, BlockTypeId type,
+                             Rotation rotation, EntityId actor) {
     auto oldType = BlockTypeId::fromName("finevox:air");
-    sendAction(makeBlockPlacedValue(pos, type, oldType));
+    sendAction(makeBlockPlacedValue(pos, type, oldType, rotation, actor));
     return true;
 }
 
-bool GameActions::useBlock(BlockCoord pos, Face face) {
-    sendAction(makePlayerUseValue(pos, face));
+bool GameActions::useBlock(BlockCoord pos, Face face, EntityId actor) {
+    sendAction(makePlayerUseValue(pos, face, actor));
     return true;
 }
 
-bool GameActions::hitBlock(BlockCoord pos, Face face) {
-    sendAction(makePlayerHitValue(pos, face));
+bool GameActions::hitBlock(BlockCoord pos, Face face, EntityId actor) {
+    sendAction(makePlayerHitValue(pos, face, actor));
     return true;
 }
 
@@ -124,17 +129,50 @@ void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos) {
 class LocalGameActions : public GameActions {
 public:
     LocalGameActions(World& world, SoundEventQueue& soundQueue, GameCommandQueue& commandQueue,
+                     finenet::Connection* clientConn, finenet::Connection* serverConn,
                      bool enableSound = true)
         : world_(world), soundQueue_(soundQueue), commandQueue_(commandQueue),
+          clientConnection_(clientConn), serverConnection_(serverConn),
           enableSound_(enableSound) {}
 
     void sendAction(finescript::Value action) override {
+        if (action.isNil()) return;
+
+        // Route across the in-process finenet::Connection pair when connected
+        if (clientConnection_ && serverConnection_ &&
+            clientConnection_->isConnected() && serverConnection_->isConnected()) {
+            try {
+                FineVoxInterner interner;
+                auto cborBytes = finescript::cborEncode(action, interner);
+
+                auto typeStr = readEventType(action);
+                finenet::ChannelId ch = finenet::Channels::Actions.id;
+                finenet::MessageType msgType = finenet::MessageType::PlayerAction;
+                if (typeStr == EVT_PLAYER_POSITION || typeStr == EVT_PLAYER_LOOK ||
+                    typeStr == EVT_PLAYER_JUMP || typeStr == EVT_PLAYER_SPRINT ||
+                    typeStr == EVT_PLAYER_SNEAK) {
+                    ch = finenet::Channels::Input.id;
+                    msgType = finenet::MessageType::PlayerInput;
+                }
+
+                auto msg = finenet::MessageBuilder(msgType).writeCBOR(cborBytes).build();
+                if (clientConnection_->send(ch, std::move(msg)) == finenet::SendResult::Ok) {
+                    serverConnection_->update();
+                    return;
+                }
+            } catch (...) {
+                // Fall back to direct queue push if action contains non-CBOR values
+            }
+        }
+
         // Push the raw Value into the command queue for the game thread
         commandQueue_.push(std::move(action));
     }
 
     // Override typed methods to add eager sound feedback before queuing
-    bool breakBlock(BlockCoord pos) override {
+    bool breakBlock(BlockCoord pos, ItemTypeId tool = {},
+                    bool preciseBreak = false,
+                    EntityId actor = INVALID_ENTITY_ID) override {
         BlockTypeId oldType = world_.getBlock(pos);
         if (oldType.isAir()) return false;
 
@@ -147,11 +185,13 @@ public:
         }
 
         // Defer mutation to game thread
-        sendAction(makeBlockBrokenValue(pos, oldType));
+        sendAction(makeBlockBrokenValue(pos, oldType, tool, preciseBreak, actor));
         return true;
     }
 
-    bool placeBlock(BlockCoord pos, BlockTypeId type) override {
+    bool placeBlock(BlockCoord pos, BlockTypeId type,
+                    Rotation rotation = Rotation::IDENTITY,
+                    EntityId actor = INVALID_ENTITY_ID) override {
         // Sound eagerly
         if (enableSound_) {
             auto soundSet = BlockRegistry::global().getType(type).soundSet();
@@ -161,7 +201,7 @@ public:
         }
 
         // Defer mutation to game thread
-        sendAction(makeBlockPlacedValue(pos, type, world_.getBlock(pos)));
+        sendAction(makeBlockPlacedValue(pos, type, world_.getBlock(pos), rotation, actor));
         return true;
     }
 
@@ -196,19 +236,21 @@ public:
         return true;
     }
 
-    bool useBlock(BlockCoord pos, Face face) override {
+    bool useBlock(BlockCoord pos, Face face,
+                  EntityId actor = INVALID_ENTITY_ID) override {
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 
-        sendAction(makePlayerUseValue(pos, face));
+        sendAction(makePlayerUseValue(pos, face, actor));
         return true;
     }
 
-    bool hitBlock(BlockCoord pos, Face face) override {
+    bool hitBlock(BlockCoord pos, Face face,
+                  EntityId actor = INVALID_ENTITY_ID) override {
         BlockTypeId blockType = world_.getBlock(pos);
         if (blockType.isAir()) return false;
 
-        sendAction(makePlayerHitValue(pos, face));
+        sendAction(makePlayerHitValue(pos, face, actor));
         return true;
     }
 
@@ -216,6 +258,8 @@ private:
     World& world_;
     SoundEventQueue& soundQueue_;
     GameCommandQueue& commandQueue_;
+    finenet::Connection* clientConnection_ = nullptr;
+    finenet::Connection* serverConnection_ = nullptr;
     bool enableSound_ = true;
 };
 
@@ -296,7 +340,8 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
             }
         }
 
-        world.breakBlock(pos);
+        EntityId actor = readEntityId(cmd);
+        world.breakBlock(pos, actor);
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
         if (eventBus) eventBus->publish(BlockBrokenEvent{pos, oldType});
     }
@@ -307,7 +352,8 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         auto blockType = readBlockTypeId(cmd, s.block_type);
         uint8_t rotIdx = static_cast<uint8_t>(readInt(cmd, s.rotation, 0));
         Rotation rot = Rotation::byIndex(rotIdx);
-        world.placeBlock(pos, blockType, rot);
+        EntityId actor = readEntityId(cmd);
+        world.placeBlock(pos, blockType, rot, actor);
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
         if (eventBus) eventBus->publish(BlockPlacedEvent{pos, blockType, oldType, rot});
     }
@@ -332,14 +378,16 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
     else if (typeStr == EVT_PLAYER_USE) {
         auto pos = readBlockCoord(cmd);
         auto face = readFace(cmd);
-        scheduler.pushExternalEvent(BlockEvent::playerUse(pos, face));
-        if (eventBus) eventBus->publish(PlayerUseEvent{pos, face});
+        EntityId actor = readEntityId(cmd);
+        scheduler.pushExternalEvent(BlockEvent::playerUse(pos, face, actor));
+        if (eventBus) eventBus->publish(PlayerUseEvent{pos, face, actor});
     }
     else if (typeStr == EVT_PLAYER_HIT) {
         auto pos = readBlockCoord(cmd);
         auto face = readFace(cmd);
-        scheduler.pushExternalEvent(BlockEvent::playerHit(pos, face));
-        if (eventBus) eventBus->publish(PlayerHitEvent{pos, face});
+        EntityId actor = readEntityId(cmd);
+        scheduler.pushExternalEvent(BlockEvent::playerHit(pos, face, actor));
+        if (eventBus) eventBus->publish(PlayerHitEvent{pos, face, actor});
     }
     else if (typeStr == EVT_PLAYER_POSITION) {
         auto id = readEntityId(cmd);
@@ -599,6 +647,10 @@ struct GameSession::Impl {
     // Command queue (graphics thread -> game thread)
     std::unique_ptr<GameCommandQueue> commandQueue;
 
+    // In-process finenet::Connection local pair
+    std::unique_ptr<finenet::Connection> clientConnection;
+    std::unique_ptr<finenet::Connection> serverConnection;
+
     // Command interface
     std::unique_ptr<LocalGameActions> actions;
 
@@ -622,6 +674,13 @@ struct GameSession::Impl {
 
     // Drain and execute all pending commands, then process scheduler events
     void drainAndExecuteCommands() {
+        if (serverConnection) {
+            serverConnection->update();
+        }
+        if (clientConnection) {
+            clientConnection->update();
+        }
+
         auto commands = commandQueue->drainAll();
         if (commands.empty()) return;
 
@@ -749,6 +808,76 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     impl.graphicsQueue = std::make_unique<GraphicsEventQueue>();
     impl.commandQueue = std::make_unique<GameCommandQueue>();
 
+    // In-process finenet::Connection local pair
+    {
+        finenet::ConnectionConfig connCfg;
+        connCfg.debugSerialization = config.debugNetSerialization;
+        for (auto& ch : connCfg.channels) {
+            ch.maxMessageSize = 0;
+        }
+        auto [clientConn, serverConn] = finenet::Connection::createLocalPair(connCfg);
+        impl.clientConnection = std::move(clientConn);
+        impl.serverConnection = std::move(serverConn);
+
+        // Server receives actions & inputs from clientConnection and pushes to commandQueue
+        auto* cmdQueuePtr = impl.commandQueue.get();
+        auto serverActionHandler = [cmdQueuePtr](const finenet::Message& msg) {
+            finenet::MessageReader reader(msg);
+            auto cborSpan = reader.readCBOR();
+            if (reader.valid() && !cborSpan.empty()) {
+                FineVoxInterner interner;
+                auto val = finescript::cborDecode(cborSpan.data(), cborSpan.size(), interner);
+                cmdQueuePtr->push(std::move(val));
+            }
+        };
+        impl.serverConnection->onMessage(finenet::MessageType::PlayerAction, serverActionHandler);
+        impl.serverConnection->onMessage(finenet::MessageType::PlayerInput, serverActionHandler);
+        impl.serverConnection->onChannel(finenet::Channels::Actions, serverActionHandler);
+        impl.serverConnection->onChannel(finenet::Channels::Input, serverActionHandler);
+
+        // Client receives sound events (Effects channel) and entity/visual events (Entities channel)
+        auto* sndQueuePtr = impl.soundQueue.get();
+        impl.clientConnection->onMessage(finenet::MessageType::SoundEvent,
+            [sndQueuePtr](const finenet::Message& msg) {
+                finenet::MessageReader reader(msg);
+                auto cborSpan = reader.readCBOR();
+                if (reader.valid() && !cborSpan.empty()) {
+                    FineVoxInterner interner;
+                    auto val = finescript::cborDecode(cborSpan.data(), cborSpan.size(), interner);
+                    sndQueuePtr->push(std::move(val));
+                }
+            });
+
+        auto* gfxQueuePtr = impl.graphicsQueue.get();
+        auto clientGfxEventHandler = [gfxQueuePtr](const finenet::Message& msg) {
+            finenet::MessageReader reader(msg);
+            auto cborSpan = reader.readCBOR();
+            if (reader.valid() && !cborSpan.empty()) {
+                FineVoxInterner interner;
+                auto val = finescript::cborDecode(cborSpan.data(), cborSpan.size(), interner);
+                gfxQueuePtr->push(GraphicsMessage::fromEvent(std::move(val)));
+            }
+        };
+        impl.clientConnection->onMessage(finenet::MessageType::EntitySpawn, clientGfxEventHandler);
+        impl.clientConnection->onMessage(finenet::MessageType::EntityDespawn, clientGfxEventHandler);
+        impl.clientConnection->onMessage(finenet::MessageType::EntityAnimation, clientGfxEventHandler);
+        impl.clientConnection->onMessage(finenet::MessageType::PlayerCorrection, clientGfxEventHandler);
+        impl.clientConnection->onMessage(finenet::MessageType::BlockCorrection, clientGfxEventHandler);
+        impl.clientConnection->onMessage(finenet::MessageType::EntityPosition,
+            [gfxQueuePtr](const finenet::Message& msg) {
+                finenet::MessageReader reader(msg);
+                uint64_t tickNum = reader.readVarInt();
+                auto cborSpan = reader.readCBOR();
+                if (reader.valid() && !cborSpan.empty()) {
+                    std::vector<uint8_t> bytes(cborSpan.begin(), cborSpan.end());
+                    EntitySnapshot snap;
+                    snap.entity = EntityState::fromCBOR(bytes);
+                    snap.tickNumber = tickNum;
+                    gfxQueuePtr->push(GraphicsMessage::fromSnapshot(std::move(snap)));
+                }
+            });
+    }
+
     // Entity system
     impl.entityManager = std::make_unique<EntityManager>(*impl.world, *impl.graphicsQueue);
     impl.entityManager->physics().setGravity(config.gravity);
@@ -798,6 +927,7 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     // Fluid simulation
     if (config.enableFluidSimulation) {
         impl.fluidTickManager = std::make_unique<FluidTickManager>(*impl.world);
+        impl.world->setFluidTickManager(impl.fluidTickManager.get());
         if (config.enableLighting) {
             impl.fluidTickManager->simulator().setLightEngine(impl.lightEngine.get());
         }
@@ -809,7 +939,9 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
 
     // Command interface
     impl.actions = std::make_unique<LocalGameActions>(
-        *impl.world, *impl.soundQueue, *impl.commandQueue, config.enableSound);
+        *impl.world, *impl.soundQueue, *impl.commandQueue,
+        impl.clientConnection.get(), impl.serverConnection.get(),
+        config.enableSound);
 
     // Register built-in subsystems
     session->addSubsystem(std::make_shared<WorldTimeSubsystem>(*impl.worldTime));
@@ -857,6 +989,11 @@ SoundEventQueue& GameSession::soundEvents() { return *impl_->soundQueue; }
 GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue; }
 
 EventBus& GameSession::eventBus() { return *impl_->eventBus; }
+
+finenet::Connection& GameSession::clientConnection() { return *impl_->clientConnection; }
+const finenet::Connection& GameSession::clientConnection() const { return *impl_->clientConnection; }
+finenet::Connection& GameSession::serverConnection() { return *impl_->serverConnection; }
+const finenet::Connection& GameSession::serverConnection() const { return *impl_->serverConnection; }
 
 // ============================================================================
 // Subsystem Management

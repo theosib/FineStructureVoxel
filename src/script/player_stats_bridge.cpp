@@ -10,17 +10,6 @@
 
 namespace finevox::script {
 
-namespace {
-
-/// Helper to get the local player MobEntity from EntityManager
-MobEntity* getLocalPlayer(EntityManager& em) {
-    EntityId playerId = em.localPlayerId();
-    if (playerId == INVALID_ENTITY_ID) return nullptr;
-    return em.getMob(playerId);
-}
-
-}  // anonymous namespace
-
 void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine) {
 
     // player_health() → float
@@ -28,9 +17,10 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&)
             -> finescript::Value
         {
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player) return finescript::Value::number(0.0);
-            return finescript::Value::number(player->health());
+            return entityManager_.withLocalPlayerMob([](MobEntity* player) -> finescript::Value {
+                if (!player) return finescript::Value::number(0.0);
+                return finescript::Value::number(player->health());
+            });
         });
 
     // player_max_health() → float
@@ -38,9 +28,10 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&)
             -> finescript::Value
         {
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player) return finescript::Value::number(0.0);
-            return finescript::Value::number(player->maxHealth());
+            return entityManager_.withLocalPlayerMob([](MobEntity* player) -> finescript::Value {
+                if (!player) return finescript::Value::number(0.0);
+                return finescript::Value::number(player->maxHealth());
+            });
         });
 
     // player_get_stat(name, [default]) → value (reads from DataContainer)
@@ -49,19 +40,21 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
             -> finescript::Value
         {
             finescript::Value defVal = args.size() >= 2 ? args[1] : finescript::Value::number(0.0);
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player || args.empty()) return defVal;
+            if (args.empty()) return defVal;
 
             uint32_t keyId;
             if (args[0].isSymbol()) keyId = args[0].asSymbol();
             else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
             else return defVal;
 
-            const auto* extra = player->entityData();
-            if (!extra || !extra->has(keyId)) return defVal;
+            return entityManager_.withLocalPlayerMob([&](MobEntity* player) -> finescript::Value {
+                if (!player) return defVal;
+                const auto* extra = player->entityData();
+                if (!extra || !extra->has(keyId)) return defVal;
 
-            DataContainerProxy proxy(const_cast<DataContainer&>(*extra));
-            return proxy.get(keyId);
+                DataContainerProxy proxy(const_cast<DataContainer&>(*extra));
+                return proxy.get(keyId);
+            });
         });
 
     // player_set_stat(name, value) → nil (writes to DataContainer)
@@ -69,17 +62,19 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args)
             -> finescript::Value
         {
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player || args.size() < 2) return finescript::Value::nil();
+            if (args.size() < 2) return finescript::Value::nil();
 
             uint32_t keyId;
             if (args[0].isSymbol()) keyId = args[0].asSymbol();
             else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
             else return finescript::Value::nil();
 
-            DataContainerProxy proxy(player->getOrCreateEntityData());
-            proxy.set(keyId, args[1]);
-            return finescript::Value::nil();
+            return entityManager_.withLocalPlayerMob([&](MobEntity* player) -> finescript::Value {
+                if (!player) return finescript::Value::nil();
+                DataContainerProxy proxy(player->getOrCreateEntityData());
+                proxy.set(keyId, args[1]);
+                return finescript::Value::nil();
+            });
         });
 
     // player_is_alive() → bool
@@ -87,9 +82,10 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&)
             -> finescript::Value
         {
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player) return finescript::Value::boolean(false);
-            return finescript::Value::boolean(!player->isDead());
+            return entityManager_.withLocalPlayerMob([](MobEntity* player) -> finescript::Value {
+                if (!player) return finescript::Value::boolean(false);
+                return finescript::Value::boolean(!player->isDead());
+            });
         });
 
     // player_position() → [x, y, z] or nil
@@ -97,14 +93,15 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&)
             -> finescript::Value
         {
-            auto* player = getLocalPlayer(entityManager_);
-            if (!player) return finescript::Value::nil();
-            Vec3 pos = player->position();
-            std::vector<finescript::Value> arr;
-            arr.push_back(finescript::Value::number(pos.x));
-            arr.push_back(finescript::Value::number(pos.y));
-            arr.push_back(finescript::Value::number(pos.z));
-            return finescript::Value::array(std::move(arr));
+            return entityManager_.withLocalPlayerMob([](MobEntity* player) -> finescript::Value {
+                if (!player) return finescript::Value::nil();
+                Vec3 pos = player->position();
+                std::vector<finescript::Value> arr;
+                arr.push_back(finescript::Value::number(pos.x));
+                arr.push_back(finescript::Value::number(pos.y));
+                arr.push_back(finescript::Value::number(pos.z));
+                return finescript::Value::array(std::move(arr));
+            });
         });
 }
 

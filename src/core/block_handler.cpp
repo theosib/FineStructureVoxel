@@ -4,6 +4,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/event_queue.hpp"  // For UpdateScheduler
+#include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/loot_registry.hpp"
 
 #include <cassert>
@@ -176,7 +177,21 @@ void BlockContext::notifyNeighbors() {
 }
 
 void BlockContext::setBlock(BlockTypeId type) {
+    BlockTypeId oldType = subChunk_.getBlock(localPos_.x, localPos_.y, localPos_.z);
     subChunk_.setBlock(localPos_.x, localPos_.y, localPos_.z, type);
+    if (oldType != type) {
+        if (world_.lightEngine()) {
+            world_.enqueueLightingUpdateWithRemesh(pos_, oldType, type);
+        }
+        if (auto* mq = world_.meshRebuildQueue()) {
+            for (const ChunkPos& affected : world_.getAffectedSubChunks(pos_)) {
+                mq->push(affected, MeshRebuildRequest::immediate());
+            }
+        }
+        if (auto* ftm = world_.fluidTickManager()) {
+            ftm->notifyBlockChanged(pos_);
+        }
+    }
 }
 
 std::unique_ptr<DataContainer> BlockContext::takePreviousData() {

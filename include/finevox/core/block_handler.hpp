@@ -14,6 +14,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/loot_table.hpp"
 #include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/entity_state.hpp"
 #include <memory>
 #include <string_view>
 #include <cstdint>
@@ -519,6 +520,16 @@ public:
      */
     void setScheduler(UpdateScheduler* scheduler) { scheduler_ = scheduler; }
 
+    /**
+     * @brief Get the acting entity/player ID that triggered this event (or INVALID_ENTITY_ID)
+     */
+    [[nodiscard]] EntityId actor() const { return actor_; }
+
+    /**
+     * @brief Set the acting entity/player ID for this context
+     */
+    void setActor(EntityId id) { actor_ = id; }
+
     // ========================================================================
     // Loot
     // ========================================================================
@@ -561,6 +572,7 @@ private:
 
     // Scheduler for tick scheduling (optional, set by UpdateScheduler)
     UpdateScheduler* scheduler_ = nullptr;
+    EntityId actor_ = INVALID_ENTITY_ID;
     bool neighborsNotified_ = false;
 };
 

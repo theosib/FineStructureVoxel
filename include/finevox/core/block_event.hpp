@@ -128,6 +128,7 @@ struct BlockEvent {
 
     // Entity data (for player/entity events)
     EntityId entityId = INVALID_ENTITY_ID;  // Which entity triggered this event
+    EntityId actorId = INVALID_ENTITY_ID;   // Acting player/entity for block interactions
     EntityState entityState;                 // Entity state (for player state events)
 
     // Fluid data (for FluidPlaced/FluidRemoved events)
@@ -149,14 +150,16 @@ struct BlockEvent {
      * @param rot Rotation of the new block
      */
     static BlockEvent blockPlaced(BlockCoord pos, BlockTypeId newType,
-                                  BlockTypeId oldType, Rotation rot = Rotation::IDENTITY);
+                                  BlockTypeId oldType, Rotation rot = Rotation::IDENTITY,
+                                  EntityId actor = INVALID_ENTITY_ID);
 
     /**
      * @brief Create a block broken event
      * @param pos World position
      * @param oldType Type of block being broken
      */
-    static BlockEvent blockBroken(BlockCoord pos, BlockTypeId oldType);
+    static BlockEvent blockBroken(BlockCoord pos, BlockTypeId oldType,
+                                  EntityId actor = INVALID_ENTITY_ID);
 
     /**
      * @brief Create a block changed event (state change, not place/break)
@@ -185,14 +188,14 @@ struct BlockEvent {
      * @param pos World position
      * @param face Which face was clicked
      */
-    static BlockEvent playerUse(BlockCoord pos, Face face);
+    static BlockEvent playerUse(BlockCoord pos, Face face, EntityId actor = INVALID_ENTITY_ID);
 
     /**
      * @brief Create a player hit (left-click) event
      * @param pos World position
      * @param face Which face was clicked
      */
-    static BlockEvent playerHit(BlockCoord pos, Face face);
+    static BlockEvent playerHit(BlockCoord pos, Face face, EntityId actor = INVALID_ENTITY_ID);
 
     /**
      * @brief Create a block update event (signal-like propagation)

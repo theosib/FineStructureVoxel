@@ -4,7 +4,8 @@
 namespace finevox {
 
 BlockEvent BlockEvent::blockPlaced(BlockCoord pos, BlockTypeId newType,
-                                   BlockTypeId oldType, Rotation rot) {
+                                   BlockTypeId oldType, Rotation rot,
+                                   EntityId actor) {
     BlockEvent event;
     event.type = EventType::BlockPlaced;
     event.pos = pos;
@@ -13,10 +14,12 @@ BlockEvent BlockEvent::blockPlaced(BlockCoord pos, BlockTypeId newType,
     event.blockType = newType;
     event.previousType = oldType;
     event.rotation = rot;
+    event.entityId = actor;
+    event.actorId = actor;
     return event;
 }
 
-BlockEvent BlockEvent::blockBroken(BlockCoord pos, BlockTypeId oldType) {
+BlockEvent BlockEvent::blockBroken(BlockCoord pos, BlockTypeId oldType, EntityId actor) {
     BlockEvent event;
     event.type = EventType::BlockBroken;
     event.pos = pos;
@@ -24,6 +27,8 @@ BlockEvent BlockEvent::blockBroken(BlockCoord pos, BlockTypeId oldType) {
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.previousType = oldType;
     event.blockType = AIR_BLOCK_TYPE;
+    event.entityId = actor;
+    event.actorId = actor;
     return event;
 }
 
@@ -74,23 +79,27 @@ BlockEvent BlockEvent::tick(BlockCoord pos, TickType tickType) {
     return event;
 }
 
-BlockEvent BlockEvent::playerUse(BlockCoord pos, Face face) {
+BlockEvent BlockEvent::playerUse(BlockCoord pos, Face face, EntityId actor) {
     BlockEvent event;
     event.type = EventType::PlayerUse;
     event.pos = pos;
     event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.face = face;
+    event.entityId = actor;
+    event.actorId = actor;
     return event;
 }
 
-BlockEvent BlockEvent::playerHit(BlockCoord pos, Face face) {
+BlockEvent BlockEvent::playerHit(BlockCoord pos, Face face, EntityId actor) {
     BlockEvent event;
     event.type = EventType::PlayerHit;
     event.pos = pos;
     event.localPos = pos.local();
     event.chunkPos = ChunkPos::fromBlock(pos);
     event.face = face;
+    event.entityId = actor;
+    event.actorId = actor;
     return event;
 }
 

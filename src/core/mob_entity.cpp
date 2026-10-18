@@ -45,6 +45,9 @@ const EntityTypeDef* MobEntity::typeDef() const {
 }
 
 std::string MobEntity::typeName() const {
+    if (typeId_.isEmpty() && isPlayer_) {
+        return "finevox:player";
+    }
     return std::string(typeId_.name());
 }
 
@@ -130,6 +133,11 @@ void MobEntity::tick(float dt, World& world) {
 }
 
 void MobEntity::updateMovement(float dt) {
+    (void)dt;
+    if (isPlayerEntity() && !hasMoveTarget_) {
+        // Player movement and velocity are driven by client prediction / PlayerInputDriver
+        return;
+    }
     if (!hasMoveTarget_) {
         // Decelerate when no target
         velocity_.x *= 0.8f;

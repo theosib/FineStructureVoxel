@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 #include "finevox/core/entity_mesh.hpp"
 #include "finevox/core/entity_render_state.hpp"
+#include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/animation_clip.hpp"
 #include "finevox/core/skeleton.hpp"
+#include "finevox/render/entity_renderer.hpp"
+#include "finevox/script/event_value.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -394,3 +398,78 @@ TEST(EntityRenderStateTest, MultipleSnapshots) {
     auto mid = state.interpolatedPosition(0.5f);
     EXPECT_NEAR(mid.x, 1.5, 0.01);
 }
+
+// ============================================================================
+// Phase R3: EntityRenderer Event Wiring Tests
+// ============================================================================
+
+TEST(EntityRendererTest, SpawnSetsEntityTypeIdAndAnimationPlaysAndCorrectionFiresCallback) {
+    EntityTypeDef zombieDef;
+    zombieDef.name = "r3_test_zombie";
+    zombieDef.animationStates["idle"] = 0;
+    zombieDef.animationStates["attack"] = 2;
+    EntityTypeRegistry::global().registerType("finevox:r3_test_zombie", std::move(zombieDef));
+    EntityTypeId zombieTypeId = EntityTypeId::fromName("finevox:r3_test_zombie");
+
+    AnimationClip idleClip;
+    idleClip.name = "idle";
+    idleClip.duration = 1.0f;
+    idleClip.looping = true;
+
+    AnimationClip attackClip;
+    attackClip.name = "attack";
+    attackClip.duration = 0.5f;
+    attackClip.looping = false;
+
+    render::EntityRenderer renderer;
+    renderer.registerAnimationClip(zombieTypeId, "idle", &idleClip);
+    renderer.registerAnimationClip(zombieTypeId, "attack", &attackClip);
+
+    GraphicsEventQueue queue;
+    queue.push(GraphicsMessage::fromEvent(
+        script::makeEntitySpawnValue(42, 13, glm::dvec3(10.0, 64.0, 20.0),
+                                     1.5f, -0.2f, "finevox:r3_test_zombie")));
+
+    renderer.processEvents(queue);
+    ASSERT_EQ(renderer.entityCount(), 1u);
+
+    const EntityRenderState* state = renderer.getEntity(42);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->typeId, zombieTypeId);
+    EXPECT_EQ(state->animator.currentClip(), &idleClip);
+
+    // Trigger attack animation (slot 2)
+    queue.push(GraphicsMessage::fromEvent(
+        script::makeEntityAnimationValue(42, 2, 0.1f)));
+    renderer.processEvents(queue);
+    EXPECT_EQ(state->currentAnimationId, 2);
+    EXPECT_EQ(state->animator.currentClip(), &attackClip);
+
+    // Trigger player correction callback
+    EntityId correctedId = INVALID_ENTITY_ID;
+    glm::dvec3 correctedPos{0.0};
+    uint64_t correctedSeq = 0;
+    std::string correctedReason;
+    renderer.setPlayerCorrectionCallback(
+        [&](EntityId id, glm::dvec3 pos, glm::dvec3 /*vel*/, bool /*onGround*/,
+            uint64_t seq, std::string_view reason) {
+            correctedId = id;
+            correctedPos = pos;
+            correctedSeq = seq;
+            correctedReason = std::string(reason);
+        });
+
+    queue.push(GraphicsMessage::fromEvent(
+        script::makePlayerCorrectionValue(42, glm::dvec3(12.0, 65.0, 22.0),
+                                          glm::dvec3(0.0), true, 77, "physics_divergence")));
+    renderer.processEvents(queue);
+
+    EXPECT_EQ(correctedId, 42u);
+    EXPECT_DOUBLE_EQ(correctedPos.x, 12.0);
+    EXPECT_DOUBLE_EQ(correctedPos.y, 65.0);
+    EXPECT_DOUBLE_EQ(correctedPos.z, 22.0);
+    EXPECT_EQ(correctedSeq, 77u);
+    EXPECT_EQ(correctedReason, "physics_divergence");
+    EXPECT_DOUBLE_EQ(state->currentPosition.x, 12.0);
+}
+

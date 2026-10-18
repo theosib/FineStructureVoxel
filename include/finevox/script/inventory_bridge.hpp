@@ -16,12 +16,14 @@
 
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/name_registry.hpp"
+#include "finevox/core/item_type.hpp"
 
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace finescript { class ScriptEngine; }
 
@@ -52,6 +54,23 @@ public:
 
     /// Set the icon lookup callback (enables item_icon native function)
     void setIconLookup(IconLookup lookup);
+
+    /// Thread-safe item insertion into a registered owner's inventory section.
+    /// Returns the number of items that could NOT fit (0 if all items were added).
+    int32_t addItem(const std::string& ownerName, const std::string& section,
+                    ItemTypeId type, int32_t count);
+
+    /// Acquire a scoped lock on the bridge's internal mutex for external synchronized access
+    [[nodiscard]] std::unique_lock<std::mutex> lock() const {
+        return std::unique_lock<std::mutex>(mutex_);
+    }
+
+    /// Execute a callback while holding the bridge's internal mutex
+    template<typename Fn>
+    decltype(auto) withLock(Fn&& fn) const {
+        std::lock_guard<std::mutex> guard(mutex_);
+        return std::forward<Fn>(fn)();
+    }
 
 private:
     struct OwnerEntry {

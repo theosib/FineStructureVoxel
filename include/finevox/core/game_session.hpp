@@ -1,6 +1,7 @@
 #pragma once
 
 #include "finevox/core/game_actions.hpp"
+#include <finenet/connection.hpp>
 #include <finescript/value.h>
 #include <memory>
 #include <string>
@@ -41,6 +42,7 @@ struct GameSessionConfig {
     uint32_t randomTicksPerChunk = 4;
     size_t columnCacheCapacity = 64;
     std::string worldSaveDir{};       // Optional world save directory for IOManager persistence
+    bool debugNetSerialization = false; // Force wire serialization on local finenet::Connection pair
 
     /// Create a config with all defaults
     static GameSessionConfig defaults() { return {}; }
@@ -95,6 +97,12 @@ public:
 
     // === EventBus ===
     EventBus& eventBus();
+
+    // === In-Process Transport Connections (finenet) ===
+    finenet::Connection& clientConnection();
+    const finenet::Connection& clientConnection() const;
+    finenet::Connection& serverConnection();
+    const finenet::Connection& serverConnection() const;
 
     // === Subsystem Management ===
     /// Add a game subsystem. Sorted by (phase, priority) at insertion time.

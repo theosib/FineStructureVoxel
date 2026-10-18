@@ -43,6 +43,7 @@
 #include <finevox/render/block_atlas.hpp>
 #include <finevox/render/particle_atlas.hpp>
 #include <finevox/render/particle_renderer.hpp>
+#include <finevox/render/entity_renderer.hpp>
 #include <finevox/core/mob_entity.hpp>
 #include <finevox/render/icon_atlas.hpp>
 #include <finevox/core/block_type.hpp>
@@ -833,14 +834,17 @@ int main(int argc, char* argv[]) {
         World& world = session->world();
 
         // Wire up item-drop pickup: when a player is close enough to an ItemDropEntity,
-        // deposit the stack into the bag. InventoryView mutates the DC directly, so
-        // the UI picks this up on its next frame without extra plumbing.
+        // deposit the stack into the bag using InventoryBridge's mutex to prevent cross-thread races.
         session->entities().setItemPickupCallback(
-            [&playerInventoryDC, &itemNameRegistry](EntityId /*playerId*/, ItemStack& stack) -> bool {
+            [&](EntityId /*playerId*/, ItemStack& stack) -> bool {
                 if (stack.isEmpty()) return false;
+#ifdef FINEVOX_HAS_SCRIPT_GUI
+                int32_t leftover = inventoryBridge.addItem("player", "bag", stack.type, stack.count);
+#else
                 auto& bag = playerInventoryDC->getOrCreateChild("bag");
                 InventoryView bagView(bag, itemNameRegistry);
                 int32_t leftover = bagView.addItem(stack.type, stack.count);
+#endif
                 if (leftover == stack.count) {
                     // Nothing fit — leave the stack unchanged, keep the drop alive.
                     return false;
@@ -1173,6 +1177,18 @@ int main(int argc, char* argv[]) {
         entityManager.setLocalPlayerId(playerId);
         std::cout << "Player entity spawned with ID " << playerId << "\n";
 
+        // Entity renderer processes graphicsEvents (spawns, despawns, snapshots, corrections)
+        finevox::render::EntityRenderer entityRenderer;
+        entityRenderer.setPlayerCorrectionCallback(
+            [&](EntityId id, glm::dvec3 pos, glm::dvec3 vel, bool onGround,
+                uint64_t /*inputSequence*/, std::string_view /*reason*/) {
+                if (id == playerId) {
+                    playerBody.setPosition(Vec3(pos));
+                    playerBody.setVelocity(Vec3(vel));
+                    playerBody.setOnGround(onGround);
+                }
+            });
+
         // Context switching helper — coordinates CursorMode, GuiMode, and input clearing
         auto setInputContext = [&](InputContext ctx) {
             inputContext = ctx;
@@ -1348,7 +1364,7 @@ int main(int argc, char* argv[]) {
             Vec3 direction = playerController.forwardVector();
             RaycastResult result = raycastBlocks(origin, direction, 10.0f, RaycastMode::Interaction, shapeProvider);
             if (result.hit) {
-                session->actions().breakBlock(result.blockPos);
+                session->actions().breakBlock(result.blockPos, {}, false, playerId);
                 std::cout << "Breaking block at (" << result.blockPos.x << "," << result.blockPos.y << "," << result.blockPos.z << ")\n";
             }
         });
@@ -1375,12 +1391,12 @@ int main(int argc, char* argv[]) {
                                   << ") - would intersect player\n";
                         return;
                     }
-                    session->actions().placeBlock(placePos, selectedBlock);
+                    session->actions().placeBlock(placePos, selectedBlock, Rotation::IDENTITY, playerId);
                     std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                               << " at (" << placePos.x << "," << placePos.y << "," << placePos.z
                               << ") - pushing player\n";
                 } else {
-                    session->actions().placeBlock(placePos, selectedBlock);
+                    session->actions().placeBlock(placePos, selectedBlock, Rotation::IDENTITY, playerId);
                     std::cout << "Placing " << StringInterner::global().lookup(selectedBlock.id)
                               << " at (" << placePos.x << "," << placePos.y << "," << placePos.z << ")\n";
                 }
@@ -2200,132 +2216,135 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Update inventory slots per-frame when inventory is open
-            if (inventoryWindowId >= 0) {
-                // Update bag slots (4x9 = 36)
-                auto* bagDC = playerInventoryDC->getChild("bag");
-                if (bagDC) {
-                    InventoryView bagView(*bagDC, itemNameRegistry);
-                    for (int i = 0; i < 36; i++) {
-                        std::string slotId = "slot_bag_" + std::to_string(i);
-                        auto slotW = mapRenderer.findById(slotId);
-                        if (!slotW.isNil()) {
-                            auto stack = bagView.getSlot(i);
-                            std::string lbl;
-                            if (!stack.isEmpty()) {
-                                lbl = std::string(stack.type.name());
-                                if (stack.count > 1)
-                                    lbl += "\n" + std::to_string(stack.count);
+            // Update inventory slots per-frame when inventory is open (locked against game-thread pickup)
+            {
+                auto invLock = inventoryBridge.lock();
+                if (inventoryWindowId >= 0) {
+                    // Update bag slots (4x9 = 36)
+                    auto* bagDC = playerInventoryDC->getChild("bag");
+                    if (bagDC) {
+                        InventoryView bagView(*bagDC, itemNameRegistry);
+                        for (int i = 0; i < 36; i++) {
+                            std::string slotId = "slot_bag_" + std::to_string(i);
+                            auto slotW = mapRenderer.findById(slotId);
+                            if (!slotW.isNil()) {
+                                auto stack = bagView.getSlot(i);
+                                std::string lbl;
+                                if (!stack.isEmpty()) {
+                                    lbl = std::string(stack.type.name());
+                                    if (stack.count > 1)
+                                        lbl += "\n" + std::to_string(stack.count);
+                                }
+                                slotW.asMap().set(symLabel, finescript::Value::string(lbl));
                             }
-                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
                         }
                     }
-                }
 
-                // Update craft grid slots (2x2 = 4)
-                auto* craftDC = playerInventoryDC->getChild("craft_grid");
-                if (craftDC) {
-                    InventoryView craftView(*craftDC, itemNameRegistry);
-                    for (int i = 0; i < 4; i++) {
-                        std::string slotId = "slot_craft_grid_" + std::to_string(i);
-                        auto slotW = mapRenderer.findById(slotId);
-                        if (!slotW.isNil()) {
-                            auto stack = craftView.getSlot(i);
-                            std::string lbl;
-                            if (!stack.isEmpty()) {
-                                lbl = std::string(stack.type.name());
-                                if (stack.count > 1)
-                                    lbl += "\n" + std::to_string(stack.count);
-                            }
-                            slotW.asMap().set(symLabel, finescript::Value::string(lbl));
-                        }
-                    }
-                }
-
-                // Update craft output slot with recipe preview
-                auto* craftDCPreview = playerInventoryDC->getChild("craft_grid");
-                if (craftDCPreview) {
-                    auto slotW = mapRenderer.findById("slot_craft_output_0");
-                    if (!slotW.isNil()) {
-                        InventoryView craftPreview(*craftDCPreview, itemNameRegistry);
-                        std::vector<ItemTypeId> gridSlots(4);
+                    // Update craft grid slots (2x2 = 4)
+                    auto* craftDC = playerInventoryDC->getChild("craft_grid");
+                    if (craftDC) {
+                        InventoryView craftView(*craftDC, itemNameRegistry);
                         for (int i = 0; i < 4; i++) {
-                            auto stack = craftPreview.getSlot(i);
-                            gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                            std::string slotId = "slot_craft_grid_" + std::to_string(i);
+                            auto slotW = mapRenderer.findById(slotId);
+                            if (!slotW.isNil()) {
+                                auto stack = craftView.getSlot(i);
+                                std::string lbl;
+                                if (!stack.isEmpty()) {
+                                    lbl = std::string(stack.type.name());
+                                    if (stack.count > 1)
+                                        lbl += "\n" + std::to_string(stack.count);
+                                }
+                                slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                            }
                         }
-                        auto match = CraftingHelper::findRecipe(
-                            gridSlots.data(), 2, 2, EMPTY_STATION);
-                        std::string lbl;
-                        if (match.recipe) {
-                            lbl = std::string(match.recipe->outputItem.name());
-                            if (match.recipe->outputCount > 1)
-                                lbl += "\n" + std::to_string(match.recipe->outputCount);
-                        }
-                        slotW.asMap().set(symLabel, finescript::Value::string(lbl));
                     }
-                }
-            }
 
-            // Update workbench slots per-frame when workbench is open
-            if (workbenchWindowId >= 0) {
-                // Update workbench craft grid slots (3x3 = 9)
-                auto* wbCraftDC = playerInventoryDC->getChild("wb_craft_grid");
-                if (wbCraftDC) {
-                    InventoryView wbCraftView(*wbCraftDC, itemNameRegistry);
-                    for (int i = 0; i < 9; i++) {
-                        std::string slotId = "slot_wb_craft_grid_" + std::to_string(i);
-                        auto slotW = mapRenderer.findById(slotId);
+                    // Update craft output slot with recipe preview
+                    auto* craftDCPreview = playerInventoryDC->getChild("craft_grid");
+                    if (craftDCPreview) {
+                        auto slotW = mapRenderer.findById("slot_craft_output_0");
                         if (!slotW.isNil()) {
-                            auto stack = wbCraftView.getSlot(i);
+                            InventoryView craftPreview(*craftDCPreview, itemNameRegistry);
+                            std::vector<ItemTypeId> gridSlots(4);
+                            for (int i = 0; i < 4; i++) {
+                                auto stack = craftPreview.getSlot(i);
+                                gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                            }
+                            auto match = CraftingHelper::findRecipe(
+                                gridSlots.data(), 2, 2, EMPTY_STATION);
                             std::string lbl;
-                            if (!stack.isEmpty()) {
-                                lbl = std::string(stack.type.name());
-                                if (stack.count > 1)
-                                    lbl += "\n" + std::to_string(stack.count);
+                            if (match.recipe) {
+                                lbl = std::string(match.recipe->outputItem.name());
+                                if (match.recipe->outputCount > 1)
+                                    lbl += "\n" + std::to_string(match.recipe->outputCount);
                             }
                             slotW.asMap().set(symLabel, finescript::Value::string(lbl));
                         }
                     }
                 }
 
-                // Update workbench craft output preview
-                if (wbCraftDC) {
-                    auto slotW = mapRenderer.findById("slot_wb_craft_output_0");
-                    if (!slotW.isNil()) {
-                        InventoryView wbPreview(*wbCraftDC, itemNameRegistry);
-                        std::vector<ItemTypeId> gridSlots(9);
+                // Update workbench slots per-frame when workbench is open
+                if (workbenchWindowId >= 0) {
+                    // Update workbench craft grid slots (3x3 = 9)
+                    auto* wbCraftDC = playerInventoryDC->getChild("wb_craft_grid");
+                    if (wbCraftDC) {
+                        InventoryView wbCraftView(*wbCraftDC, itemNameRegistry);
                         for (int i = 0; i < 9; i++) {
-                            auto stack = wbPreview.getSlot(i);
-                            gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                            std::string slotId = "slot_wb_craft_grid_" + std::to_string(i);
+                            auto slotW = mapRenderer.findById(slotId);
+                            if (!slotW.isNil()) {
+                                auto stack = wbCraftView.getSlot(i);
+                                std::string lbl;
+                                if (!stack.isEmpty()) {
+                                    lbl = std::string(stack.type.name());
+                                    if (stack.count > 1)
+                                        lbl += "\n" + std::to_string(stack.count);
+                                }
+                                slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                            }
                         }
-                        auto match = CraftingHelper::findRecipe(
-                            gridSlots.data(), 3, 3, StationTypeId::fromName("finevox:workbench"));
-                        std::string lbl;
-                        if (match.recipe) {
-                            lbl = std::string(match.recipe->outputItem.name());
-                            if (match.recipe->outputCount > 1)
-                                lbl += "\n" + std::to_string(match.recipe->outputCount);
-                        }
-                        slotW.asMap().set(symLabel, finescript::Value::string(lbl));
                     }
-                }
 
-                // Also update bag slots (shared between inventory and workbench)
-                auto* bagDC2 = playerInventoryDC->getChild("bag");
-                if (bagDC2) {
-                    InventoryView bagView2(*bagDC2, itemNameRegistry);
-                    for (int i = 0; i < 36; i++) {
-                        std::string slotId = "slot_bag_" + std::to_string(i);
-                        auto slotW = mapRenderer.findById(slotId);
+                    // Update workbench craft output preview
+                    if (wbCraftDC) {
+                        auto slotW = mapRenderer.findById("slot_wb_craft_output_0");
                         if (!slotW.isNil()) {
-                            auto stack = bagView2.getSlot(i);
+                            InventoryView wbPreview(*wbCraftDC, itemNameRegistry);
+                            std::vector<ItemTypeId> gridSlots(9);
+                            for (int i = 0; i < 9; i++) {
+                                auto stack = wbPreview.getSlot(i);
+                                gridSlots[i] = stack.isEmpty() ? EMPTY_ITEM_TYPE : stack.type;
+                            }
+                            auto match = CraftingHelper::findRecipe(
+                                gridSlots.data(), 3, 3, StationTypeId::fromName("finevox:workbench"));
                             std::string lbl;
-                            if (!stack.isEmpty()) {
-                                lbl = std::string(stack.type.name());
-                                if (stack.count > 1)
-                                    lbl += "\n" + std::to_string(stack.count);
+                            if (match.recipe) {
+                                lbl = std::string(match.recipe->outputItem.name());
+                                if (match.recipe->outputCount > 1)
+                                    lbl += "\n" + std::to_string(match.recipe->outputCount);
                             }
                             slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                        }
+                    }
+
+                    // Also update bag slots (shared between inventory and workbench)
+                    auto* bagDC2 = playerInventoryDC->getChild("bag");
+                    if (bagDC2) {
+                        InventoryView bagView2(*bagDC2, itemNameRegistry);
+                        for (int i = 0; i < 36; i++) {
+                            std::string slotId = "slot_bag_" + std::to_string(i);
+                            auto slotW = mapRenderer.findById(slotId);
+                            if (!slotW.isNil()) {
+                                auto stack = bagView2.getSlot(i);
+                                std::string lbl;
+                                if (!stack.isEmpty()) {
+                                    lbl = std::string(stack.type.name());
+                                    if (stack.count > 1)
+                                        lbl += "\n" + std::to_string(stack.count);
+                                }
+                                slotW.asMap().set(symLabel, finescript::Value::string(lbl));
+                            }
                         }
                     }
                 }
@@ -2336,6 +2355,7 @@ int main(int argc, char* argv[]) {
 
             // Draw cursor item overlay near mouse pointer (foreground draw list = always on top)
             if (inventoryWindowId >= 0 || workbenchWindowId >= 0) {
+                auto invLock = inventoryBridge.lock();
                 auto* cursorDC = playerInventoryDC->getChild("cursor");
                 if (cursorDC) {
                     InventoryView cursorView(*cursorDC, itemNameRegistry);
@@ -2432,25 +2452,23 @@ int main(int argc, char* argv[]) {
 
             // Demo respawn: if the authoritative game-thread player entity
             // has died (e.g. in lava), teleport the client-side body back
-            // to spawn and restore full health.  Without this, death would
-            // silently disable fluid detection (splash / buoyancy / damage)
-            // and there's no HUD or death screen wired into the demo to
-            // give the player visible feedback.  This is demo-only — a
-            // real game wires a proper death→respawn UI.
-            if (MobEntity* gameMob = entityManager.getMob(playerId)) {
-                if (gameMob->isDead()) {
+            // to spawn and restore full health.  Synchronized via withMob.
+            entityManager.withMob(playerId, [&](MobEntity* gameMob) {
+                if (gameMob && gameMob->isDead()) {
                     Vec3 respawn(
                         static_cast<float>(startPos.x),
                         static_cast<float>(startPos.y - playerController.eyeHeight()),
                         static_cast<float>(startPos.z));
                     playerBody.setPosition(respawn);
                     playerBody.setVelocity(Vec3(0.0f));
+                    gameMob->setPosition(respawn);
+                    gameMob->setVelocity(Vec3(0.0f));
                     gameMob->setHealth(gameMob->maxHealth());
                     std::cout << "\n[respawn] Player died — restored to spawn "
                               << "(" << respawn.x << ", " << respawn.y
                               << ", " << respawn.z << ").\n";
                 }
-            }
+            });
 
             // Player/camera update
             playerController.update(dt);
@@ -2483,7 +2501,8 @@ int main(int argc, char* argv[]) {
                 session->actions().sendPlayerState(playerId, state);
             }
 
-            [[maybe_unused]] auto graphicsEvents = session->graphicsEvents().drainAll();
+            entityRenderer.processEvents(session->graphicsEvents());
+            entityRenderer.update(dt, camera.positionD());
 
 #ifdef FINEVOX_HAS_AUDIO
             audioEngine.update(camera.positionD(), playerController.forwardVector(), glm::vec3(0, 1, 0));

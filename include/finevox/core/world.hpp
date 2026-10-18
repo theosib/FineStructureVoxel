@@ -13,6 +13,7 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/name_registry.hpp"
+#include "finevox/core/entity_state.hpp"
 #include <unordered_map>
 #include <memory>
 #include <shared_mutex>
@@ -28,6 +29,7 @@ namespace finevox {
 class ColumnManager;
 class LightEngine;
 class UpdateScheduler;
+class FluidTickManager;
 struct LightingUpdate;
 struct BlockChange;  // Defined in batch_builder.hpp
 
@@ -78,11 +80,13 @@ public:
 
     /// Place a block through the event system
     /// @return true if event was queued, false if no scheduler set
-    bool placeBlock(BlockCoord pos, BlockTypeId type, Rotation rotation = Rotation::IDENTITY);
+    bool placeBlock(BlockCoord pos, BlockTypeId type,
+                    Rotation rotation = Rotation::IDENTITY,
+                    EntityId actor = INVALID_ENTITY_ID);
 
     /// Break a block through the event system
     /// @return true if event was queued, false if no scheduler set
-    bool breakBlock(BlockCoord pos);
+    bool breakBlock(BlockCoord pos, EntityId actor = INVALID_ENTITY_ID);
 
     /// Place multiple blocks through the event system (bulk)
     /// More efficient than individual placeBlock calls
@@ -269,6 +273,11 @@ public:
     [[nodiscard]] UpdateScheduler* updateScheduler() { return updateScheduler_; }
     [[nodiscard]] const UpdateScheduler* updateScheduler() const { return updateScheduler_; }
 
+    /// Attach optional FluidTickManager for fluid notifications on direct/script mutations
+    void setFluidTickManager(FluidTickManager* ftm) { fluidTickManager_ = ftm; }
+    [[nodiscard]] FluidTickManager* fluidTickManager() { return fluidTickManager_; }
+    [[nodiscard]] const FluidTickManager* fluidTickManager() const { return fluidTickManager_; }
+
     // ========================================================================
     // Name Registry (Per-World Stable ID Mapping)
     // ========================================================================
@@ -300,6 +309,9 @@ private:
 
     // Optional column manager for column lifecycle / persistence (not owned)
     ColumnManager* columnManager_ = nullptr;
+
+    // Optional fluid tick manager for fluid simulation notifications (not owned)
+    FluidTickManager* fluidTickManager_ = nullptr;
 
     // Config: always defer mesh rebuilds to lighting thread (for testing)
     bool alwaysDeferMeshRebuild_ = false;

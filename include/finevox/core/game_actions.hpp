@@ -1,7 +1,9 @@
 #pragma once
 
 #include "finevox/core/position.hpp"       // BlockCoord, Face
+#include "finevox/core/rotation.hpp"       // Rotation
 #include "finevox/core/string_interner.hpp"  // BlockTypeId
+#include "finevox/core/item_type.hpp"      // ItemTypeId
 #include "finevox/core/entity_state.hpp"   // EntityId, EntityState
 #include "finevox/core/fluid_type_id.hpp"  // FluidTypeId
 #include "finevox/core/recipe.hpp"         // RecipeId
@@ -29,16 +31,22 @@ public:
     virtual void sendAction(finescript::Value action) = 0;
 
     /// Break a block. Returns true if the action was accepted.
-    virtual bool breakBlock(BlockCoord pos);
+    virtual bool breakBlock(BlockCoord pos, ItemTypeId tool = {},
+                            bool preciseBreak = false,
+                            EntityId actor = INVALID_ENTITY_ID);
 
     /// Place a block. Returns true if the action was accepted.
-    virtual bool placeBlock(BlockCoord pos, BlockTypeId type);
+    virtual bool placeBlock(BlockCoord pos, BlockTypeId type,
+                            Rotation rotation = Rotation::IDENTITY,
+                            EntityId actor = INVALID_ENTITY_ID);
 
     /// Right-click interaction with a block. Returns true if block had a handler.
-    virtual bool useBlock(BlockCoord pos, Face face);
+    virtual bool useBlock(BlockCoord pos, Face face,
+                          EntityId actor = INVALID_ENTITY_ID);
 
     /// Left-click hit on a block (non-break, e.g. note block). Returns true if handled.
-    virtual bool hitBlock(BlockCoord pos, Face face);
+    virtual bool hitBlock(BlockCoord pos, Face face,
+                          EntityId actor = INVALID_ENTITY_ID);
 
     /// Place fluid at a position. Returns true if the action was accepted.
     virtual bool placeFluid(BlockCoord pos, FluidTypeId type, uint8_t level = 15);

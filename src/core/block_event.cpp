@@ -60,6 +60,9 @@ BlockEvent BlockEvent::tick(BlockCoord pos, TickType tickType) {
         case TickType::Random:
             event.type = EventType::TickRandom;
             break;
+        case TickType::Game:
+            event.type = EventType::TickGame;
+            break;
         default:
             event.type = EventType::TickScheduled;
             break;

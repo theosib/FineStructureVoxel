@@ -91,6 +91,21 @@ SubChunk& ChunkColumn::getOrCreateSubChunk(int32_t chunkY) {
     return *ptr;
 }
 
+void ChunkColumn::setSubChunk(int32_t chunkY, std::shared_ptr<SubChunk> subChunk) {
+    if (!subChunk || subChunk->isEmpty()) {
+        subChunks_.erase(chunkY);
+        heightmapDirty_ = true;
+        return;
+    }
+    subChunk->setPosition(toChunkPos(chunkY));
+    subChunks_[chunkY] = std::move(subChunk);
+    heightmapDirty_ = true;
+}
+
+void ChunkColumn::setSubChunk(int32_t chunkY, std::unique_ptr<SubChunk> subChunk) {
+    setSubChunk(chunkY, std::shared_ptr<SubChunk>(std::move(subChunk)));
+}
+
 void ChunkColumn::pruneEmptySubChunks() {
     for (auto it = subChunks_.begin(); it != subChunks_.end(); ) {
         if (it->second->isEmpty()) {

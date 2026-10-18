@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/core/ai_driver.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/entity_type_def.hpp"
 #include "finevox/core/entity_type_registry.hpp"
@@ -249,3 +250,81 @@ TEST_F(AIDriverTest, LandingDetectionCapturesVelocity) {
     // preLandingVelocityY should have captured the falling velocity
     EXPECT_FLOAT_EQ(mob.preLandingVelocityY(), -10.0f);
 }
+
+TEST_F(AIDriverTest, GroundedEntityDoesNotAccumulateNegativeVelocityY) {
+    World world;
+    auto stoneId = BlockTypeId::fromName("test_ground_stone");
+    BlockType stone;
+    stone.setShape(CollisionShape::FULL_BLOCK).setOpaque(true);
+    BlockRegistry::global().registerType(stoneId, stone);
+
+    // Solid floor at y = 0 (top surface at y = 1.0)
+    for (int x = -2; x <= 2; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock({x, 0, z}, stoneId);
+        }
+    }
+
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+
+    auto mob = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_driver_pig"));
+    mob->setPosition(Vec3(0.5f, 1.0f, 0.5f));
+    mob->setOnGround(true);
+    EntityId id = em.spawnEntity(std::move(mob));
+
+    // Tick 20 times on flat ground — velocity.y must remain 0.0f, not accumulate -gravity*dt!
+    for (int i = 0; i < 20; ++i) {
+        em.tick(0.05f);
+    }
+
+    MobEntity* spawned = em.getMob(id);
+    ASSERT_NE(spawned, nullptr);
+    EXPECT_TRUE(spawned->isOnGround());
+    EXPECT_FLOAT_EQ(spawned->velocity().y, 0.0f);
+}
+
+TEST_F(AIDriverTest, CustomDriverTickAndPlayerEventsWiredThroughEntityManager) {
+    World world;
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+
+    class TrackingDriver : public AIDriver {
+    public:
+        void tick(MobEntity&, float dt) override {
+            ++tickCount;
+            lastDt = dt;
+        }
+        void onEvent(MobEntity&, const finescript::Value&) override {
+            ++eventCount;
+        }
+        std::vector<InternedId> subscribedEvents() const override { return {}; }
+
+        int tickCount = 0;
+        float lastDt = 0.0f;
+        int eventCount = 0;
+    };
+
+    auto mob = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_driver_pig"));
+    auto driver = std::make_unique<TrackingDriver>();
+    auto* driverPtr = driver.get();
+    mob->setDriver(std::move(driver));
+    EntityId mobId = em.spawnEntity(std::move(mob));
+    (void)mobId;
+
+    em.tick(0.05f);
+    EXPECT_EQ(driverPtr->tickCount, 1);
+    EXPECT_FLOAT_EQ(driverPtr->lastDt, 0.05f);
+
+    // Also verify EntityManager::handlePlayerSprint/Sneak/Jump/Look forward to PlayerInputDriver
+    EntityId playerId = em.spawnPlayer(Vec3(0.0f, 10.0f, 0.0f));
+    MobEntity* playerMob = em.getMob(playerId);
+    ASSERT_NE(playerMob, nullptr);
+
+    em.handlePlayerSprint(BlockEvent::playerSprint(playerId, true), true);
+    EXPECT_FLOAT_EQ(playerMob->speedMultiplier(), 1.3f);
+
+    em.handlePlayerSneak(BlockEvent::playerSneak(playerId, true), true);
+    EXPECT_FLOAT_EQ(playerMob->speedMultiplier(), 0.3f);
+}
+

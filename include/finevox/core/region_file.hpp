@@ -156,6 +156,12 @@ public:
     [[nodiscard]] size_t freeSpaceCount() const { return freeSpans_.size(); }
     [[nodiscard]] uint64_t dataFileSize() const { return dataFileEnd_; }
 
+    // Verify free-list invariants (throws std::logic_error if violated):
+    // (a) every free span is non-empty and within [0, dataFileEnd_]
+    // (b) no free span overlaps any live column's [offset, offset + size) in index_
+    // (c) free spans are pairwise non-overlapping
+    void validateFreeListInvariants() const;
+
 private:
     RegionPos pos_;
     std::filesystem::path basePath_;

@@ -59,6 +59,8 @@ void MobEntity::playAnimation(std::string_view name) {
 }
 
 void MobEntity::tick(float dt, World& world) {
+    world_ = &world;
+
     // Landing detection — capture velocity before ground state changes
     if (!onGround_) {
         preLandingVelocityY_ = velocity_.y;
@@ -101,8 +103,12 @@ void MobEntity::tick(float dt, World& world) {
         senses_.update(*this, *entityManager_, dt);
     }
 
-    // Run AI brain
-    brain_.tick(*this, dt);
+    // Run AI driver (or fallback to brain for non-player mobs without a driver)
+    if (driver_) {
+        driver_->tick(*this, dt);
+    } else if (!isPlayerEntity()) {
+        brain_.tick(*this, dt);
+    }
 
     // Apply movement toward target
     updateMovement(dt);
@@ -206,7 +212,7 @@ void MobEntity::lookAt(const glm::dvec3& target) {
     double distXZ = std::sqrt(dx * dx + dz * dz);
 
     yaw_ = static_cast<float>(std::atan2(dx, dz));
-    pitch_ = static_cast<float>(-std::atan2(dy, distXZ));
+    pitch_ = static_cast<float>(std::atan2(dy, distXZ));
 }
 
 void MobEntity::jump() {

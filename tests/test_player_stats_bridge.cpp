@@ -75,6 +75,38 @@ TEST_F(PlayerStatsBridgeTest, PlayerSetAndGetStat) {
     EXPECT_NEAR(result.asFloat(), 18.5, 0.01);
 }
 
+TEST_F(PlayerStatsBridgeTest, PlayerSetAndGetZeroFalseAndEmptyStat) {
+    auto* mob = session_->entities().getMob(playerId_);
+    ASSERT_NE(mob, nullptr);
+    // Negative control: reading a missing stat does not allocate entityData
+    EXPECT_EQ(mob->entityData(), nullptr);
+    auto defVal = eval("{player_get_stat \"uninitialized\" -1.0}");
+    EXPECT_DOUBLE_EQ(defVal.asFloat(), -1.0);
+    EXPECT_EQ(mob->entityData(), nullptr);
+
+    // Storing 0, 0.0, false, and "" returns the exact stored values, not the fallback default
+    eval("{player_set_stat \"zero_int\" 0}");
+    eval("{player_set_stat \"zero_flt\" 0.0}");
+    eval("{player_set_stat \"flag\" false}");
+    eval("{player_set_stat \"label\" \"\"}");
+
+    auto rInt = eval("{player_get_stat \"zero_int\" 99}");
+    EXPECT_TRUE(rInt.isInt());
+    EXPECT_EQ(rInt.asInt(), 0);
+
+    auto rFlt = eval("{player_get_stat \"zero_flt\" 99.0}");
+    EXPECT_TRUE(rFlt.isFloat());
+    EXPECT_DOUBLE_EQ(rFlt.asFloat(), 0.0);
+
+    auto rBool = eval("{player_get_stat \"flag\" true}");
+    EXPECT_TRUE(rBool.isBool());
+    EXPECT_FALSE(rBool.asBool());
+
+    auto rStr = eval("{player_get_stat \"label\" \"fallback\"}");
+    EXPECT_TRUE(rStr.isString());
+    EXPECT_EQ(rStr.asString(), "");
+}
+
 TEST_F(PlayerStatsBridgeTest, PlayerIsAlive) {
     auto result = eval("{player_is_alive}");
     ASSERT_TRUE(result.isBool());

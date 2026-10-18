@@ -117,9 +117,12 @@ inline MeshRebuildRequest mergeMeshRebuildRequest(
 ///
 using MeshRebuildQueue = KeyedQueue<ChunkPos, MeshRebuildRequest>;
 
-/// Create a MeshRebuildQueue with proper merge semantics
+/// Create a MeshRebuildQueue with proper merge and priority semantics
 inline MeshRebuildQueue createMeshRebuildQueue() {
-    return MeshRebuildQueue(mergeMeshRebuildRequest);
+    return MeshRebuildQueue(
+        mergeMeshRebuildRequest,
+        [](const MeshRebuildRequest& r) { return static_cast<int>(r.priority); }
+    );
 }
 
 }  // namespace finevox

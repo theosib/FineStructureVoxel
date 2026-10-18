@@ -3,6 +3,8 @@
 #include "finevox/core/ai_brain.hpp"
 #include "finevox/core/ai_goals.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/entity_manager.hpp"
+#include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/entity_type_def.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/pathfinder.hpp"
@@ -468,3 +470,86 @@ TEST_F(EntityAITest, SensesDetectsNothing) {
     EXPECT_EQ(mob->senses().visibleCount(), 0u);
     EXPECT_EQ(mob->senses().nearestPlayer(), nullptr);
 }
+
+TEST_F(EntityAITest, EntityLookDirectionMatchesLookAtInRadians) {
+    auto mob = std::make_unique<MobEntity>(1, EntityTypeId::fromName("test_ai_zombie"));
+    mob->setPosition(Vec3(0.0f, 0.0f, 0.0f));
+    mob->setEyeHeight(0.0f);
+
+    // Target along +X, +Y, +Z
+    glm::dvec3 target(3.0, 4.0, 12.0);
+    mob->lookAt(target);
+
+    Vec3 dir = mob->lookDirection();
+    Vec3 expected = glm::normalize(Vec3(3.0f, 4.0f, 12.0f));
+    EXPECT_NEAR(dir.x, expected.x, 1e-4f);
+    EXPECT_NEAR(dir.y, expected.y, 1e-4f);
+    EXPECT_NEAR(dir.z, expected.z, 1e-4f);
+}
+
+TEST_F(EntityAITest, FleeGoalRunsAwayFromAttacker) {
+    World world;
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+
+    EntityId attackerId = em.spawnPlayer(Vec3(10.0f, 1.0f, 0.0f));
+    auto pig = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_ai_pig"));
+    pig->setPosition(Vec3(0.0f, 1.0f, 0.0f));
+    EntityId pigId = em.spawnEntity(std::move(pig));
+
+    MobEntity* pigMob = em.getMob(pigId);
+    ASSERT_NE(pigMob, nullptr);
+
+    // Attacker is at +X (10, 1, 0), pig is at (0, 1, 0) -> pig must flee toward -X!
+    pigMob->damage(1.0f, attackerId);
+    FleeGoal flee(7);
+    ASSERT_TRUE(flee.canStart(*pigMob));
+    flee.start(*pigMob);
+
+    ASSERT_TRUE(pigMob->hasMoveTarget());
+    EXPECT_LT(pigMob->moveTarget().x, -5.0);
+    EXPECT_NEAR(pigMob->moveTarget().z, 0.0, 0.01);
+}
+
+TEST_F(EntityAITest, ChaseGoalUsesPathfinderAroundWall) {
+    World world;
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+
+    auto stoneId = BlockTypeId::fromName("test_path_stone2");
+    BlockType stone;
+    stone.setOpaque(true);
+    BlockRegistry::global().registerType(stoneId, stone);
+
+    // Build a flat floor
+    for (int x = -5; x <= 5; ++x) {
+        for (int z = -5; z <= 5; ++z) {
+            world.setBlock({x, 0, z}, stoneId);
+        }
+    }
+    // Build a short 2-high wall at z=2 for x in [-1, 1], leaving x=2 open as a detour
+    for (int x = -1; x <= 1; ++x) {
+        world.setBlock({x, 1, 2}, stoneId);
+        world.setBlock({x, 2, 2}, stoneId);
+    }
+
+    EntityId playerId = em.spawnPlayer(Vec3(0.5f, 1.0f, 4.5f));
+    auto zombie = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_ai_zombie"));
+    zombie->setPosition(Vec3(0.5f, 1.0f, 0.5f));
+    EntityId zombieId = em.spawnEntity(std::move(zombie));
+
+    MobEntity* zombieMob = em.getMob(zombieId);
+    ASSERT_NE(zombieMob, nullptr);
+    zombieMob->senses().update(*zombieMob, em, 0.05f);
+
+    ChaseGoal chase(5);
+    ASSERT_TRUE(chase.canStart(*zombieMob));
+    chase.start(*zombieMob);
+    chase.tick(*zombieMob, 0.05f);
+
+    // Waypoint should be an intermediate cell (not directly (0.5, 1.0, 4.5) through the wall)
+    ASSERT_TRUE(zombieMob->hasMoveTarget());
+    EXPECT_LT(zombieMob->moveTarget().z, 4.0);
+    (void)playerId;
+}
+

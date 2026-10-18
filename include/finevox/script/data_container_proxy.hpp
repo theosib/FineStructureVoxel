@@ -14,11 +14,16 @@
 #include <finescript/proxy_map.h>
 #include <finescript/value.h>
 
+namespace finevox {
+class BlockContext;
+}
+
 namespace finevox::script {
 
 class DataContainerProxy : public finescript::ProxyMap {
 public:
     explicit DataContainerProxy(DataContainer& container);
+    explicit DataContainerProxy(BlockContext& blockCtx);
 
     finescript::Value get(uint32_t key) const override;
     void set(uint32_t key, finescript::Value value) override;
@@ -27,7 +32,11 @@ public:
     std::vector<uint32_t> keys() const override;
 
 private:
-    DataContainer& container_;
+    [[nodiscard]] const DataContainer* readContainer() const;
+    [[nodiscard]] DataContainer& writeContainer();
+
+    mutable DataContainer* container_ = nullptr;
+    BlockContext* blockCtx_ = nullptr;
 };
 
 }  // namespace finevox::script

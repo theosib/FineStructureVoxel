@@ -61,6 +61,34 @@ TEST_F(ConfigParserTest, KeyWithSuffix) {
     EXPECT_EQ(entry->value.asString(), "vertices");
 }
 
+TEST_F(ConfigParserTest, NamespacedValueDoesNotSplitIntoSuffix) {
+    auto doc = parser.parseString(
+        "name: finevox:zombie\n"
+        "particle: finevox:ember_burst\n"
+        "face:north: 1 2 3\n"
+    );
+
+    ASSERT_EQ(doc.size(), 3u);
+
+    const auto* nameEntry = doc.get("name");
+    ASSERT_NE(nameEntry, nullptr);
+    EXPECT_FALSE(nameEntry->hasSuffix());
+    EXPECT_EQ(nameEntry->suffix, "");
+    EXPECT_EQ(nameEntry->value.asString(), "finevox:zombie");
+
+    const auto* particleEntry = doc.get("particle");
+    ASSERT_NE(particleEntry, nullptr);
+    EXPECT_FALSE(particleEntry->hasSuffix());
+    EXPECT_EQ(particleEntry->value.asString(), "finevox:ember_burst");
+
+    // Negative control: key:suffix: without whitespace still parses suffix
+    const auto* faceEntry = doc.get("face", "north");
+    ASSERT_NE(faceEntry, nullptr);
+    EXPECT_TRUE(faceEntry->hasSuffix());
+    EXPECT_EQ(faceEntry->suffix, "north");
+    EXPECT_EQ(faceEntry->value.asString(), "1 2 3");
+}
+
 TEST_F(ConfigParserTest, DataLines) {
     auto doc = parser.parseString(
         "face:bottom:\n"

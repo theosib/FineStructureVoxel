@@ -13,6 +13,7 @@
 
 #include <finescript/script_engine.h>
 #include <finescript/execution_context.h>
+#include <finescript/map_data.h>
 
 #include <chrono>
 #include <filesystem>
@@ -269,3 +270,133 @@ TEST_F(ScriptIntegrationTest, BlockModelScriptField) {
     EXPECT_TRUE(model.hasScript());
     EXPECT_EQ(model.script(), "blocks/test_block");
 }
+
+// ============================================================================
+// Phase R0 Tests: ud->blockCtx wiring, lazy DataContainer, DataContainerProxy
+// ============================================================================
+
+TEST_F(ScriptIntegrationTest, ScriptBlockHandlerWiresBlockCtxAndLazyDataContainer) {
+    World world;
+    GameScriptEngine gse(world);
+
+    // Handler that calls ctx.* natives WITHOUT writing to data
+    auto readOnlyPath = writeScript("readonly_block.fsc", R"(
+on :place do
+    ctx.set_rotation 5
+    ctx.request_rebuild
+end
+)");
+
+    auto* roHandler = gse.loadBlockScript(readOnlyPath, "test:ro_script_block");
+    ASSERT_NE(roHandler, nullptr);
+
+    BlockTypeId roBlockId = BlockTypeId::fromName("test:ro_script_block");
+    BlockCoord pos{2, 3, 4};
+    world.setBlock(pos, roBlockId);
+
+    SubChunk* sc = world.getSubChunk(ChunkPos::fromBlock(pos));
+    ASSERT_NE(sc, nullptr);
+    uint64_t versionBefore = sc->blockVersion();
+
+    // Negative control: before onPlace, rotation is 0 and no block data exists
+    EXPECT_EQ(sc->getRotationIndex(pos.local()), 0);
+    EXPECT_FALSE(sc->hasBlockData(pos.localIndex()));
+
+    BlockContext ctx(world, *sc, pos, pos.local());
+    roHandler->onPlace(ctx);
+
+    // ctx.set_rotation and ctx.request_rebuild succeeded via ud->blockCtx
+    EXPECT_EQ(sc->getRotationIndex(pos.local()), 5);
+    EXPECT_GT(sc->blockVersion(), versionBefore);
+    // And no empty DataContainer was allocated since data was not written!
+    EXPECT_FALSE(sc->hasBlockData(pos.localIndex()));
+
+    // Positive control: a handler that writes to data DOES lazily allocate DataContainer
+    auto writeDataPath = writeScript("writedata_block.fsc", R"(
+on :place do
+    set data.active true
+    set data.power 0
+end
+)");
+    auto* rwHandler = gse.loadBlockScript(writeDataPath, "test:rw_script_block");
+    ASSERT_NE(rwHandler, nullptr);
+
+    BlockCoord pos2{5, 3, 4};
+    world.setBlock(pos2, roBlockId);
+    BlockContext ctx2(world, *sc, pos2, pos2.local());
+    rwHandler->onPlace(ctx2);
+
+    EXPECT_TRUE(sc->hasBlockData(pos2.localIndex()));
+    const DataContainer* dc = sc->blockData(pos2.localIndex());
+    ASSERT_NE(dc, nullptr);
+    EXPECT_TRUE(dc->get<bool>("active", false));
+    EXPECT_EQ(dc->get<int64_t>("power", -1), 0);
+}
+
+TEST_F(ScriptIntegrationTest, DataContainerProxyBoolArraysAndNestedMapsRoundTrip) {
+    DataContainer container;
+    DataContainerProxy proxy(container);
+    auto& si = StringInterner::global();
+
+    // 1. Booleans round-trip as Value::Type::Bool (not Int)
+    uint32_t boolTrueKey = si.intern("flag_true");
+    uint32_t boolFalseKey = si.intern("flag_false");
+    proxy.set(boolTrueKey, finescript::Value::boolean(true));
+    proxy.set(boolFalseKey, finescript::Value::boolean(false));
+
+    auto vTrue = proxy.get(boolTrueKey);
+    auto vFalse = proxy.get(boolFalseKey);
+    EXPECT_TRUE(vTrue.isBool());
+    EXPECT_FALSE(vTrue.isInt());
+    EXPECT_TRUE(vTrue.asBool());
+    EXPECT_TRUE(vFalse.isBool());
+    EXPECT_FALSE(vFalse.asBool());
+
+    // 2. Integer, float, and string arrays round-trip
+    uint32_t intArrKey = si.intern("ints");
+    proxy.set(intArrKey, finescript::Value::array({
+        finescript::Value::integer(10),
+        finescript::Value::integer(0),
+        finescript::Value::integer(-5)
+    }));
+    auto vInts = proxy.get(intArrKey);
+    ASSERT_TRUE(vInts.isArray());
+    ASSERT_EQ(vInts.asArray().size(), 3u);
+    EXPECT_EQ(vInts.asArray()[0].asInt(), 10);
+    EXPECT_EQ(vInts.asArray()[1].asInt(), 0);
+    EXPECT_EQ(vInts.asArray()[2].asInt(), -5);
+
+    uint32_t fltArrKey = si.intern("floats");
+    proxy.set(fltArrKey, finescript::Value::array({
+        finescript::Value::number(1.5),
+        finescript::Value::number(0.0)
+    }));
+    auto vFlts = proxy.get(fltArrKey);
+    ASSERT_TRUE(vFlts.isArray());
+    ASSERT_EQ(vFlts.asArray().size(), 2u);
+    EXPECT_DOUBLE_EQ(vFlts.asArray()[0].asFloat(), 1.5);
+    EXPECT_DOUBLE_EQ(vFlts.asArray()[1].asFloat(), 0.0);
+
+    uint32_t strArrKey = si.intern("strings");
+    proxy.set(strArrKey, finescript::Value::array({
+        finescript::Value::string("alpha"),
+        finescript::Value::string("")
+    }));
+    auto vStrs = proxy.get(strArrKey);
+    ASSERT_TRUE(vStrs.isArray());
+    ASSERT_EQ(vStrs.asArray().size(), 2u);
+    EXPECT_EQ(vStrs.asArray()[0].asString(), "alpha");
+    EXPECT_EQ(vStrs.asArray()[1].asString(), "");
+
+    // 3. Nested maps round-trip as ProxyMap
+    uint32_t nestedKey = si.intern("nested");
+    uint32_t innerKey = si.intern("count");
+    auto nestedMap = finescript::Value::map();
+    nestedMap.asMap().set(innerKey, finescript::Value::integer(42));
+    proxy.set(nestedKey, nestedMap);
+
+    auto vNested = proxy.get(nestedKey);
+    ASSERT_TRUE(vNested.isMap());
+    EXPECT_EQ(vNested.asMap().get(innerKey).asInt(), 42);
+}
+

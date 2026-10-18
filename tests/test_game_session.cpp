@@ -232,9 +232,54 @@ TEST(GameSessionTest, CustomConfig) {
     GameSessionConfig config;
     config.tickRate = 10;
     config.gravity = -9.8f;
+    config.randomTicksPerChunk = 12;
+    config.enableLighting = false;
+    config.enableSound = false;
 
     auto session = GameSession::createLocal(config);
     EXPECT_FLOAT_EQ(session->worldTime().ticksPerSecond(), 10.0f);
+    EXPECT_FLOAT_EQ(session->entities().physics().gravity(), -9.8f);
+    EXPECT_EQ(session->scheduler().tickConfig().randomTicksPerSubchunk, 12u);
+    EXPECT_EQ(session->world().lightEngine(), nullptr);
+
+    // With enableSound = false, placing a block with a soundSet does not emit sound events
+    auto stone = ensureTestBlock("test_stone_muted", true);
+    session->actions().placeBlock({0, 0, 0}, stone);
+    EXPECT_TRUE(session->soundEvents().empty());
+}
+
+TEST(GameSessionTest, SendPlayerStatePreservesYawAndPitchAndPlaceBlockPreservesRotation) {
+    auto session = GameSession::createLocal();
+    EntityId playerId = session->entities().spawnPlayer(Vec3(0.0f, 64.0f, 0.0f));
+
+    EntityState state;
+    state.id = playerId;
+    state.position = glm::dvec3(2.0, 64.0, 3.0);
+    state.velocity = glm::dvec3(0.0, 0.0, 0.0);
+    state.onGround = true;
+    state.yaw = 1.25f;
+    state.pitch = -0.45f;
+    state.inputSequence = 7;
+
+    session->actions().sendPlayerState(playerId, state);
+
+    // Also send a rotated block placement command
+    auto stairs = ensureTestBlock("test_rotated_stairs", false);
+    session->world().setBlock({0, 0, 0}, stairs);
+    session->actions().sendAction(
+        makeBlockPlacedValue({1, 2, 3}, stairs, AIR_BLOCK_TYPE, Rotation::ROTATE_Y_90));
+
+    session->tick(0.0f);
+
+    const Entity* player = session->entities().getEntity(playerId);
+    ASSERT_NE(player, nullptr);
+    EXPECT_FLOAT_EQ(player->yaw(), 1.25f);
+    EXPECT_FLOAT_EQ(player->pitch(), -0.45f);
+
+    SubChunk* sc = session->world().getSubChunk(ChunkPos::fromBlock({1, 2, 3}));
+    ASSERT_NE(sc, nullptr);
+    EXPECT_EQ(sc->getBlock(1, 2, 3), stairs);
+    EXPECT_EQ(sc->getRotation(1, 2, 3), Rotation::ROTATE_Y_90);
 }
 
 // ============================================================================

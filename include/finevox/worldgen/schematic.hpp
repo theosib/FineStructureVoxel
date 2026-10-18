@@ -162,11 +162,11 @@ private:
 ///
 /// @warning `M` has determinant -1, so `dst.rotation` is generally NOT one of the 24
 /// proper rotations. `Rotation` can hold it and compose/inverse/apply all behave
-/// correctly, but `Rotation::index()` has no entry for it and returns 0 (identity).
-/// Both the world storage (`SubChunk::rotations_`, a uint8_t index array) and the
-/// schematic file format encode orientation as that index, so a mirrored block's
-/// orientation is silently lost if the result is stamped into the world or saved.
-/// Mirroring is currently correct only as an in-memory transform; see
+/// correctly, but `Rotation::index()` throws `std::logic_error` because there is no
+/// entry for it in the 24-rotation table. Both the world storage (`SubChunk::rotations_`,
+/// a uint8_t index array) and the schematic file format encode orientation as that index,
+/// so stamping or saving a mirrored schematic with reflected orientations will fail loudly.
+/// Mirroring is currently valid only as an in-memory transform; see
 /// docs/systems/worldgen.md for the follow-up needed before production use.
 [[nodiscard]] Schematic mirrorSchematic(const Schematic& schematic, Axis axis);
 

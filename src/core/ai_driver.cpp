@@ -23,9 +23,8 @@ bool AIDriver::subscribesTo(InternedId eventType) const {
 // BrainAIDriver — delegates to AIBrain goal system
 // ============================================================================
 
-void BrainAIDriver::tick(MobEntity& /*mob*/, float /*dt*/) {
-    // AIBrain::tick is called from MobEntity::tick directly,
-    // so this driver doesn't need to tick the brain again.
+void BrainAIDriver::tick(MobEntity& mob, float dt) {
+    mob.brain().tick(mob, dt);
 }
 
 void BrainAIDriver::onEvent(MobEntity& /*mob*/, const finescript::Value& /*event*/) {

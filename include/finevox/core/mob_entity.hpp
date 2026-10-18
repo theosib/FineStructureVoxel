@@ -56,6 +56,11 @@ public:
 
     /// Set entity manager reference (for senses to scan entities)
     void setEntityManager(EntityManager* em) { entityManager_ = em; }
+    [[nodiscard]] EntityManager* entityManager() const { return entityManager_; }
+
+    /// Get world reference (valid during/after tick)
+    void setWorld(World* w) { world_ = w; }
+    [[nodiscard]] World* world() const { return world_; }
 
     // ========================================================================
     // AI Driver (top-level decision-maker)
@@ -142,6 +147,7 @@ public:
 
     /// Get the Y velocity just before the most recent landing (for fall damage)
     [[nodiscard]] float preLandingVelocityY() const { return preLandingVelocityY_; }
+    void recordPreLandingVelocityY(float vy) { preLandingVelocityY_ = vy; }
 
 private:
     EntityTypeId typeId_;
@@ -149,6 +155,7 @@ private:
     std::unique_ptr<AIDriver> driver_;
     EntitySenses senses_;
     EntityManager* entityManager_ = nullptr;
+    World* world_ = nullptr;
     MobEventHooks* eventHooks_ = nullptr;
     bool deathHookFired_ = false;
     bool isPlayer_ = false;

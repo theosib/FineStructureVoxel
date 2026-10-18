@@ -8,13 +8,14 @@ StringInterner& StringInterner::global() {
 }
 
 StringInterner::StringInterner() {
-    // Reserve IDs 0, 1, 2 for special block types
-    strings_.emplace_back("finevox:air");       // ID 0: Air (proper name for printing)
+    // Reserve ID 0 as "" (empty/null across all ID types; BlockTypeId::name() returns "finevox:air" for ID 0)
+    // Reserve IDs 1, 2 for special block types
+    strings_.emplace_back("");                  // ID 0: Empty / Air
     strings_.emplace_back("finevox:invalid");   // ID 1: Invalid
     strings_.emplace_back("finevox:unknown");   // ID 2: Unknown
 
     // Add to lookup for reverse mapping
-    // Both empty string and "finevox:air" map to AIR_INTERNED_ID
+    // Both empty string and "finevox:air" map to AIR_INTERNED_ID (0)
     lookup_[""] = AIR_INTERNED_ID;
     lookup_["finevox:air"] = AIR_INTERNED_ID;
     lookup_["finevox:invalid"] = INVALID_INTERNED_ID;
@@ -22,12 +23,10 @@ StringInterner::StringInterner() {
 }
 
 InternedId StringInterner::intern(std::string_view str) {
-    std::string key(str);  // Convert to string for map operations
-
-    // Fast path: check if already interned (read lock)
+    // Fast path: check if already interned (read lock, transparent string_view lookup)
     {
         std::shared_lock readLock(mutex_);
-        auto it = lookup_.find(key);
+        auto it = lookup_.find(str);
         if (it != lookup_.end()) {
             return it->second;
         }
@@ -37,7 +36,7 @@ InternedId StringInterner::intern(std::string_view str) {
     std::unique_lock writeLock(mutex_);
 
     // Double-check after acquiring write lock
-    auto it = lookup_.find(key);
+    auto it = lookup_.find(str);
     if (it != lookup_.end()) {
         return it->second;
     }
@@ -45,7 +44,7 @@ InternedId StringInterner::intern(std::string_view str) {
     // Add new string
     InternedId id = static_cast<InternedId>(strings_.size());
     strings_.emplace_back(str);
-    lookup_[std::move(key)] = id;
+    lookup_.emplace(strings_.back(), id);
 
     return id;
 }
@@ -60,7 +59,7 @@ std::string_view StringInterner::lookup(InternedId id) const {
 
 std::optional<InternedId> StringInterner::find(std::string_view str) const {
     std::shared_lock lock(mutex_);
-    auto it = lookup_.find(std::string(str));
+    auto it = lookup_.find(str);
     if (it != lookup_.end()) {
         return it->second;
     }
@@ -75,13 +74,16 @@ size_t StringInterner::size() const {
 // BlockTypeId implementation
 
 BlockTypeId BlockTypeId::fromName(std::string_view name) {
-    if (name.empty()) {
+    if (name.empty() || name == "finevox:air") {
         return AIR_BLOCK_TYPE;
     }
     return BlockTypeId{StringInterner::global().intern(name)};
 }
 
 std::string_view BlockTypeId::name() const {
+    if (id == AIR_INTERNED_ID) {
+        return "finevox:air";
+    }
     return StringInterner::global().lookup(id);
 }
 

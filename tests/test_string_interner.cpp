@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/item_type.hpp"
+#include "finevox/core/fluid_type_id.hpp"
+#include "finevox/core/entity_type_id.hpp"
+#include "finevox/core/data_container.hpp"
 #include <thread>
 #include <vector>
 #include <unordered_set>
@@ -66,9 +70,18 @@ TEST(StringInternerTest, FindNonExistingString) {
 TEST(StringInternerTest, ReservedIds) {
     auto& interner = StringInterner::global();
 
-    // Air is ID 0, has proper printable name
-    std::string_view airName = interner.lookup(AIR_INTERNED_ID);
-    EXPECT_EQ(airName, "finevox:air");
+    // ID 0 is empty string in StringInterner so empty item/fluid/entity IDs resolve to ""
+    std::string_view id0Name = interner.lookup(AIR_INTERNED_ID);
+    EXPECT_EQ(id0Name, "");
+
+    // While BlockTypeId::name() returns "finevox:air" for AIR_BLOCK_TYPE (ID 0)
+    EXPECT_EQ(AIR_BLOCK_TYPE.name(), "finevox:air");
+
+    // And empty IDs across other systems return "" instead of "finevox:air"
+    EXPECT_EQ(EMPTY_ITEM_TYPE.name(), "");
+    EXPECT_EQ(EMPTY_FLUID_TYPE.name(), "");
+    EXPECT_EQ(EMPTY_ENTITY_TYPE_ID.name(), "");
+    EXPECT_EQ(InternedString{}.str(), "");
 
     // Invalid is ID 1
     std::string_view invalidName = interner.lookup(INVALID_INTERNED_ID);

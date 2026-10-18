@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/core/mesh_worker_pool.hpp"
+#include "finevox/core/queue.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/wake_signal.hpp"
 #include <thread>
@@ -454,3 +455,86 @@ TEST_F(MeshWorkerPoolTest, ThreadCountReported) {
     EXPECT_EQ(pool4.threadCount(), 4);
     pool4.stop();
 }
+
+// ============================================================================
+// Phase R0 Tests: MeshRebuildQueue Priority Ordering & Queue/KeyedQueue Alarms
+// ============================================================================
+
+TEST(MeshRebuildQueuePriorityTest, PopsUrgentRequestsBeforeBackground) {
+    MeshRebuildQueue queue = createMeshRebuildQueue();
+
+    ChunkPos bgPos{10, 0, 10};
+    ChunkPos normalPos{5, 0, 5};
+    ChunkPos urgentPos{0, 0, 0};
+
+    // Push in reverse urgency order: background (1000) -> normal (100) -> immediate (0)
+    queue.push(bgPos, MeshRebuildRequest::background());
+    queue.push(normalPos, MeshRebuildRequest::normal());
+    queue.push(urgentPos, MeshRebuildRequest::immediate());
+
+    auto first = queue.tryPop();
+    auto second = queue.tryPop();
+    auto third = queue.tryPop();
+
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    ASSERT_TRUE(third.has_value());
+
+    EXPECT_EQ(first->first, urgentPos);
+    EXPECT_EQ(first->second.priority, 0u);
+
+    EXPECT_EQ(second->first, normalPos);
+    EXPECT_EQ(second->second.priority, 100u);
+
+    EXPECT_EQ(third->first, bgPos);
+    EXPECT_EQ(third->second.priority, 1000u);
+}
+
+TEST(MeshRebuildQueuePriorityTest, UpgradingExistingRequestMovesItAheadOfNormal) {
+    MeshRebuildQueue queue = createMeshRebuildQueue();
+
+    ChunkPos firstBg{1, 0, 0};
+    ChunkPos secondNormal{2, 0, 0};
+
+    queue.push(firstBg, MeshRebuildRequest::background());
+    queue.push(secondNormal, MeshRebuildRequest::normal());
+
+    // Upgrade firstBg to immediate (0) via merge
+    queue.push(firstBg, MeshRebuildRequest::immediate());
+
+    auto first = queue.tryPop();
+    auto second = queue.tryPop();
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    EXPECT_EQ(first->first, firstBg);
+    EXPECT_EQ(first->second.priority, 0u);
+    EXPECT_EQ(second->first, secondNormal);
+}
+
+TEST(QueueAlarmOrderingTest, EarlierAlarmWinsOverLaterAlarm) {
+    using Clock = std::chrono::steady_clock;
+
+    Queue<int> q;
+    auto start = Clock::now();
+    // Set a far-future alarm (5 seconds), then a near alarm (30ms)
+    q.setAlarm(start + std::chrono::seconds(5));
+    q.setAlarm(start + std::chrono::milliseconds(30));
+    // Also set a later alarm (5 seconds) after the 30ms one — must NOT overwrite 30ms!
+    q.setAlarm(start + std::chrono::seconds(5));
+
+    EXPECT_TRUE(q.waitForWork(std::chrono::milliseconds(500)));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
+    EXPECT_LT(elapsed.count(), 250);
+
+    KeyedQueue<int, int> kq;
+    auto kStart = Clock::now();
+    kq.setAlarm(kStart + std::chrono::seconds(5));
+    kq.setAlarm(kStart + std::chrono::milliseconds(30));
+    kq.setAlarm(kStart + std::chrono::seconds(5));
+
+    EXPECT_TRUE(kq.waitForWork(std::chrono::milliseconds(500)));
+    auto kElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - kStart);
+    EXPECT_LT(kElapsed.count(), 250);
+}
+

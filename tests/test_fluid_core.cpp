@@ -703,16 +703,21 @@ TEST(SubChunkFluidTest, SetFluidCreatesLayer) {
     EXPECT_GT(sc.fluidVersion(), 0u);
 }
 
-TEST(SubChunkFluidTest, RemoveFluidDeallocatesEmptyLayer) {
+TEST(SubChunkFluidTest, RemoveFluidKeepsLayerAllocatedForLockFreeReads) {
     SubChunk sc;
     FluidTypeId water = FluidTypeId::fromName("water");
 
     sc.setFluid(0, 0, 0, water, FLUID_SOURCE_LEVEL);
     EXPECT_TRUE(sc.hasFluidLayer());
+    EXPECT_TRUE(sc.hasFluid());
+    EXPECT_FALSE(sc.isEmpty());
 
     sc.removeFluid(0, 0, 0);
-    // Layer auto-deallocated when empty
-    EXPECT_FALSE(sc.hasFluidLayer());
+    // Layer stays allocated for lock-free MeshWorkerPool safety, but is logically empty
+    EXPECT_TRUE(sc.hasFluidLayer());
+    EXPECT_TRUE(sc.fluidLayer()->isEmpty());
+    EXPECT_FALSE(sc.hasFluid());
+    EXPECT_TRUE(sc.isEmpty());
 }
 
 TEST(SubChunkFluidTest, SetEmptyTypeNoOpWithoutLayer) {

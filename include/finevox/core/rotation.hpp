@@ -53,7 +53,11 @@ public:
     // Get number of rotations
     static constexpr uint8_t count() { return 24; }
 
+    // Check if this matrix is one of the 24 proper cube rotations (det == +1)
+    [[nodiscard]] bool isProperRotation() const;
+
     // Get the index of this rotation (0-23)
+    // Throws std::logic_error if the matrix is not one of the 24 proper rotations (e.g. a reflection)
     [[nodiscard]] uint8_t index() const;
 
     // Construct identity rotation

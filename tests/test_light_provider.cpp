@@ -338,3 +338,109 @@ TEST(LightProviderTest, FluidLightProviderDoesNotBlockSky) {
 
     EXPECT_FALSE(provider->blocksSkyLight(AIR_BLOCK_TYPE));
 }
+
+// ============================================================================
+// Phase R0 Tests: LightProvider & LightingQueue::enqueue wiring in LightEngine
+// ============================================================================
+
+TEST(LightProviderTest, CustomProviderDrivesLightEnginePropagation) {
+    World world;
+    LightEngine engine(world);
+
+    // Register a custom block type with 0 emission in BlockRegistry
+    BlockType crystal;
+    crystal.setOpaque(false)
+           .setTransparent(true)
+           .setLightEmission(0)
+           .setLightAttenuation(1)
+           .setBlocksSkyLight(false);
+    BlockTypeId crystalId = BlockTypeId::fromName("r0light:magic_crystal");
+    BlockRegistry::global().registerType(crystalId, crystal);
+
+    // Seal a 7x7x7 chamber of opaque stone around (8, 8, 8)
+    BlockTypeId stoneId = BlockTypeId::fromName("r0light:stone");
+    BlockType stone;
+    stone.setOpaque(true).setLightAttenuation(15).setBlocksSkyLight(true);
+    BlockRegistry::global().registerType(stoneId, stone);
+    for (int x = 5; x <= 11; ++x) {
+        for (int y = 5; y <= 11; ++y) {
+            for (int z = 5; z <= 11; ++z) {
+                if (x == 5 || x == 11 || y == 5 || y == 11 || z == 5 || z == 11) {
+                    world.setBlock({x, y, z}, stoneId);
+                }
+            }
+        }
+    }
+
+    // Negative control: without custom LightProvider, placing crystal emits 0 light
+    BlockCoord center{8, 8, 8};
+    world.setBlock(center, crystalId);
+    engine.onBlockPlaced(center, AIR_BLOCK_TYPE, crystalId);
+    EXPECT_EQ(engine.getBlockLight(center), 0);
+
+    // Add a custom LightProvider that makes crystalId emit 12 light
+    class CrystalLightProvider : public LightProvider {
+    public:
+        explicit CrystalLightProvider(BlockTypeId target) : target_(target) {}
+        std::string_view name() const override { return "CrystalLight"; }
+        uint8_t getEmission(BlockTypeId bt) const override {
+            return bt == target_ ? 12 : 0;
+        }
+        uint8_t getAttenuation(BlockTypeId bt) const override {
+            if (bt.isAir()) return 1;
+            return BlockRegistry::global().getType(bt).lightAttenuation();
+        }
+        bool blocksSkyLight(BlockTypeId bt) const override {
+            if (bt.isAir()) return false;
+            return BlockRegistry::global().getType(bt).blocksSkyLight();
+        }
+    private:
+        BlockTypeId target_;
+    };
+
+    engine.addLightProvider(std::make_shared<CrystalLightProvider>(crystalId));
+    engine.onBlockPlaced(center, AIR_BLOCK_TYPE, crystalId);
+
+    // Now the custom provider drives LightEngine propagation!
+    EXPECT_EQ(engine.getBlockLight(center), 12);
+    EXPECT_EQ(engine.getBlockLight({9, 8, 8}), 11);
+
+    // Removing the crystal removes the light
+    world.setBlock(center, AIR_BLOCK_TYPE);
+    engine.onBlockRemoved(center, crystalId);
+    EXPECT_EQ(engine.getBlockLight(center), 0);
+    EXPECT_EQ(engine.getBlockLight({9, 8, 8}), 0);
+}
+
+TEST(LightProviderTest, LightingQueueCoalescesPreservingOriginalOldTypeAndTriggerFlag) {
+    LightingQueue queue;
+    BlockCoord pos{4, 4, 4};
+    BlockTypeId torch = BlockTypeId::fromName("r0light:torch");
+    BlockTypeId stone = BlockTypeId::fromName("r0light:stone");
+    BlockTypeId dirt = BlockTypeId::fromName("r0light:dirt");
+
+    // Update 1: torch -> stone, triggerMeshRebuild = true
+    LightingUpdate u1;
+    u1.pos = pos;
+    u1.oldType = torch;
+    u1.newType = stone;
+    u1.triggerMeshRebuild = true;
+    queue.enqueue(u1);
+
+    // Update 2 at same position: stone -> dirt, triggerMeshRebuild = false
+    LightingUpdate u2;
+    u2.pos = pos;
+    u2.oldType = stone;
+    u2.newType = dirt;
+    u2.triggerMeshRebuild = false;
+    queue.enqueue(u2);
+
+    EXPECT_EQ(queue.size(), 1u);
+    auto batch = queue.tryDequeueBatch(10);
+    ASSERT_EQ(batch.size(), 1u);
+    EXPECT_EQ(batch[0].pos, pos);
+    EXPECT_EQ(batch[0].oldType, torch);
+    EXPECT_EQ(batch[0].newType, dirt);
+    EXPECT_TRUE(batch[0].triggerMeshRebuild);
+}
+

@@ -37,6 +37,7 @@ enum class TickType : uint8_t {
     Scheduled = 1,  // One-time scheduled tick (from scheduleTick)
     Repeat = 2,     // Repeating tick (at set interval)
     Random = 4,     // Random tick (for grass growth, etc.)
+    Game = 8,       // Regular game tick (for blocks with wantsGameTicks)
 };
 
 // Allow combining tick types with bitwise OR
@@ -471,6 +472,8 @@ public:
      */
     void notifyNeighbors();
 
+    [[nodiscard]] bool neighborsNotified() const { return neighborsNotified_; }
+
     // ========================================================================
     // Previous State (for place/break events)
     // ========================================================================
@@ -558,6 +561,7 @@ private:
 
     // Scheduler for tick scheduling (optional, set by UpdateScheduler)
     UpdateScheduler* scheduler_ = nullptr;
+    bool neighborsNotified_ = false;
 };
 
 }  // namespace finevox

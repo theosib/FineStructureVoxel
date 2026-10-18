@@ -1,7 +1,9 @@
 #include "finevox/core/ai_goals.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/entity_manager.hpp"
 #include "finevox/core/entity_type_def.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/pathfinder.hpp"
 #include <cmath>
 #include <random>
 
@@ -104,7 +106,9 @@ void ChaseGoal::start(MobEntity& mob) {
     } else {
         targetId_ = mob.lastAttacker();
     }
-    repathTimer_ = 0.0f;
+    repathTimer_ = params_.repathInterval;  // Trigger immediate path computation on first tick
+    path_.clear();
+    pathIndex_ = 0;
     mob.setAnimation(params_.animSlot);
 }
 
@@ -113,7 +117,7 @@ void ChaseGoal::tick(MobEntity& mob, float dt) {
 
     if (targetId_ == INVALID_ENTITY_ID) return;
 
-    // Find target entity through senses
+    // Find target entity through senses (or entityManager)
     Entity* target = nullptr;
     for (auto* e : mob.senses().visibleEntities()) {
         if (e->id() == targetId_) {
@@ -121,13 +125,50 @@ void ChaseGoal::tick(MobEntity& mob, float dt) {
             break;
         }
     }
+    if (!target && mob.entityManager()) {
+        target = mob.entityManager()->getEntity(targetId_);
+    }
 
     if (!target) return;
 
-    // Re-path periodically
-    if (repathTimer_ >= params_.repathInterval || !mob.hasMoveTarget()) {
+    // Advance along existing path waypoints when current waypoint is reached
+    if (pathIndex_ < path_.size() && !mob.hasMoveTarget()) {
+        const auto& wp = path_[pathIndex_++];
+        mob.moveTo(glm::dvec3(wp.pos.x + 0.5, wp.pos.y, wp.pos.z + 0.5));
+    }
+
+    // Re-path periodically or when out of waypoints
+    if (repathTimer_ >= params_.repathInterval ||
+        (!mob.hasMoveTarget() && pathIndex_ >= path_.size())) {
         repathTimer_ = 0.0f;
-        mob.moveTo(glm::dvec3(target->position()));
+        path_.clear();
+        pathIndex_ = 0;
+
+        glm::dvec3 startPos(mob.position());
+        glm::dvec3 goalPos(target->position());
+
+        if (mob.world()) {
+            auto he = mob.halfExtents();
+            auto found = Pathfinder::findPath(
+                *mob.world(), startPos, goalPos,
+                he.x * 2.0f, he.y * 2.0f,
+                static_cast<int32_t>(std::ceil(params_.maxRange * 2.0f)));
+            if (found && !found->empty()) {
+                path_ = std::move(*found);
+                // Skip start node if we're already in that block cell
+                if (path_.size() > 1) {
+                    pathIndex_ = 1;
+                } else {
+                    pathIndex_ = 0;
+                }
+                const auto& wp = path_[pathIndex_++];
+                mob.moveTo(glm::dvec3(wp.pos.x + 0.5, wp.pos.y, wp.pos.z + 0.5));
+                return;
+            }
+        }
+
+        // Fallback when unobstructed or no walkable floor path found
+        mob.moveTo(goalPos);
     }
 }
 
@@ -155,6 +196,8 @@ bool ChaseGoal::isComplete(MobEntity& mob) {
 
 void ChaseGoal::stop(MobEntity& mob) {
     targetId_ = INVALID_ENTITY_ID;
+    path_.clear();
+    pathIndex_ = 0;
     mob.clearMoveTarget();
 }
 
@@ -272,10 +315,45 @@ bool FleeGoal::canStart(MobEntity& mob) {
 void FleeGoal::start(MobEntity& mob) {
     fleeTimer_ = 0.0f;
 
-    // Run in a random direction away from attacker (or random if no attacker)
     auto pos = mob.position();
-    float dx = randomFloat(-params_.distance, params_.distance);
-    float dz = randomFloat(-params_.distance, params_.distance);
+
+    // Locate threat entity (lastAttacker first, then nearest visible player)
+    const Entity* threat = nullptr;
+    if (mob.lastAttacker() != INVALID_ENTITY_ID) {
+        if (mob.entityManager()) {
+            threat = mob.entityManager()->getEntity(mob.lastAttacker());
+        }
+        if (!threat) {
+            for (auto* e : mob.senses().visibleEntities()) {
+                if (e->id() == mob.lastAttacker()) {
+                    threat = e;
+                    break;
+                }
+            }
+        }
+    }
+    if (!threat) {
+        threat = mob.senses().nearestPlayer();
+    }
+
+    float dx = 0.0f;
+    float dz = 0.0f;
+    bool haveDirection = false;
+    if (threat) {
+        float awayX = pos.x - threat->position().x;
+        float awayZ = pos.z - threat->position().z;
+        float len = std::sqrt(awayX * awayX + awayZ * awayZ);
+        if (len > 1e-4f) {
+            dx = (awayX / len) * params_.distance;
+            dz = (awayZ / len) * params_.distance;
+            haveDirection = true;
+        }
+    }
+
+    if (!haveDirection) {
+        dx = randomFloat(-params_.distance, params_.distance);
+        dz = randomFloat(-params_.distance, params_.distance);
+    }
 
     mob.moveTo(glm::dvec3(pos.x + dx, pos.y, pos.z + dz));
     mob.setSpeedMultiplier(params_.speedMult);

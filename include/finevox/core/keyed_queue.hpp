@@ -16,7 +16,6 @@
 #include "finevox/core/wake_signal.hpp"
 
 #include <deque>
-#include <unordered_set>
 #include <unordered_map>
 #include <optional>
 #include <functional>
@@ -25,6 +24,7 @@
 #include <chrono>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 
 namespace finevox {
 
@@ -85,6 +85,7 @@ public:
     using Clock = std::chrono::steady_clock;
     using TimePoint = Clock::time_point;
     using MergeFn = std::function<Data(const Data& existing, const Data& incoming)>;
+    using PriorityFn = std::function<int(const Data& data)>;
 
     /**
      * @brief Create queue with default merge (replace with incoming)
@@ -93,12 +94,13 @@ public:
         : merge_([](const Data&, const Data& incoming) { return incoming; }) {}
 
     /**
-     * @brief Create queue with custom merge function
+     * @brief Create queue with custom merge function and optional priority extractor
      *
      * @param merge Function that combines existing and incoming data
+     * @param priority Optional function returning urgency (lower int = popped first)
      */
-    explicit KeyedQueue(MergeFn merge)
-        : merge_(std::move(merge)) {}
+    explicit KeyedQueue(MergeFn merge, PriorityFn priority = nullptr)
+        : merge_(std::move(merge)), priority_(std::move(priority)) {}
 
     ~KeyedQueue() = default;
 
@@ -176,7 +178,6 @@ public:
                 isNew = false;
             } else {
                 order_.push_back(key);
-                present_.insert(key);
                 dataMap_[key] = data;
                 isNew = true;
             }
@@ -212,7 +213,6 @@ public:
                 isNew = false;
             } else {
                 order_.push_back(key);
-                present_.insert(key);
                 dataMap_.emplace(std::move(key), std::move(data));
                 isNew = true;
             }
@@ -259,7 +259,6 @@ public:
                     it->second = merge_(it->second, std::move(data));
                 } else {
                     order_.push_back(key);
-                    present_.insert(key);
                     dataMap_.emplace(std::move(key), std::move(data));
                     ++newCount;
                 }
@@ -292,15 +291,7 @@ public:
             return std::nullopt;
         }
 
-        Key key = std::move(order_.front());
-        order_.pop_front();
-        present_.erase(key);
-
-        auto it = dataMap_.find(key);
-        Data data = std::move(it->second);
-        dataMap_.erase(it);
-
-        return std::make_pair(std::move(key), std::move(data));
+        return popNextUnlocked();
     }
 
     /**
@@ -328,15 +319,7 @@ public:
             return std::nullopt;
         }
 
-        Key key = std::move(order_.front());
-        order_.pop_front();
-        present_.erase(key);
-
-        auto it = dataMap_.find(key);
-        Data data = std::move(it->second);
-        dataMap_.erase(it);
-
-        return std::make_pair(std::move(key), std::move(data));
+        return popNextUnlocked();
     }
 
     // ========================================================================
@@ -354,15 +337,7 @@ public:
         result.reserve(order_.size());
 
         while (!order_.empty()) {
-            Key key = std::move(order_.front());
-            order_.pop_front();
-            present_.erase(key);
-
-            auto it = dataMap_.find(key);
-            Data data = std::move(it->second);
-            dataMap_.erase(it);
-
-            result.emplace_back(std::move(key), std::move(data));
+            result.push_back(popNextUnlocked());
         }
         return result;
     }
@@ -380,15 +355,7 @@ public:
         result.reserve(count);
 
         for (size_t i = 0; i < count; ++i) {
-            Key key = std::move(order_.front());
-            order_.pop_front();
-            present_.erase(key);
-
-            auto it = dataMap_.find(key);
-            Data data = std::move(it->second);
-            dataMap_.erase(it);
-
-            result.emplace_back(std::move(key), std::move(data));
+            result.push_back(popNextUnlocked());
         }
         return result;
     }
@@ -400,12 +367,12 @@ public:
     /**
      * @brief Set an alarm to wake at the specified time
      *
-     * If an alarm is already pending, keeps the LATER time.
+     * If an alarm is already pending, keeps the EARLIER time.
      */
     void setAlarm(TimePoint wakeTime) {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        if (!alarmPending_ || wakeTime > alarmTime_) {
+        if (!alarmPending_ || wakeTime < alarmTime_) {
             alarmTime_ = wakeTime;
             alarmPending_ = true;
         }
@@ -524,7 +491,7 @@ public:
      */
     [[nodiscard]] bool contains(const Key& key) const {
         std::lock_guard<std::mutex> lock(mutex_);
-        return present_.count(key) > 0;
+        return dataMap_.find(key) != dataMap_.end();
     }
 
     /**
@@ -586,21 +553,44 @@ public:
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
         order_.clear();
-        present_.clear();
         dataMap_.clear();
         alarmPending_ = false;
     }
 
 private:
+    std::pair<Key, Data> popNextUnlocked() {
+        auto bestIt = order_.begin();
+        if (priority_ && order_.size() > 1) {
+            int bestPrio = priority_(dataMap_.at(*bestIt));
+            for (auto it = std::next(order_.begin()); it != order_.end(); ++it) {
+                int p = priority_(dataMap_.at(*it));
+                if (p < bestPrio) {
+                    bestPrio = p;
+                    bestIt = it;
+                }
+            }
+        }
+        Key key = std::move(*bestIt);
+        if (bestIt == order_.begin()) {
+            order_.pop_front();
+        } else {
+            order_.erase(bestIt);
+        }
+        auto mapIt = dataMap_.find(key);
+        Data data = std::move(mapIt->second);
+        dataMap_.erase(mapIt);
+        return std::make_pair(std::move(key), std::move(data));
+    }
+
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     bool shutdownFlag_ = false;
 
     std::deque<Key> order_;                              // Insertion order
-    std::unordered_set<Key, Hash, Equal> present_;       // Fast lookup
     std::unordered_map<Key, Data, Hash, Equal> dataMap_; // Key -> Data
 
     MergeFn merge_;
+    PriorityFn priority_;
 
     // Alarm state
     bool alarmPending_ = false;

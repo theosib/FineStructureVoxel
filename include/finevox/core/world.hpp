@@ -70,7 +70,7 @@ public:
 
     /// Place a block through the event system
     /// @return true if event was queued, false if no scheduler set
-    bool placeBlock(BlockCoord pos, BlockTypeId type);
+    bool placeBlock(BlockCoord pos, BlockTypeId type, Rotation rotation = Rotation::IDENTITY);
 
     /// Break a block through the event system
     /// @return true if event was queued, false if no scheduler set

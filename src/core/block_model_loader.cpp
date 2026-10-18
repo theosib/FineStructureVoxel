@@ -6,19 +6,6 @@
 
 namespace finevox {
 
-namespace {
-// ConfigParser splits "key: ns:value" into key="key", suffix="ns", value="value".
-// For fields whose values are expected to be namespaced names (e.g.
-// "finevox:ember_burst"), reconstruct the full value.  Mirrors the same
-// helper in recipe_loader.cpp / particle_registry.cpp.
-std::string entryFullValue(const ConfigEntry& entry) {
-    if (!entry.suffix.empty()) {
-        return entry.suffix + ":" + entry.value.asStringOwned();
-    }
-    return entry.value.asStringOwned();
-}
-} // anonymous namespace
-
 // ============================================================================
 // BlockModelLoader Implementation
 // ============================================================================
@@ -180,9 +167,7 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
     }
 
     if (auto* particleEntry = doc->get("particle")) {
-        // Preset names are namespaced ("finevox:ember_burst") — reconstruct
-        // the full string so the colon survives ConfigParser's key:suffix split.
-        model.setParticle(entryFullValue(*particleEntry));
+        model.setParticle(particleEntry->value.asStringOwned());
     }
 
     cleanup();
@@ -367,9 +352,7 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
     }
 
     if (const ConfigEntry* particleEntry = doc.get("particle")) {
-        // Preserve the "finevox:" prefix — ConfigParser splits on the
-        // second colon, so we reconstruct from suffix + value.
-        model.setParticle(entryFullValue(*particleEntry));
+        model.setParticle(particleEntry->value.asStringOwned());
     }
 
     return model;

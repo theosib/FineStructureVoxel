@@ -66,6 +66,22 @@ void SubChunk::setBlock(uint16_t index, BlockTypeId type) {
     }
 }
 
+void SubChunk::touchBlock(LocalBlockCoord pos) {
+    uint16_t index = pos.toIndex();
+    BlockTypeId currentType = getBlock(index);
+
+    blockVersion_.fetch_add(1, std::memory_order_release);
+
+    if (blockChangeCallback_) {
+        blockChangeCallback_(position_, pos, currentType, currentType);
+    }
+}
+
+void SubChunk::touchBlock(uint16_t index) {
+    if (index >= VOLUME) return;
+    touchBlock(LocalBlockCoord::fromIndex(index));
+}
+
 void SubChunk::setBlockInternal(int32_t index, BlockTypeId type, BlockTypeId oldType) {
     LocalIndex oldIndex = blocks_[index];
 
@@ -594,6 +610,10 @@ bool SubChunk::hasFluidLayer() const {
     return fluidLayer_ != nullptr;
 }
 
+bool SubChunk::hasFluid() const {
+    return fluidLayer_ != nullptr && !fluidLayer_->isEmpty();
+}
+
 void SubChunk::removeFluidLayer() {
     fluidLayer_.reset();
 }
@@ -645,13 +665,9 @@ bool SubChunk::removeFluid(int32_t x, int32_t y, int32_t z) {
 
 bool SubChunk::removeFluid(int32_t index) {
     if (!fluidLayer_ || index < 0 || index >= VOLUME) return false;
-    bool removed = fluidLayer_->removeFluid(index);
-
-    // Auto-deallocate if layer is now completely empty
-    if (removed && fluidLayer_->isEmpty()) {
-        fluidLayer_.reset();
-    }
-    return removed;
+    // Keep fluidLayer_ allocated for the lifetime of the SubChunk so lock-free
+    // MeshWorkerPool readers never dereference a deleted FluidLayer*.
+    return fluidLayer_->removeFluid(index);
 }
 
 uint64_t SubChunk::fluidVersion() const {

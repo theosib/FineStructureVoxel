@@ -10,6 +10,7 @@
 
 #include "finevox/core/ai_goal.hpp"
 #include "finevox/core/entity_state.hpp"
+#include "finevox/core/pathfinder.hpp"
 #include <glm/glm.hpp>
 #include <optional>
 #include <vector>
@@ -135,6 +136,8 @@ private:
     ChaseGoalParams params_;
     EntityId targetId_ = INVALID_ENTITY_ID;
     float repathTimer_ = 0.0f;
+    Pathfinder::Path path_;
+    size_t pathIndex_ = 0;
 };
 
 // ============================================================================

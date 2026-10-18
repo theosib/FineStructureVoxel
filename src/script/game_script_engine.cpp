@@ -1,5 +1,6 @@
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/entity_context_proxy.hpp"
+#include "finevox/script/data_container_proxy.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/entity_manager.hpp"
@@ -9,6 +10,7 @@
 #include "finevox/core/pathfinder.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include <finescript/map_data.h>
+#include <finescript/native_function.h>
 #include <cmath>
 #include <iostream>
 
@@ -296,61 +298,75 @@ void GameScriptEngine::registerNativeFunctions() {
         });
 
     // ========================================================================
-    // world.* functions
+    // world.* and world_* functions
     // ========================================================================
 
-    engine_->registerFunction("world.get_block",
-        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
-            -> finescript::Value
-        {
-            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
-            if (!ud || !ud->world) return finescript::Value::nil();
+    auto getBlockFn = [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+        -> finescript::Value
+    {
+        auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+        if (!ud || !ud->world) return finescript::Value::nil();
 
-            int x, y, z;
+        int x, y, z;
+        if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+
+        BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
+        return finescript::Value::symbol(type.id);
+    };
+    engine_->registerFunction("world.get_block", getBlockFn);
+    engine_->registerFunction("world_get_block", getBlockFn);
+
+    auto setBlockFn = [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+        -> finescript::Value
+    {
+        auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+        if (!ud || !ud->world) return finescript::Value::nil();
+
+        int x, y, z;
+        uint32_t typeId;
+
+        // [x y z] type  or  x y z type
+        if (args.size() == 2 && args[0].isArray() && args[1].isSymbol()) {
             if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
-
-            BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
-            return finescript::Value::symbol(type.id);
-        });
-
-    engine_->registerFunction("world.set_block",
-        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
-            -> finescript::Value
-        {
-            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
-            if (!ud || !ud->world) return finescript::Value::nil();
-
-            int x, y, z;
-            uint32_t typeId;
-
-            // [x y z] type  or  x y z type
-            if (args.size() == 2 && args[0].isArray() && args[1].isSymbol()) {
-                if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
-                typeId = args[1].asSymbol();
-            } else if (args.size() >= 4 && args[3].isSymbol()) {
-                if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
-                typeId = args[3].asSymbol();
-            } else {
-                return finescript::Value::nil();
-            }
-
-            ud->world->setBlock(BlockCoord{x, y, z}, BlockTypeId(typeId));
+            typeId = args[1].asSymbol();
+        } else if (args.size() >= 4 && args[3].isSymbol()) {
+            if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+            typeId = args[3].asSymbol();
+        } else {
             return finescript::Value::nil();
-        });
+        }
 
-    engine_->registerFunction("world.is_air",
-        [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
-            -> finescript::Value
-        {
-            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
-            if (!ud || !ud->world) return finescript::Value::nil();
+        ud->world->setBlock(BlockCoord{x, y, z}, BlockTypeId(typeId));
+        return finescript::Value::nil();
+    };
+    engine_->registerFunction("world.set_block", setBlockFn);
+    engine_->registerFunction("world_set_block", setBlockFn);
 
-            int x, y, z;
-            if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+    auto isAirFn = [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
+        -> finescript::Value
+    {
+        auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+        if (!ud || !ud->world) return finescript::Value::nil();
 
-            BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
-            return finescript::Value::boolean(type.isAir());
-        });
+        int x, y, z;
+        if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
+
+        BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
+        return finescript::Value::boolean(type.isAir());
+    };
+    engine_->registerFunction("world.is_air", isAirFn);
+    engine_->registerFunction("world_is_air", isAirFn);
+
+    // Also register a "world" map constant so dotted calls (world.get_block, etc.) work in finescript
+    auto worldMap = finescript::Value::map();
+    auto& si = StringInterner::global();
+    worldMap.asMap().set(si.intern("get_block"),
+        finescript::Value::nativeFunction(std::make_shared<finescript::SimpleLambdaFunction>(getBlockFn)));
+    worldMap.asMap().set(si.intern("set_block"),
+        finescript::Value::nativeFunction(std::make_shared<finescript::SimpleLambdaFunction>(setBlockFn)));
+    worldMap.asMap().set(si.intern("is_air"),
+        finescript::Value::nativeFunction(std::make_shared<finescript::SimpleLambdaFunction>(isAirFn)));
+    engine_->registerConstant("world", std::move(worldMap));
 
     // ========================================================================
     // fluid_* functions
@@ -968,20 +984,16 @@ void GameScriptEngine::registerMobNativeFunctions() {
             auto* ud = static_cast<ScriptUserData*>(ctx.userData());
             if (!ud || !ud->entityCtx || args.empty()) return finescript::Value::nil();
 
-            std::string key;
-            if (args[0].isString()) key = args[0].asString();
-            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
+            const auto* extra = ud->entityCtx->entityData();
+            if (!extra) return finescript::Value::nil();
+
+            uint32_t keyId;
+            if (args[0].isSymbol()) keyId = args[0].asSymbol();
+            else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
             else return finescript::Value::nil();
 
-            auto& extra = ud->entityCtx->getOrCreateEntityData();
-            // Try common types
-            auto fval = extra.get<float>(key, 0.0f);
-            if (fval != 0.0f) return finescript::Value::number(fval);
-            auto ival = extra.get<int64_t>(key, 0);
-            if (ival != 0) return finescript::Value::integer(ival);
-            auto sval = extra.get<std::string>(key, "");
-            if (!sval.empty()) return finescript::Value::string(sval);
-            return finescript::Value::nil();
+            DataContainerProxy proxy(const_cast<DataContainer&>(*extra));
+            return proxy.get(keyId);
         });
 
     // mob_set_data(key, value)
@@ -992,18 +1004,13 @@ void GameScriptEngine::registerMobNativeFunctions() {
             auto* ud = static_cast<ScriptUserData*>(ctx.userData());
             if (!ud || !ud->entityCtx || args.size() < 2) return finescript::Value::nil();
 
-            std::string key;
-            if (args[0].isString()) key = args[0].asString();
-            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
+            uint32_t keyId;
+            if (args[0].isSymbol()) keyId = args[0].asSymbol();
+            else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
             else return finescript::Value::nil();
 
-            auto& extra = ud->entityCtx->getOrCreateEntityData();
-            const auto& val = args[1];
-            if (val.isFloat()) extra.set<float>(key, static_cast<float>(val.asFloat()));
-            else if (val.isInt()) extra.set<int64_t>(key, val.asInt());
-            else if (val.isString()) extra.set<std::string>(key, std::string(val.asString()));
-            else if (val.isBool()) extra.set<int64_t>(key, val.asBool() ? 1 : 0);
-
+            DataContainerProxy proxy(ud->entityCtx->getOrCreateEntityData());
+            proxy.set(keyId, args[1]);
             return finescript::Value::nil();
         });
 

@@ -61,9 +61,23 @@ public:
 private:
     StringInterner();
 
+    struct TransparentStringHash {
+        using is_transparent = void;
+        size_t operator()(std::string_view sv) const noexcept {
+            return std::hash<std::string_view>{}(sv);
+        }
+    };
+
+    struct TransparentStringEqual {
+        using is_transparent = void;
+        bool operator()(std::string_view a, std::string_view b) const noexcept {
+            return a == b;
+        }
+    };
+
     mutable std::shared_mutex mutex_;
     std::vector<std::string> strings_;  // Index = ID, value = string
-    std::unordered_map<std::string, InternedId> lookup_;  // Fast reverse lookup (owns strings)
+    std::unordered_map<std::string, InternedId, TransparentStringHash, TransparentStringEqual> lookup_;  // Fast reverse lookup (owns strings)
 };
 
 // Convenience wrapper for block type IDs

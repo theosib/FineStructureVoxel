@@ -213,22 +213,25 @@ bool ConfigParser::parseLine(std::string_view line, ConfigEntry& currentEntry,
     currentEntry.key = std::string(line.substr(0, colonPos));
 
     // Check for second colon (key:suffix:)
+    // Only treat a second colon as a key suffix separator if it appears before
+    // any whitespace (e.g. "face:top: value" -> suffix="top", whereas
+    // "name: finevox:zombie" -> suffix="", value="finevox:zombie").
     auto rest = line.substr(colonPos + 1);
     auto secondColon = rest.find(':');
 
-    if (secondColon != std::string_view::npos) {
-        // Has suffix
-        currentEntry.suffix = std::string(rest.substr(0, secondColon));
-
-        // Trim leading/trailing whitespace from suffix
-        while (!currentEntry.suffix.empty() && std::isspace(static_cast<unsigned char>(currentEntry.suffix.front()))) {
-            currentEntry.suffix.erase(0, 1);
+    if (secondColon != std::string_view::npos && secondColon > 0) {
+        std::string_view candidateSuffix = rest.substr(0, secondColon);
+        bool hasWhitespace = false;
+        for (char c : candidateSuffix) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                hasWhitespace = true;
+                break;
+            }
         }
-        while (!currentEntry.suffix.empty() && std::isspace(static_cast<unsigned char>(currentEntry.suffix.back()))) {
-            currentEntry.suffix.pop_back();
+        if (!hasWhitespace) {
+            currentEntry.suffix = std::string(candidateSuffix);
+            rest = rest.substr(secondColon + 1);
         }
-
-        rest = rest.substr(secondColon + 1);
     }
 
     // Trim leading whitespace from value

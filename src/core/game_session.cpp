@@ -77,7 +77,8 @@ bool GameActions::removeFluid(BlockCoord pos) {
 
 void GameActions::sendPlayerState(EntityId id, const EntityState& state) {
     sendAction(makePlayerPositionValue(id, state.position, state.velocity,
-                                        state.onGround, state.inputSequence));
+                                        state.onGround, state.inputSequence,
+                                        state.yaw, state.pitch));
 }
 
 void GameActions::setWorldTime(int64_t ticks) {
@@ -116,8 +117,10 @@ void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos) {
 
 class LocalGameActions : public GameActions {
 public:
-    LocalGameActions(World& world, SoundEventQueue& soundQueue, GameCommandQueue& commandQueue)
-        : world_(world), soundQueue_(soundQueue), commandQueue_(commandQueue) {}
+    LocalGameActions(World& world, SoundEventQueue& soundQueue, GameCommandQueue& commandQueue,
+                     bool enableSound = true)
+        : world_(world), soundQueue_(soundQueue), commandQueue_(commandQueue),
+          enableSound_(enableSound) {}
 
     void sendAction(finescript::Value action) override {
         // Push the raw Value into the command queue for the game thread
@@ -130,9 +133,11 @@ public:
         if (oldType.isAir()) return false;
 
         // Sound eagerly (instant audio feedback on calling thread)
-        auto soundSet = BlockRegistry::global().getType(oldType).soundSet();
-        if (soundSet.isValid()) {
-            soundQueue_.push(makeSoundEventValue(soundSet, "break", "effects", pos));
+        if (enableSound_) {
+            auto soundSet = BlockRegistry::global().getType(oldType).soundSet();
+            if (soundSet.isValid()) {
+                soundQueue_.push(makeSoundEventValue(soundSet, "break", "effects", pos));
+            }
         }
 
         // Defer mutation to game thread
@@ -142,9 +147,11 @@ public:
 
     bool placeBlock(BlockCoord pos, BlockTypeId type) override {
         // Sound eagerly
-        auto soundSet = BlockRegistry::global().getType(type).soundSet();
-        if (soundSet.isValid()) {
-            soundQueue_.push(makeSoundEventValue(soundSet, "place", "effects", pos));
+        if (enableSound_) {
+            auto soundSet = BlockRegistry::global().getType(type).soundSet();
+            if (soundSet.isValid()) {
+                soundQueue_.push(makeSoundEventValue(soundSet, "place", "effects", pos));
+            }
         }
 
         // Defer mutation to game thread
@@ -154,9 +161,11 @@ public:
 
     bool placeFluid(BlockCoord pos, FluidTypeId type, uint8_t level) override {
         // Sound eagerly
-        const FluidType* ft = FluidRegistry::global().getType(type);
-        if (ft && ft->soundSet.isValid()) {
-            soundQueue_.push(makeSoundEventValue(ft->soundSet, "place", "effects", pos));
+        if (enableSound_) {
+            const FluidType* ft = FluidRegistry::global().getType(type);
+            if (ft && ft->soundSet.isValid()) {
+                soundQueue_.push(makeSoundEventValue(ft->soundSet, "place", "effects", pos));
+            }
         }
 
         // Defer mutation to game thread
@@ -169,9 +178,11 @@ public:
         if (oldFluid.isEmpty()) return false;
 
         // Sound eagerly
-        const FluidType* ft = FluidRegistry::global().getType(oldFluid);
-        if (ft && ft->soundSet.isValid()) {
-            soundQueue_.push(makeSoundEventValue(ft->soundSet, "break", "effects", pos));
+        if (enableSound_) {
+            const FluidType* ft = FluidRegistry::global().getType(oldFluid);
+            if (ft && ft->soundSet.isValid()) {
+                soundQueue_.push(makeSoundEventValue(ft->soundSet, "break", "effects", pos));
+            }
         }
 
         // Defer mutation to game thread
@@ -199,6 +210,7 @@ private:
     World& world_;
     SoundEventQueue& soundQueue_;
     GameCommandQueue& commandQueue_;
+    bool enableSound_ = true;
 };
 
 // ============================================================================
@@ -284,7 +296,8 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         auto pos = readBlockCoord(cmd);
         const auto& s = EventSymbols::instance();
         auto blockType = readBlockTypeId(cmd, s.block_type);
-        world.placeBlock(pos, blockType);
+        uint8_t rotIdx = static_cast<uint8_t>(readInt(cmd, s.rotation, 0));
+        world.placeBlock(pos, blockType, Rotation::byIndex(rotIdx));
         if (fluidTickManager) fluidTickManager->notifyBlockChanged(pos);
     }
     else if (typeStr == EVT_FLUID_PLACED) {
@@ -318,6 +331,8 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         uint64_t seq = static_cast<uint64_t>(readInt(cmd, s.input_sequence));
 
         BlockEvent event = BlockEvent::playerPosition(id, pos, vel, onGround, seq);
+        event.entityState.yaw = readFloat(cmd, s.yaw, 0.0f);
+        event.entityState.pitch = readFloat(cmd, s.pitch, 0.0f);
         entityManager.handlePlayerPosition(event);
     }
     else if (typeStr == EVT_PLAYER_LOOK) {
@@ -601,13 +616,24 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     // Create core systems
     impl.world = std::make_unique<World>();
     impl.scheduler = std::make_unique<UpdateScheduler>(*impl.world);
+    {
+        TickConfig tickCfg = impl.scheduler->tickConfig();
+        tickCfg.randomTicksPerSubchunk = config.randomTicksPerChunk;
+        tickCfg.randomTicksEnabled = (config.randomTicksPerChunk > 0);
+        if (config.tickRate > 0) {
+            tickCfg.gameTickIntervalMs = 1000u / config.tickRate;
+        }
+        impl.scheduler->setTickConfig(tickCfg);
+    }
 
     // Lighting
     impl.lightEngine = std::make_unique<LightEngine>(*impl.world);
     impl.lightEngine->setMaxPropagationDistance(10000);
 
-    // Wire lighting to world
-    impl.world->setLightEngine(impl.lightEngine.get());
+    // Wire lighting and scheduler to world
+    if (config.enableLighting) {
+        impl.world->setLightEngine(impl.lightEngine.get());
+    }
     impl.world->setUpdateScheduler(impl.scheduler.get());
 
     // Event queues
@@ -617,7 +643,10 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
 
     // Entity system
     impl.entityManager = std::make_unique<EntityManager>(*impl.world, *impl.graphicsQueue);
-    impl.entityManager->setSoundQueue(impl.soundQueue.get());
+    impl.entityManager->physics().setGravity(config.gravity);
+    if (config.enableSound) {
+        impl.entityManager->setSoundQueue(impl.soundQueue.get());
+    }
 
     // World time
     impl.worldTime = std::make_unique<WorldTime>();
@@ -626,7 +655,9 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     // Fluid simulation
     if (config.enableFluidSimulation) {
         impl.fluidTickManager = std::make_unique<FluidTickManager>(*impl.world);
-        impl.fluidTickManager->simulator().setLightEngine(impl.lightEngine.get());
+        if (config.enableLighting) {
+            impl.fluidTickManager->simulator().setLightEngine(impl.lightEngine.get());
+        }
     }
 
     // Particle simulation (CPU, game-thread authoritative)
@@ -635,7 +666,7 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
 
     // Command interface
     impl.actions = std::make_unique<LocalGameActions>(
-        *impl.world, *impl.soundQueue, *impl.commandQueue);
+        *impl.world, *impl.soundQueue, *impl.commandQueue, config.enableSound);
 
     // Register built-in subsystems
     session->addSubsystem(std::make_shared<WorldTimeSubsystem>(*impl.worldTime));

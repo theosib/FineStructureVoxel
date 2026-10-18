@@ -82,6 +82,7 @@ class DataContainer;
 // - vector<string>: string arrays
 using DataValue = std::variant<
     std::monostate,
+    bool,
     int64_t,
     double,
     std::string,
@@ -233,7 +234,10 @@ T DataContainer::get(DataKey key, T defaultValue) const {
 
     // Try to get the value as type T
     if constexpr (std::is_same_v<T, bool>) {
-        // Bool stored as int64_t
+        if (auto* val = std::get_if<bool>(&it->second)) {
+            return *val;
+        }
+        // Fallback: int64_t stored as bool
         if (auto* val = std::get_if<int64_t>(&it->second)) {
             return *val != 0;
         }
@@ -241,6 +245,10 @@ T DataContainer::get(DataKey key, T defaultValue) const {
         // All integers stored as int64_t
         if (auto* val = std::get_if<int64_t>(&it->second)) {
             return static_cast<T>(*val);
+        }
+        // Also allow reading bool as integer (0 or 1)
+        if (auto* val = std::get_if<bool>(&it->second)) {
+            return static_cast<T>(*val ? 1 : 0);
         }
     } else if constexpr (std::is_floating_point_v<T>) {
         // All floats stored as double
@@ -287,8 +295,7 @@ T DataContainer::get(DataKey key, T defaultValue) const {
 template<typename T>
 void DataContainer::set(DataKey key, T value) {
     if constexpr (std::is_same_v<T, bool>) {
-        // Store bool as int64_t
-        data_[key] = static_cast<int64_t>(value ? 1 : 0);
+        data_[key] = value;
     } else if constexpr (std::is_integral_v<T>) {
         // Store all integers as int64_t
         data_[key] = static_cast<int64_t>(value);

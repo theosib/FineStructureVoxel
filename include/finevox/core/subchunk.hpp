@@ -80,8 +80,14 @@ public:
         setBlock(LocalBlockCoord{x, y, z}, type);
     }
 
-    // Check if subchunk is entirely air (for optimization/culling)
-    [[nodiscard]] bool isEmpty() const { return nonAirCount_ == 0; }
+    // Check if subchunk is empty (no non-air blocks and no fluid)
+    [[nodiscard]] bool isEmpty() const { return nonAirCount_ == 0 && !hasFluid(); }
+
+    // Check if subchunk has no non-air blocks (ignores fluid layer)
+    [[nodiscard]] bool isAirOnly() const { return nonAirCount_ == 0; }
+
+    // Check if subchunk has any non-empty fluid cells
+    [[nodiscard]] bool hasFluid() const;
 
     // Count of non-air blocks
     [[nodiscard]] int32_t nonAirCount() const { return nonAirCount_; }
@@ -118,6 +124,17 @@ public:
     // Version starts at 1; 0 means "no mesh built yet"
     [[nodiscard]] uint64_t blockVersion() const {
         return blockVersion_.load(std::memory_order_acquire);
+    }
+
+    // Increment block version and fire blockChangeCallback_ without changing the block type
+    // Used when a block's visual state or extra data changes in place
+    void touchBlock(LocalBlockCoord pos);
+    void touchBlock(uint16_t index);
+    void touchBlock(int32_t x, int32_t y, int32_t z) {
+        touchBlock(LocalBlockCoord{x, y, z});
+    }
+    void bumpBlockVersion() {
+        blockVersion_.fetch_add(1, std::memory_order_release);
     }
 
     // ========================================================================

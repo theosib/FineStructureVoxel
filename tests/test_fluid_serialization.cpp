@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/core/serialization.hpp"
+#include "finevox/core/world.hpp"
 #include "finevox/core/fluid_layer.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/fluid_registry.hpp"
@@ -256,3 +257,50 @@ TEST(FluidSerialization, MaxPaletteRoundTrip) {
         EXPECT_EQ(rfl->getLevel(i, 0, 0), FLUID_SOURCE_LEVEL);
     }
 }
+
+TEST(FluidSerialization, FluidOnlySubChunkPreservedInColumnAndWorld) {
+    FluidTypeId water = registerTestFluid("test_fs_ocean_water");
+
+    ColumnPos colPos{3, -4};
+    ChunkColumn column(colPos);
+
+    // Create a fluid-only subchunk at chunkY = 2 (no solid blocks at all!)
+    SubChunk& sc = column.getOrCreateSubChunk(2);
+    EXPECT_TRUE(sc.setFluid(4, 5, 6, water, FLUID_SOURCE_LEVEL));
+    EXPECT_EQ(sc.nonAirCount(), 0);
+    EXPECT_TRUE(sc.isAirOnly());
+    EXPECT_TRUE(sc.hasFluid());
+    EXPECT_FALSE(sc.isEmpty());
+
+    // Column Y bounds must include the fluid-only subchunk
+    auto bounds = column.getYBounds();
+    ASSERT_TRUE(bounds.has_value());
+    EXPECT_EQ(bounds->first, 2);
+    EXPECT_EQ(bounds->second, 2);
+
+    // Pruning empty subchunks must NOT drop the fluid-only subchunk
+    column.pruneEmptySubChunks();
+    EXPECT_TRUE(column.hasSubChunk(2));
+
+    // Column CBOR round-trip must preserve the fluid-only subchunk
+    auto bytes = ColumnSerializer::toCBOR(column, colPos.x, colPos.z);
+    int32_t outX = 0, outZ = 0;
+    auto restored = ColumnSerializer::fromCBOR(bytes, &outX, &outZ);
+    ASSERT_NE(restored, nullptr);
+    EXPECT_EQ(outX, colPos.x);
+    EXPECT_EQ(outZ, colPos.z);
+
+    SubChunk* rsc = restored->getSubChunk(2);
+    ASSERT_NE(rsc, nullptr);
+    EXPECT_EQ(rsc->nonAirCount(), 0);
+    EXPECT_EQ(rsc->getFluid(4, 5, 6), water);
+    EXPECT_EQ(rsc->getFluidLevel(4, 5, 6), FLUID_SOURCE_LEVEL);
+
+    // World::getAllSubChunkPositions must also include fluid-only subchunks
+    World world;
+    world.setFluid(BlockCoord{3 * 16 + 4, 2 * 16 + 5, -4 * 16 + 6}, water, FLUID_SOURCE_LEVEL);
+    auto positions = world.getAllSubChunkPositions();
+    ASSERT_EQ(positions.size(), 1u);
+    EXPECT_EQ(positions[0], (ChunkPos{3, 2, -4}));
+}
+

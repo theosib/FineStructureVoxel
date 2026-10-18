@@ -90,6 +90,10 @@ public:
     // Get or create subchunk at the given chunk Y coordinate
     [[nodiscard]] SubChunk& getOrCreateSubChunk(int32_t chunkY);
 
+    // Install a pre-built subchunk at the given chunk Y coordinate (used by deserialization)
+    void setSubChunk(int32_t chunkY, std::shared_ptr<SubChunk> subChunk);
+    void setSubChunk(int32_t chunkY, std::unique_ptr<SubChunk> subChunk);
+
     // Remove empty subchunks (called periodically or before save)
     void pruneEmptySubChunks();
 

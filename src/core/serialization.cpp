@@ -506,112 +506,17 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
         } else if (key == "subchunks") {
             auto [arrType, arrLen] = decoder.readHeader();
             if (arrType == cbor::ARRAY) {
+                subchunks.reserve(arrLen);
                 for (uint64_t j = 0; j < arrLen; ++j) {
-                    // Each subchunk is an embedded CBOR map
-                    // Read the subchunk header to get its structure
-                    auto [scType, scFieldCount] = decoder.readHeader();
-                    if (scType != cbor::MAP) {
-                        decoder.skipValue();
-                        continue;
-                    }
+                    size_t startPos = decoder.position();
+                    decoder.skipValue();
+                    size_t endPos = decoder.position();
 
-                    // We need to re-parse from the start
-                    // This is inefficient, but correct. Better approach would be
-                    // to track byte boundaries.
-                    // For now, let's manually parse the subchunk inline
-
-                    SerializedSubChunk serialized;
-
-                    for (uint64_t k = 0; k < scFieldCount; ++k) {
-                        auto [fieldKeyType, fieldKeyLen] = decoder.readHeader();
-                        if (fieldKeyType != cbor::TEXT_STRING) {
-                            decoder.skipValue();
-                            continue;
-                        }
-                        std::string fieldKey = decoder.readString(fieldKeyLen);
-
-                        if (fieldKey == "y") {
-                            serialized.yLevel = static_cast<int32_t>(decoder.readInt());
-                        } else if (fieldKey == "palette") {
-                            auto [paletteType, paletteLen] = decoder.readHeader();
-                            if (paletteType == cbor::ARRAY) {
-                                serialized.palette.reserve(paletteLen);
-                                for (uint64_t p = 0; p < paletteLen; ++p) {
-                                    auto [strType, strLen] = decoder.readHeader();
-                                    if (strType == cbor::TEXT_STRING) {
-                                        serialized.palette.push_back(decoder.readString(strLen));
-                                    } else {
-                                        serialized.palette.push_back("");
-                                    }
-                                }
-                            }
-                        } else if (fieldKey == "blocks") {
-                            auto [bytesType, bytesLen] = decoder.readHeader();
-                            if (bytesType == cbor::BYTE_STRING) {
-                                serialized.blocks = decoder.readBytes(bytesLen);
-                                serialized.use16Bit = (serialized.blocks.size() == SubChunk::VOLUME * 2);
-                            }
-                        } else if (fieldKey == "rotations") {
-                            auto [bytesType, bytesLen] = decoder.readHeader();
-                            if (bytesType == cbor::BYTE_STRING) {
-                                serialized.rotations = decoder.readBytes(bytesLen);
-                            }
-                        } else if (fieldKey == "light") {
-                            auto [bytesType, bytesLen] = decoder.readHeader();
-                            if (bytesType == cbor::BYTE_STRING) {
-                                serialized.lightData = decoder.readBytes(bytesLen);
-                            }
-                        } else if (fieldKey == "blockData") {
-                            // Per-block extra data: map of block index -> DataContainer
-                            auto [mapType, mapLen] = decoder.readHeader();
-                            if (mapType == cbor::MAP) {
-                                for (uint64_t m = 0; m < mapLen; ++m) {
-                                    int64_t index = decoder.readInt();
-                                    size_t startPos = decoder.position();
-                                    decoder.skipValue();
-                                    size_t endPos = decoder.position();
-
-                                    std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
-                                    auto container = DataContainer::fromCBOR(containerData);
-                                    if (container) {
-                                        serialized.blockData[static_cast<uint16_t>(index)] = std::move(container);
-                                    }
-                                }
-                            }
-                        } else if (fieldKey == "data") {
-                            // Subchunk-level extra data
-                            size_t startPos = decoder.position();
-                            decoder.skipValue();
-                            size_t endPos = decoder.position();
-
-                            std::span<const uint8_t> containerData{data.data() + startPos, endPos - startPos};
-                            serialized.subchunkData = DataContainer::fromCBOR(containerData);
-                        } else if (fieldKey == "fluid_palette") {
-                            auto [paletteType, paletteLen] = decoder.readHeader();
-                            if (paletteType == cbor::ARRAY) {
-                                serialized.fluidPalette.reserve(paletteLen);
-                                for (uint64_t p = 0; p < paletteLen; ++p) {
-                                    auto [strType, strLen] = decoder.readHeader();
-                                    if (strType == cbor::TEXT_STRING) {
-                                        serialized.fluidPalette.push_back(decoder.readString(strLen));
-                                    } else {
-                                        serialized.fluidPalette.push_back("");
-                                    }
-                                }
-                            }
-                        } else if (fieldKey == "fluid_data") {
-                            auto [bytesType, bytesLen] = decoder.readHeader();
-                            if (bytesType == cbor::BYTE_STRING) {
-                                serialized.fluidData = decoder.readBytes(bytesLen);
-                            }
-                        } else {
-                            decoder.skipValue();
-                        }
-                    }
-
-                    auto sc = SubChunkSerializer::deserialize(serialized);
-                    if (sc) {
-                        subchunks.emplace_back(serialized.yLevel, std::move(sc));
+                    std::span<const uint8_t> scData{data.data() + startPos, endPos - startPos};
+                    int32_t yLevel = 0;
+                    auto sc = SubChunkSerializer::fromCBOR(scData, &yLevel);
+                    if (sc && !sc->isEmpty()) {
+                        subchunks.emplace_back(yLevel, std::move(sc));
                     }
                 }
             }
@@ -623,71 +528,16 @@ std::unique_ptr<ChunkColumn> ColumnSerializer::fromCBOR(std::span<const uint8_t>
     if (outX) *outX = x;
     if (outZ) *outZ = z;
 
-    // Create the column and populate it
+    // Create the column and install deserialized subchunks directly (no double-copying)
     ColumnPos colPos{x, z};
     auto column = std::make_unique<ChunkColumn>(colPos);
 
     for (auto& [y, sc] : subchunks) {
-        // We need to copy blocks from sc into the column
-        // ChunkColumn creates subchunks on demand
-        for (int idx = 0; idx < SubChunk::VOLUME; ++idx) {
-            BlockTypeId type = sc->getBlock(idx);
-            if (!type.isAir()) {
-                // Convert linear index to local coordinates
-                LocalBlockCoord local = LocalBlockCoord::fromIndex(static_cast<uint16_t>(idx));
-                // Convert to world Y coordinate
-                int worldY = y * 16 + local.y;
-                column->setBlock(local.x, worldY, local.z, type);
-            }
-        }
-
-        SubChunk* targetSc = column->getSubChunk(y);
-        if (targetSc) {
-            // Copy rotation data
-            if (sc->hasNonIdentityRotations()) {
-                targetSc->setRotationData(sc->rotationData());
-            }
-
-            // Copy light data
-            if (!sc->isLightDark()) {
-                targetSc->setLightData(sc->lightData());
-            }
-
-            // Copy block extra data
-            for (const auto& [blockIdx, dataPtr] : sc->allBlockData()) {
-                if (dataPtr && !dataPtr->empty()) {
-                    DataContainer& targetData = targetSc->getOrCreateBlockData(blockIdx);
-                    dataPtr->forEach([&targetData](DataKey key, const DataValue& value) {
-                        targetData.set(key, DataContainer::cloneValue(value));
-                    });
-                }
-            }
-
-            // Copy subchunk-level extra data
-            if (sc->hasData() && !sc->data()->empty()) {
-                DataContainer& targetData = targetSc->getOrCreateData();
-                sc->data()->forEach([&targetData](DataKey key, const DataValue& value) {
-                    targetData.set(key, DataContainer::cloneValue(value));
-                });
-            }
-
-            // Copy fluid layer
-            const FluidLayer* srcFluid = sc->fluidLayer();
-            if (srcFluid && !srcFluid->isEmpty()) {
-                FluidLayer& targetFluid = targetSc->getOrCreateFluidLayer();
-                // Copy cell by cell using public API to maintain palette/refcounts
-                for (int32_t idx = 0; idx < FluidLayer::VOLUME; ++idx) {
-                    FluidCell cell = srcFluid->getCell(idx);
-                    if (!cell.isEmpty()) {
-                        FluidTypeId fid = srcFluid->palette().getType(cell.paletteIndex);
-                        if (fid.isValid()) {
-                            targetFluid.setFluid(idx, fid, cell.level);
-                        }
-                    }
-                }
-            }
-        }
+        column->setSubChunk(y, std::move(sc));
     }
+
+    // Rebuild game tick registries for all loaded subchunks
+    column->rebuildGameTickRegistries();
 
     // Apply column-level extra data
     if (columnData && !columnData->empty()) {

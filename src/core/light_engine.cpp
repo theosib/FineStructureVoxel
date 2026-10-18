@@ -19,8 +19,18 @@ namespace finevox {
 void LightingQueue::enqueue(LightingUpdate update) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        // Consolidate by position - newer updates overwrite older
-        pending_[update.pos] = update;
+        // Consolidate by position: preserve the original oldType/oldFluid from the
+        // first update in this batch, update newType/newFluid to the latest, and
+        // OR triggerMeshRebuild so a deferred remesh request is never lost.
+        auto it = pending_.find(update.pos);
+        if (it != pending_.end()) {
+            it->second.newType = update.newType;
+            it->second.newFluid = update.newFluid;
+            it->second.triggerMeshRebuild =
+                it->second.triggerMeshRebuild || update.triggerMeshRebuild;
+        } else {
+            pending_.emplace(update.pos, std::move(update));
+        }
     }
     cv_.notify_one();
 }
@@ -286,9 +296,10 @@ uint8_t LightEngine::getAttenuation(BlockTypeId blockType) const {
 
     // Check for custom attenuation callback
     auto it = attenuationCallbacks_.find(blockType);
-    if (it != attenuationCallbacks_.end()) {
-        // Custom callback handles attenuation differently
-        // For standard lookup, use the block type's base attenuation
+    if (it != attenuationCallbacks_.end() && it->second) {
+        uint8_t outLight = it->second(blockType, SubChunk::MAX_LIGHT, 1);
+        if (outLight >= SubChunk::MAX_LIGHT) return 1;
+        return static_cast<uint8_t>(SubChunk::MAX_LIGHT - outLight);
     }
 
     const BlockType& type = BlockRegistry::global().getType(blockType);
@@ -297,8 +308,8 @@ uint8_t LightEngine::getAttenuation(BlockTypeId blockType) const {
 
 uint8_t LightEngine::getAttenuationWithFluid(const BlockCoord& pos, BlockTypeId blockType,
                                               float& outFluidMult) const {
-    uint8_t blockAtten = getAttenuation(blockType);
-    outFluidMult = 0.0f;  // No logarithmic fluid by default
+    uint8_t blockAtten = queryCombinedAttenuation(blockType);
+    outFluidMult = queryCombinedLogAttenuation(pos);
 
     FluidTypeId fluidType = world_.getFluid(pos);
     if (fluidType.isEmpty()) {
@@ -312,7 +323,9 @@ uint8_t LightEngine::getAttenuationWithFluid(const BlockCoord& pos, BlockTypeId 
 
     if (ft->customAttenuation) {
         // Logarithmic attenuation: caller applies multiplicatively after block atten
-        outFluidMult = ft->attenuationBase;
+        if (outFluidMult == 0.0f) {
+            outFluidMult = ft->attenuationBase;
+        }
         return blockAtten;
     }
 
@@ -341,9 +354,9 @@ uint8_t LightEngine::getLightEmission(BlockTypeId blockType) const {
 // ============================================================================
 
 void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, BlockTypeId newType) {
-    // Get light emissions
-    uint8_t oldEmission = getLightEmission(oldType);
-    uint8_t newEmission = getLightEmission(newType);
+    // Get light emissions via provider chain (falls back to BlockRegistry when no providers registered)
+    uint8_t oldEmission = queryCombinedEmission(oldType);
+    uint8_t newEmission = queryCombinedEmission(newType);
 
     // If old block emitted light, remove it
     if (oldEmission > 0) {
@@ -359,7 +372,7 @@ void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, Bloc
     }
 
     // If new block is opaque, it may block existing light
-    uint8_t newAttenuation = getAttenuation(newType);
+    uint8_t newAttenuation = queryCombinedAttenuation(newType);
     if (newAttenuation >= 15) {
         // Fully opaque - block all light passing through
         uint8_t currentLight = getBlockLight(pos);
@@ -372,7 +385,7 @@ void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, Bloc
     }
 
     // Handle sky light blocking
-    if (blocksSkyLight(newType) && !blocksSkyLight(oldType)) {
+    if (queryCombinedBlocksSkyLight(newType) && !queryCombinedBlocksSkyLight(oldType)) {
         // New block now blocks sky light - update column below
         uint8_t currentSkyLight = getSkyLight(pos);
         if (currentSkyLight > 0) {
@@ -391,7 +404,7 @@ void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, Bloc
                 if (belowLight == 0) break;
 
                 BlockTypeId belowBlock = world_.getBlock(belowPos);
-                if (blocksSkyLight(belowBlock)) break;
+                if (queryCombinedBlocksSkyLight(belowBlock)) break;
 
                 ChunkPos belowChunkPos = toChunkPos(belowPos);
                 SubChunk* belowSubChunk = getOrCreateSubChunkForLight(belowChunkPos);
@@ -408,7 +421,7 @@ void LightEngine::onBlockRemoved(const BlockCoord& pos, BlockTypeId oldType) {
     onBlockPlaced(pos, oldType, AIR_BLOCK_TYPE);
 
     // If this block was blocking light, light can now flow through
-    uint8_t oldAttenuation = getAttenuation(oldType);
+    uint8_t oldAttenuation = queryCombinedAttenuation(oldType);
     if (oldAttenuation >= 15) {
         // Was fully opaque - find the highest light from neighbors and propagate from here
         static const std::array<BlockCoord, 6> offsets = {{
@@ -436,7 +449,7 @@ void LightEngine::onBlockRemoved(const BlockCoord& pos, BlockTypeId oldType) {
     }
 
     // If this block was blocking sky light, re-propagate from above
-    if (blocksSkyLight(oldType)) {
+    if (queryCombinedBlocksSkyLight(oldType)) {
         BlockCoord abovePos{pos.x, pos.y + 1, pos.z};
         uint8_t aboveSkyLight = getSkyLight(abovePos);
         if (aboveSkyLight > 0) {
@@ -628,9 +641,15 @@ void LightEngine::propagateLightBFS(const BlockCoord& start, uint8_t startLevel,
 
             // Calculate new light level
             int32_t newLight;
-            if (fluidMult > 0.0f) {
+            auto cbIt = attenuationCallbacks_.find(neighborBlock);
+            if (cbIt != attenuationCallbacks_.end() && cbIt->second) {
+                newLight = static_cast<int32_t>(cbIt->second(neighborBlock, currentLight, 1));
+                if (fluidMult > 0.0f && newLight > 0) {
+                    newLight = static_cast<int32_t>(std::floor(newLight * fluidMult));
+                }
+            } else if (fluidMult > 0.0f) {
                 // Logarithmic fluid attenuation: subtract block atten, then multiply
-                int32_t afterBlock = static_cast<int32_t>(currentLight) - getAttenuation(neighborBlock);
+                int32_t afterBlock = static_cast<int32_t>(currentLight) - queryCombinedAttenuation(neighborBlock);
                 if (afterBlock <= 0) continue;
                 newLight = static_cast<int32_t>(std::floor(afterBlock * fluidMult));
             } else {
@@ -849,7 +868,7 @@ void LightEngine::initializeColumnLighting(const ColumnPos& columnPos) {
                     uint8_t blockEmission = 0;
                     BlockTypeId block = sub->getBlock(x, y, z);
                     if (!block.isAir()) {
-                        blockEmission = getLightEmission(block);
+                        blockEmission = queryCombinedEmission(block);
                     }
 
                     FluidTypeId fluid;
@@ -900,7 +919,7 @@ void LightEngine::recalculateSubChunk(const ChunkPos& chunkPos) {
                 uint8_t emission = 0;
 
                 BlockTypeId block = subChunk->getBlock(x, y, z);
-                emission = getLightEmission(block);
+                emission = queryCombinedEmission(block);
 
                 // Check fluid light emission if no block emission
                 if (emission == 0 && hasFluid) {
@@ -964,7 +983,7 @@ void LightEngine::processUpdates() {
     for (const BlockCoord& pos : pendingUpdates_) {
         // Re-propagate light from this position if it's a light source
         BlockTypeId block = world_.getBlock(pos);
-        uint8_t emission = getLightEmission(block);
+        uint8_t emission = queryCombinedEmission(block);
         if (emission > 0) {
             propagateBlockLight(pos, emission);
         }
@@ -1101,10 +1120,10 @@ void LightEngine::flushAffectedChunks() {
 
 void LightEngine::processLightingUpdate(const LightingUpdate& update) {
     // --- Block change handling ---
-    uint8_t oldEmission = getLightEmission(update.oldType);
-    uint8_t newEmission = getLightEmission(update.newType);
-    uint8_t oldAttenuation = getAttenuation(update.oldType);
-    uint8_t newAttenuation = getAttenuation(update.newType);
+    uint8_t oldEmission = queryCombinedEmission(update.oldType);
+    uint8_t newEmission = queryCombinedEmission(update.newType);
+    uint8_t oldAttenuation = queryCombinedAttenuation(update.oldType);
+    uint8_t newAttenuation = queryCombinedAttenuation(update.newType);
 
     bool lightingChanged = true;
     if (oldAttenuation >= 15 && newAttenuation >= 15 &&

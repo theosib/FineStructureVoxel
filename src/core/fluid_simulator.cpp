@@ -482,6 +482,10 @@ bool FluidSimulator::handleFluidInteraction(BlockCoord pos, FluidTypeId flowing,
 
     dirtySubChunks_.insert(ChunkPos::fromBlock(pos));
 
+    BlockTypeId oldBlock = world_.getBlock(pos);
+    FluidTypeId oldFluid = world_.getFluid(pos);
+    if (oldFluid.isEmpty()) oldFluid = existing;
+
     if (interaction->resultBlock.isValid() && !interaction->resultBlock.isAir()) {
         world_.setBlock(pos, interaction->resultBlock);
         world_.removeFluid(pos);
@@ -491,6 +495,22 @@ bool FluidSimulator::handleFluidInteraction(BlockCoord pos, FluidTypeId flowing,
         world_.removeFluid(pos);
     } else if (interaction->resultFluid.isValid()) {
         world_.setFluid(pos, interaction->resultFluid, FLUID_SOURCE_LEVEL);
+    }
+
+    BlockTypeId newBlock = world_.getBlock(pos);
+    FluidTypeId newFluid = world_.getFluid(pos);
+    if (oldBlock != newBlock || oldFluid != newFluid) {
+        LightEngine* le = lightEngine_ ? lightEngine_ : world_.lightEngine();
+        if (le) {
+            LightingUpdate lu;
+            lu.pos = pos;
+            lu.oldType = oldBlock;
+            lu.newType = newBlock;
+            lu.oldFluid = oldFluid;
+            lu.newFluid = newFluid;
+            lu.triggerMeshRebuild = true;
+            le->enqueue(lu);
+        }
     }
 
     return true;

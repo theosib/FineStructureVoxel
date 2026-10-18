@@ -3,8 +3,10 @@
 #include "finevox/core/serialization.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 #include <lz4.h>
 
@@ -254,6 +256,10 @@ bool RegionFile::loadToc() {
         addFreeSpan(cursor, dataFileEnd_ - cursor);
     }
 
+#ifndef NDEBUG
+    validateFreeListInvariants();
+#endif
+
     return true;
 }
 
@@ -363,9 +369,57 @@ std::optional<uint64_t> RegionFile::findFreeSpan(uint64_t size) {
 void RegionFile::addFreeSpan(uint64_t offset, uint64_t size) {
     if (size == 0) return;
 
-    // TODO: Merge with adjacent spans
-    // For now, just add it
-    freeSpans_.insert(FreeSpan{offset, size});
+    // Merge with any adjacent free spans
+    uint64_t newStart = offset;
+    uint64_t newEnd = offset + size;
+
+    for (auto it = freeSpans_.begin(); it != freeSpans_.end(); ) {
+        uint64_t spanStart = it->offset;
+        uint64_t spanEnd = it->offset + it->size;
+        if (spanEnd == newStart || spanStart == newEnd) {
+            newStart = std::min(newStart, spanStart);
+            newEnd = std::max(newEnd, spanEnd);
+            it = freeSpans_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    freeSpans_.insert(FreeSpan{newStart, newEnd - newStart});
+}
+
+void RegionFile::validateFreeListInvariants() const {
+    std::vector<std::pair<uint64_t, uint64_t>> freeRanges;
+    freeRanges.reserve(freeSpans_.size());
+
+    for (const auto& span : freeSpans_) {
+        if (span.size == 0) {
+            throw std::logic_error("RegionFile free-list invariant violated: zero-size free span");
+        }
+        if (span.offset > dataFileEnd_ || span.size > dataFileEnd_ - span.offset) {
+            throw std::logic_error("RegionFile free-list invariant violated: free span exceeds dataFileEnd_");
+        }
+        uint64_t spanEnd = span.offset + span.size;
+
+        // (a) No free span may overlap any live column's [offset, offset + size)
+        for (const auto& [key, entry] : index_) {
+            uint64_t liveStart = entry.offset;
+            uint64_t liveEnd = entry.offset + entry.size;
+            if (span.offset < liveEnd && liveStart < spanEnd) {
+                throw std::logic_error("RegionFile free-list invariant violated: free span overlaps live column");
+            }
+        }
+
+        freeRanges.emplace_back(span.offset, spanEnd);
+    }
+
+    // (b) Free spans must be pairwise non-overlapping
+    std::sort(freeRanges.begin(), freeRanges.end());
+    for (size_t i = 1; i < freeRanges.size(); ++i) {
+        if (freeRanges[i - 1].second > freeRanges[i].first) {
+            throw std::logic_error("RegionFile free-list invariant violated: overlapping free spans");
+        }
+    }
 }
 
 void RegionFile::removeFreeSpan(uint64_t offset, uint64_t size) {
@@ -502,6 +556,10 @@ bool RegionFile::saveColumnRaw(ColumnPos pos, std::span<const uint8_t> cborData)
 
     // Update in-memory index
     index_[key] = entry;
+
+#ifndef NDEBUG
+    validateFreeListInvariants();
+#endif
 
     return true;
 }

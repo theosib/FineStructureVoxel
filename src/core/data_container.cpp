@@ -277,6 +277,8 @@ static void encodeValue(std::vector<uint8_t>& out, const DataValue& value) {
 
         if constexpr (std::is_same_v<T, std::monostate>) {
             cbor::encodeNull(out);
+        } else if constexpr (std::is_same_v<T, bool>) {
+            out.push_back((cbor::SIMPLE << 5) | (v ? cbor::TRUE_VALUE : cbor::FALSE_VALUE));
         } else if constexpr (std::is_same_v<T, int64_t>) {
             cbor::encodeInt(out, v);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -452,8 +454,8 @@ static DataValue decodeValue(cbor::Decoder& decoder) {
                 additional == cbor::FALSE_VALUE ||
                 additional == cbor::TRUE_VALUE) {
                 decoder.read();
-                if (additional == cbor::FALSE_VALUE) return static_cast<int64_t>(0);
-                if (additional == cbor::TRUE_VALUE) return static_cast<int64_t>(1);
+                if (additional == cbor::FALSE_VALUE) return false;
+                if (additional == cbor::TRUE_VALUE) return true;
                 return std::monostate{};
             } else if (additional == cbor::FLOAT64) {
                 decoder.read(); // Skip the initial byte

@@ -705,3 +705,135 @@ TEST(PropagationPolicyTest, NoSchedulerFallsBackToDrop) {
     ctx.notifyNeighbors();
     // No way to verify events weren't generated, but at least it doesn't crash
 }
+
+// ============================================================================
+// Phase R0 Tests: requestMeshRebuild, notifyNeighbors scheduler, TickType::Game
+// ============================================================================
+
+namespace {
+class NeighborTrackingHandler : public BlockHandler {
+public:
+    explicit NeighborTrackingHandler(std::string n) : name_(std::move(n)) {}
+    std::string_view name() const override { return name_; }
+
+    void onNeighborUpdated(BlockContext& ctx, Face changedFace) override {
+        ++neighborUpdateCount;
+        lastChangedFace = changedFace;
+        lastObservedNeighbor = ctx.getNeighbor(changedFace);
+        // Schedule a tick from inside onNeighborUpdated (requires scheduler_ on neighborCtx!)
+        ctx.scheduleTick(2);
+    }
+
+    void onTick(BlockContext&, TickType type) override {
+        if (type & TickType::Game) ++gameTickCount;
+        if (type & TickType::Scheduled) ++scheduledTickCount;
+    }
+
+    int neighborUpdateCount = 0;
+    Face lastChangedFace = Face::PosY;
+    BlockTypeId lastObservedNeighbor;
+    int gameTickCount = 0;
+    int scheduledTickCount = 0;
+
+private:
+    std::string name_;
+};
+}  // namespace
+
+TEST(BlockContextFixTest, RequestMeshRebuildAndMarkDirtyIncrementBlockVersion) {
+    World world;
+    BlockTypeId stone = BlockTypeId::fromName("r0test:stone");
+    BlockCoord pos{3, 4, 5};
+    world.setBlock(pos, stone);
+
+    SubChunk* sc = world.getSubChunk(ChunkPos::fromBlock(pos));
+    ASSERT_NE(sc, nullptr);
+
+    int callbackCount = 0;
+    sc->setBlockChangeCallback([&](ChunkPos, LocalBlockCoord, BlockTypeId oldT, BlockTypeId newT) {
+        EXPECT_EQ(oldT, stone);
+        EXPECT_EQ(newT, stone);
+        ++callbackCount;
+    });
+
+    BlockContext ctx(world, *sc, pos, pos.local());
+    uint64_t v0 = sc->blockVersion();
+
+    ctx.requestMeshRebuild();
+    uint64_t v1 = sc->blockVersion();
+    EXPECT_GT(v1, v0);
+    EXPECT_EQ(callbackCount, 1);
+
+    ctx.markDirty();
+    uint64_t v2 = sc->blockVersion();
+    EXPECT_GT(v2, v1);
+    EXPECT_EQ(callbackCount, 2);
+}
+
+TEST(UpdateSchedulerFixTest, NonHandlerBlockPlaceAndBreakNotifiesAdjacentHandlersWithScheduler) {
+    World world;
+    UpdateScheduler scheduler(world);
+    world.setUpdateScheduler(&scheduler);
+
+    BlockType sensorType;
+    sensorType.setWantsGameTicks(true);
+    BlockTypeId sensorId = BlockTypeId::fromName("r0test:sensor");
+    BlockRegistry::global().registerType(sensorId, sensorType);
+
+    auto sensorHandler = std::make_unique<NeighborTrackingHandler>("r0test:sensor");
+    auto* sensorHandlerPtr = sensorHandler.get();
+    BlockRegistry::global().registerHandler("r0test:sensor", std::move(sensorHandler));
+
+    // Plain block with NO custom BlockHandler
+    BlockType plainType;
+    BlockTypeId plainId = BlockTypeId::fromName("r0test:plain_stone");
+    BlockRegistry::global().registerType(plainId, plainType);
+
+    // Place sensor at (5, 5, 5)
+    world.setBlock({5, 5, 5}, sensorId);
+
+    // Place plain block at (6, 5, 5) (+X neighbor of sensor) via scheduler
+    scheduler.pushExternalEvent(BlockEvent::blockPlaced({6, 5, 5}, plainId, AIR_BLOCK_TYPE));
+    scheduler.processEvents();
+
+    EXPECT_EQ(sensorHandlerPtr->neighborUpdateCount, 1);
+    EXPECT_EQ(sensorHandlerPtr->lastChangedFace, Face::PosX);
+    EXPECT_EQ(sensorHandlerPtr->lastObservedNeighbor, plainId);
+    // And ctx.scheduleTick(2) inside onNeighborUpdated worked because neighborCtx had scheduler_!
+    EXPECT_TRUE(scheduler.hasScheduledTick({5, 5, 5}));
+
+    // Breaking the plain block at (6, 5, 5) also notifies the sensor and sees AIR_BLOCK_TYPE
+    scheduler.pushExternalEvent(BlockEvent::blockBroken({6, 5, 5}, plainId));
+    scheduler.processEvents();
+
+    EXPECT_EQ(sensorHandlerPtr->neighborUpdateCount, 2);
+    EXPECT_EQ(sensorHandlerPtr->lastObservedNeighbor, AIR_BLOCK_TYPE);
+}
+
+TEST(UpdateSchedulerFixTest, GameTickAndScheduledTickDoNotCollideInOutbox) {
+    World world;
+    UpdateScheduler scheduler(world);
+
+    BlockType tickingType;
+    tickingType.setWantsGameTicks(true);
+    BlockTypeId tickingId = BlockTypeId::fromName("r0test:dual_tick");
+    BlockRegistry::global().registerType(tickingId, tickingType);
+
+    auto handler = std::make_unique<NeighborTrackingHandler>("r0test:dual_tick");
+    auto* handlerPtr = handler.get();
+    BlockRegistry::global().registerHandler("r0test:dual_tick", std::move(handler));
+
+    BlockCoord pos{2, 2, 2};
+    scheduler.pushExternalEvent(BlockEvent::blockPlaced(pos, tickingId, AIR_BLOCK_TYPE));
+    scheduler.processEvents();
+
+    // Schedule a 1-tick Scheduled tick for the same block that also receives Game ticks
+    scheduler.scheduleTick(pos, 1, TickType::Scheduled);
+    scheduler.advanceGameTick();
+    scheduler.processEvents();
+
+    // Both the Game tick AND the Scheduled tick must have fired (no collision in EventOutbox)
+    EXPECT_EQ(handlerPtr->gameTickCount, 1);
+    EXPECT_EQ(handlerPtr->scheduledTickCount, 1);
+}
+

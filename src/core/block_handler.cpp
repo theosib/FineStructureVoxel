@@ -106,17 +106,18 @@ void BlockContext::setRepeatTickInterval(int interval) {
 }
 
 void BlockContext::requestMeshRebuild() {
-    // Touch the block to trigger version increment
-    // setBlock with the same type increments blockVersion
-    BlockTypeId currentType = blockType();
-    subChunk_.setBlock(localPos_.x, localPos_.y, localPos_.z, currentType);
+    // Touch the block to increment blockVersion and invoke blockChangeCallback_
+    subChunk_.touchBlock(localPos_);
+    if (auto* meshQueue = world_.meshRebuildQueue()) {
+        for (const ChunkPos& affected : world_.getAffectedSubChunks(pos_)) {
+            meshQueue->push(affected, MeshRebuildRequest::immediate());
+        }
+    }
 }
 
 void BlockContext::markDirty() {
-    // Touch the block to trigger version increment
-    // This flags the subchunk for persistence via version change
-    BlockTypeId currentType = blockType();
-    subChunk_.setBlock(localPos_.x, localPos_.y, localPos_.z, currentType);
+    // Touch the block to trigger version increment and change notification
+    subChunk_.touchBlock(localPos_);
 }
 
 BlockTypeId BlockContext::getNeighbor(Face face) const {
@@ -125,6 +126,8 @@ BlockTypeId BlockContext::getNeighbor(Face face) const {
 }
 
 void BlockContext::notifyNeighbors() {
+    neighborsNotified_ = true;
+
     // Get handler for each neighbor and call onNeighborUpdated
     BlockRegistry& registry = BlockRegistry::global();
 
@@ -162,8 +165,9 @@ void BlockContext::notifyNeighbors() {
         // Calculate local position within neighbor's subchunk
         LocalBlockCoord neighborLocalPos = neighborPos.local();
 
-        // Create context for neighbor and notify
+        // Create context for neighbor, propagate scheduler, and notify
         BlockContext neighborCtx(world_, *neighborSubChunk, neighborPos, neighborLocalPos);
+        neighborCtx.setScheduler(scheduler_);
 
         // The opposite face is the one that changed from the neighbor's perspective
         Face changedFace = oppositeFace(face);

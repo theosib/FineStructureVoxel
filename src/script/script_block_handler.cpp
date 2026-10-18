@@ -1,6 +1,7 @@
 #include "finevox/script/script_block_handler.hpp"
 #include "finevox/script/block_context_proxy.hpp"
 #include "finevox/script/data_container_proxy.hpp"
+#include "finevox/script/game_script_engine.hpp"
 #include "finevox/core/string_interner.hpp"
 #include <iostream>
 
@@ -25,6 +26,7 @@ struct EventSymbols {
     uint32_t scheduled;
     uint32_t repeat;
     uint32_t random;
+    uint32_t game;
 
     // Face symbols
     uint32_t pos_x, neg_x, pos_y, neg_y, pos_z, neg_z;
@@ -46,6 +48,7 @@ struct EventSymbols {
                 si.intern("scheduled"),
                 si.intern("repeat"),
                 si.intern("random"),
+                si.intern("game"),
                 si.intern("pos_x"),
                 si.intern("neg_x"),
                 si.intern("pos_y"),
@@ -76,6 +79,7 @@ static uint32_t tickTypeToSymbol(TickType type) {
     if (type & TickType::Scheduled) return s.scheduled;
     if (type & TickType::Repeat) return s.repeat;
     if (type & TickType::Random) return s.random;
+    if (type & TickType::Game) return s.game;
     return s.scheduled;
 }
 
@@ -153,10 +157,17 @@ finescript::Value ScriptBlockHandler::invokeHandler(
     auto ctxProxy = std::make_shared<BlockContextProxy>(blockCtx);
     ctx_->set("ctx", finescript::Value::proxyMap(ctxProxy));
 
-    // Set up per-block data proxy
-    DataContainer& dataContainer = blockCtx.getOrCreateData();
-    auto dataProxy = std::make_shared<DataContainerProxy>(dataContainer);
+    // Set up lazy per-block data proxy (only creates DataContainer if written to)
+    auto dataProxy = std::make_shared<DataContainerProxy>(blockCtx);
     ctx_->set("data", finescript::Value::proxyMap(dataProxy));
+
+    // Set blockCtx in userData so ctx.* native functions can access this block
+    auto* ud = static_cast<ScriptUserData*>(ctx_->userData());
+    BlockContext* prevBlockCtx = nullptr;
+    if (ud) {
+        prevBlockCtx = ud->blockCtx;
+        ud->blockCtx = &blockCtx;
+    }
 
     // Call the handler
     finescript::Value result;
@@ -165,6 +176,11 @@ finescript::Value ScriptBlockHandler::invokeHandler(
     } catch (const std::exception& e) {
         std::cerr << "[ScriptBlockHandler] Error in '" << name_
                   << "' handler: " << e.what() << "\n";
+    }
+
+    // Restore previous block context
+    if (ud) {
+        ud->blockCtx = prevBlockCtx;
     }
 
     // Clear transient variables

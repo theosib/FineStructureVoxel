@@ -428,13 +428,13 @@ void World::setUpdateScheduler(UpdateScheduler* scheduler) {
 // External Block API (Event-Driven)
 // ============================================================================
 
-bool World::placeBlock(BlockCoord pos, BlockTypeId type) {
+bool World::placeBlock(BlockCoord pos, BlockTypeId type, Rotation rotation) {
     if (!updateScheduler_) {
         return false;
     }
 
     BlockTypeId oldType = getBlock(pos);
-    updateScheduler_->pushExternalEvent(BlockEvent::blockPlaced(pos, type, oldType));
+    updateScheduler_->pushExternalEvent(BlockEvent::blockPlaced(pos, type, oldType, rotation));
     return true;
 }
 

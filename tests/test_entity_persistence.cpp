@@ -2,6 +2,7 @@
 #include "finevox/core/entity_serializer.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/entity_type_def.hpp"
@@ -566,3 +567,34 @@ TEST_F(EntityColumnTest, LoadFromEmptyColumn) {
     EXPECT_EQ(loaded, 0u);
     EXPECT_EQ(em.entityCount(), 0u);
 }
+
+TEST_F(EntitySerializerTest, ItemDropEntityPreservesItemStack) {
+    ItemStack stack;
+    stack.type = ItemTypeId::fromName("finevox:diamond_pickaxe");
+    stack.count = 3;
+    stack.durability = 120;
+    stack.metadata = std::make_unique<DataContainer>();
+    stack.metadata->set<int64_t>("efficiency", 4);
+
+    ItemDropEntity original(EntityId{77}, std::move(stack));
+    original.setPosition(Vec3(12.0f, 65.0f, -8.0f));
+    original.setPickupDelay(1.25f);
+    original.setMaxAge(180.0f);
+
+    auto dc = EntitySerializer::entityToData(original);
+    ASSERT_NE(dc, nullptr);
+
+    auto restored = EntitySerializer::entityFromData(*dc);
+    ASSERT_NE(restored, nullptr);
+
+    auto* drop = dynamic_cast<ItemDropEntity*>(restored.get());
+    ASSERT_NE(drop, nullptr);
+    EXPECT_EQ(drop->item().type, ItemTypeId::fromName("finevox:diamond_pickaxe"));
+    EXPECT_EQ(drop->item().count, 3);
+    EXPECT_EQ(drop->item().durability, 120);
+    ASSERT_NE(drop->item().metadata, nullptr);
+    EXPECT_EQ(drop->item().metadata->get<int64_t>("efficiency"), 4);
+    EXPECT_FLOAT_EQ(drop->pickupDelay(), 1.25f);
+    EXPECT_FLOAT_EQ(drop->maxAge(), 180.0f);
+}
+

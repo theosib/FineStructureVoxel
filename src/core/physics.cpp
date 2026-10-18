@@ -550,13 +550,13 @@ float PhysicsSystem::resolveAxisCollision(
         if (movement > 0.0f) {
             // Moving in positive direction
             float maxAllowed = collider.min[axis] - entityBox.max[axis] - COLLISION_MARGIN;
-            if (maxAllowed < result && maxAllowed > -COLLISION_MARGIN) {
+            if (maxAllowed < result && maxAllowed >= -COLLISION_MARGIN * 2.0f) {
                 result = glm::max(0.0f, maxAllowed);
             }
         } else {
             // Moving in negative direction
             float maxAllowed = collider.max[axis] - entityBox.min[axis] + COLLISION_MARGIN;
-            if (maxAllowed > result && maxAllowed < COLLISION_MARGIN) {
+            if (maxAllowed > result && maxAllowed <= COLLISION_MARGIN * 2.0f) {
                 result = glm::min(0.0f, maxAllowed);
             }
         }

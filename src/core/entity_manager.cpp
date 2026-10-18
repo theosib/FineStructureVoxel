@@ -75,10 +75,16 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     // Wire up MobEntity-specific hooks and AI presets
     if (auto* mob = dynamic_cast<MobEntity*>(rawPtr)) {
         mob->setEntityManager(this);
+        mob->setWorld(&world_);
 
         // Auto-configure AI preset if brain is empty
         if (const auto* def = mob->typeDef(); def && mob->brain().goalCount() == 0) {
             configureAIPreset(*mob, def->aiType);
+        }
+
+        // Attach default BrainAIDriver for non-player mobs if no driver set
+        if (!mob->isPlayerEntity() && !mob->driver()) {
+            mob->setDriver(std::make_unique<BrainAIDriver>());
         }
 
         // Attach script hooks
@@ -307,12 +313,26 @@ void EntityManager::physicsPass(float tickDt) {
         }
 
         // 4. Move with collision
+        bool wasOnGround = entity->isOnGround();
         Vec3 velocity = entity->velocity();
         Vec3 movement = velocity * tickDt;
         physics_.moveBody(*entity, movement);
 
-        // 5. Update ground state
-        entity->setOnGround(physics_.checkOnGround(*entity));
+        // 5. Update ground state and zero downward velocity when grounded
+        bool nowOnGround = physics_.checkOnGround(*entity);
+        entity->setOnGround(nowOnGround);
+        if (nowOnGround) {
+            if (!wasOnGround) {
+                if (auto* mob = dynamic_cast<MobEntity*>(entity.get())) {
+                    mob->recordPreLandingVelocityY(velocity.y);
+                }
+            }
+            Vec3 postVel = entity->velocity();
+            if (postVel.y < 0.0f) {
+                postVel.y = 0.0f;
+                entity->setVelocity(postVel);
+            }
+        }
     }
 }
 
@@ -418,31 +438,37 @@ void EntityManager::handlePlayerLook(const BlockEvent& event) {
     if (!player) return;
 
     player->setLook(event.entityState.yaw, event.entityState.pitch);
+    if (auto* mob = dynamic_cast<MobEntity*>(player); mob && mob->driver()) {
+        mob->driver()->onEvent(*mob, script::makePlayerLookValue(
+            event.entityId, event.entityState.yaw, event.entityState.pitch));
+    }
 }
 
 void EntityManager::handlePlayerJump(const BlockEvent& event) {
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
-    // Jump is handled by graphics thread prediction
-    // Here we just acknowledge the intent
-    // The position update will come via PlayerPosition event
+    if (auto* mob = dynamic_cast<MobEntity*>(player); mob && mob->driver()) {
+        mob->driver()->onEvent(*mob, script::makePlayerJumpValue(event.entityId));
+    }
 }
 
 void EntityManager::handlePlayerSprint(const BlockEvent& event, bool starting) {
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
-    // Sprint affects movement speed - could be tracked per-entity
-    // For now, this is informational
+    if (auto* mob = dynamic_cast<MobEntity*>(player); mob && mob->driver()) {
+        mob->driver()->onEvent(*mob, script::makePlayerSprintValue(event.entityId, starting));
+    }
 }
 
 void EntityManager::handlePlayerSneak(const BlockEvent& event, bool starting) {
     Entity* player = getEntity(event.entityId);
     if (!player) return;
 
-    // Sneak affects movement speed and collision behavior
-    // For now, this is informational
+    if (auto* mob = dynamic_cast<MobEntity*>(player); mob && mob->driver()) {
+        mob->driver()->onEvent(*mob, script::makePlayerSneakValue(event.entityId, starting));
+    }
 }
 
 // ============================================================================

@@ -178,7 +178,8 @@ finescript::Value makePlayerHitValue(BlockCoord pos, Face face);
 
 /** Build a player position update. */
 finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
-                                          bool onGround, uint64_t inputSequence);
+                                          bool onGround, uint64_t inputSequence,
+                                          float yaw = 0.0f, float pitch = 0.0f);
 
 /** Build a player look update. */
 finescript::Value makePlayerLookValue(EntityId id, float yaw, float pitch);

@@ -183,7 +183,8 @@ finescript::Value makePlayerHitValue(BlockCoord pos, Face face) {
 }
 
 finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
-                                          bool onGround, uint64_t inputSequence) {
+                                          bool onGround, uint64_t inputSequence,
+                                          float yaw, float pitch) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
@@ -197,6 +198,8 @@ finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm:
     setFloat(m, s.vel_z, velocity.z);
     setBool(m, s.on_ground, onGround);
     setInt(m, s.input_sequence, static_cast<int64_t>(inputSequence));
+    setFloat(m, s.yaw, yaw);
+    setFloat(m, s.pitch, pitch);
     return v;
 }
 

@@ -1,5 +1,6 @@
 #include "finevox/core/entity_serializer.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/cbor.hpp"
@@ -60,6 +61,22 @@ std::unique_ptr<DataContainer> EntitySerializer::entityToData(const Entity& enti
         dc->set<int64_t>("is_mob", 1);
     }
 
+    // ItemDropEntity-specific fields
+    if (const auto* drop = dynamic_cast<const ItemDropEntity*>(&entity)) {
+        dc->set<int64_t>("is_item_drop", 1);
+        const auto& stack = drop->item();
+        if (!stack.type.isEmpty()) {
+            dc->set<std::string>("item_type", std::string(stack.type.name()));
+        }
+        dc->set<int64_t>("item_count", stack.count);
+        dc->set<int64_t>("item_durability", stack.durability);
+        if (stack.metadata) {
+            dc->set("item_metadata", stack.metadata->clone());
+        }
+        dc->set<double>("pickup_delay", drop->pickupDelay());
+        dc->set<double>("max_age", drop->maxAge());
+    }
+
     // Per-entity extra data (DataContainer)
     if (entity.entityData()) {
         dc->set("extra_data", entity.entityData()->clone());
@@ -74,6 +91,9 @@ std::unique_ptr<DataContainer> EntitySerializer::entityToData(const Entity& enti
 
 std::unique_ptr<Entity> EntitySerializer::entityFromData(const DataContainer& data) {
     bool isMob = data.get<int64_t>("is_mob", 0) != 0;
+    bool isItemDrop = data.get<int64_t>("is_item_drop", 0) != 0;
+    auto entityType = static_cast<EntityType>(
+        static_cast<uint16_t>(data.get<int64_t>("entity_type", 0)));
 
     std::unique_ptr<Entity> entity;
 
@@ -86,9 +106,26 @@ std::unique_ptr<Entity> EntitySerializer::entityFromData(const DataContainer& da
         mob->setHealth(static_cast<float>(data.get<double>("health", 20.0)));
         mob->setSpeedMultiplier(static_cast<float>(data.get<double>("speed_mult", 1.0)));
         entity = std::move(mob);
+    } else if (isItemDrop || entityType == EntityType::ItemDrop) {
+        ItemStack stack;
+        auto itemName = data.get<std::string>("item_type");
+        if (!itemName.empty()) {
+            stack.type = ItemTypeId::fromName(itemName);
+        }
+        stack.count = static_cast<int32_t>(data.get<int64_t>("item_count", stack.type.isEmpty() ? 0 : 1));
+        stack.durability = static_cast<int32_t>(data.get<int64_t>("item_durability", 0));
+        if (const auto* customChild = data.getChild("item_metadata")) {
+            stack.metadata = customChild->clone();
+        }
+        auto drop = std::make_unique<ItemDropEntity>(INVALID_ENTITY_ID, std::move(stack));
+        if (data.has("pickup_delay")) {
+            drop->setPickupDelay(static_cast<float>(data.get<double>("pickup_delay", 0.5)));
+        }
+        if (data.has("max_age")) {
+            drop->setMaxAge(static_cast<float>(data.get<double>("max_age", 300.0)));
+        }
+        entity = std::move(drop);
     } else {
-        auto entityType = static_cast<EntityType>(
-            static_cast<uint16_t>(data.get<int64_t>("entity_type", 0)));
         entity = std::make_unique<Entity>(INVALID_ENTITY_ID, entityType);
     }
 

@@ -201,17 +201,6 @@ std::string readFileToString(const std::string& path) {
     return ss.str();
 }
 
-/// ConfigParser splits "key: ns:value" into key="key", suffix="ns", value="value".
-/// This reconstructs the full original value string when a suffix is present
-/// — needed so that names containing a colon (e.g. "finevox:block_fragment")
-/// survive the parse.  Mirrors the helper in recipe_loader.cpp.
-std::string entryFullValue(const ConfigEntry& e) {
-    if (e.hasSuffix()) {
-        return e.suffix + ":" + e.value.asStringOwned();
-    }
-    return e.value.asStringOwned();
-}
-
 } // anonymous namespace
 
 // ============================================================================
@@ -227,8 +216,7 @@ std::optional<ParticleTypeDef> ParticleLoader::loadTypeFromString(std::string_vi
 
     for (const auto& e : doc.entries()) {
         if (e.key == "name") {
-            // "name: finevox:block_fragment" would otherwise split.
-            def.name = entryFullValue(e);
+            def.name = e.value.asStringOwned();
         } else if (e.key == "lifetime") {
             def.lifetime = Range::parse(e.value.asString());
         } else if (e.key == "initial_speed" || e.key == "speed") {
@@ -248,7 +236,7 @@ std::optional<ParticleTypeDef> ParticleLoader::loadTypeFromString(std::string_vi
         } else if (e.key == "end_tint") {
             def.endTint = parseVec4(e.value.asString(), def.startTint);
         } else if (e.key == "atlas_region" || e.key == "texture") {
-            def.atlasRegion = entryFullValue(e);
+            def.atlasRegion = e.value.asStringOwned();
         } else if (e.key == "billboard") {
             def.billboard = parseBillboardMode(e.value.asString());
         } else if (e.key == "collides") {
@@ -322,7 +310,7 @@ std::optional<EmitterPresetDef> ParticleLoader::loadPresetFromString(std::string
 
     for (const auto& e : doc.entries()) {
         if (e.key == "name") {
-            def.name = entryFullValue(e);
+            def.name = e.value.asStringOwned();
         } else if (e.key == "shape") {
             def.shape = parseEmitterShape(e.value.asString());
         } else if (e.key == "shape_size" || e.key == "size" || e.key == "radius") {
@@ -334,7 +322,7 @@ std::optional<EmitterPresetDef> ParticleLoader::loadPresetFromString(std::string
         } else if (e.key == "duration") {
             def.duration = e.value.asFloat(-1.0f);
         } else if (e.key == "particle" || e.key == "particle_type") {
-            def.particleType = entryFullValue(e);
+            def.particleType = e.value.asStringOwned();
         } else if (e.key == "tint") {
             def.tint = parseVec4(e.value.asString(), glm::vec4(1.0f));
             def.hasTint = true;

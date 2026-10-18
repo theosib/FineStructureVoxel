@@ -181,18 +181,9 @@ int main() {
     // Test 4: 3D spatialization - sound moves from left to right
     std::cout << "[Test 4] 3D spatialization: sound panning left to right...\n";
     for (int i = -5; i <= 5; ++i) {
-        SoundEvent event;
-        event.soundSet = soundSetId;
-        event.action = SoundAction::Place;
-        event.category = SoundCategory::Effects;
-        event.posX = static_cast<float>(i * 3);  // Move from -15 to +15 blocks on X
-        event.posY = 0.0f;
-        event.posZ = -5.0f;  // 5 blocks in front
-        event.volume = 1.0f;
-        event.pitch = 1.0f;
-        event.positional = true;
-
-        eventQueue.push(event);
+        eventQueue.push(finevox::script::makeSoundEventValue(
+            soundSetId, "place", "effects",
+            static_cast<float>(i * 3), 0.0f, -5.0f, 1.0f, 1.0f, true));
         engine.update(glm::dvec3(0), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
     }

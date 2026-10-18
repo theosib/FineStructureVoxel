@@ -1,5 +1,8 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
+#ifdef nil
+#undef nil
+#endif
 
 #include "finevox/audio/audio_engine.hpp"
 #include "finevox/script/event_value.hpp"
@@ -42,23 +45,38 @@ struct AudioEngine::Impl {
         : eventQueue(queue), registry(reg) {}
 
     ~Impl() {
-        if (engineInitialized) {
-            // Stop and clean up all active sounds before engine shutdown
-            for (auto* s : activeSoundList) {
-                ma_sound_uninit(s);
-                delete s;
-            }
-            activeSoundList.clear();
+        shutdownEngine();
+    }
 
+    void shutdownEngine() {
+        if (!engineInitialized) return;
+
+        std::vector<ma_sound*> finished;
+        {
             std::lock_guard lock(finishedMutex);
-            for (auto* s : finishedSounds) {
-                ma_sound_uninit(s);
-                delete s;
-            }
-            finishedSounds.clear();
-
-            ma_engine_uninit(&engine);
+            finished.swap(finishedSounds);
         }
+
+        // Remove any finished sounds from activeSoundList first so we never double-free
+        for (auto* s : finished) {
+            activeSoundList.erase(
+                std::remove(activeSoundList.begin(), activeSoundList.end(), s),
+                activeSoundList.end());
+        }
+
+        for (auto* s : activeSoundList) {
+            ma_sound_uninit(s);
+            delete s;
+        }
+        activeSoundList.clear();
+
+        for (auto* s : finished) {
+            ma_sound_uninit(s);
+            delete s;
+        }
+
+        ma_engine_uninit(&engine);
+        engineInitialized = false;
     }
 
     void cleanupFinished() {
@@ -69,22 +87,28 @@ struct AudioEngine::Impl {
             toClean.swap(finishedSounds);
         }
 
+        if (toClean.empty()) return;
+
+        // Remove from activeSoundList BEFORE uninitializing and freeing
+        for (auto* s : toClean) {
+            activeSoundList.erase(
+                std::remove(activeSoundList.begin(), activeSoundList.end(), s),
+                activeSoundList.end());
+        }
+
         // Uninit and delete on the main thread (safe)
         for (auto* s : toClean) {
             ma_sound_uninit(s);
             delete s;
         }
-
-        // Also remove from active list
-        activeSoundList.erase(
-            std::remove_if(activeSoundList.begin(), activeSoundList.end(),
-                [](ma_sound* s) { return ma_sound_at_end(s); }),
-            activeSoundList.end());
     }
 
     float getCategoryVolume(SoundCategory cat) const {
-        return volumes[static_cast<size_t>(SoundCategory::Master)] *
-               volumes[static_cast<size_t>(cat)];
+        if (cat == SoundCategory::Master) {
+            return 1.0f;
+        }
+        // Master volume is applied once at the engine level via ma_engine_set_volume
+        return volumes[static_cast<size_t>(cat)];
     }
 
     void processEvent(const finescript::Value& event) {
@@ -212,6 +236,9 @@ bool AudioEngine::initialize(const AudioConfig& config) {
 
     impl_->engineInitialized = true;
 
+    // Apply initial master volume on the engine
+    ma_engine_set_volume(&impl_->engine, impl_->volumes[static_cast<size_t>(SoundCategory::Master)]);
+
     // Set listener to origin
     ma_engine_listener_set_position(&impl_->engine, 0, 0.0f, 0.0f, 0.0f);
 
@@ -219,9 +246,8 @@ bool AudioEngine::initialize(const AudioConfig& config) {
 }
 
 void AudioEngine::shutdown() {
-    if (impl_ && impl_->engineInitialized) {
-        ma_engine_uninit(&impl_->engine);
-        impl_->engineInitialized = false;
+    if (impl_) {
+        impl_->shutdownEngine();
     }
 }
 

@@ -33,11 +33,18 @@ BlockEvent EventOutbox::mergeEvents(const BlockEvent& existing, const BlockEvent
     BlockEvent merged = incoming;  // Start with incoming (more recent)
 
     switch (existing.type) {
-        case EventType::NeighborUpdated:
-            // Merge face masks - OR them together
-            merged.neighborFaceMask = existing.neighborFaceMask | incoming.neighborFaceMask;
+        case EventType::NeighborUpdated: {
+            // Merge face masks - OR them together (including changedFace if mask wasn't explicitly populated)
+            uint8_t existingMask = existing.neighborFaceMask != 0
+                ? existing.neighborFaceMask
+                : static_cast<uint8_t>(1 << static_cast<uint8_t>(existing.changedFace));
+            uint8_t incomingMask = incoming.neighborFaceMask != 0
+                ? incoming.neighborFaceMask
+                : static_cast<uint8_t>(1 << static_cast<uint8_t>(incoming.changedFace));
+            merged.neighborFaceMask = existingMask | incomingMask;
             // Keep changedFace from incoming (most recent primary face)
             break;
+        }
 
         case EventType::BlockPlaced:
         case EventType::BlockBroken:
@@ -239,8 +246,12 @@ void UpdateScheduler::processDeferredEvents() {
 }
 
 bool UpdateScheduler::processEvent(const BlockEvent& event) {
-    // Get the subchunk
+    // Get the subchunk (for BlockPlaced, placing a non-air block creates the subchunk if needed)
     SubChunk* subchunk = world_.getSubChunk(event.chunkPos);
+    if (!subchunk && event.type == EventType::BlockPlaced && !event.blockType.isAir()) {
+        world_.setBlock(event.pos, event.blockType);
+        subchunk = world_.getSubChunk(event.chunkPos);
+    }
     if (!subchunk) {
         // Chunk not loaded - for BlockUpdate events, defer and request load
         if (event.type == EventType::BlockUpdate) {
@@ -276,6 +287,9 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
 
     // Handle BlockBroken specially - need to process before the block is gone
     if (event.type == EventType::BlockBroken) {
+        // Keep shared ownership of subchunk in case removing the last block prunes it from the column
+        auto subchunkShared = world_.getSubChunkShared(event.chunkPos);
+
         // Unregister from game ticks
         subchunk->unregisterFromGameTicks(localIndex);
 
@@ -295,6 +309,13 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         // Actually remove the block from the world
         world_.setBlock(event.pos, AIR_BLOCK_TYPE);
 
+        // Notify adjacent blocks that have handlers that this neighbor is now air
+        if (subchunkShared) {
+            BlockContext notifyCtx(world_, *subchunkShared, event.pos, event.localPos);
+            notifyCtx.setScheduler(this);
+            notifyCtx.notifyNeighbors();
+        }
+
         // Enqueue lighting update with smart remesh deferral
         // If lighting queue is empty, lighting thread handles remesh
         // Otherwise we push remesh immediately and lighting handles additional
@@ -306,6 +327,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
     if (event.type == EventType::BlockPlaced) {
         // Place the block in the world first
         world_.setBlock(event.pos, event.blockType);
+        subchunk->setRotation(event.localPos, event.rotation);
 
         // Look up handler for the NEW block type
         BlockHandler* handler = BlockRegistry::global().getHandler(event.blockType);
@@ -316,6 +338,11 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
         if (handler) {
             ctx.setPreviousType(event.previousType);
             handler->onPlace(ctx);
+        }
+
+        // Notify adjacent blocks that have handlers (unless onPlace already did so)
+        if (!ctx.neighborsNotified()) {
+            ctx.notifyNeighbors();
         }
 
         // After handler returns, check if block wants game ticks
@@ -352,10 +379,14 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
 
         case EventType::NeighborUpdated:
             if (handler) {
-                // Call for each changed face
-                event.forEachChangedNeighbor([&](Face face) {
-                    handler->onNeighborUpdated(ctx, face);
-                });
+                if (event.neighborFaceMask != 0) {
+                    // Call for each changed face in mask
+                    event.forEachChangedNeighbor([&](Face face) {
+                        handler->onNeighborUpdated(ctx, face);
+                    });
+                } else {
+                    handler->onNeighborUpdated(ctx, event.changedFace);
+                }
             }
             break;
 
@@ -411,7 +442,7 @@ void UpdateScheduler::generateGameTickEvents() {
         const auto& tickBlocks = subchunk->gameTickBlocks();
         for (uint16_t localIndex : tickBlocks) {
             BlockCoord worldPos = chunkPos.toWorld(localIndex);
-            outbox_.push(BlockEvent::tick(worldPos, TickType::Scheduled));  // Use Scheduled for game ticks
+            outbox_.push(BlockEvent::tick(worldPos, TickType::Game));
         }
     }
 }

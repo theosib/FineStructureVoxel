@@ -554,11 +554,12 @@ TEST(SchematicMirrorTest, MirroredOrientationIsAReflection) {
     // matrix, reflections included.
     EXPECT_EQ(result.compose(result.inverse()), Rotation::IDENTITY);
 
-    // index() has no entry for a reflection and reports 0 (identity) -- this is why
+    // index() has no entry for a reflection and throws std::logic_error -- this is why
     // a mirrored schematic cannot currently be stamped into the world or saved
-    // without losing orientation. See mirrorSchematic()'s @warning.
-    EXPECT_EQ(result.index(), 0);
-    EXPECT_NE(Rotation::byIndex(result.index()), result);
+    // without resolving orientation to a proper rotation. See mirrorSchematic()'s @warning.
+    EXPECT_FALSE(result.isProperRotation());
+    EXPECT_TRUE(Rotation::ROTATE_Y_90.isProperRotation());
+    EXPECT_THROW((void)result.index(), std::logic_error);
 }
 
 // ============================================================================

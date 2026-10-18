@@ -7,15 +7,6 @@
 
 namespace finevox {
 
-// ConfigParser splits "key: ns:value" into key="key", suffix="ns", value="value".
-// This helper reconstructs the full value as "ns:value" when a suffix is present.
-static std::string getFullValue(const ConfigEntry& entry) {
-    if (entry.hasSuffix()) {
-        return entry.suffix + ":" + entry.value.asStringOwned();
-    }
-    return entry.value.asStringOwned();
-}
-
 // Parse space-separated ingredient tokens from a row string
 static std::vector<ItemMatch> parseRow(std::string_view row) {
     std::vector<ItemMatch> result;
@@ -58,7 +49,7 @@ std::optional<Recipe> RecipeLoader::loadFromString(std::string_view content) {
         const auto& val = entry.value;
 
         if (key == "name") {
-            name = getFullValue(entry);
+            name = val.asStringOwned();
         }
         else if (key == "type") {
             auto typeStr = val.asString();
@@ -71,15 +62,15 @@ std::optional<Recipe> RecipeLoader::loadFromString(std::string_view content) {
             }
         }
         else if (key == "station") {
-            auto fullVal = getFullValue(entry);
-            if (fullVal == "none" || fullVal.empty()) {
+            auto stationVal = val.asString();
+            if (stationVal == "none" || stationVal.empty()) {
                 recipe.station = EMPTY_STATION;
             } else {
-                recipe.station = StationTypeId::fromName(fullVal);
+                recipe.station = StationTypeId::fromName(stationVal);
             }
         }
         else if (key == "category") {
-            recipe.category = getFullValue(entry);
+            recipe.category = val.asStringOwned();
         }
         // --- Pattern (shaped) ---
         else if (key == "width") {
@@ -89,18 +80,18 @@ std::optional<Recipe> RecipeLoader::loadFromString(std::string_view content) {
             recipe.height = val.asInt(0);
         }
         else if (key == "row") {
-            rows.push_back(parseRow(getFullValue(entry)));
+            rows.push_back(parseRow(val.asString()));
         }
         else if (key == "mirror") {
             recipe.allowMirror = val.asBool(false);
         }
         // --- Shapeless ---
         else if (key == "ingredient") {
-            recipe.ingredients.push_back(parseIngredient(getFullValue(entry)));
+            recipe.ingredients.push_back(parseIngredient(val.asString()));
         }
         // --- Smelting ---
         else if (key == "input") {
-            recipe.smeltInput = parseIngredient(getFullValue(entry));
+            recipe.smeltInput = parseIngredient(val.asString());
         }
         else if (key == "smelt_time") {
             recipe.smeltTicks = val.asInt(200);
@@ -110,7 +101,7 @@ std::optional<Recipe> RecipeLoader::loadFromString(std::string_view content) {
         }
         // --- Output ---
         else if (key == "output") {
-            recipe.outputItem = ItemTypeId::fromName(getFullValue(entry));
+            recipe.outputItem = ItemTypeId::fromName(val.asString());
         }
         else if (key == "count") {
             recipe.outputCount = val.asInt(1);

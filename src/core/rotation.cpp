@@ -1,4 +1,5 @@
 #include "finevox/core/rotation.hpp"
+#include <stdexcept>
 #include <unordered_map>
 
 namespace finevox {
@@ -115,13 +116,22 @@ const Rotation& Rotation::byIndex(uint8_t index) {
     return ALL_ROTATIONS[index % 24];
 }
 
+bool Rotation::isProperRotation() const {
+    for (uint8_t i = 0; i < 24; ++i) {
+        if (ALL_ROTATIONS[i] == *this) {
+            return true;
+        }
+    }
+    return false;
+}
+
 uint8_t Rotation::index() const {
     for (uint8_t i = 0; i < 24; ++i) {
         if (ALL_ROTATIONS[i] == *this) {
             return i;
         }
     }
-    return 0;  // Should never happen for valid rotation
+    throw std::logic_error("Rotation::index() called on non-proper rotation matrix (e.g. reflection)");
 }
 
 Face Rotation::apply(Face face) const {

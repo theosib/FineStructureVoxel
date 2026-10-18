@@ -1,4 +1,5 @@
 #include "finevox/script/player_stats_bridge.hpp"
+#include "finevox/script/data_container_proxy.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/data_container.hpp"
@@ -42,28 +43,25 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
             return finescript::Value::number(player->maxHealth());
         });
 
-    // player_get_stat(name) → float (reads from DataContainer)
+    // player_get_stat(name, [default]) → value (reads from DataContainer)
     engine.registerFunction("player_get_stat",
         [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args)
             -> finescript::Value
         {
+            finescript::Value defVal = args.size() >= 2 ? args[1] : finescript::Value::number(0.0);
             auto* player = getLocalPlayer(entityManager_);
-            if (!player || args.empty()) return finescript::Value::number(0.0);
+            if (!player || args.empty()) return defVal;
 
-            std::string key;
-            if (args[0].isString()) key = args[0].asString();
-            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
-            else return finescript::Value::number(0.0);
+            uint32_t keyId;
+            if (args[0].isSymbol()) keyId = args[0].asSymbol();
+            else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
+            else return defVal;
 
-            auto* extra = player->entityData();
-            if (!extra) return finescript::Value::number(0.0);
+            const auto* extra = player->entityData();
+            if (!extra || !extra->has(keyId)) return defVal;
 
-            // Try float first, then int
-            float fval = extra->get<float>(key, 0.0f);
-            if (fval != 0.0f) return finescript::Value::number(fval);
-            int64_t ival = extra->get<int64_t>(key, 0);
-            if (ival != 0) return finescript::Value::number(static_cast<double>(ival));
-            return finescript::Value::number(0.0);
+            DataContainerProxy proxy(const_cast<DataContainer&>(*extra));
+            return proxy.get(keyId);
         });
 
     // player_set_stat(name, value) → nil (writes to DataContainer)
@@ -74,16 +72,13 @@ void PlayerStatsBridge::registerNativeFunctions(finescript::ScriptEngine& engine
             auto* player = getLocalPlayer(entityManager_);
             if (!player || args.size() < 2) return finescript::Value::nil();
 
-            std::string key;
-            if (args[0].isString()) key = args[0].asString();
-            else if (args[0].isSymbol()) key = StringInterner::global().lookup(args[0].asSymbol());
+            uint32_t keyId;
+            if (args[0].isSymbol()) keyId = args[0].asSymbol();
+            else if (args[0].isString()) keyId = StringInterner::global().intern(args[0].asString());
             else return finescript::Value::nil();
 
-            auto& extra = player->getOrCreateEntityData();
-            if (args[1].isFloat())
-                extra.set<float>(key, static_cast<float>(args[1].asFloat()));
-            else if (args[1].isInt())
-                extra.set<int64_t>(key, args[1].asInt());
+            DataContainerProxy proxy(player->getOrCreateEntityData());
+            proxy.set(keyId, args[1]);
             return finescript::Value::nil();
         });
 

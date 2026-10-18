@@ -275,15 +275,15 @@ public:
     /**
      * @brief Set an alarm to wake at the specified time
      *
-     * If an alarm is already pending, keeps the LATER time (rationale: if
-     * we're setting a new alarm while one exists, the worker is busy anyway).
+     * If an alarm is already pending, keeps the EARLIER time so an urgent
+     * wakeup deadline is never delayed by a later background alarm.
      *
      * If wakeTime is in the past, the next waitForWork() returns immediately.
      */
     void setAlarm(TimePoint wakeTime) {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        if (!alarmPending_ || wakeTime > alarmTime_) {
+        if (!alarmPending_ || wakeTime < alarmTime_) {
             alarmTime_ = wakeTime;
             alarmPending_ = true;
         }

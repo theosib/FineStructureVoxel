@@ -630,3 +630,55 @@ end
     // health should be set to x coordinate = 15
     EXPECT_NEAR(mob.health(), 15.0f, 0.01f);
 }
+
+TEST_F(ScriptEntityTest, MobGetDataPreservesZeroFalseEmptyAndDoesNotAllocateOnRead) {
+    World world;
+    GameScriptEngine gse(world);
+
+    auto path = writeScript("mob_data_test.fsc", R"(
+on :spawn do
+    set missing {mob_get_data "nonexistent"}
+end
+
+on :tick do
+    mob_set_data "zero_int" 0
+    mob_set_data "zero_flt" 0.0
+    mob_set_data "flag_false" false
+    mob_set_data "empty_str" ""
+end
+)");
+
+    auto* handler = gse.loadEntityScript(path, "data_mob");
+    ASSERT_NE(handler, nullptr);
+
+    auto typeId = EntityTypeId::fromName("test_mob");
+    MobEntity mob(50, typeId);
+
+    // Negative control: reading missing key does NOT allocate entityData()
+    EXPECT_EQ(mob.entityData(), nullptr);
+    handler->onSpawn(mob);
+    EXPECT_EQ(mob.entityData(), nullptr);
+
+    // Writing zero/false/empty values stores them and reads them back accurately
+    handler->onTick(mob, 0.05f);
+    ASSERT_NE(mob.entityData(), nullptr);
+
+    auto readPath = writeScript("mob_data_verify.fsc", R"(
+on :interact do
+    if ({mob_get_data "zero_int"} == 0) do
+        if ({mob_get_data "zero_flt"} == 0.0) do
+            if ({mob_get_data "flag_false"} == false) do
+                if ({mob_get_data "empty_str"} == "") do
+                    mob_set_health 13
+                end
+            end
+        end
+    end
+end
+)");
+    auto* verifyHandler = gse.loadEntityScript(readPath, "verify_mob");
+    ASSERT_NE(verifyHandler, nullptr);
+    verifyHandler->onInteract(mob, 1);
+    EXPECT_NEAR(mob.health(), 13.0f, 0.01f);
+}
+

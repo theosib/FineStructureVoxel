@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include "finevox/core/rotation.hpp"
+#include "finevox/core/subchunk.hpp"
 #include <set>
+#include <stdexcept>
 
 using namespace finevox;
 
@@ -179,8 +181,39 @@ TEST(RotationTest, AllRotationsAreValid) {
 TEST(RotationTest, IndexRoundTrip) {
     for (uint8_t i = 0; i < 24; ++i) {
         const auto& rot = Rotation::byIndex(i);
+        EXPECT_TRUE(rot.isProperRotation());
         EXPECT_EQ(rot.index(), i);
     }
+}
+
+TEST(RotationTest, ImproperRotationThrowsOnIndex) {
+    // Negative control: proper rotations are recognized and do not throw
+    for (uint8_t i = 0; i < 24; ++i) {
+        const auto& rot = Rotation::byIndex(i);
+        EXPECT_TRUE(rot.isProperRotation());
+        EXPECT_NO_THROW((void)rot.index());
+    }
+
+    // Pure axis reflections (det = -1)
+    Rotation reflectX{{{{-1, 0, 0}, {0, 1, 0}, {0, 0, 1}}}};
+    Rotation reflectY{{{{1, 0, 0}, {0, -1, 0}, {0, 0, 1}}}};
+    Rotation reflectZ{{{{1, 0, 0}, {0, 1, 0}, {0, 0, -1}}}};
+
+    for (const auto& refl : {reflectX, reflectY, reflectZ}) {
+        EXPECT_FALSE(refl.isProperRotation());
+        EXPECT_THROW((void)refl.index(), std::logic_error);
+
+        // Composing a reflection with any of the 24 proper rotations also yields det = -1
+        for (uint8_t i = 0; i < 24; ++i) {
+            Rotation improper = refl.compose(Rotation::byIndex(i));
+            EXPECT_FALSE(improper.isProperRotation());
+            EXPECT_THROW((void)improper.index(), std::logic_error);
+        }
+    }
+
+    // SubChunk::setRotation must also fail loudly on an improper rotation
+    SubChunk sc;
+    EXPECT_THROW(sc.setRotation(0, 0, 0, reflectX), std::logic_error);
 }
 
 TEST(RotationTest, AllRotationsHaveInverse) {

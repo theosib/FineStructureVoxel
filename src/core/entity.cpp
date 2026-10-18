@@ -33,17 +33,15 @@ std::string Entity::typeName() const {
 }
 
 Vec3 Entity::lookDirection() const {
-    // Convert yaw and pitch (in degrees) to a unit direction vector
-    // Yaw: 0 = +Z, 90 = -X, 180 = -Z, 270 = +X
-    // Pitch: 0 = forward, -90 = up, +90 = down
+    // Convert yaw and pitch (in radians) to a unit direction vector
+    // Matches PlayerController::forwardVector() and MobEntity::lookAt():
+    // Yaw: 0 = +Z, +pi/2 = +X, pi = -Z, -pi/2 = -X
+    // Pitch: 0 = forward, +pi/2 = up, -pi/2 = down
 
-    float yawRad = glm::radians(yaw_);
-    float pitchRad = glm::radians(pitch_);
-
-    float cosPitch = std::cos(pitchRad);
-    float x = -std::sin(yawRad) * cosPitch;
-    float y = -std::sin(pitchRad);
-    float z = std::cos(yawRad) * cosPitch;
+    float cosPitch = std::cos(pitch_);
+    float x = std::sin(yaw_) * cosPitch;
+    float y = std::sin(pitch_);
+    float z = std::cos(yaw_) * cosPitch;
 
     return Vec3(x, y, z);
 }

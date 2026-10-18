@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "finevox/core/region_file.hpp"
+#include "finevox/core/serialization.hpp"
 #include <filesystem>
 #include <map>
+#include <random>
 #include <vector>
 
 using namespace finevox;
@@ -229,4 +231,76 @@ TEST_F(RegionFreeSpaceTest, RepeatedOverwriteDoesNotGrowDataFileWithoutBound) {
         sizeBefore = reopened.dataFileSize();
     }
 }
+
+// ============================================================================
+// (d) Seeded random operation-sequence test (~100 steps)
+// ============================================================================
+
+TEST_F(RegionFreeSpaceTest, SeededRandomOperationSequencePreservesAllLiveColumns) {
+    std::mt19937 rng(0xC0FFEE42u);
+    std::uniform_int_distribution<int32_t> coordDist(0, 7);
+    std::uniform_int_distribution<int> blocksDist(4, 96);
+    std::uniform_int_distribution<int> opDist(0, 99);
+
+    struct LiveState {
+        int seed;
+        int blocks;
+        std::vector<uint8_t> rawCbor;
+    };
+    std::map<std::pair<int32_t, int32_t>, LiveState> liveColumns;
+
+    auto region = std::make_unique<RegionFile>(tempDir, RegionPos{0, 0});
+
+    for (int step = 0; step < 120; ++step) {
+        SCOPED_TRACE("step " + std::to_string(step));
+        int op = opDist(rng);
+
+        if (op < 15) {
+            // Reopen RegionFile from disk (tests ToC replay + free-list rebuild)
+            region.reset();
+            region = std::make_unique<RegionFile>(tempDir, RegionPos{0, 0});
+            EXPECT_NO_THROW(region->validateFreeListInvariants());
+        } else if (op < 25) {
+            // Compact ToC and validate invariants
+            region->compactToc();
+            EXPECT_NO_THROW(region->validateFreeListInvariants());
+        } else {
+            // Save or overwrite a column with varying payload size
+            ColumnPos pos{coordDist(rng), coordDist(rng)};
+            int seed = step + 1;
+            int blocks = blocksDist(rng);
+            ChunkColumn col = makeColumn(pos, seed, blocks);
+            auto cbor = ColumnSerializer::toCBOR(col, pos.x, pos.z);
+
+            ASSERT_TRUE(region->saveColumnRaw(pos, cbor));
+            EXPECT_NO_THROW(region->validateFreeListInvariants());
+
+            liveColumns[{pos.x, pos.z}] = LiveState{seed, blocks, std::move(cbor)};
+        }
+
+        // Periodically verify every live column's exact serialized content
+        if (step % 20 == 19 || step == 119) {
+            EXPECT_EQ(region->columnCount(), liveColumns.size());
+            for (const auto& [xz, state] : liveColumns) {
+                ColumnPos pos{xz.first, xz.second};
+                expectColumnMatches(*region, pos, state.seed, state.blocks, "random sequence check");
+                auto loaded = region->loadColumn(pos);
+                ASSERT_NE(loaded, nullptr);
+                auto reserialized = ColumnSerializer::toCBOR(*loaded, pos.x, pos.z);
+                EXPECT_EQ(reserialized, state.rawCbor);
+            }
+        }
+    }
+
+    // Final reopen and full verification
+    region.reset();
+    RegionFile finalRegion(tempDir, RegionPos{0, 0});
+    EXPECT_NO_THROW(finalRegion.validateFreeListInvariants());
+    EXPECT_EQ(finalRegion.columnCount(), liveColumns.size());
+    for (const auto& [xz, state] : liveColumns) {
+        ColumnPos pos{xz.first, xz.second};
+        expectColumnMatches(finalRegion, pos, state.seed, state.blocks, "final reopen check");
+    }
+}
+
 

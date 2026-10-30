@@ -56,6 +56,13 @@ glm::vec2 edgeScroll(glm::vec2 cursor, glm::vec2 viewport, float margin, bool sp
     return direction;
 }
 
+std::optional<double> groundLevel(std::vector<int32_t> heights) {
+    if (heights.empty()) return std::nullopt;
+    auto middle = heights.begin() + static_cast<std::ptrdiff_t>(heights.size() / 2);
+    std::nth_element(heights.begin(), middle, heights.end());
+    return static_cast<double>(*middle);
+}
+
 void TacticalCamera::setPivot(const glm::dvec3& pivot) {
     pivot_ = pivot;
     targetPivot_ = pivot;
@@ -96,6 +103,10 @@ void TacticalCamera::moveTarget(const glm::vec2& move) {
     }
 }
 
+void TacticalCamera::followGround(double y) {
+    if (std::abs(y - targetPivot_.y) > GROUND_DEADBAND) targetPivot_.y = y;
+}
+
 void TacticalCamera::orbit(float yawRadians, float pitchRadians) {
     yaw_ += yawRadians;
     pitch_ = std::clamp(pitch_ + pitchRadians, MIN_PITCH, MAX_PITCH);
@@ -119,7 +130,10 @@ void TacticalCamera::setBounds(const glm::vec2& min, const glm::vec2& max) {
 void TacticalCamera::update(float dt) {
     // Exponential smoothing: frame-rate independent, no overshoot
     float blend = 1.0f - std::exp(-dt * 12.0f);
-    pivot_ += (targetPivot_ - pivot_) * double(blend);
+    float climb = 1.0f - std::exp(-dt * 3.0f);    // Slower: a pan is the player's, a hill isn't
+    pivot_.x += (targetPivot_.x - pivot_.x) * blend;
+    pivot_.z += (targetPivot_.z - pivot_.z) * blend;
+    pivot_.y += (targetPivot_.y - pivot_.y) * climb;
     distance_ += (targetDistance_ - distance_) * blend;
 }
 

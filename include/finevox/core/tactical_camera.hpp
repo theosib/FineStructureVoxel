@@ -10,6 +10,7 @@
 
 #include <glm/glm.hpp>
 #include <optional>
+#include <vector>
 
 namespace finevox {
 
@@ -46,11 +47,18 @@ struct WorldRay {
 [[nodiscard]] glm::vec2 edgeScroll(glm::vec2 cursor, glm::vec2 viewport, float margin,
                                    bool spansScreen);
 
+/// The ground under an area, from the height of each column sampled across it. The median, so
+/// the odd tree, tower, or pit in the area has no say at all. nullopt if there are no samples.
+[[nodiscard]] std::optional<double> groundLevel(std::vector<int32_t> heights);
+
 /// Orbit camera around a ground pivot: pan moves the pivot, zoom changes the arm.
 class TacticalCamera {
 public:
     void setPivot(const glm::dvec3& pivot);
-    void setPivotHeight(double y) { targetPivot_.y = y; }
+
+    /// Ride at this ground level. Height glides rather than following pans at speed, and a
+    /// change smaller than GROUND_DEADBAND is ignored, so uneven ground doesn't bob the view.
+    void followGround(double y);
 
     /// Pan along the ground, in the camera's own forward/right axes. Units are
     /// world blocks, scaled by the caller for zoom-independent feel if wanted.
@@ -86,6 +94,7 @@ public:
     static constexpr float MAX_DISTANCE = 160.0f;
     static constexpr float MIN_PITCH = 0.35f;   ///< Radians below horizontal
     static constexpr float MAX_PITCH = 1.45f;
+    static constexpr double GROUND_DEADBAND = 2.0;  ///< Blocks
 
 private:
     void moveTarget(const glm::vec2& move);

@@ -167,6 +167,7 @@ struct GameClient::Impl {
 
     InputActionSystem inputActions;
     bool panLeft = false, panRight = false, panForward = false, panBack = false;
+    float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
     glm::vec2 grabCursor{0.0f};
     bool orbitLeft = false, orbitRight = false;
@@ -202,6 +203,7 @@ struct GameClient::Impl {
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
     bool handleAction(const ActionResult& result);
+    [[nodiscard]] std::vector<int32_t> groundHeightsAround(const glm::dvec3& centre) const;
 
     uint32_t symFrame = 0, symMouse = 0, symAction = 0, symState = 0, symKey = 0;
 };
@@ -645,15 +647,13 @@ void GameClient::Impl::updateCamera(float dt) {
     if (orbitLeft) tactical.orbit(CAMERA_ORBIT_SPEED * dt, 0.0f);
     if (orbitRight) tactical.orbit(-CAMERA_ORBIT_SPEED * dt, 0.0f);
 
-    // Keep the pivot on the ground so zooming goes where you're looking
-    glm::dvec3 target = tactical.targetPivot();
-    World& world = runtime.replica().world();
-    int32_t tx = static_cast<int32_t>(std::floor(target.x));
-    int32_t tz = static_cast<int32_t>(std::floor(target.z));
-    for (int32_t y = 200; y > 0; --y) {
-        if (!world.getBlock(tx, y, tz).isAir()) {
-            tactical.setPivotHeight(double(y + 1));
-            break;
+    // Keep the pivot on the ground so zooming goes where you're looking. No hurry: this is
+    // a slow glide, and looking at each column takes a moment.
+    groundCheckIn -= dt;
+    if (groundCheckIn <= 0.0f) {
+        groundCheckIn = 0.1f;
+        if (auto ground = groundLevel(groundHeightsAround(tactical.targetPivot()))) {
+            tactical.followGround(*ground);
         }
     }
     tactical.update(dt);
@@ -664,6 +664,41 @@ void GameClient::Impl::updateCamera(float dt) {
 
     view = makeViewBasis(tactical.position(), tactical.forward(), FOV_DEGREES,
                          viewport.x / std::max(viewport.y, 1.0f));
+}
+
+std::vector<int32_t> GameClient::Impl::groundHeightsAround(const glm::dvec3& centre) const {
+    // A grid across about a third of what's on screen, so that wider views steer by wider land
+    constexpr int32_t REACH = 3;
+    int32_t step = std::clamp(static_cast<int32_t>(tactical.distance() * 0.1f), 2, 10);
+    int32_t centreX = static_cast<int32_t>(std::floor(centre.x));
+    int32_t centreZ = static_cast<int32_t>(std::floor(centre.z));
+
+    const World& world = runtime.replica().world();
+    const BlockRegistry& registry = BlockRegistry::global();
+    std::vector<int32_t> heights;
+    heights.reserve((REACH * 2 + 1) * (REACH * 2 + 1));
+
+    for (int32_t dz = -REACH; dz <= REACH; ++dz) {
+        for (int32_t dx = -REACH; dx <= REACH; ++dx) {
+            int32_t x = centreX + dx * step;
+            int32_t z = centreZ + dz * step;
+            const ChunkColumn* column = world.getColumn(ColumnPos(x >> 4, z >> 4));
+            auto bounds = column ? column->getYBounds() : std::nullopt;
+            if (!bounds) continue;  // Never seen, which says nothing about the ground here
+
+            // Down to something solid or a water surface. Foliage lets the eye through,
+            // and a lake's bed is not where anyone thinks the land is.
+            for (int32_t y = bounds->second * 16 + 15; y >= bounds->first * 16; --y) {
+                BlockTypeId block = column->getBlock(x, y, z);
+                if (world.hasFluid(BlockCoord(x, y, z)) ||
+                    (!block.isAir() && registry.getType(block).isOpaque())) {
+                    heights.push_back(y + 1);
+                    break;
+                }
+            }
+        }
+    }
+    return heights;
 }
 
 void GameClient::Impl::buildScene() {
@@ -882,6 +917,12 @@ void GameClient::Impl::registerNatives() {
             tactical.setPivot(glm::dvec3(number(args[0]), tactical.pivot().y, number(args[1])));
         }
         return Value::nil();
+    });
+
+    e.registerFunction("cam_pivot", [this](ExecutionContext&, const Args&) -> Value {
+        glm::dvec3 pivot = tactical.pivot();
+        return Value::array(std::vector<Value>{Value::number(pivot.x), Value::number(pivot.y),
+                                               Value::number(pivot.z)});
     });
 
     e.registerFunction("cam_set", [this](ExecutionContext&, const Args& args) -> Value {

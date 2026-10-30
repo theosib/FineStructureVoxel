@@ -2,6 +2,7 @@
 #include "finevox/core/tactical_camera.hpp"
 
 #include <cmath>
+#include <vector>
 
 using namespace finevox;
 
@@ -203,6 +204,101 @@ TEST(TacticalCameraGrab, IgnoresACursorAboveTheHorizon) {
     glm::dvec3 before = cam.targetPivot();
     cam.grab(rigView(cam), VIEWPORT * 0.5f, glm::vec2(VIEWPORT.x * 0.5f, 0.0f), VIEWPORT);
     EXPECT_EQ(cam.targetPivot(), before);
+}
+
+TEST(GroundLevel, IgnoresTheOddTallOrLowColumn) {
+    std::vector<int32_t> field(49, 64);
+    EXPECT_EQ(groundLevel(field), 64.0);
+
+    // A tree, a tower, and a pit in the sampled area
+    field[3] = 72;
+    field[20] = 90;
+    field[41] = 50;
+    EXPECT_EQ(groundLevel(field), 64.0);
+}
+
+TEST(GroundLevel, FollowsWhatMostOfTheAreaIs) {
+    std::vector<int32_t> field(49, 64);
+    for (int i = 0; i < 30; ++i) field[i] = 70;
+    EXPECT_EQ(groundLevel(field), 70.0);
+}
+
+TEST(GroundLevel, NothingSampledIsNoAnswer) {
+    EXPECT_FALSE(groundLevel({}).has_value());
+}
+
+TEST(TacticalCameraGround, SmallChangesDoNotMoveTheCamera) {
+    TacticalCamera cam;
+    cam.setPivot(glm::dvec3(0.0, 64.0, 0.0));
+    for (double y : {65.0, 63.0, 66.0, 62.0}) {
+        cam.followGround(y);
+        cam.update(10.0f);
+        EXPECT_EQ(cam.pivot().y, 64.0) << "ground at " << y;
+    }
+}
+
+TEST(TacticalCameraGround, RealChangesAreGlidedTo) {
+    TacticalCamera cam;
+    cam.setPivot(glm::dvec3(0.0, 64.0, 0.0));
+    cam.followGround(80.0);
+
+    cam.update(1.0f / 60.0f);
+    double oneFrame = cam.pivot().y - 64.0;
+    EXPECT_GT(oneFrame, 0.0);
+    EXPECT_LT(oneFrame, 1.0) << "a sudden sixteen block rise must not lurch";
+
+    for (int i = 0; i < 240; ++i) cam.update(1.0f / 60.0f);
+    EXPECT_NEAR(cam.pivot().y, 80.0, 0.01);
+}
+
+TEST(TacticalCameraGround, FollowingHeightLeavesPanningAtFullSpeed) {
+    TacticalCamera cam;
+    cam.setPivot(glm::dvec3(0.0, 64.0, 0.0));
+    cam.followGround(80.0);
+    cam.pan(20.0f, 0.0f);
+    for (int i = 0; i < 30; ++i) cam.update(1.0f / 60.0f);
+
+    double panned = glm::length(glm::dvec2(cam.pivot().x, cam.pivot().z));
+    double climbed = cam.pivot().y - 64.0;
+    EXPECT_GT(panned / 20.0, 0.95);
+    EXPECT_LT(climbed / 16.0, 0.85);
+}
+
+// A long pan over a gentle ridge with a tree every few columns, as the camera used to see it
+// and as it does now. The ridge is 12 blocks high, so that's the travel an ideal camera does.
+TEST(TacticalCameraGround, PanningOverTreesDoesNotBob) {
+    auto terrain = [](int x) { return 64 + static_cast<int>(6.0 + 6.0 * std::sin(x * 0.02)); };
+    auto topBlock = [&](int x) { return terrain(x) + (x % 7 == 0 ? 7 : 0); };
+
+    auto travel = [&](auto&& followAt) {
+        TacticalCamera cam;
+        cam.setPivot(glm::dvec3(0.0, terrain(0), 0.0));
+        double total = 0.0;
+        double last = cam.pivot().y;
+        for (int x = 0; x < 300; ++x) {
+            followAt(cam, x);
+            cam.update(1.0f / 30.0f);
+            total += std::abs(cam.pivot().y - last);
+            last = cam.pivot().y;
+        }
+        return total;
+    };
+
+    double sampled = travel([&](TacticalCamera& cam, int x) {
+        std::vector<int32_t> heights;
+        for (int dz = 0; dz < 7; ++dz) {
+            for (int dx = -3; dx <= 3; ++dx) {
+                // Trees scattered in z as well as x, so each row sees different ones
+                int cx = x + dx * 6;
+                heights.push_back(terrain(cx) + ((cx + dz * 3) % 7 == 0 ? 7 : 0));
+            }
+        }
+        cam.followGround(*groundLevel(std::move(heights)));
+    });
+    double singleColumn = travel([&](TacticalCamera& cam, int x) { cam.followGround(topBlock(x)); });
+
+    EXPECT_LT(sampled, 40.0) << "the land itself accounts for at most ~24 of this";
+    EXPECT_LT(sampled, singleColumn * 0.5);
 }
 
 TEST(TacticalCameraRig, SmoothingIsFrameRateIndependent) {

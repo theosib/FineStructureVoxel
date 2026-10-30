@@ -177,6 +177,7 @@ entity_pos id   entity_faction id  set_faction_color id r g b
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
+cam_pivot -> [x y z]
 request_screenshot path    quit_game
 ```
 

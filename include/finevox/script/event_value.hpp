@@ -152,6 +152,9 @@ constexpr const char* EVT_PARTICLE_SPAWN = "particle_spawn";
 constexpr const char* EVT_PARTICLE_DESPAWN = "particle_despawn";
 constexpr const char* EVT_PARTICLE_BURST = "particle_burst";
 
+// Game-defined command, opaque to the engine
+constexpr const char* EVT_GAME_COMMAND = "game_command";
+
 // ============================================================================
 // Command/Action Event Builders (Graphics thread → Game thread)
 // ============================================================================
@@ -268,6 +271,10 @@ finescript::Value makeParticleDespawnValue(uint32_t emitterId);
 
 /** Build a one-shot particle burst command at a world position. */
 finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos);
+
+/// Wrap a game-defined command for transport; read back with readGameCommandBody
+finescript::Value makeGameCommandValue(finescript::Value body);
+finescript::Value readGameCommandBody(const finescript::Value& event);
 
 // ============================================================================
 // BlockCoord convenience overload for sound events

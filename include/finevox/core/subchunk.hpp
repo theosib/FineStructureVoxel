@@ -67,6 +67,10 @@ public:
     [[nodiscard]] BlockTypeId getBlock(LocalBlockCoord pos) const;
     [[nodiscard]] BlockTypeId getBlock(uint16_t index) const;
     // Convenience overload for int32_t coordinates
+    /// Cheap presence test: true if any block here is this type. Lets searches skip
+    /// whole subchunks without touching their 4096 cells.
+    [[nodiscard]] bool hasBlockType(BlockTypeId type) const { return palette_.contains(type); }
+
     [[nodiscard]] BlockTypeId getBlock(int32_t x, int32_t y, int32_t z) const {
         return getBlock(LocalBlockCoord{x, y, z});
     }

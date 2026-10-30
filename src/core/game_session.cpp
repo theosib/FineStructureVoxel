@@ -118,6 +118,10 @@ void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos) {
     sendAction(makeParticleBurstValue(preset, pos));
 }
 
+void GameActions::sendGameCommand(finescript::Value command) {
+    sendAction(makeGameCommandValue(std::move(command)));
+}
+
 // ============================================================================
 // LocalGameActions — single-player implementation
 //
@@ -272,6 +276,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
                            FluidTickManager* fluidTickManager,
                            ParticleSystem* particles,
                            EventBus* eventBus,
+                           const std::function<void(const finescript::Value&)>& gameCommandHandler,
                            const finescript::Value& cmd) {
     auto typeStr = readEventType(cmd);
 
@@ -551,6 +556,9 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         glm::dvec3 position = readDVec3(cmd, s.pos_x, s.pos_y, s.pos_z);
         particles->burst(preset, position);
     }
+    else if (typeStr == EVT_GAME_COMMAND) {
+        if (gameCommandHandler) gameCommandHandler(readGameCommandBody(cmd));
+    }
 }
 
 // ============================================================================
@@ -640,6 +648,7 @@ struct GameSession::Impl {
 
     // EventBus
     std::shared_ptr<EventBus> eventBus;
+    std::function<void(const finescript::Value&)> gameCommandHandler;
 
     // Registered subsystems (sorted by phase/priority)
     std::vector<std::shared_ptr<GameSubsystem>> subsystems;
@@ -687,7 +696,7 @@ struct GameSession::Impl {
         for (const auto& cmd : commands) {
             executeCommand(*world, *scheduler, *entityManager, *worldTime,
                            fluidTickManager.get(), particleSystem.get(),
-                           eventBus.get(), cmd);
+                           eventBus.get(), gameCommandHandler, cmd);
         }
         scheduler->processEvents();
     }
@@ -989,6 +998,10 @@ SoundEventQueue& GameSession::soundEvents() { return *impl_->soundQueue; }
 GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue; }
 
 EventBus& GameSession::eventBus() { return *impl_->eventBus; }
+
+void GameSession::setGameCommandHandler(std::function<void(const finescript::Value&)> handler) {
+    impl_->gameCommandHandler = std::move(handler);
+}
 
 finenet::Connection& GameSession::clientConnection() { return *impl_->clientConnection; }
 const finenet::Connection& GameSession::clientConnection() const { return *impl_->clientConnection; }

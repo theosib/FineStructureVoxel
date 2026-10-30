@@ -4,7 +4,8 @@ namespace finevox {
 
 void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                                 std::vector<EntityVertex>& vertices,
-                                std::vector<uint32_t>& indices) const
+                                std::vector<uint32_t>& indices,
+                                const glm::vec3& teamColor) const
 {
     vertices.clear();
     indices.clear();
@@ -72,6 +73,7 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                 v.position = glm::vec3(worldPos);
                 v.normal = transformedNormal;
                 v.texCoord = part.uvOffset + faceUVs[c] * part.uvSize;
+                v.color = glm::mix(part.color, teamColor, part.teamTint);
                 vertices.push_back(v);
             }
 

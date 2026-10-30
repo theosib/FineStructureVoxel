@@ -40,6 +40,7 @@ void EntityRenderer::processEvents(GraphicsEventQueue& queue) {
 void EntityRenderer::update(float dt, const glm::dvec3& /*cameraPos*/) {
     for (auto& [id, state] : entities_) {
         if (!state.active) continue;
+        state.timeSinceSnapshot += dt;
         state.animator.update(dt);
     }
 }

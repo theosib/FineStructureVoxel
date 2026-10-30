@@ -1,4 +1,5 @@
 #include "finevox/core/entity_render_state.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace finevox {
@@ -19,6 +20,18 @@ float EntityRenderState::interpolatedPitch(float alpha) const {
     return prevPitch + (currentPitch - prevPitch) * alpha;
 }
 
+float EntityRenderState::interpolationAlpha(float tickRate) const {
+    return std::min(1.0f, timeSinceSnapshot * tickRate);
+}
+
+float EntityRenderState::interpolatedYawRadians(float alpha) const {
+    constexpr float PI = 3.14159265f;
+    float diff = currentYaw - prevYaw;
+    while (diff > PI) diff -= 2.0f * PI;
+    while (diff < -PI) diff += 2.0f * PI;
+    return prevYaw + diff * alpha;
+}
+
 void EntityRenderState::applySnapshot(const EntityState& state) {
     // Shift current to previous
     prevPosition = currentPosition;
@@ -29,6 +42,9 @@ void EntityRenderState::applySnapshot(const EntityState& state) {
     currentPosition = state.position;
     currentYaw = state.yaw;
     currentPitch = state.pitch;
+    velocity = state.velocity;
+    faction = state.faction;
+    timeSinceSnapshot = 0.0f;
 }
 
 }  // namespace finevox

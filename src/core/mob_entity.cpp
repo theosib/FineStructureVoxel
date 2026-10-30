@@ -116,6 +116,7 @@ void MobEntity::tick(float dt, World& world) {
 
     // Apply movement toward target
     updateMovement(dt);
+    updateLocomotionAnimation();
 
     // Check for death.  The hook fires exactly once per death (latch reset
     // by heal()/setHealth when HP climbs back above zero so respawn works).
@@ -180,6 +181,23 @@ void MobEntity::updateMovement(float dt) {
 
     // Face movement direction
     yaw_ = std::atan2(dirX, dirZ);
+}
+
+void MobEntity::updateLocomotionAnimation() {
+    // Types opt in by naming a "walk" state. Anything else playing (a scripted
+    // "work" swing) is left alone until it ends.
+    const auto* def = typeDef();
+    if (!def) return;
+    auto walk = def->animationStates.find("walk");
+    if (walk == def->animationStates.end()) return;
+    auto idle = def->animationStates.find("idle");
+    uint8_t idleSlot = idle == def->animationStates.end() ? uint8_t{0} : idle->second;
+
+    if (hasMoveTarget_) {
+        if (animationId_ == idleSlot) setAnimation(walk->second);
+    } else if (animationId_ == walk->second) {
+        setAnimation(idleSlot);
+    }
 }
 
 void MobEntity::setHealth(float hp) {

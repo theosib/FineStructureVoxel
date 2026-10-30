@@ -103,6 +103,7 @@ GameScriptEngine::GameScriptEngine(World& world)
     registerMobNativeFunctions();
     registerSpatialNativeFunctions();
     registerCombatNativeFunctions();
+    registerUnitNativeFunctions();
 }
 
 GameScriptEngine::~GameScriptEngine() {

@@ -183,6 +183,9 @@ private:
     /// Apply movement toward target
     void updateMovement(float dt);
 
+    /// Switch between idle and walk states as movement starts and stops
+    void updateLocomotionAnimation();
+
     /// Initialize from type definition
     void initFromTypeDef();
 };

@@ -26,7 +26,14 @@ class EntityManager;
 class FluidTickManager;
 }
 
+namespace finevox {
+class NavigationSystem;
+class WorkClaimRegistry;
+}
+
 namespace finevox::script {
+
+class ScriptGameSubsystem;
 
 /// User data passed through ExecutionContext::setUserData()
 struct ScriptUserData {
@@ -35,6 +42,9 @@ struct ScriptUserData {
     MobEntity* entityCtx = nullptr;
     EntityManager* entityManager = nullptr;
     FluidTickManager* fluidTicks = nullptr;
+    NavigationSystem* navigation = nullptr;
+    WorkClaimRegistry* workClaims = nullptr;
+    ScriptGameSubsystem* gameScript = nullptr;
 };
 
 class GameScriptEngine {
@@ -70,6 +80,15 @@ public:
     /// Set fluid tick manager reference (for script fluid/block notifications)
     void setFluidTickManager(FluidTickManager* ftm);
 
+    /// Set navigation service (for ent_goto and friends)
+    void setNavigation(NavigationSystem* nav) { userData_.navigation = nav; }
+
+    /// Set work claim registry (for claim_block and friends)
+    void setWorkClaims(WorkClaimRegistry* claims) { userData_.workClaims = claims; }
+
+    /// Shared user data for contexts created outside this class
+    [[nodiscard]] ScriptUserData& userData() { return userData_; }
+
     /// Load entity scripts for all registered entity types with script fields
     void loadEntityScriptsFromRegistry();
 
@@ -81,6 +100,7 @@ private:
     void registerMobNativeFunctions();
     void registerSpatialNativeFunctions();
     void registerCombatNativeFunctions();
+    void registerUnitNativeFunctions();
 
     std::unique_ptr<finescript::ScriptEngine> engine_;
     FineVoxInterner interner_;

@@ -449,6 +449,20 @@ finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos
     return v;
 }
 
+finescript::Value makeGameCommandValue(finescript::Value body) {
+    static const uint32_t bodyKey = StringInterner::global().intern("body");
+    auto v = makeMap();
+    auto& m = v.asMap();
+    setType(m, EVT_GAME_COMMAND);
+    m.set(bodyKey, std::move(body));
+    return v;
+}
+
+finescript::Value readGameCommandBody(const finescript::Value& event) {
+    static const uint32_t bodyKey = StringInterner::global().intern("body");
+    return event.asMap().get(bodyKey);
+}
+
 finescript::Value makeEntityAnimationValue(EntityId id, uint8_t animId, float time) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();

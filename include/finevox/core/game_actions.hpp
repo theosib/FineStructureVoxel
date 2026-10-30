@@ -78,6 +78,11 @@ public:
 
     /// Fire a one-shot particle burst at a world position.
     virtual void particleBurst(std::string_view preset, glm::dvec3 pos);
+
+    /// Send a game-defined command. The engine routes it unopened to
+    /// GameSession's game command handler on the game thread. The value must not
+    /// be shared with the calling thread afterwards.
+    virtual void sendGameCommand(finescript::Value command);
 };
 
 }  // namespace finevox

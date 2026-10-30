@@ -3,6 +3,7 @@
 #include "finevox/core/game_actions.hpp"
 #include <finenet/connection.hpp>
 #include <finescript/value.h>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -103,6 +104,11 @@ public:
     const finenet::Connection& clientConnection() const;
     finenet::Connection& serverConnection();
     const finenet::Connection& serverConnection() const;
+
+    // === Game Commands ===
+    /// Handler for commands from GameActions::sendGameCommand (game thread).
+    /// Set before startGameThread().
+    void setGameCommandHandler(std::function<void(const finescript::Value&)> handler);
 
     // === Subsystem Management ===
     /// Add a game subsystem. Sorted by (phase, priority) at insertion time.

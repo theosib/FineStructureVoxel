@@ -23,6 +23,7 @@ struct EntityVertex {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texCoord;
+    glm::vec3 color{1.0f};
 };
 
 // ============================================================================
@@ -35,6 +36,8 @@ struct EntityMeshPart {
     glm::vec3 size{1.0f};       // Full box dimensions (width, height, depth)
     glm::vec2 uvOffset{0.0f};   // UV start on texture atlas
     glm::vec2 uvSize{1.0f};     // UV dimensions for one face
+    glm::vec3 color{1.0f};      // Flat colour, for models that aren't textured
+    float teamTint = 0.0f;      // 0..1 blend from color toward the faction colour
 };
 
 // ============================================================================
@@ -49,7 +52,8 @@ public:
     /// Each part produces 24 vertices (4 per face × 6 faces) and 36 indices
     void buildVertices(const std::vector<glm::mat4>& worldPoses,
                        std::vector<EntityVertex>& vertices,
-                       std::vector<uint32_t>& indices) const;
+                       std::vector<uint32_t>& indices,
+                       const glm::vec3& teamColor = glm::vec3(1.0f)) const;
 
     [[nodiscard]] size_t partCount() const { return parts.size(); }
     [[nodiscard]] bool isEmpty() const { return parts.empty(); }

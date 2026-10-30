@@ -106,6 +106,7 @@ add_library(finevox SHARED
     src/core/mob_entity.cpp
     src/core/pathfinder.cpp
     src/core/navigation.cpp
+    src/core/work_claims.cpp
     src/core/entity_senses.cpp
     src/core/ai_goals.cpp
     src/core/skeleton.cpp
@@ -113,6 +114,8 @@ add_library(finevox SHARED
     src/core/animation_controller.cpp
     src/core/skeleton_loader.cpp
     src/core/entity_mesh.cpp
+    src/core/entity_model.cpp
+    src/core/tactical_camera.cpp
     src/core/entity_render_state.cpp
     src/render/entity_renderer.cpp
     src/core/spawn_manager.cpp
@@ -198,6 +201,8 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/inventory_bridge.cpp
         src/script/player_stats_bridge.cpp
         src/script/particle_bridge.cpp
+        src/script/unit_natives.cpp
+        src/script/script_game_subsystem.cpp
     )
 
     # finevox already provides include dirs and finescript PUBLIC
@@ -257,6 +262,32 @@ target_compile_options(finevox_worldgen PRIVATE
 )
 
 target_link_libraries(finevox_worldgen PUBLIC finevox)
+
+# ============================================================================
+# Game Runtime (namespace: finevox::game) - manifest-driven, no GPU dependency
+# ============================================================================
+
+if(TARGET finevox_script)
+    add_library(finevox_game SHARED
+        src/game/game_manifest.cpp
+        src/game/game_runtime.cpp
+    )
+
+    target_include_directories(finevox_game PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+
+    target_compile_options(finevox_game PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    )
+
+    target_link_libraries(finevox_game PUBLIC finevox finevox_worldgen finevox_script)
+
+    add_executable(finevox_headless apps/finevox_headless.cpp)
+    target_link_libraries(finevox_headless PRIVATE finevox_game)
+endif()
 
 # ============================================================================
 # Vulkan Render Module (namespace: finevox::render)
@@ -596,6 +627,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_mob_event_hooks.cpp
         tests/test_ai_goal_params.cpp
         tests/test_navigation.cpp
+        tests/test_tactical_camera.cpp
+        tests/test_entity_model.cpp
         tests/test_navigation.cpp
         tests/test_ai_driver.cpp
         tests/test_entity_spatial_index.cpp

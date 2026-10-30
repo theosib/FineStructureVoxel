@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <memory>
 #include "finevox/core/region_file.hpp"
 #include "finevox/core/serialization.hpp"
 #include <filesystem>
@@ -37,12 +38,12 @@ protected:
 
     // Build a column whose content is a deterministic function of `seed`.
     // `blocks` controls the serialized payload size.
-    static ChunkColumn makeColumn(ColumnPos pos, int seed, int blocks = 16) {
-        ChunkColumn col(pos);
+    static std::unique_ptr<ChunkColumn> makeColumn(ColumnPos pos, int seed, int blocks = 16) {
+        auto col = std::make_unique<ChunkColumn>(pos);
         BlockTypeId type = BlockTypeId::fromName(
             "test:block_" + std::to_string(seed % 4));
         for (int i = 0; i < blocks; ++i) {
-            col.setBlock(i % 16, (i / 16) % 64, (seed + i) % 16, type);
+            col->setBlock(i % 16, (i / 16) % 64, (seed + i) % 16, type);
         }
         return col;
     }
@@ -50,7 +51,8 @@ protected:
     // Verify that a column reads back with exactly the content makeColumn produced.
     static void expectColumnMatches(RegionFile& region, ColumnPos pos, int seed,
                                     int blocks, const char* what) {
-        ChunkColumn expected = makeColumn(pos, seed, blocks);
+        auto expectedColumn = makeColumn(pos, seed, blocks);
+        ChunkColumn& expected = *expectedColumn;
         auto loaded = region.loadColumn(pos);
         ASSERT_NE(loaded, nullptr) << what << ": column (" << pos.x << ", " << pos.z
                                    << ") failed to load";
@@ -91,7 +93,7 @@ TEST_F(RegionFreeSpaceTest, SecondColumnMustNotOverwriteLiveSpanOfFirst) {
     {
         RegionFile region(tempDir, RegionPos{0, 0});
         for (int i = 0; i < 3; ++i) {
-            ASSERT_TRUE(region.saveColumn(makeColumn(posA, seedA, blocksA), posA))
+            ASSERT_TRUE(region.saveColumn(*makeColumn(posA, seedA, blocksA), posA))
                 << "save #" << (i + 1) << " failed";
         }
     }
@@ -103,7 +105,7 @@ TEST_F(RegionFreeSpaceTest, SecondColumnMustNotOverwriteLiveSpanOfFirst) {
         // Sanity: A is intact right after reopening.
         expectColumnMatches(region, posA, seedA, blocksA, "after reopen");
 
-        ASSERT_TRUE(region.saveColumn(makeColumn(posB, seedB, blocksB), posB));
+        ASSERT_TRUE(region.saveColumn(*makeColumn(posB, seedB, blocksB), posB));
 
         // The whole point: A must still be A, checked on block contents and
         // not merely on loadColumn() returning non-null.
@@ -165,7 +167,7 @@ TEST_F(RegionFreeSpaceTest, WritingAColumnNeverDisturbsAnyOtherLiveColumn) {
             }
 
             const Write& w = writes[i];
-            ASSERT_TRUE(region->saveColumn(makeColumn(w.pos, w.seed, w.blocks), w.pos));
+            ASSERT_TRUE(region->saveColumn(*makeColumn(w.pos, w.seed, w.blocks), w.pos));
             expected[{w.pos.x, w.pos.z}] = {w.seed, w.blocks};
 
             // INVARIANT CHECK: no live column has been disturbed by this write.
@@ -200,13 +202,13 @@ TEST_F(RegionFreeSpaceTest, RepeatedOverwriteDoesNotGrowDataFileWithoutBound) {
 
     RegionFile region(tempDir, RegionPos{0, 0});
 
-    ASSERT_TRUE(region.saveColumn(makeColumn(pos, 0, blocks), pos));
+    ASSERT_TRUE(region.saveColumn(*makeColumn(pos, 0, blocks), pos));
     const uint64_t oneColumnSize = region.dataFileSize();
     ASSERT_GT(oneColumnSize, 0u);
 
     for (int i = 0; i < 200; ++i) {
         // Same seed => byte-identical payload each time.
-        ASSERT_TRUE(region.saveColumn(makeColumn(pos, 0, blocks), pos));
+        ASSERT_TRUE(region.saveColumn(*makeColumn(pos, 0, blocks), pos));
     }
 
     // A leak-free allocator settles at a small multiple of one column's size.
@@ -223,7 +225,7 @@ TEST_F(RegionFreeSpaceTest, RepeatedOverwriteDoesNotGrowDataFileWithoutBound) {
     for (int restart = 0; restart < 5; ++restart) {
         RegionFile reopened(tempDir, RegionPos{0, 0});
         for (int i = 0; i < 20; ++i) {
-            ASSERT_TRUE(reopened.saveColumn(makeColumn(pos, 0, blocks), pos));
+            ASSERT_TRUE(reopened.saveColumn(*makeColumn(pos, 0, blocks), pos));
         }
         expectColumnMatches(reopened, pos, 0, blocks, "after restart overwrites");
         EXPECT_LE(reopened.dataFileSize(), sizeBefore + oneColumnSize)
@@ -269,7 +271,8 @@ TEST_F(RegionFreeSpaceTest, SeededRandomOperationSequencePreservesAllLiveColumns
             ColumnPos pos{coordDist(rng), coordDist(rng)};
             int seed = step + 1;
             int blocks = blocksDist(rng);
-            ChunkColumn col = makeColumn(pos, seed, blocks);
+            auto column = makeColumn(pos, seed, blocks);
+            ChunkColumn& col = *column;
             auto cbor = ColumnSerializer::toCBOR(col, pos.x, pos.z);
 
             ASSERT_TRUE(region->saveColumnRaw(pos, cbor));

@@ -15,6 +15,7 @@
 #include "finevox/core/name_registry.hpp"
 #include "finevox/core/entity_state.hpp"
 #include <unordered_map>
+#include "finevox/core/column_index.hpp"
 #include <memory>
 #include <shared_mutex>
 #include <functional>
@@ -287,7 +288,18 @@ public:
     [[nodiscard]] const NameRegistry& nameRegistry() const { return nameRegistry_; }
 
 private:
+    /// Writers hold this. Readers don't: every lookup goes through columnIndex_, and with
+    /// no column manager attached a block or fluid read takes no lock at all.
     mutable std::shared_mutex columnMutex_;
+    ColumnIndex columnIndex_;
+
+    /// Taken out of the world but maybe still being read. Freed with the world.
+    std::vector<std::unique_ptr<ChunkColumn>> removedColumns_;
+
+    [[nodiscard]] ChunkColumn* findColumn(ColumnPos pos) const;
+    /// Callers hold columnMutex_ exclusively
+    ChunkColumn& addColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column);
+    void retireColumn(uint64_t key);
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> columns_;
     ColumnGenerator columnGenerator_;
 

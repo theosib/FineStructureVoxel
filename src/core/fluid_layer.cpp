@@ -1,4 +1,5 @@
 #include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/shared_cell.hpp"
 #include <algorithm>
 #include <cstring>
 
@@ -13,15 +14,15 @@ uint8_t FluidPalette::addType(FluidTypeId type) {
 
     // Check if already in palette
     for (uint8_t i = 1; i <= MAX_ENTRIES; ++i) {
-        if (entries_[i] == type) return i;
+        if (sharedLoad(entries_[i]) == type) return i;
     }
 
     // Find first free slot
     if (activeCount_ >= MAX_ENTRIES) return 0;  // Full
 
     for (uint8_t i = 1; i <= MAX_ENTRIES; ++i) {
-        if (entries_[i].isEmpty()) {
-            entries_[i] = type;
+        if (sharedLoad(entries_[i]).isEmpty()) {
+            sharedStore(entries_[i], type);
             ++activeCount_;
             return i;
         }
@@ -34,8 +35,8 @@ void FluidPalette::removeType(FluidTypeId type) {
     if (type.isEmpty()) return;
 
     for (uint8_t i = 1; i <= MAX_ENTRIES; ++i) {
-        if (entries_[i] == type) {
-            entries_[i] = EMPTY_FLUID_TYPE;
+        if (sharedLoad(entries_[i]) == type) {
+            sharedStore(entries_[i], EMPTY_FLUID_TYPE);
             --activeCount_;
             return;
         }
@@ -44,14 +45,14 @@ void FluidPalette::removeType(FluidTypeId type) {
 
 FluidTypeId FluidPalette::getType(uint8_t localIndex) const {
     if (localIndex == 0 || localIndex > MAX_ENTRIES) return EMPTY_FLUID_TYPE;
-    return entries_[localIndex];
+    return sharedLoad(entries_[localIndex]);
 }
 
 uint8_t FluidPalette::getIndex(FluidTypeId type) const {
     if (type.isEmpty()) return 0;
 
     for (uint8_t i = 1; i <= MAX_ENTRIES; ++i) {
-        if (entries_[i] == type) return i;
+        if (sharedLoad(entries_[i]) == type) return i;
     }
     return 0;
 }
@@ -62,7 +63,7 @@ bool FluidPalette::contains(FluidTypeId type) const {
 }
 
 void FluidPalette::clear() {
-    entries_.fill(EMPTY_FLUID_TYPE);
+    for (FluidTypeId& entry : entries_) sharedStore(entry, EMPTY_FLUID_TYPE);
     activeCount_ = 0;
 }
 
@@ -75,7 +76,7 @@ FluidCell FluidLayer::getCell(int32_t x, int32_t y, int32_t z) const {
 }
 
 FluidCell FluidLayer::getCell(int32_t index) const {
-    return FluidCell::unpack(data_[index]);
+    return FluidCell::unpack(sharedLoad(data_[index]));
 }
 
 FluidTypeId FluidLayer::getFluidType(int32_t x, int32_t y, int32_t z) const {
@@ -83,7 +84,7 @@ FluidTypeId FluidLayer::getFluidType(int32_t x, int32_t y, int32_t z) const {
 }
 
 FluidTypeId FluidLayer::getFluidType(int32_t index) const {
-    auto cell = FluidCell::unpack(data_[index]);
+    auto cell = FluidCell::unpack(sharedLoad(data_[index]));
     return palette_.getType(cell.paletteIndex);
 }
 
@@ -92,7 +93,7 @@ uint8_t FluidLayer::getLevel(int32_t x, int32_t y, int32_t z) const {
 }
 
 uint8_t FluidLayer::getLevel(int32_t index) const {
-    auto cell = FluidCell::unpack(data_[index]);
+    auto cell = FluidCell::unpack(sharedLoad(data_[index]));
     return cell.level;
 }
 
@@ -101,7 +102,7 @@ bool FluidLayer::hasFluid(int32_t x, int32_t y, int32_t z) const {
 }
 
 bool FluidLayer::hasFluid(int32_t index) const {
-    return data_[index] != 0;
+    return sharedLoad(data_[index]) != 0;
 }
 
 bool FluidLayer::setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uint8_t level) {
@@ -109,7 +110,7 @@ bool FluidLayer::setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uin
 }
 
 bool FluidLayer::setFluid(int32_t index, FluidTypeId type, uint8_t level) {
-    auto oldCell = FluidCell::unpack(data_[index]);
+    auto oldCell = FluidCell::unpack(sharedLoad(data_[index]));
 
     // If setting to empty, use removeFluid
     if (type.isEmpty() || level == 0) {
@@ -132,11 +133,11 @@ bool FluidLayer::setFluid(int32_t index, FluidTypeId type, uint8_t level) {
     if (!oldCell.isEmpty()) {
         decrementPaletteRef(oldCell.paletteIndex);
     } else {
-        ++nonEmptyCount_;
+        nonEmptyCount_.fetch_add(1, std::memory_order_relaxed);
     }
 
     refCounts_[newPaletteIndex]++;
-    data_[index] = newCell.pack();
+    sharedStore(data_[index], newCell.pack());
     bumpVersion();
     return true;
 }
@@ -146,22 +147,22 @@ bool FluidLayer::removeFluid(int32_t x, int32_t y, int32_t z) {
 }
 
 bool FluidLayer::removeFluid(int32_t index) {
-    auto oldCell = FluidCell::unpack(data_[index]);
+    auto oldCell = FluidCell::unpack(sharedLoad(data_[index]));
     if (oldCell.isEmpty()) return false;
 
     decrementPaletteRef(oldCell.paletteIndex);
-    --nonEmptyCount_;
+    nonEmptyCount_.fetch_sub(1, std::memory_order_relaxed);
 
-    data_[index] = 0;
+    sharedStore(data_[index], uint8_t{0});
     bumpVersion();
     return true;
 }
 
 void FluidLayer::clear() {
-    std::memset(data_.data(), 0, data_.size());
+    for (uint8_t& cell : data_) sharedStore(cell, uint8_t{0});
     palette_.clear();
     refCounts_.fill(0);
-    nonEmptyCount_ = 0;
+    nonEmptyCount_.store(0, std::memory_order_relaxed);
     bumpVersion();
 }
 
@@ -170,12 +171,12 @@ void FluidLayer::setRawData(const std::array<uint8_t, VOLUME>& data) {
 
     // Rebuild ref counts and non-empty count from data
     refCounts_.fill(0);
-    nonEmptyCount_ = 0;
+    nonEmptyCount_.store(0, std::memory_order_relaxed);
 
     for (int32_t i = 0; i < VOLUME; ++i) {
-        auto cell = FluidCell::unpack(data_[i]);
+        auto cell = FluidCell::unpack(sharedLoad(data_[i]));
         if (!cell.isEmpty()) {
-            ++nonEmptyCount_;
+            nonEmptyCount_.fetch_add(1, std::memory_order_relaxed);
             refCounts_[cell.paletteIndex]++;
         }
     }

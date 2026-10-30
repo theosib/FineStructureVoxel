@@ -666,6 +666,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_projectile_system.cpp
         tests/test_work_claims.cpp
         tests/test_tactical_camera.cpp
+        tests/test_world_concurrency.cpp
         tests/test_entity_model.cpp
         tests/test_navigation.cpp
         tests/test_ai_driver.cpp

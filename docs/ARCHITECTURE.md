@@ -163,3 +163,35 @@ RenderSurface::deferDelete()  // safe cleanup from render thread
 | Light thread | LightEngine BFS propagation |
 | Audio thread | miniaudio callback (never call ma_sound_uninit from here) |
 | Fence-wait thread | FrameFenceWaiter: overlaps mesh processing with GPU fence wait |
+
+### World data: writers lock, readers don't
+
+Block, light, and fluid reads happen millions of times a second on every thread above, and on
+a server they'd multiply again by the clients. A `shared_mutex` around them doesn't share:
+readers still fight over its cache line, and eight threads got *less* done than one (970 ns a
+read against 35 ns). So the storage has three rules, and adding to it means keeping them:
+
+1. **Readers never block.** A read of a block, light level, or fluid is a few atomic loads.
+   `World`'s `columnMutex_` and `ChunkColumn`'s `slotMutex_` are for writers, and only writers.
+2. **Memory a reader can reach stays valid.** Nothing a reader might be inside is freed while
+   the world runs. A subchunk "removed" with its last block leaves the directory and stays
+   allocated for reuse; a `SubChunk*` is good for the life of its column. Palette buffers
+   outgrown, fluid layers removed, and index tables replaced all stay until their owner goes.
+3. **Stale is fine, torn is not.** A reader may see a value one update old. Whatever it fed
+   gets corrected by the version bump and rebuild that follow the write. The one ordering that
+   matters is that a palette entry is published before any block index that refers to it, so a
+   reader never sees a block type that was never there.
+
+`shared_cell.hpp` holds the access pattern for plain arrays. `ColumnIndex` is the lock-free
+lookup of columns; `columns_` next to it is the writers' copy. To check any of this, build with
+`-fsanitize=thread` and run the game: it should report nothing.
+
+Not yet covered by these rules:
+
+- With a `ColumnManager` attached (streaming worlds), a read that misses `columnIndex_` takes
+  the manager's lock, and an unloading column is freed with no thought for readers. Needs a
+  grace period before free: this is the next thing a multiplayer server would hit.
+- `BlockRegistry::getType` takes a `shared_mutex` per call, and the mesher calls it per face.
+  Types only change at startup, so it can freeze into a plain table.
+- `compactPalette` rewrites indices and palette non-atomically, and a mesh built during it can
+  stay wrong until the next change. Saving should compact a copy.

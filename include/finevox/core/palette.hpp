@@ -9,6 +9,9 @@
 
 #include <cstdint>
 #include <vector>
+#include <array>
+#include <atomic>
+#include <memory>
 #include <unordered_map>
 #include "finevox/core/string_interner.hpp"
 
@@ -36,6 +39,9 @@ public:
 
     SubChunkPalette();
 
+    SubChunkPalette(const SubChunkPalette&) = delete;
+    SubChunkPalette& operator=(const SubChunkPalette&) = delete;
+
     // Add a block type to palette, returning its local index
     // Returns existing index if already in palette
     // Reuses freed IDs from removeType() before allocating new ones
@@ -48,7 +54,12 @@ public:
 
     // Get global ID from local index
     // Returns AIR_BLOCK_TYPE if index invalid or slot is empty
-    [[nodiscard]] BlockTypeId getGlobalId(LocalIndex localIndex) const;
+    // Safe from any thread, during writes. Everything else here belongs to the writer.
+    [[nodiscard]] BlockTypeId getGlobalId(LocalIndex localIndex) const {
+        uint32_t capacity = readCapacity_.load(std::memory_order_acquire);
+        if (localIndex >= capacity) return AIR_BLOCK_TYPE;
+        return readEntries_.load(std::memory_order_acquire)[localIndex].load(std::memory_order_relaxed);
+    }
 
     // Get local index for a global ID
     // Returns INVALID_LOCAL_INDEX if not in palette
@@ -87,10 +98,25 @@ public:
     [[nodiscard]] bool needsCompaction() const { return !freeList_.empty(); }
 
 private:
+    // What readers see: palette_ again, in storage that stays put. A vector can't do this,
+    // since growing frees the buffer a reader may be in. Past the inline entries, each
+    // buffer is kept until the palette goes, at no more than double the final size.
+    // These come first and together: most subchunks read one cache line here.
+    static constexpr uint32_t INLINE_ENTRIES = 12;
+    using Entry = std::atomic<BlockTypeId>;
+
+    alignas(64) std::atomic<Entry*> readEntries_{nullptr};
+    std::atomic<uint32_t> readCapacity_{INLINE_ENTRIES};  // Never above readEntries_'s real size
+    std::array<Entry, INLINE_ENTRIES> inlineEntries_;
+
     std::vector<BlockTypeId> palette_;  // Index -> global ID (may have empty slots)
     std::unordered_map<BlockTypeId, LocalIndex> reverse_;  // Global ID -> index
     std::vector<LocalIndex> freeList_;  // Freed indices available for reuse
     LocalIndex maxIndex_ = 0;  // Highest index currently in use
+    std::vector<std::unique_ptr<Entry[]>> spilledEntries_;
+
+    void publish(LocalIndex index, BlockTypeId globalId);
+    void publishAll();
 };
 
 // Utility: compute ceil(log2(n)) - bits needed to represent values 0 to n-1

@@ -85,16 +85,16 @@ public:
     }
 
     // Check if subchunk is empty (no non-air blocks and no fluid)
-    [[nodiscard]] bool isEmpty() const { return nonAirCount_ == 0 && !hasFluid(); }
+    [[nodiscard]] bool isEmpty() const { return nonAirCount() == 0 && !hasFluid(); }
 
     // Check if subchunk has no non-air blocks (ignores fluid layer)
-    [[nodiscard]] bool isAirOnly() const { return nonAirCount_ == 0; }
+    [[nodiscard]] bool isAirOnly() const { return nonAirCount() == 0; }
 
     // Check if subchunk has any non-empty fluid cells
     [[nodiscard]] bool hasFluid() const;
 
     // Count of non-air blocks
-    [[nodiscard]] int32_t nonAirCount() const { return nonAirCount_; }
+    [[nodiscard]] int32_t nonAirCount() const { return nonAirCount_.load(std::memory_order_relaxed); }
 
     // Access to palette for serialization
     [[nodiscard]] const SubChunkPalette& palette() const { return palette_; }
@@ -403,11 +403,15 @@ public:
     // Clear the block change callback
     void clearBlockChangeCallback() { blockChangeCallback_ = nullptr; }
 
+    /// Back to a new subchunk, keeping the version counters running. A column calls this
+    /// on reusing one rather than freeing it, as readers may still be inside the old one.
+    void recycle();
+
 private:
     SubChunkPalette palette_;
     std::array<LocalIndex, VOLUME> blocks_;
     std::vector<uint32_t> usageCounts_;  // Reference count per local index
-    int32_t nonAirCount_ = 0;
+    std::atomic<int32_t> nonAirCount_{0};
 
     // Block version for mesh invalidation (starts at 1, incremented on each change)
     std::atomic<uint64_t> blockVersion_{1};
@@ -436,7 +440,11 @@ private:
     std::unique_ptr<DataContainer> data_;
 
     // Fluid layer: lazily allocated, null until first fluid placed (~4.1KB when allocated)
+    // Once made it stays for the life of the SubChunk, so readers can go through a published
+    // pointer with no lock. Removing the layer unpublishes it and reuse publishes it again.
     std::unique_ptr<FluidLayer> fluidLayer_;
+    std::atomic<FluidLayer*> publishedFluidLayer_{nullptr};
+    [[nodiscard]] FluidLayer* fluid() const { return publishedFluidLayer_.load(std::memory_order_acquire); }
 
     // Game tick registry: local indices of blocks that want game ticks
     // O(1) insert/remove/lookup via hash set

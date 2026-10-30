@@ -149,10 +149,10 @@ public:
     // ========================================================================
 
     /// Count of non-empty fluid cells
-    [[nodiscard]] uint16_t nonEmptyCount() const { return nonEmptyCount_; }
+    [[nodiscard]] uint16_t nonEmptyCount() const { return nonEmptyCount_.load(std::memory_order_relaxed); }
 
     /// Check if the layer has no fluid at all
-    [[nodiscard]] bool isEmpty() const { return nonEmptyCount_ == 0; }
+    [[nodiscard]] bool isEmpty() const { return nonEmptyCount_.load(std::memory_order_relaxed) == 0; }
 
     /// Access palette
     [[nodiscard]] const FluidPalette& palette() const { return palette_; }
@@ -176,7 +176,7 @@ private:
     // Packed data: upper 4 bits = palette index, lower 4 bits = level
     std::array<uint8_t, VOLUME> data_{};  // Zero-initialized (empty)
     FluidPalette palette_;
-    uint16_t nonEmptyCount_ = 0;
+    std::atomic<uint16_t> nonEmptyCount_{0};
     std::atomic<uint64_t> version_{1};
 
     /// Convert local coordinates to array index

@@ -1,9 +1,35 @@
 #include "finevox/core/subchunk.hpp"
+#include "finevox/core/shared_cell.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/fluid_layer.hpp"
 
 namespace finevox {
+
+namespace {
+
+template <typename Cell, size_t N>
+void fillBlocks(std::array<Cell, N>& cells, std::type_identity_t<Cell> value) {
+    for (Cell& cell : cells) sharedStore(cell, value, std::memory_order_release);
+}
+
+template <size_t N>
+void fillBytes(std::array<uint8_t, N>& cells, uint8_t value) {
+    for (uint8_t& cell : cells) sharedStore(cell, value);
+}
+
+}  // namespace
+
+void SubChunk::recycle() {
+    clear();
+    fillBytes(light_, 0);
+    lightVersion_.fetch_add(1, std::memory_order_release);
+    removeFluidLayer();
+    blockData_.clear();
+    data_.reset();
+    gameTickBlocks_.clear();
+    blockChangeCallback_ = nullptr;
+}
 
 SubChunk::SubChunk() {
     // Initialize all blocks to air (index 0)
@@ -19,7 +45,8 @@ BlockTypeId SubChunk::getBlock(LocalBlockCoord pos) const {
 }
 
 BlockTypeId SubChunk::getBlock(uint16_t index) const {
-    LocalIndex localIdx = blocks_[index];
+    // Acquire pairs with the release below: the palette entry is out before the index is
+    LocalIndex localIdx = sharedLoad(blocks_[index], std::memory_order_acquire);
     return palette_.getGlobalId(localIdx);
 }
 
@@ -98,13 +125,13 @@ void SubChunk::setBlockInternal(int32_t index, BlockTypeId type, BlockTypeId old
     incrementUsage(newIndex);
 
     // Update the block array
-    blocks_[index] = newIndex;
+    sharedStore(blocks_[index], newIndex, std::memory_order_release);
 
     // Track non-air count
     if (oldType.isAir() && !type.isAir()) {
-        ++nonAirCount_;
+        nonAirCount_.fetch_add(1, std::memory_order_relaxed);
     } else if (!oldType.isAir() && type.isAir()) {
-        --nonAirCount_;
+        nonAirCount_.fetch_sub(1, std::memory_order_relaxed);
     }
 }
 
@@ -129,15 +156,15 @@ void SubChunk::incrementUsage(LocalIndex index) {
 }
 
 void SubChunk::clear() {
-    bool wasNotEmpty = nonAirCount_ > 0;
+    bool wasNotEmpty = nonAirCount() > 0;
     bool hadRotations = hasNonIdentityRotations();
 
-    blocks_.fill(0);
+    fillBlocks(blocks_, 0);
     palette_.clear();
     usageCounts_.clear();
     usageCounts_.push_back(VOLUME);  // Air has all blocks
-    nonAirCount_ = 0;
-    rotations_.fill(0);  // Reset all rotations to identity
+    nonAirCount_.store(0, std::memory_order_relaxed);
+    fillBytes(rotations_, 0);  // Reset all rotations to identity
 
     // Increment block version if there was any content or rotations
     if (wasNotEmpty || hadRotations) {
@@ -155,7 +182,7 @@ void SubChunk::fill(BlockTypeId type) {
     LocalIndex index = palette_.addType(type);
 
     // Fill all blocks with this index
-    blocks_.fill(index);
+    fillBlocks(blocks_, index);
 
     // Reset usage counts
     usageCounts_.clear();
@@ -167,14 +194,14 @@ void SubChunk::fill(BlockTypeId type) {
     (void)palette_.addType(type);  // Re-add the type (index will be 1)
 
     // Update blocks to use new index after palette clear
-    blocks_.fill(1);
+    fillBlocks(blocks_, 1);
     usageCounts_.clear();
     usageCounts_.resize(2, 0);
     usageCounts_[0] = 0;  // Air
     usageCounts_[1] = VOLUME;
 
-    nonAirCount_ = VOLUME;
-    rotations_.fill(0);  // Reset all rotations to identity
+    nonAirCount_.store(VOLUME, std::memory_order_relaxed);
+    fillBytes(rotations_, 0);  // Reset all rotations to identity
 
     // Increment block version
     blockVersion_.fetch_add(1, std::memory_order_release);
@@ -187,10 +214,10 @@ std::vector<SubChunk::LocalIndex> SubChunk::compactPalette() {
     for (auto& blockIndex : blocks_) {
         LocalIndex newIndex = mapping[blockIndex];
         if (newIndex != SubChunkPalette::INVALID_LOCAL_INDEX) {
-            blockIndex = newIndex;
+            sharedStore(blockIndex, newIndex, std::memory_order_release);
         } else {
             // This shouldn't happen if usageCounts_ is accurate
-            blockIndex = 0;  // Default to air
+            sharedStore(blockIndex, LocalIndex{0}, std::memory_order_release);  // Default to air
         }
     }
 
@@ -214,7 +241,7 @@ uint8_t SubChunk::getSkyLight(int32_t x, int32_t y, int32_t z) const {
 
 uint8_t SubChunk::getSkyLight(int32_t index) const {
     if (index < 0 || index >= VOLUME) return 0;
-    return unpackSkyLight(light_[index]);
+    return unpackSkyLight(sharedLoad(light_[index]));
 }
 
 uint8_t SubChunk::getBlockLight(int32_t x, int32_t y, int32_t z) const {
@@ -223,7 +250,7 @@ uint8_t SubChunk::getBlockLight(int32_t x, int32_t y, int32_t z) const {
 
 uint8_t SubChunk::getBlockLight(int32_t index) const {
     if (index < 0 || index >= VOLUME) return 0;
-    return unpackBlockLight(light_[index]);
+    return unpackBlockLight(sharedLoad(light_[index]));
 }
 
 uint8_t SubChunk::getCombinedLight(int32_t x, int32_t y, int32_t z) const {
@@ -232,8 +259,9 @@ uint8_t SubChunk::getCombinedLight(int32_t x, int32_t y, int32_t z) const {
 
 uint8_t SubChunk::getCombinedLight(int32_t index) const {
     if (index < 0 || index >= VOLUME) return 0;
-    uint8_t sky = unpackSkyLight(light_[index]);
-    uint8_t block = unpackBlockLight(light_[index]);
+    uint8_t packed = sharedLoad(light_[index]);
+    uint8_t sky = unpackSkyLight(packed);
+    uint8_t block = unpackBlockLight(packed);
     return sky > block ? sky : block;
 }
 
@@ -243,7 +271,7 @@ uint8_t SubChunk::getPackedLight(int32_t x, int32_t y, int32_t z) const {
 
 uint8_t SubChunk::getPackedLight(int32_t index) const {
     if (index < 0 || index >= VOLUME) return 0;
-    return light_[index];
+    return sharedLoad(light_[index]);
 }
 
 void SubChunk::setSkyLight(int32_t x, int32_t y, int32_t z, uint8_t level) {
@@ -253,11 +281,11 @@ void SubChunk::setSkyLight(int32_t x, int32_t y, int32_t z, uint8_t level) {
 void SubChunk::setSkyLight(int32_t index, uint8_t level) {
     if (index < 0 || index >= VOLUME) return;
 
-    uint8_t oldPacked = light_[index];
+    uint8_t oldPacked = sharedLoad(light_[index]);
     uint8_t newPacked = packLight(level & 0x0F, unpackBlockLight(oldPacked));
 
     if (oldPacked != newPacked) {
-        light_[index] = newPacked;
+        sharedStore(light_[index], newPacked);
         bumpLightVersion();
     }
 }
@@ -269,11 +297,11 @@ void SubChunk::setBlockLight(int32_t x, int32_t y, int32_t z, uint8_t level) {
 void SubChunk::setBlockLight(int32_t index, uint8_t level) {
     if (index < 0 || index >= VOLUME) return;
 
-    uint8_t oldPacked = light_[index];
+    uint8_t oldPacked = sharedLoad(light_[index]);
     uint8_t newPacked = packLight(unpackSkyLight(oldPacked), level & 0x0F);
 
     if (oldPacked != newPacked) {
-        light_[index] = newPacked;
+        sharedStore(light_[index], newPacked);
         bumpLightVersion();
     }
 }
@@ -285,11 +313,11 @@ void SubChunk::setLight(int32_t x, int32_t y, int32_t z, uint8_t skyLight, uint8
 void SubChunk::setLight(int32_t index, uint8_t skyLight, uint8_t blockLight) {
     if (index < 0 || index >= VOLUME) return;
 
-    uint8_t oldPacked = light_[index];
+    uint8_t oldPacked = sharedLoad(light_[index]);
     uint8_t newPacked = packLight(skyLight & 0x0F, blockLight & 0x0F);
 
     if (oldPacked != newPacked) {
-        light_[index] = newPacked;
+        sharedStore(light_[index], newPacked);
         bumpLightVersion();
     }
 }
@@ -309,7 +337,7 @@ void SubChunk::setPackedLight(int32_t index, uint8_t packed) {
 
 void SubChunk::clearLight() {
     bool wasDark = isLightDark();
-    light_.fill(0);
+    fillBytes(light_, 0);
     if (!wasDark) {
         bumpLightVersion();
     }
@@ -380,7 +408,7 @@ Rotation SubChunk::getRotation(int32_t x, int32_t y, int32_t z) const {
 
 Rotation SubChunk::getRotation(int32_t index) const {
     if (index < 0 || index >= VOLUME) return Rotation::IDENTITY;
-    uint8_t rotIdx = rotations_[index];
+    uint8_t rotIdx = sharedLoad(rotations_[index]);
     if (rotIdx >= Rotation::count()) return Rotation::IDENTITY;
     return Rotation::byIndex(rotIdx);
 }
@@ -395,7 +423,7 @@ uint8_t SubChunk::getRotationIndex(int32_t x, int32_t y, int32_t z) const {
 
 uint8_t SubChunk::getRotationIndex(int32_t index) const {
     if (index < 0 || index >= VOLUME) return 0;
-    return rotations_[index];
+    return sharedLoad(rotations_[index]);
 }
 
 uint8_t SubChunk::getRotationIndex(LocalBlockCoord pos) const {
@@ -409,8 +437,8 @@ void SubChunk::setRotation(int32_t x, int32_t y, int32_t z, const Rotation& rota
 void SubChunk::setRotation(int32_t index, const Rotation& rotation) {
     if (index < 0 || index >= VOLUME) return;
     uint8_t newIdx = rotation.index();
-    if (rotations_[index] != newIdx) {
-        rotations_[index] = newIdx;
+    if (sharedLoad(rotations_[index]) != newIdx) {
+        sharedStore(rotations_[index], newIdx);
         // Rotation changes affect rendering, bump block version
         blockVersion_.fetch_add(1, std::memory_order_release);
     }
@@ -427,8 +455,8 @@ void SubChunk::setRotationIndex(int32_t x, int32_t y, int32_t z, uint8_t rotatio
 void SubChunk::setRotationIndex(int32_t index, uint8_t rotationIndex) {
     if (index < 0 || index >= VOLUME) return;
     if (rotationIndex >= Rotation::count()) rotationIndex = 0;
-    if (rotations_[index] != rotationIndex) {
-        rotations_[index] = rotationIndex;
+    if (sharedLoad(rotations_[index]) != rotationIndex) {
+        sharedStore(rotations_[index], rotationIndex);
         // Rotation changes affect rendering, bump block version
         blockVersion_.fetch_add(1, std::memory_order_release);
     }
@@ -440,7 +468,7 @@ void SubChunk::setRotationIndex(LocalBlockCoord pos, uint8_t rotationIndex) {
 
 void SubChunk::clearRotations() {
     bool hadRotations = hasNonIdentityRotations();
-    rotations_.fill(0);
+    fillBytes(rotations_, 0);
     if (hadRotations) {
         blockVersion_.fetch_add(1, std::memory_order_release);
     }
@@ -457,7 +485,7 @@ void SubChunk::setRotationData(const std::array<uint8_t, VOLUME>& data) {
 
 bool SubChunk::hasNonIdentityRotations() const {
     for (int32_t i = 0; i < VOLUME; ++i) {
-        if (rotations_[i] != 0) return true;
+        if (sharedLoad(rotations_[i]) != 0) return true;
     }
     return false;
 }
@@ -592,30 +620,34 @@ void SubChunk::rebuildGameTickRegistry() {
 // ============================================================================
 
 FluidLayer* SubChunk::fluidLayer() {
-    return fluidLayer_.get();
+    return fluid();
 }
 
 const FluidLayer* SubChunk::fluidLayer() const {
-    return fluidLayer_.get();
+    return fluid();
 }
 
 FluidLayer& SubChunk::getOrCreateFluidLayer() {
-    if (!fluidLayer_) {
-        fluidLayer_ = std::make_unique<FluidLayer>();
+    if (!fluid()) {
+        if (!fluidLayer_) fluidLayer_ = std::make_unique<FluidLayer>();
+        publishedFluidLayer_.store(fluidLayer_.get(), std::memory_order_release);
     }
-    return *fluidLayer_;
+    return *fluid();
 }
 
 bool SubChunk::hasFluidLayer() const {
-    return fluidLayer_ != nullptr;
+    return fluid() != nullptr;
 }
 
 bool SubChunk::hasFluid() const {
-    return fluidLayer_ != nullptr && !fluidLayer_->isEmpty();
+    return fluid() != nullptr && !fluid()->isEmpty();
 }
 
 void SubChunk::removeFluidLayer() {
-    fluidLayer_.reset();
+    if (FluidLayer* layer = fluid()) {
+        layer->clear();
+        publishedFluidLayer_.store(nullptr, std::memory_order_release);
+    }
 }
 
 FluidTypeId SubChunk::getFluid(int32_t x, int32_t y, int32_t z) const {
@@ -623,8 +655,8 @@ FluidTypeId SubChunk::getFluid(int32_t x, int32_t y, int32_t z) const {
 }
 
 FluidTypeId SubChunk::getFluid(int32_t index) const {
-    if (!fluidLayer_ || index < 0 || index >= VOLUME) return EMPTY_FLUID_TYPE;
-    return fluidLayer_->getFluidType(index);
+    if (!fluid() || index < 0 || index >= VOLUME) return EMPTY_FLUID_TYPE;
+    return fluid()->getFluidType(index);
 }
 
 uint8_t SubChunk::getFluidLevel(int32_t x, int32_t y, int32_t z) const {
@@ -632,8 +664,8 @@ uint8_t SubChunk::getFluidLevel(int32_t x, int32_t y, int32_t z) const {
 }
 
 uint8_t SubChunk::getFluidLevel(int32_t index) const {
-    if (!fluidLayer_ || index < 0 || index >= VOLUME) return 0;
-    return fluidLayer_->getLevel(index);
+    if (!fluid() || index < 0 || index >= VOLUME) return 0;
+    return fluid()->getLevel(index);
 }
 
 bool SubChunk::hasFluid(int32_t x, int32_t y, int32_t z) const {
@@ -641,8 +673,8 @@ bool SubChunk::hasFluid(int32_t x, int32_t y, int32_t z) const {
 }
 
 bool SubChunk::hasFluid(int32_t index) const {
-    if (!fluidLayer_ || index < 0 || index >= VOLUME) return false;
-    return fluidLayer_->hasFluid(index);
+    if (!fluid() || index < 0 || index >= VOLUME) return false;
+    return fluid()->hasFluid(index);
 }
 
 bool SubChunk::setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uint8_t level) {
@@ -653,7 +685,7 @@ bool SubChunk::setFluid(int32_t index, FluidTypeId type, uint8_t level) {
     if (index < 0 || index >= VOLUME) return false;
 
     // If setting to empty and no layer exists, nothing to do
-    if ((type.isEmpty() || level == 0) && !fluidLayer_) return false;
+    if ((type.isEmpty() || level == 0) && !fluid()) return false;
 
     auto& layer = getOrCreateFluidLayer();
     return layer.setFluid(index, type, level);
@@ -664,15 +696,15 @@ bool SubChunk::removeFluid(int32_t x, int32_t y, int32_t z) {
 }
 
 bool SubChunk::removeFluid(int32_t index) {
-    if (!fluidLayer_ || index < 0 || index >= VOLUME) return false;
-    // Keep fluidLayer_ allocated for the lifetime of the SubChunk so lock-free
+    if (!fluid() || index < 0 || index >= VOLUME) return false;
+    // Keep the layer allocated for the lifetime of the SubChunk so lock-free
     // MeshWorkerPool readers never dereference a deleted FluidLayer*.
-    return fluidLayer_->removeFluid(index);
+    return fluid()->removeFluid(index);
 }
 
 uint64_t SubChunk::fluidVersion() const {
-    if (!fluidLayer_) return 0;
-    return fluidLayer_->version();
+    if (!fluid()) return 0;
+    return fluid()->version();
 }
 
 }  // namespace finevox

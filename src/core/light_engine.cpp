@@ -217,6 +217,11 @@ SubChunk* LightEngine::getOrCreateSubChunkForLight(const ChunkPos& chunkPos) {
         return subChunk;
     }
 
+    // Light spreading past the top or bottom of the world just stops there
+    if (!ChunkColumn::inRange(chunkPos.y)) {
+        return nullptr;
+    }
+
     // Need to create it - get or create the column first
     ColumnPos colPos{chunkPos.x, chunkPos.z};
     ChunkColumn& column = world_.getOrCreateColumn(colPos);
@@ -235,10 +240,7 @@ uint8_t LightEngine::getSkyLight(const BlockCoord& pos) const {
     if (!subChunk) {
         // Above everything a loaded column holds is open sky. Anything else is unloaded.
         const ChunkColumn* column = world_.getColumn(ColumnPos(chunkPos.x, chunkPos.z));
-        if (column) {
-            auto bounds = column->getYBounds();
-            if (!bounds || chunkPos.y > bounds->second) return SubChunk::MAX_LIGHT;
-        }
+        if (column && !column->hasContentAbove(chunkPos.y)) return SubChunk::MAX_LIGHT;
         return 0;
     }
     return subChunk->getSkyLight(toLocalIndex(pos));

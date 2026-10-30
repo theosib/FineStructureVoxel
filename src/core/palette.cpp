@@ -4,10 +4,50 @@
 namespace finevox {
 
 SubChunkPalette::SubChunkPalette() {
+    for (Entry& entry : inlineEntries_) entry.store(AIR_BLOCK_TYPE, std::memory_order_relaxed);
+    readEntries_.store(inlineEntries_.data(), std::memory_order_relaxed);
+
     // Air is always at index 0
     palette_.push_back(AIR_BLOCK_TYPE);
     reverse_[AIR_BLOCK_TYPE] = 0;
     maxIndex_ = 0;
+}
+
+void SubChunkPalette::publish(LocalIndex index, BlockTypeId globalId) {
+    uint32_t capacity = readCapacity_.load(std::memory_order_relaxed);
+    Entry* entries = readEntries_.load(std::memory_order_relaxed);
+
+    if (index >= capacity) {
+        uint32_t bigger = capacity;
+        while (index >= bigger) bigger *= 2;
+
+        auto grown = std::make_unique<Entry[]>(bigger);
+        for (uint32_t i = 0; i < capacity; ++i) {
+            grown[i].store(entries[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+        for (uint32_t i = capacity; i < bigger; ++i) {
+            grown[i].store(AIR_BLOCK_TYPE, std::memory_order_relaxed);
+        }
+
+        entries = grown.get();
+        spilledEntries_.push_back(std::move(grown));
+        // Pointer first: a reader must never pair a capacity with a smaller buffer
+        readEntries_.store(entries, std::memory_order_release);
+        readCapacity_.store(bigger, std::memory_order_release);
+    }
+
+    entries[index].store(globalId, std::memory_order_release);
+}
+
+void SubChunkPalette::publishAll() {
+    uint32_t capacity = readCapacity_.load(std::memory_order_relaxed);
+    Entry* entries = readEntries_.load(std::memory_order_relaxed);
+    for (size_t i = palette_.size(); i < capacity; ++i) {
+        entries[i].store(AIR_BLOCK_TYPE, std::memory_order_release);
+    }
+    for (size_t i = 0; i < palette_.size(); ++i) {
+        publish(static_cast<LocalIndex>(i), palette_[i]);
+    }
 }
 
 SubChunkPalette::LocalIndex SubChunkPalette::addType(BlockTypeId globalId) {
@@ -30,6 +70,7 @@ SubChunkPalette::LocalIndex SubChunkPalette::addType(BlockTypeId globalId) {
         palette_.push_back(globalId);
     }
 
+    publish(index, globalId);
     reverse_[globalId] = index;
 
     // Update max index if needed
@@ -55,6 +96,7 @@ bool SubChunkPalette::removeType(BlockTypeId globalId) {
 
     // Mark slot as empty and add to free list
     palette_[index] = AIR_BLOCK_TYPE;  // Use air as "empty" marker
+    publish(index, AIR_BLOCK_TYPE);
     reverse_.erase(it);
     freeList_.push_back(index);
 
@@ -62,13 +104,6 @@ bool SubChunkPalette::removeType(BlockTypeId globalId) {
     // The compact() function will properly reset it
 
     return true;
-}
-
-BlockTypeId SubChunkPalette::getGlobalId(LocalIndex localIndex) const {
-    if (localIndex >= palette_.size()) {
-        return AIR_BLOCK_TYPE;
-    }
-    return palette_[localIndex];
 }
 
 SubChunkPalette::LocalIndex SubChunkPalette::getLocalIndex(BlockTypeId globalId) const {
@@ -96,6 +131,7 @@ void SubChunkPalette::clear() {
     palette_.push_back(AIR_BLOCK_TYPE);
     reverse_[AIR_BLOCK_TYPE] = 0;
     maxIndex_ = 0;
+    publishAll();
 }
 
 std::vector<SubChunkPalette::LocalIndex> SubChunkPalette::compact(
@@ -128,6 +164,7 @@ std::vector<SubChunkPalette::LocalIndex> SubChunkPalette::compact(
     reverse_ = std::move(newReverse);
     freeList_.clear();  // All slots are now contiguous
     maxIndex_ = palette_.empty() ? 0 : static_cast<LocalIndex>(palette_.size() - 1);
+    publishAll();
 
     return mapping;
 }

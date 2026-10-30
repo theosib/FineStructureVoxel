@@ -12,7 +12,10 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/subchunk.hpp"
 #include <unordered_map>
+#include <atomic>
 #include <memory>
+#include <mutex>
+#include <vector>
 #include <optional>
 #include <functional>
 #include <array>
@@ -30,16 +33,21 @@ class DataContainer;
 // - Automatically creates SubChunks when blocks are set
 // - Automatically removes SubChunks when they become all air
 //
-// Y range: supports the full Y range from position.hpp (±2048 blocks = ±128 subchunks)
+// Y range: supports the full Y range from position.hpp (±2048 blocks = ±128 subchunks).
+// Writing past it does nothing and reading past it gives air.
+//
+// Thread safety: one thread writes blocks, lighting adds subchunks of its own, and any thread
+// may read at any time without waiting. A subchunk that "goes" when its last block does only
+// leaves the directory: the object stays until the column does and is reused if the slot
+// fills again. So a SubChunk* is good for the life of the column, whatever the world does
+// next, and a reader finding one has at worst an emptied subchunk in hand.
 //
 class ChunkColumn {
 public:
     explicit ChunkColumn(ColumnPos pos);
     ~ChunkColumn();  // Defined in .cpp for unique_ptr<DataContainer>
 
-    // Allow move, prevent copy
-    ChunkColumn(ChunkColumn&&) noexcept;
-    ChunkColumn& operator=(ChunkColumn&&) noexcept;
+    // Readers hold pointers into a column, so it stays where it is
     ChunkColumn(const ChunkColumn&) = delete;
     ChunkColumn& operator=(const ChunkColumn&) = delete;
 
@@ -98,10 +106,10 @@ public:
     void pruneEmptySubChunks();
 
     // Number of subchunks currently allocated
-    [[nodiscard]] size_t subChunkCount() const { return subChunks_.size(); }
+    [[nodiscard]] size_t subChunkCount() const;
 
     // Check if entire column is empty (no non-air blocks)
-    [[nodiscard]] bool isEmpty() const { return subChunks_.empty(); }
+    [[nodiscard]] bool isEmpty() const { return subChunkCount() == 0; }
 
     // Total non-air block count across all subchunks
     [[nodiscard]] int64_t nonAirCount() const;
@@ -113,6 +121,10 @@ public:
 
     // Get Y bounds of non-empty subchunks (nullopt if column is empty)
     [[nodiscard]] std::optional<std::pair<int32_t, int32_t>> getYBounds() const;
+
+    /// True if any subchunk above chunkY holds something. Cheaper than getYBounds, which
+    /// has to look at all of them: above the terrain this looks at a few empty slots.
+    [[nodiscard]] bool hasContentAbove(int32_t chunkY) const;
 
     // Compact all subchunk palettes (for serialization)
     void compactAll();
@@ -145,10 +157,10 @@ public:
     void setHeightmapData(const std::array<int32_t, 256>& data);
 
     /// Check if the heightmap needs recalculation
-    [[nodiscard]] bool heightmapDirty() const { return heightmapDirty_; }
+    [[nodiscard]] bool heightmapDirty() const { return heightmapDirty_.load(std::memory_order_acquire); }
 
     /// Mark heightmap as dirty (needs recalculation)
-    void markHeightmapDirty() { heightmapDirty_ = true; }
+    void markHeightmapDirty() { heightmapDirty_.store(true, std::memory_order_release); }
 
     // ========================================================================
     // Light Initialization (for lazy sky light calculation)
@@ -156,13 +168,13 @@ public:
 
     /// Check if sky light has been initialized for this column
     /// Returns false if the column needs sky light calculation before meshing
-    [[nodiscard]] bool isLightInitialized() const { return lightInitialized_; }
+    [[nodiscard]] bool isLightInitialized() const { return lightInitialized_.load(std::memory_order_acquire); }
 
     /// Mark sky light as initialized (called after sky light propagation)
-    void markLightInitialized() { lightInitialized_ = true; }
+    void markLightInitialized() { lightInitialized_.store(true, std::memory_order_release); }
 
     /// Reset light initialization flag (e.g., after major terrain changes)
-    void resetLightInitialized() { lightInitialized_ = false; }
+    void resetLightInitialized() { lightInitialized_.store(false, std::memory_order_release); }
 
     // ========================================================================
     // Column Extra Data (per-column game state)
@@ -218,20 +230,47 @@ public:
         return lastActivityTime_;
     }
 
+    static constexpr int32_t MIN_CHUNK_Y = -128;
+    static constexpr int32_t MAX_CHUNK_Y = 127;
+
+    /// False past the top and bottom of the world, where getOrCreateSubChunk throws
+    [[nodiscard]] static bool inRange(int32_t chunkY) {
+        return chunkY >= MIN_CHUNK_Y && chunkY <= MAX_CHUNK_Y;
+    }
+
 private:
+    static constexpr size_t SLOTS = MAX_CHUNK_Y - MIN_CHUNK_Y + 1;
+
+    [[nodiscard]] SubChunk* liveSubChunk(int32_t chunkY) const {
+        if (!inRange(chunkY)) return nullptr;
+        return live_[chunkY - MIN_CHUNK_Y].load(std::memory_order_acquire);
+    }
+    /// Callers hold slotMutex_
+    void takeOut(int32_t chunkY) { live_[chunkY - MIN_CHUNK_Y].store(nullptr, std::memory_order_release); }
+
     ColumnPos pos_;
-    std::unordered_map<int32_t, std::shared_ptr<SubChunk>> subChunks_;
+
+    /// What readers look at, one atomic load per lookup: the terrain's few subchunks sit
+    /// on a cache line or two. owners_ outlasts it, so taking a subchunk out of the
+    /// directory never frees what a reader might be using.
+    std::array<std::atomic<SubChunk*>, SLOTS> live_{};
+    std::array<std::shared_ptr<SubChunk>, SLOTS> owners_;
+    std::atomic<int32_t> topChunkY_{MIN_CHUNK_Y};    ///< No subchunk has ever been above this
+    std::vector<std::shared_ptr<SubChunk>> replaced_;  ///< setSubChunk's leavings, same reason as owner
+
+    /// Only for changing the directory, so a reader never meets it
+    mutable std::mutex slotMutex_;
 
     // Heightmap: Y coordinate of highest sky-light-blocking block + 1 for each (x, z)
     // Index = z * 16 + x
     // Value of INT32_MIN means no opaque blocks in this column
     static constexpr int32_t NO_HEIGHT = std::numeric_limits<int32_t>::min();
     std::array<int32_t, 256> heightmap_;
-    bool heightmapDirty_ = true;
+    std::atomic<bool> heightmapDirty_{true};
 
     // Light initialization: false until sky light is first calculated
     // Used for lazy initialization - mesher can wait for this before building
-    bool lightInitialized_ = false;
+    std::atomic<bool> lightInitialized_{false};
 
     // Column-level extra data (pending events, biome data, etc.)
     std::unique_ptr<DataContainer> data_;

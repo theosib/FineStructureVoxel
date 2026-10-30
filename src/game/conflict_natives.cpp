@@ -84,6 +84,18 @@ void registerConflictNatives(GameRuntime& runtime) {
         }
     });
 
+    // vision_state faction x z -> :visible, :explored, or :unknown
+    e.registerFunction("vision_state", [=](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3) return Value::nil();
+        VisionState state = rt->vision().stateAt(static_cast<uint16_t>(number(args[0])),
+                                                 static_cast<int32_t>(std::floor(number(args[1]))),
+                                                 static_cast<int32_t>(std::floor(number(args[2]))));
+        const char* name = state == VisionState::Visible    ? "visible"
+                           : state == VisionState::Explored ? "explored"
+                                                            : "unknown";
+        return Value::symbol(StringInterner::global().intern(name));
+    });
+
     e.registerFunction("vision_can_see", [=](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 3) return Value::boolean(false);
         return Value::boolean(rt->vision().isVisible(

@@ -209,7 +209,7 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
     }
 
     texture_ = finevk::Texture::fromMemory(device, atlas.data(), atlasWidth_, atlasHeight_,
-                                           commandPool, false, true);
+                                           commandPool, true, true);
 
     for (const auto& [id, set] : blocks) {
         auto face = [&](const std::string& name) {

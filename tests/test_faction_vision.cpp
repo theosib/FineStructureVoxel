@@ -8,6 +8,9 @@
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/world.hpp"
 
+#include <chrono>
+#include <iostream>
+
 using namespace finevox;
 
 namespace {
@@ -152,6 +155,43 @@ TEST_F(FactionVisionTest, RevealMarksExploredWithoutLineOfSight) {
 TEST_F(FactionVisionTest, PositionsOutsideTheMapAreUnknown) {
     EXPECT_EQ(vision->stateAt(BLUE, -5, 30), VisionState::Unknown);
     EXPECT_EQ(vision->stateAt(BLUE, 500, 30), VisionState::Unknown);
+}
+
+TEST_F(FactionVisionTest, TerrainChangesReachTheHeightGrid) {
+    spawn(BLUE, 44, 30);
+    vision->refresh(BLUE);
+    ASSERT_EQ(vision->stateAt(BLUE, 56, 30), VisionState::Visible);
+
+    wall(50, 4, stone);
+    for (int i = 0; i < 300; ++i) vision->tick(1.0f / 30.0f);
+    EXPECT_NE(vision->stateAt(BLUE, 56, 30), VisionState::Visible)
+        << "a new wall must block sight without an explicit refresh";
+}
+
+TEST_F(FactionVisionTest, VisibleCellsLingerBrieflySoEdgesDoNotBlink) {
+    EntityId id = spawn(BLUE, 20, 30);
+    for (int i = 0; i < 30; ++i) vision->tick(1.0f / 30.0f);
+    ASSERT_EQ(vision->stateAt(BLUE, 24, 30), VisionState::Visible);
+
+    entities->getMob(id)->setPosition(Vec3(110.5f, GROUND_Y, 30.5f));
+    for (int i = 0; i < 20; ++i) vision->tick(1.0f / 30.0f);
+    EXPECT_EQ(vision->stateAt(BLUE, 24, 30), VisionState::Visible) << "still lingering";
+
+    for (int i = 0; i < 120; ++i) vision->tick(1.0f / 30.0f);
+    EXPECT_EQ(vision->stateAt(BLUE, 24, 30), VisionState::Explored) << "but not forever";
+}
+
+TEST_F(FactionVisionTest, ManyUnitsStayCheap) {
+    for (int i = 0; i < 200; ++i) spawn(BLUE, 10 + (i % 100), 5 + (i / 10));
+    vision->refresh(BLUE);
+
+    auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; ++i) vision->refresh(BLUE);
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / 20.0;
+    std::cout << "vision pass for 200 units: " << ms << " ms\n";
+#ifdef NDEBUG
+    EXPECT_LT(ms, 30.0) << "a full faction pass must fit inside a 33ms tick";
+#endif
 }
 
 TEST_F(FactionVisionTest, SnapshotMatchesQueries) {

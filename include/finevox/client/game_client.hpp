@@ -28,6 +28,11 @@ struct ClientOptions {
     std::string screenshotPath;
     int screenshotFrame = 0;
 
+    /// With screenshotPath: also save this many more frames, `burstInterval` apart, as
+    /// PATH_1.png, PATH_2.png, ... Comparing them measures flicker, which stills can't.
+    int burstCount = 0;
+    int burstInterval = 10;
+
     /// Print render statistics once a second
     bool printStats = false;
 

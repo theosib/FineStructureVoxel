@@ -53,6 +53,9 @@ layout(push_constant) uniform PushConstants {
 // Lighting constants
 const float DIFFUSE = 0.6;  // Diffuse light strength
 
+// Highest mip the atlas's tile borders support
+const float MAX_ATLAS_MIP = 2.0;
+
 // Calculate fog factor based on distance
 // Returns 0.0 (no fog) to 1.0 (full fog)
 float calculateFog(float distance) {
@@ -104,12 +107,17 @@ void main() {
     // Wrap texture coordinates for proper tiling within atlas cell
     vec2 tiledTexCoord = wrapTexCoord(fragTexCoord, fragTileBounds);
 
-    // Sample the block atlas texture using explicit LOD 0
-    // We use textureLod instead of texture because fract() creates a UV discontinuity
-    // at wrap points (1.0 -> 0.0). The GPU's derivative calculations (dFdx/dFdy) see
-    // this as a huge change, causing incorrect LOD selection and filtering artifacts.
-    // By forcing LOD 0, we bypass the derivative issue entirely.
-    vec4 texColor = textureLod(blockAtlas, tiledTexCoord, 0.0);
+    // Sample the block atlas with an explicit mip level.
+    // fract() creates a UV discontinuity at wrap points, so the GPU's own derivatives
+    // would see a huge jump there and pick the wrong level. Taking derivatives of the
+    // unwrapped coordinates avoids that. Sampling only mip 0 instead sparkles badly
+    // from a distance. The clamp stops at the level the atlas's 2-pixel tile borders
+    // can support before neighbouring tiles bleed in.
+    vec2 texelCoord = fragTexCoord * vec2(textureSize(blockAtlas, 0));
+    vec2 dx = dFdx(texelCoord);
+    vec2 dy = dFdy(texelCoord);
+    float mipLevel = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+    vec4 texColor = textureLod(blockAtlas, tiledTexCoord, clamp(mipLevel, 0.0, MAX_ATLAS_MIP));
 
     // Discard fully transparent pixels
     if (texColor.a < 0.01) {

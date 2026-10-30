@@ -25,6 +25,7 @@ constexpr float ARRIVE_RADIUS = 0.45f;
 constexpr float BUILD_STANCE_RADIUS = 0.2f;
 constexpr float STUCK_SECONDS = 2.0f;
 constexpr int MAX_REPATHS = 2;
+constexpr float MIN_HOP_PROGRESS = 2.0f;
 
 uint64_t packCoord(const BlockCoord& p) {
     // 24 bits each is ±8M blocks, far beyond any loaded column in practice
@@ -113,6 +114,8 @@ public:
         open_.push({heuristic(startCell_), startKey});
 
         int expanded = 0;
+        uint64_t closestKey = startKey;
+        float closest = heuristic(startCell_);
         while (!open_.empty() && expanded < query_.maxNodes) {
             OpenEntry entry = open_.top();
             open_.pop();
@@ -126,10 +129,21 @@ public:
                 if (outNodes) *outNodes = expanded;
                 return reconstruct(entry.key, expanded);
             }
+
+            float remaining = heuristic(current.pos);
+            if (remaining < closest) {
+                closest = remaining;
+                closestKey = entry.key;
+            }
             expand(entry.key, current);
         }
 
         if (outNodes) *outNodes = expanded;
+        if (query_.allowPartial && closestKey != startKey) {
+            NavPath path = reconstruct(closestKey, expanded);
+            path.partial = true;
+            return path;
+        }
         return std::nullopt;
     }
 
@@ -348,6 +362,8 @@ void NavigationSystem::order(EntityId id, const NavOrder& order) {
     agent.repaths = 0;
     agent.stuckTime = 0.0f;
     agent.bestDistance = 1e9f;
+    agent.partialPath = false;
+    agent.lastHopDistance = 1e9f;
     searchQueue_.push_back(id);
 }
 
@@ -428,6 +444,7 @@ void NavigationSystem::runSearches() {
         query.allowPlace = agent.order.allowPlace;
         query.allowDig = agent.order.allowDig;
         query.maxNodes = agent.order.maxNodes;
+        query.allowPartial = agent.order.allowPartial;
 
         int nodes = 0;
         auto path = findNavPath(world_, query, &nodes);
@@ -438,6 +455,7 @@ void NavigationSystem::runSearches() {
             mob->clearMoveTarget();
             continue;
         }
+        agent.partialPath = path->partial;
         agent.steps = std::move(path->steps);
         agent.next = 0;
         agent.state = NavState::Moving;
@@ -456,9 +474,31 @@ void NavigationSystem::finish(Agent& agent, MobEntity& mob, NavState state) {
     mob.clearMoveTarget();
 }
 
+void NavigationSystem::beginNextHop(EntityId id, Agent& agent, MobEntity& mob) {
+    Vec3 pos = mob.position();
+    double dx = agent.order.goal.x - pos.x;
+    double dz = agent.order.goal.z - pos.z;
+    float remaining = static_cast<float>(std::sqrt(dx * dx + dz * dz));
+
+    // Each hop has to gain ground, or the closest point is a dead end
+    if (remaining >= agent.lastHopDistance - MIN_HOP_PROGRESS) {
+        finish(agent, mob, NavState::Failed);
+        return;
+    }
+    agent.lastHopDistance = remaining;
+    agent.state = NavState::Pending;
+    agent.steps.clear();
+    agent.next = 0;
+    searchQueue_.push_back(id);
+}
+
 void NavigationSystem::followPath(EntityId id, Agent& agent, MobEntity& mob, float dt) {
     if (agent.next >= agent.steps.size()) {
-        finish(agent, mob, NavState::Arrived);
+        if (agent.partialPath) {
+            beginNextHop(id, agent, mob);
+        } else {
+            finish(agent, mob, NavState::Arrived);
+        }
         return;
     }
 
@@ -485,7 +525,11 @@ void NavigationSystem::followPath(EntityId id, Agent& agent, MobEntity& mob, flo
         agent.stuckTime = 0.0f;
         agent.bestDistance = 1e9f;
         if (agent.next >= agent.steps.size()) {
-            finish(agent, mob, NavState::Arrived);
+            if (agent.partialPath) {
+                beginNextHop(id, agent, mob);
+            } else {
+                finish(agent, mob, NavState::Arrived);
+            }
             return;
         }
         const NavStep& upcoming = agent.steps[agent.next];

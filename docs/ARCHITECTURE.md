@@ -53,7 +53,7 @@
 
 ---
 
-## Five Shared Libraries
+## Shared Libraries
 
 | Library | CMake Target | Namespace | Links |
 |---------|-------------|-----------|-------|
@@ -62,6 +62,7 @@
 | `libfinevox_render` | `finevox_render` | `finevox::render::` | `finevox` PUBLIC, finevk |
 | `libfinevox_audio` | `finevox_audio` | `finevox::audio::` | `finevox`, miniaudio |
 | `libfinevox_script` | `finevox_script` | `finevox::script::` | `finevox`, finescript |
+| `libfinevox_game` | `finevox_game` | `finevox::game::` | `finevox_worldgen`, `finevox_script` |
 
 Tests link `finevox_worldgen` (gets core transitively). The script library is always built (`FINEVOX_BUILD_AUDIO` is optional for audio).
 
@@ -156,7 +157,7 @@ RenderSurface::deferDelete()  // safe cleanup from render thread
 | Thread | Responsibilities |
 |--------|-----------------|
 | Main / Render | finevk game loop, input, camera, WorldRenderer draw calls |
-| Game thread | 30 TPS tick loop: WorldTime, UpdateScheduler, EntityManager, FluidTickManager |
+| Game thread | 30 TPS tick loop: WorldTime, UpdateScheduler, EntityManager, FluidTickManager, navigation, vision, game script |
 | Mesh workers | MeshWorkerPool: parallel CPU mesh generation, write to MeshCacheEntry |
 | IO threads | IOManager: async save/load of region files |
 | Light thread | LightEngine BFS propagation |

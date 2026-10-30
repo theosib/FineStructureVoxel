@@ -12,6 +12,12 @@
  * This is server-side truth. Clients and AI players are told what a faction can
  * see, never the reverse, so neither can peek. Game thread only, except where
  * noted.
+ *
+ * Sight is a horizon sweep: rays march out from the eye over a per-column height
+ * grid, tracking the steepest angle so far. Anything below that horizon is hidden.
+ * That is a few thousand array reads per unit rather than a block-by-block ray to
+ * every cell, which is what keeps it affordable with armies on the map. The grid
+ * refreshes a few chunks per tick, only where blocks actually changed.
  */
 
 #include "finevox/core/game_subsystem.hpp"
@@ -65,7 +71,8 @@ public:
     /// Reveal an area without line of sight (scripted events, map setup)
     void reveal(uint16_t faction, const glm::dvec3& center, float radius);
 
-    /// Recompute a faction's sight now instead of waiting for its turn
+    /// Recompute a faction's sight now instead of waiting for its turn. Exact: unlike
+    /// the periodic update, cells out of sight lapse at once.
     void refresh(uint16_t faction);
 
     /// Default sight radius for entities with no `vision` property
@@ -96,9 +103,20 @@ private:
         float radius;
     };
 
+    /// Top of what blocks sight in a column, and of see-through growth above it
+    struct ColumnHeight {
+        int16_t solid = -1;
+        int16_t foliage = -1;
+    };
+
     [[nodiscard]] int32_t cellIndex(int32_t x, int32_t z) const;
-    void updateFaction(uint16_t faction, std::vector<uint8_t>& cells);
+    [[nodiscard]] int32_t columnIndex(int32_t x, int32_t z) const;
+    void updateFaction(uint16_t faction, std::vector<uint8_t>& cells, bool linger);
     void castFrom(const glm::dvec3& eye, float radius, std::vector<uint8_t>& cells);
+
+    void ensureHeights();
+    void refreshChunkHeights(int32_t chunkX, int32_t chunkZ);
+    void refreshSomeHeights();
 
     World& world_;
     EntityManager& entities_;
@@ -109,8 +127,15 @@ private:
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<uint16_t, std::vector<uint8_t>> factions_;
+    /// Updates each visible cell has left before it lapses to Explored
+    std::unordered_map<uint16_t, std::vector<uint8_t>> linger_;
     std::unordered_map<int64_t, Source> sources_;
     std::vector<uint16_t> order_;
+    std::vector<ColumnHeight> heights_;
+    std::vector<uint64_t> chunkVersions_;   ///< Sum of block versions per chunk column
+    int32_t chunksX_ = 0;
+    int32_t chunksZ_ = 0;
+    int32_t heightCursor_ = 0;
     int64_t nextSource_ = 1;
     size_t turn_ = 0;
     uint32_t ticks_ = 0;

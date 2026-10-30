@@ -406,6 +406,55 @@ TEST_F(NavigationAgentTest, RepathsWhenAWallAppearsMidRoute) {
     EXPECT_NEAR(entities->getMob(id)->position().x, 30.5f, 1.0f);
 }
 
+TEST_F(NavigationTest, PartialSearchReturnsTheClosestRouteWhenItRunsOutOfNodes) {
+    NavQuery q = query(cell(0, GROUND_Y, 0), cell(60, GROUND_Y, 50));
+    q.maxNodes = 200;
+    EXPECT_FALSE(findNavPath(world, q).has_value());
+
+    q.allowPartial = true;
+    auto path = findNavPath(world, q);
+    ASSERT_TRUE(path.has_value());
+    EXPECT_TRUE(path->partial);
+    replay(*path, {0, GROUND_Y, 0});
+    EXPECT_GT(path->steps.back().pos.x, 5) << "must make headway";
+}
+
+TEST_F(NavigationAgentTest, LongTripsArriveInHopsOfBoundedCost) {
+    EntityId id = spawn(0, 0);
+    tick(5);
+    NavOrder order;
+    order.goal = cell(60, GROUND_Y, 50);
+    order.maxNodes = 250;   // Far too small for the whole trip at once
+    order.allowPartial = true;
+    nav->order(id, order);
+
+    EXPECT_EQ(settle(id, 40.0f), NavState::Arrived);
+    Vec3 pos = entities->getMob(id)->position();
+    EXPECT_NEAR(pos.x, 60.5f, 1.0f);
+    EXPECT_NEAR(pos.z, 50.5f, 1.0f);
+}
+
+TEST_F(NavigationAgentTest, PartialTripsGiveUpAtADeadEnd) {
+    // Sealed in: walls all round a small yard, goal outside
+    wall(10, -8, 20, 3);
+    wall(-6, -8, 20, 3);
+    for (int x = -6; x <= 10; ++x) {
+        for (int y = 0; y < 3; ++y) {
+            world.setBlock(x, GROUND_Y + y, 20, stone);
+            world.setBlock(x, GROUND_Y + y, -8, stone);
+        }
+    }
+    EntityId id = spawn(0, 0);
+    tick(5);
+    NavOrder order;
+    order.goal = cell(50, GROUND_Y, 40);
+    order.maxNodes = 300;
+    order.allowPartial = true;
+    nav->order(id, order);
+
+    EXPECT_EQ(settle(id, 30.0f), NavState::Failed);
+}
+
 TEST_F(NavigationAgentTest, FailsWhenThereIsNoRoute) {
     EntityId id = spawn(0, 0);
     tick(5);

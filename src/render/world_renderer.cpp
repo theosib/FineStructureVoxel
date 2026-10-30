@@ -297,7 +297,14 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         const ChunkPos& pos = uploadData->pos;
         SubChunkView* view = getOrCreateView(pos);
 
+        // Frames in flight may still draw the old mesh, so it must outlive them
+        auto retire = [this](finevk::RawMeshPtr mesh) {
+            if (mesh) renderer_->deferDelete(std::move(mesh));
+        };
+
         if (uploadData->mesh.isEmpty()) {
+            retire(view->takeMesh());
+            retire(view->takeFluidMesh());
             view->release();
             view->setLastBuiltLOD(uploadData->lodLevel);
             ++uploads;
@@ -307,6 +314,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         if (view->canUpdateInPlace(uploadData->mesh)) {
             view->update(*renderer_->commandPool(), uploadData->mesh);
         } else {
+            retire(view->takeMesh());
             view->upload(*device_, *renderer_->commandPool(), uploadData->mesh, config_.meshCapacityMultiplier);
         }
 
@@ -315,10 +323,12 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             if (view->canUpdateFluidInPlace(uploadData->fluidMesh)) {
                 view->updateFluid(*renderer_->commandPool(), uploadData->fluidMesh);
             } else {
+                retire(view->takeFluidMesh());
                 view->uploadFluid(*device_, *renderer_->commandPool(),
                                   uploadData->fluidMesh, config_.meshCapacityMultiplier);
             }
         } else {
+            retire(view->takeFluidMesh());
             view->releaseFluid();
         }
 

@@ -15,6 +15,14 @@ SubChunkView::SubChunkView(ChunkPos pos)
 
 SubChunkView::~SubChunkView() = default;
 
+finevk::RawMeshPtr SubChunkView::takeMesh() {
+    return std::move(mesh_);
+}
+
+finevk::RawMeshPtr SubChunkView::takeFluidMesh() {
+    return std::move(fluidMesh_);
+}
+
 void SubChunkView::upload(
     finevk::LogicalDevice& device,
     finevk::CommandPool& commandPool,

@@ -53,6 +53,9 @@ struct NavQuery {
     /// the search to choose a road over the straight line, at the price of more
     /// expansions the faster this is.
     float fastestSurface = 1.5f;
+    /// If the search runs out of nodes, return the route to the closest point reached
+    /// rather than nothing. Lets a long trip proceed in hops of bounded cost.
+    bool allowPartial = false;
 };
 
 enum class NavAction : uint8_t {
@@ -70,6 +73,7 @@ struct NavStep {
 struct NavPath {
     std::vector<NavStep> steps;
     int nodesExpanded = 0;
+    bool partial = false;   ///< Ends short of the goal; see NavQuery::allowPartial
 };
 
 /// True if an entity of this height can stand with feet in `pos`
@@ -99,6 +103,7 @@ struct NavOrder {
     bool allowPlace = false;
     bool allowDig = false;
     int maxNodes = 12000;
+    bool allowPartial = false;
 };
 
 class NavigationSystem : public GameSubsystem {
@@ -144,17 +149,20 @@ private:
         float stuckTime = 0.0f;
         float bestDistance = 1e9f;
         int repaths = 0;
+        bool partialPath = false;
+        float lastHopDistance = 1e9f;   ///< Distance to goal when the last hop began
     };
 
     void runSearches();
     void followPath(EntityId id, Agent& agent, MobEntity& mob, float dt);
     void finish(Agent& agent, MobEntity& mob, NavState state);
+    void beginNextHop(EntityId id, Agent& agent, MobEntity& mob);
 
     World& world_;
     EntityManager& entities_;
     std::unordered_map<EntityId, Agent> agents_;
     std::deque<EntityId> searchQueue_;
-    int nodeBudget_ = 24000;
+    int nodeBudget_ = 12000;
     int nodesLastTick_ = 0;
 };
 

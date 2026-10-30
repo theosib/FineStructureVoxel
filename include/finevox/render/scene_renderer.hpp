@@ -12,7 +12,7 @@
 #include "finevox/render/scene_geometry.hpp"
 
 #include <finevk/engine/camera.hpp>
-#include <finevk/high/raw_mesh.hpp>
+#include <finevk/device/buffer.hpp>
 #include <finevk/high/uniform_buffer.hpp>
 #include <finevk/rendering/descriptors.hpp>
 #include <finevk/rendering/pipeline.hpp>
@@ -47,9 +47,10 @@ public:
     void drawTranslucent(finevk::CommandBuffer& cmd);
 
 private:
+    /// Host-visible vertex storage, one buffer per frame in flight. Geometry changes
+    /// every frame, and a device-local upload would stall the frame on a submit.
     struct DynamicMesh {
-        finevk::RawMeshPtr mesh;
-        std::vector<uint32_t> indices;
+        std::vector<finevk::BufferPtr> buffers;
     };
 
     void draw(finevk::CommandBuffer& cmd, finevk::GraphicsPipeline& pipeline, DynamicMesh& target,

@@ -134,6 +134,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     const uint32_t keyRange = si.intern("range");
     const uint32_t keyPlace = si.intern("place");
     const uint32_t keyDig = si.intern("dig");
+    const uint32_t keyPartial = si.intern("partial");
     const uint32_t keyMaxNodes = si.intern("max_nodes");
     const uint32_t keyKind = si.intern("kind");
     const uint32_t keyPos = si.intern("pos");
@@ -317,7 +318,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     // Navigation
     // ------------------------------------------------------------------------
 
-    // ent_goto id x y z [=range r] [=place true] [=dig true] [=max_nodes n] -> queued?
+    // ent_goto id x y z [=range r] [=place true] [=dig true] [=partial true] [=max_nodes n]
     e.registerFunction("ent_goto", [=](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         if (!ud || !ud->navigation || !mobArg(ctx, args)) return Value::boolean(false);
@@ -333,6 +334,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         if (nodes.isNumeric()) order.maxNodes = static_cast<int>(nodes.asNumber());
         order.allowPlace = option(options, keyPlace).truthy();
         order.allowDig = option(options, keyDig).truthy();
+        order.allowPartial = option(options, keyPartial).truthy();
 
         ud->navigation->order(entityArg(args), order);
         return Value::boolean(true);

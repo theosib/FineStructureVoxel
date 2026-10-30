@@ -4,7 +4,7 @@ A voxel game engine built on FineStructureVK (Vulkan wrapper). Game content is l
 
 ## Current Status
 
-**Phase 21 complete — 1684 tests passing** (1633 main + 51 script)
+See [docs/STATUS.md](docs/STATUS.md) for current state.
 
 All engine systems implemented:
 - World management (chunk columns, lifecycle, persistence)
@@ -39,15 +39,26 @@ All engine systems implemented:
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Making a Game
+
+A game is a content directory with a `game.conf`. It needs no C++:
+
+```bash
+finevox_run --game-root path/to/game       # play
+finevox_headless --game-root path/to/game  # run with no window, for tests
+```
+
+See [docs/systems/game-runtime.md](docs/systems/game-runtime.md).
+
 ## Building
 
 ```bash
-mkdir build && cd build
-cmake ..
-make -j8
-./finevox_tests
-./render_demo          # interactive demo (requires Vulkan)
-./render_demo --worldgen  # with procedural world generation
+# Dependencies are siblings of this repo, each with a Release build in build/
+cmake -S . -B ../fv-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DFINEVOX_BUILD_RENDER=ON -DFINEVOX_BUILD_AUDIO=ON
+cmake --build ../fv-build
+../fv-build/finevox_tests         # run test binaries directly, not ctest -j
+../fv-build/finevox_render_demo   # interactive demo (requires Vulkan)
 ```
 
 ## Documentation

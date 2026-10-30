@@ -1575,3 +1575,83 @@ TEST(LightingQueueAlarmTest, StopWakesDuringAlarmWait) {
     EXPECT_TRUE(batch.empty());
     EXPECT_LE(elapsed.count(), 500);
 }
+
+// ============================================================================
+// Sky light returns when cover is removed
+// ============================================================================
+
+class SkyLightClearingTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ground = BlockTypeId::fromName("clearing_ground");
+        leaves = BlockTypeId::fromName("clearing_leaves");
+        log = BlockTypeId::fromName("clearing_log");
+
+        BlockType groundType;
+        groundType.setCollisionShape(CollisionShape::FULL_BLOCK);
+        BlockRegistry::global().registerOrUpdateType(ground, groundType);
+        BlockRegistry::global().registerOrUpdateType(log, groundType);
+
+        BlockType leafType;
+        leafType.setOpaque(false);
+        leafType.setNoCollision();
+        leafType.setBlocksSkyLight(false);
+        leafType.setLightAttenuation(1);
+        BlockRegistry::global().registerOrUpdateType(leaves, leafType);
+
+        for (int x = 0; x < 16; ++x) {
+            for (int z = 0; z < 16; ++z) world.setBlock(x, 20, z, ground);
+        }
+    }
+
+    void initialise() {
+        engine.initializeSkyLight(ColumnPos(0, 0));
+        engine.processUpdates();
+    }
+
+    void remove(BlockCoord pos, BlockTypeId type) {
+        world.setBlock(pos, BlockTypeId());
+        LightingUpdate update{pos, type, BlockTypeId(), {}, {}};
+        engine.enqueue(update);
+    }
+
+    /// Updates are applied only by the lighting thread, as in a running game
+    void settle() {
+        engine.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+        engine.stop();
+    }
+
+    World world;
+    LightEngine engine{world};
+    BlockTypeId ground, leaves, log;
+};
+
+TEST_F(SkyLightClearingTest, FellingALogLetsTheSkyBackIn) {
+    for (int y = 21; y < 26; ++y) world.setBlock(8, y, 8, log);
+    initialise();
+    EXPECT_LT(engine.getSkyLight({8, 21, 8}), 15) << "inside the trunk";
+
+    for (int y = 25; y >= 21; --y) remove({8, y, 8}, log);
+    settle();
+    EXPECT_GE(engine.getSkyLight({8, 21, 8}), 14);
+}
+
+TEST_F(SkyLightClearingTest, ClearingFoliageRemovesItsShade) {
+    for (int x = 6; x <= 10; ++x) {
+        for (int z = 6; z <= 10; ++z) {
+            for (int y = 26; y <= 29; ++y) world.setBlock(x, y, z, leaves);
+        }
+    }
+    initialise();
+    uint8_t shaded = engine.getSkyLight({8, 21, 8});
+    EXPECT_LT(shaded, 15) << "canopy should shade the ground";
+
+    for (int y = 29; y >= 26; --y) {
+        for (int x = 6; x <= 10; ++x) {
+            for (int z = 6; z <= 10; ++z) remove({x, y, z}, leaves);
+        }
+    }
+    settle();
+    EXPECT_GE(engine.getSkyLight({8, 21, 8}), 14) << "no canopy, no shade";
+}

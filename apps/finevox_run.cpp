@@ -49,6 +49,10 @@ int main(int argc, char* argv[]) {
             clientOptions.screenshotPath = value();
         } else if (arg == "--screenshot-frame") {
             clientOptions.screenshotFrame = std::stoi(value());
+        } else if (arg == "--screenshot-burst") {
+            clientOptions.burstCount = std::stoi(value());
+        } else if (arg == "--screenshot-interval") {
+            clientOptions.burstInterval = std::stoi(value());
         } else if (arg == "--exit-after") {
             clientOptions.exitAfterFrames = std::stoi(value());
         } else {

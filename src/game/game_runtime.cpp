@@ -95,6 +95,7 @@ void GameRuntime::load() {
     GameSessionConfig config;
     config.tickRate = manifest_.tickRate;
     config.gravity = manifest_.gravity;
+    config.randomTicksPerChunk = manifest_.randomTicks;
     session_ = GameSession::createLocal(config);
 
     generateWorld();

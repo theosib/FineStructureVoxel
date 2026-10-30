@@ -138,3 +138,100 @@ TEST(LabelRegistryTest, LoadFromFile) {
     EXPECT_EQ(reg.get("block.stone.name"), "Stone");
     EXPECT_EQ(reg.format("hotbar.slot", {"5"}), "Slot 5");
 }
+
+// ============================================================================
+// Locales
+// ============================================================================
+
+class LabelLocaleTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        labels.clear();
+        labels.setLocale("en");
+        labels.setFallbackLocale("en");
+        labels.loadLocaleString("en",
+            "ui.hello: Hello\n"
+            "ui.only_en: English only\n"
+            "ui.greet: Hello {name}, you have {gold} gold\n"
+            "ui.units.one: {count} unit\n"
+            "ui.units.other: {count} units\n");
+        labels.loadLocaleString("fr",
+            "ui.hello: Bonjour\n"
+            "ui.units.one: {count} unité\n"
+            "ui.units.other: {count} unités\n");
+        labels.loadLocaleString("ru",
+            "ui.units.one: {count} боец\n"
+            "ui.units.few: {count} бойца\n"
+            "ui.units.many: {count} бойцов\n");
+        labels.loadLocaleString("ja", "ui.units.other: {count}人\n");
+    }
+
+    void TearDown() override {
+        labels.clear();
+        labels.setLocale("en");
+    }
+
+    std::string units(int64_t n) { return labels.formatLocalized("ui.units", {}, &n); }
+
+    LabelRegistry& labels = LabelRegistry::global();
+};
+
+TEST_F(LabelLocaleTest, ActiveLocaleWins) {
+    labels.setLocale("fr");
+    EXPECT_EQ(labels.get("ui.hello"), "Bonjour");
+}
+
+TEST_F(LabelLocaleTest, MissingStringsFallBackThenShowTheKey) {
+    labels.setLocale("fr");
+    EXPECT_EQ(labels.get("ui.only_en"), "English only");
+    EXPECT_EQ(labels.get("ui.nowhere"), "ui.nowhere");
+}
+
+TEST_F(LabelLocaleTest, NamedParametersSubstitute) {
+    EXPECT_EQ(labels.formatLocalized("ui.greet", {{"name", "Ada"}, {"gold", "12"}}),
+              "Hello Ada, you have 12 gold");
+}
+
+TEST_F(LabelLocaleTest, AnUnknownParameterStaysVisible) {
+    EXPECT_EQ(labels.formatLocalized("ui.greet", {{"name", "Ada"}}),
+              "Hello Ada, you have {gold} gold");
+}
+
+TEST_F(LabelLocaleTest, EnglishPlurals) {
+    EXPECT_EQ(units(1), "1 unit");
+    EXPECT_EQ(units(0), "0 units");
+    EXPECT_EQ(units(2), "2 units");
+}
+
+TEST_F(LabelLocaleTest, FrenchTreatsZeroAsSingular) {
+    labels.setLocale("fr");
+    EXPECT_EQ(units(0), "0 unité");
+    EXPECT_EQ(units(2), "2 unités");
+}
+
+TEST_F(LabelLocaleTest, RussianUsesThreeForms) {
+    labels.setLocale("ru");
+    EXPECT_EQ(units(1), "1 боец");
+    EXPECT_EQ(units(21), "21 боец");
+    EXPECT_EQ(units(3), "3 бойца");
+    EXPECT_EQ(units(5), "5 бойцов");
+    EXPECT_EQ(units(11), "11 бойцов") << "the teens are always 'many'";
+    EXPECT_EQ(units(13), "13 бойцов");
+}
+
+TEST_F(LabelLocaleTest, JapaneseHasNoGrammaticalNumber) {
+    labels.setLocale("ja");
+    EXPECT_EQ(units(1), "1人");
+    EXPECT_EQ(units(7), "7人");
+}
+
+TEST_F(LabelLocaleTest, MissingPluralFormFallsBackToOtherThenTheBareKey) {
+    labels.loadLocaleString("en", "ui.plain: Things\n");
+    int64_t n = 1;
+    EXPECT_EQ(labels.formatLocalized("ui.plain", {}, &n), "Things");
+}
+
+TEST_F(LabelLocaleTest, RegionalLocalesUseTheirLanguageRules) {
+    EXPECT_STREQ(LabelRegistry::pluralCategory("ru-RU", 3), "few");
+    EXPECT_STREQ(LabelRegistry::pluralCategory("pt_BR", 0), "one");
+}

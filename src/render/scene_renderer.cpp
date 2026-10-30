@@ -4,6 +4,7 @@
 #include <finevk/device/logical_device.hpp>
 
 #include <cstddef>
+#include <cstring>
 
 namespace finevox::render {
 
@@ -123,32 +124,27 @@ void SceneRenderer::draw(finevk::CommandBuffer& cmd, finevk::GraphicsPipeline& p
         return;
     }
 
-    target.indices.resize(vertices.size());
-    for (uint32_t i = 0; i < vertices.size(); ++i) target.indices[i] = i;
-
-    auto* commandPool = surface_->commandPool();
-    if (!target.mesh) {
-        VkVertexInputBindingDescription binding{0, sizeof(SceneVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-        std::vector<VkVertexInputAttributeDescription> attributes = {
-            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(SceneVertex, position))},
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<uint32_t>(offsetof(SceneVertex, normal))},
-            {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, static_cast<uint32_t>(offsetof(SceneVertex, color))},
-        };
-        target.mesh = finevk::RawMesh::create(device_)
-            .vertexLayout(binding, attributes)
-            .vertices(vertices.data(), vertices.size())
-            .indices(target.indices.data(), target.indices.size())
-            .reserveCapacity(2.0f)
-            .build(commandPool);
-    } else {
-        target.mesh->update(*commandPool, vertices.data(), vertices.size(), target.indices.data(),
-                            target.indices.size());
+    uint32_t frame = surface_->currentFrame();
+    if (target.buffers.size() < surface_->framesInFlight()) {
+        target.buffers.resize(surface_->framesInFlight());
     }
+
+    VkDeviceSize bytes = vertices.size() * sizeof(SceneVertex);
+    finevk::BufferPtr& buffer = target.buffers[frame];
+    if (!buffer || buffer->size() < bytes) {
+        if (buffer) surface_->deferDelete(std::move(buffer));
+        buffer = finevk::Buffer::create(device_)
+            .size(bytes * 2)
+            .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+            .memoryUsage(finevk::MemoryUsage::CpuToGpu)
+            .build();
+    }
+    std::memcpy(buffer->map(), vertices.data(), bytes);
 
     pipeline.bind(cmd.handle());
     VkExtent2D extent = surface_->extent();
     cmd.setViewportAndScissor(extent.width, extent.height);
-    pipelineLayout_->bindDescriptorSet(cmd.handle(), descriptorSets_[surface_->currentFrame()]);
+    pipelineLayout_->bindDescriptorSet(cmd.handle(), descriptorSets_[frame]);
 
     ScenePushConstants pc{};
     pc.fogStart = fogStart_;
@@ -160,8 +156,10 @@ void SceneRenderer::draw(finevk::CommandBuffer& cmd, finevk::GraphicsPipeline& p
     pipelineLayout_->pushConstants(cmd.handle(),
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
 
-    target.mesh->bind(cmd);
-    target.mesh->draw(cmd);
+    VkBuffer handle = buffer->handle();
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd.handle(), 0, 1, &handle, &offset);
+    vkCmdDraw(cmd.handle(), static_cast<uint32_t>(vertices.size()), 1, 0, 0);
     vertices.clear();
 }
 

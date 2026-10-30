@@ -196,6 +196,10 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             if (!model->opaque()) {
                 blockType.setTransparent(true);
                 blockType.setBlocksSkyLight(false);
+                // BlockModel defaults to blocking all light, which would turn the
+                // ground under every see-through block black. An explicit
+                // light-attenuation below 15 still applies.
+                if (model->lightAttenuation() >= 15) blockType.setLightAttenuation(1);
             }
         }
 

@@ -26,8 +26,13 @@ struct GameManifest {
     bool caves = false;
 
     uint32_t tickRate = 30;
+    uint32_t randomTicks = 4;     ///< Per subchunk per tick; 0 if no block wants them
     float gravity = -14.0f;
     float viewDistance = 256.0f;
+    /// Merge distant blocks into coarser meshes. Suits a first-person view of a far
+    /// horizon. An overhead camera keeps most of the map in the transition zone, where
+    /// meshes visibly swap as it moves, so such games turn this off.
+    bool lod = true;
     std::string defaultLocale = "en";
 
     bool fogOfWar = true;

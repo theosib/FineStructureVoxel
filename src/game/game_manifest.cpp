@@ -19,8 +19,10 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.seaLevel = doc->getInt("sea_level", m.seaLevel);
     m.caves = doc->getBool("caves", m.caves);
     m.tickRate = static_cast<uint32_t>(doc->getInt("tick_rate", static_cast<int>(m.tickRate)));
+    m.randomTicks = static_cast<uint32_t>(doc->getInt("random_ticks", static_cast<int>(m.randomTicks)));
     m.gravity = doc->getFloat("gravity", m.gravity);
     m.viewDistance = doc->getFloat("view_distance", m.viewDistance);
+    m.lod = doc->getBool("lod", m.lod);
     m.defaultLocale = std::string(doc->getString("default_locale", m.defaultLocale));
     m.fogOfWar = doc->getBool("fog_of_war", m.fogOfWar);
     m.viewerFaction = static_cast<uint16_t>(doc->getInt("viewer_faction", m.viewerFaction));

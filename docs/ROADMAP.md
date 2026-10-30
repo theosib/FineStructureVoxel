@@ -31,6 +31,14 @@ These items were designed and partially scoped but deferred during implementatio
 - **Icon-based slot rendering** — `IconAtlas` and `item_icon` exist but inventory slots show text labels not block preview icons. Wire icon UVs into slot button images.
 - **Cursor item visual** — Currently a text tooltip near mouse. Should be a dragged icon sprite following the cursor.
 
+### From Phase K (Game Runtime)
+- **Batched mesh uploads** — each subchunk is its own GPU submit-and-wait, about 4ms. A first view of a large world fills in over seconds. Needs a batched path in FineStructureVK.
+- **Fog in the chunk shader** — fog of war is a translucent overlay on the highest block in each cell, so tall things poke through. A vision texture sampled in `chunk.frag` would be exact.
+- **`WorldReplica` block rotation** — blocks and fluids replicate; rotations don't yet.
+- **Local avoidance** — path following has no unit separation.
+- **Font fallback in finegui** — `loc` handles any language's strings, but CJK needs glyphs.
+- **`render_demo` on `GameClient`** — the demo still has its own host code.
+
 ### Design Issue (Phase 19 / Script)
 - **Cross-context native functions** — Functions like `show_main_menu()` crossing finescript execution contexts is architecturally awkward. The right fix is a message-passing or state-machine approach where UI state transitions are events rather than direct calls.
 

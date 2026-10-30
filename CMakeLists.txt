@@ -697,9 +697,11 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_inventory_natives.cpp
             tests/test_entity_script_wiring.cpp
             tests/test_player_stats_bridge.cpp
+            tests/test_game_runtime.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE
+            finevox_game
             finevox_script
             finevox_worldgen
             GTest::gtest_main

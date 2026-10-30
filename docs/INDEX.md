@@ -43,6 +43,7 @@
 | [systems/scripting.md](systems/scripting.md) | GameScriptEngine, proxies, native fns | `finevox_script` | Script integration, .fsc blocks/entities |
 | [systems/ui.md](systems/ui.md) | finegui, MapRenderer, console | apps | UI layout, in-game console, settings |
 | [systems/game-session.md](systems/game-session.md) | GameSession, GameActions, finenet local transport, game thread | `finevox` | Session lifecycle, command routing, client-server boundary |
+| [systems/game-runtime.md](systems/game-runtime.md) | `GameRuntime`, `finevox_run`, `finevox_headless`, navigation, vision, projectiles, blueprints, client scripting | `finevox_game` / client | Building a game on the engine |
 | [systems/content-roots.md](systems/content-roots.md) | `ContentPackLoader`, `--game-root` flag, resource lookup paths | `finevox` / apps | Loading content packs from engine or external game directories |
 
 ---

@@ -282,6 +282,9 @@ public:
     /// Propagate sky light from a position
     /// @param pos Starting position
     /// @param lightLevel Light level to propagate
+
+    /// Let sky light back into a cell after something over or in it became thinner
+    void restoreSkyLight(const BlockCoord& pos);
     void propagateSkyLight(const BlockCoord& pos, uint8_t lightLevel);
 
     // ========================================================================

@@ -7,7 +7,9 @@
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/input_action_system.hpp"
 #include "finevox/core/light_engine.hpp"
+#include "finevox/core/mob_entity.hpp"
 #include "finevox/core/physics.hpp"
+#include "finevox/core/player_controller.hpp"
 #include "finevox/core/sky.hpp"
 #include "finevox/core/tactical_camera.hpp"
 #include "finevox/core/world.hpp"
@@ -25,6 +27,7 @@
 #include "finevox/script/finevox_interner.hpp"
 
 #include <finegui/finegui.hpp>
+#include <imgui.h>
 #include <finegui/map_renderer.hpp>
 #include <finegui/script_bindings.hpp>
 #include <finegui/script_gui_manager.hpp>
@@ -64,6 +67,7 @@ constexpr float FAR_PLANE = 900.0f;
 constexpr float CAMERA_PAN_SPEED = 0.9f;   // Fraction of arm length per second
 constexpr float CAMERA_ORBIT_SPEED = 1.6f;
 constexpr float PICK_RANGE = 700.0f;
+constexpr uint64_t FOG_REFRESH_FRAMES = 15;
 
 class GameRootFinder : public finescript::ResourceFinder {
 public:
@@ -145,6 +149,15 @@ struct GameClient::Impl {
     finevk::Camera camera;
     TacticalCamera tactical;
     ViewBasis view;
+
+    // Embodied view: a first-person avatar sharing the same world and picking
+    PlayerController steward;
+    std::unique_ptr<PhysicsSystem> stewardPhysics;
+    std::unique_ptr<SimplePhysicsBody> stewardBody;
+    BlockShapeProvider stewardShapes;
+    EntityId stewardId = INVALID_ENTITY_ID;
+    bool embodied = false;
+    bool jumpHeld = false;
     glm::vec2 viewport{1600.0f, 900.0f};
     SkyParameters sky;
     std::unordered_map<uint16_t, glm::vec3> factionColors;
@@ -154,7 +167,12 @@ struct GameClient::Impl {
     bool orbitLeft = false, orbitRight = false;
     glm::vec2 mouse{0.0f};
 
+    struct FogQuad {
+        glm::dvec3 center;
+        float alpha;
+    };
     std::vector<uint8_t> fogCells;
+    std::vector<FogQuad> fogQuads;
 
     finevk::StagingPoolPtr stagingPool;
     uint64_t frameCount = 0;
@@ -174,6 +192,8 @@ struct GameClient::Impl {
     void drainUiMessages();
     void buildProjectiles();
     void buildFogOverlay();
+    void setEmbodied(bool on);
+    void updateStewardView(float dt);
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
 
@@ -245,6 +265,7 @@ void GameClient::Impl::setup() {
     render::WorldRendererConfig worldConfig;
     worldConfig.viewDistance = manifest.viewDistance;
     worldRenderer = std::make_unique<render::WorldRenderer>(&device, &renderer, world, worldConfig);
+    worldRenderer->setLODEnabled(manifest.lod);
 
     std::string shaderDir = options.shaderDir.string() + "/";
     worldRenderer->loadShaders(shaderDir + "chunk.vert.spv", shaderDir + "chunk.frag.spv");
@@ -313,8 +334,21 @@ void GameClient::Impl::setup() {
     std::string bindings = (runtime.gameRoot() / "input" / "default.bindings").string();
     if (fs::exists(bindings)) inputActions.loadBindings(bindings);
 
+    stewardShapes = createBlockShapeProvider(world);
+    stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
+    stewardBody = std::make_unique<SimplePhysicsBody>(
+        Vec3(0.0f, float(manifest.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
+    steward.setPhysics(stewardBody.get(), stewardPhysics.get());
+    steward.setFlyMode(false);
+    stewardId = session.entities().spawnPlayer(stewardBody->position());
+    session.entities().setLocalPlayerId(stewardId);
+    if (MobEntity* mob = session.entities().getMob(stewardId)) {
+        mob->setFaction(manifest.viewerFaction);
+    }
+
     registerNatives();
     bindInput();
+    uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
     loadUiScript();
 
     auto worldLayer = std::make_shared<render::WorldRenderLayer>(*worldRenderer);
@@ -393,10 +427,20 @@ void GameClient::Impl::setup() {
     };
     callbacks.onPostRender = [this]() {
         ++frameCount;
-        if (!options.screenshotPath.empty() &&
-            frameCount == static_cast<uint64_t>(options.screenshotFrame)) {
-            screenshotPath = options.screenshotPath;
-            screenshotRequested = true;
+        if (!options.screenshotPath.empty() && options.screenshotFrame > 0) {
+            int64_t since = static_cast<int64_t>(frameCount) - options.screenshotFrame;
+            if (since == 0) {
+                screenshotPath = options.screenshotPath;
+                screenshotRequested = true;
+            } else if (since > 0 && options.burstCount > 0 && since % options.burstInterval == 0 &&
+                       since / options.burstInterval <= options.burstCount) {
+                fs::path base(options.screenshotPath);
+                screenshotPath = (base.parent_path() /
+                                  (base.stem().string() + "_" +
+                                   std::to_string(since / options.burstInterval) + ".png"))
+                                     .string();
+                screenshotRequested = true;
+            }
         }
         if (screenshotRequested) {
             screenshotRequested = false;
@@ -471,6 +515,12 @@ void GameClient::Impl::bindInput() {
                     else if (action == "end_pan_forward") panForward = false;
                     else if (action == "begin_pan_back") panBack = true;
                     else if (action == "end_pan_back") panBack = false;
+                    else if (action == "toggle_view") setEmbodied(!embodied);
+                    else if (action == "begin_jump") {
+                        jumpHeld = true;
+                        if (embodied) steward.requestJump();
+                    }
+                    else if (action == "end_jump") jumpHeld = false;
                     else if (action == "begin_orbit_left") orbitLeft = true;
                     else if (action == "end_orbit_left") orbitLeft = false;
                     else if (action == "begin_orbit_right") orbitRight = true;
@@ -489,7 +539,66 @@ void GameClient::Impl::bindInput() {
         finevk::InputPriority::Game);
 }
 
+void GameClient::Impl::setEmbodied(bool on) {
+    embodied = on;
+    auto& input = engine->inputManager();
+    panLeft = panRight = panForward = panBack = false;
+    steward.clearInput();
+
+    if (on) {
+        // Step down at the point the overhead view was looking at
+        glm::dvec3 pivot = tactical.pivot();
+        stewardBody->setPosition(Vec3(static_cast<float>(pivot.x), static_cast<float>(pivot.y) + 1.0f,
+                                      static_cast<float>(pivot.z)));
+        stewardBody->setVelocity(Vec3(0.0f));
+        input.setCursorMode(finevk::CursorMode::Disabled);
+    } else {
+        Vec3 pos = stewardBody->position();
+        tactical.setPivot(glm::dvec3(pos.x, pos.y, pos.z));
+        input.setCursorMode(finevk::CursorMode::Normal);
+    }
+
+    uiCtx->set("view_mode", Value::symbol(uiEngine->intern(on ? "embodied" : "tactical")));
+}
+
+void GameClient::Impl::updateStewardView(float dt) {
+    auto& input = engine->inputManager();
+    steward.setMoveForward(panForward);
+    steward.setMoveBack(panBack);
+    steward.setMoveLeft(panLeft);
+    steward.setMoveRight(panRight);
+
+    glm::vec2 delta = input.mouseDelta();
+    if (delta.x != 0.0f || delta.y != 0.0f) steward.look(delta.x, delta.y);
+    steward.update(dt);
+
+    Vec3 pos = stewardBody->position();
+    Vec3 eye(pos.x, pos.y + steward.eyeHeight(), pos.z);
+    Vec3 safeOrigin(pos.x, pos.y + 0.9f, pos.z);
+    Vec3 adjusted = adjustCameraForWallCollision(safeOrigin, eye, stewardShapes);
+    glm::dvec3 cameraPos(adjusted.x, adjusted.y, adjusted.z);
+
+    camera.moveTo(cameraPos);
+    camera.setOrientation(steward.forwardVector(), glm::vec3(0.0f, 1.0f, 0.0f));
+    camera.updateState();
+    view = makeViewBasis(cameraPos, steward.forwardVector(), FOV_DEGREES,
+                         viewport.x / std::max(viewport.y, 1.0f));
+
+    EntityState state;
+    state.position = glm::dvec3(pos.x, pos.y, pos.z);
+    state.velocity = glm::dvec3(stewardBody->velocity());
+    state.onGround = stewardBody->isOnGround();
+    state.yaw = glm::degrees(steward.yaw());
+    state.pitch = glm::degrees(steward.pitch());
+    runtime.session().actions().sendPlayerState(stewardId, state);
+}
+
 void GameClient::Impl::updateCamera(float dt) {
+    if (embodied) {
+        updateStewardView(dt);
+        return;
+    }
+
     float pan = CAMERA_PAN_SPEED * tactical.distance() * dt;
     float right = (panRight ? pan : 0.0f) - (panLeft ? pan : 0.0f);
     float forward = (panForward ? pan : 0.0f) - (panBack ? pan : 0.0f);
@@ -580,41 +689,49 @@ void GameClient::Impl::buildProjectiles() {
 void GameClient::Impl::buildFogOverlay() {
     if (!runtime.manifest().fogOfWar) return;
 
-    // Vision changes a few times a second; heights only when terrain arrives
-    if (frameCount % 12 == 0 || fogCells.empty()) {
+    // Vision and terrain change far slower than frames, and finding each cell's top
+    // means walking down a column of blocks. Do that a few times a second.
+    if (frameCount % FOG_REFRESH_FRAMES == 0 || fogCells.empty()) {
         fogCells = runtime.vision().snapshot(runtime.manifest().viewerFaction);
+        fogQuads.clear();
+
+        const FactionVision& vision = runtime.vision();
+        const VisionBounds& bounds = vision.bounds();
+        int32_t cell = FactionVision::CELL_SIZE;
+        World& world = runtime.replica().world();
+        double range = tactical.distance() * 2.5 + 64.0;
+        glm::dvec3 pivot = tactical.pivot();
+
+        int32_t minCx = std::max(0, static_cast<int32_t>((pivot.x - range - bounds.minX) / cell));
+        int32_t maxCx = std::min(vision.cellsX() - 1, static_cast<int32_t>((pivot.x + range - bounds.minX) / cell));
+        int32_t minCz = std::max(0, static_cast<int32_t>((pivot.z - range - bounds.minZ) / cell));
+        int32_t maxCz = std::min(vision.cellsZ() - 1, static_cast<int32_t>((pivot.z + range - bounds.minZ) / cell));
+
+        for (int32_t cz = minCz; cz <= maxCz; ++cz) {
+            for (int32_t cx = minCx; cx <= maxCx; ++cx) {
+                uint8_t state = fogCells[size_t(cz) * vision.cellsX() + cx];
+                if (state == static_cast<uint8_t>(VisionState::Visible)) continue;
+
+                int32_t x = bounds.minX + cx * cell;
+                int32_t z = bounds.minZ + cz * cell;
+                int32_t top = static_cast<int32_t>(pivot.y) + 48;
+                while (top > 0 && world.getBlock(x + cell / 2, top, z + cell / 2).isAir()) --top;
+                if (top <= 0) continue;
+
+                float alpha = state == static_cast<uint8_t>(VisionState::Explored) ? 0.42f : 0.97f;
+                fogQuads.push_back({glm::dvec3(x + cell * 0.5, top + 1.05, z + cell * 0.5), alpha});
+            }
+        }
     }
 
-    const FactionVision& vision = runtime.vision();
-    const VisionBounds& bounds = vision.bounds();
-    int32_t cell = FactionVision::CELL_SIZE;
-    World& world = runtime.replica().world();
     glm::dvec3 cameraPos = camera.positionD();
-    double range = tactical.distance() * 2.2 + 48.0;
-    glm::dvec3 pivot = tactical.pivot();
+    float half = FactionVision::CELL_SIZE * 0.5f;
     auto& overlay = sceneRenderer->translucent();
-
-    int32_t minCx = std::max(0, static_cast<int32_t>((pivot.x - range - bounds.minX) / cell));
-    int32_t maxCx = std::min(vision.cellsX() - 1, static_cast<int32_t>((pivot.x + range - bounds.minX) / cell));
-    int32_t minCz = std::max(0, static_cast<int32_t>((pivot.z - range - bounds.minZ) / cell));
-    int32_t maxCz = std::min(vision.cellsZ() - 1, static_cast<int32_t>((pivot.z + range - bounds.minZ) / cell));
-
-    for (int32_t cz = minCz; cz <= maxCz; ++cz) {
-        for (int32_t cx = minCx; cx <= maxCx; ++cx) {
-            uint8_t state = fogCells[size_t(cz) * vision.cellsX() + cx];
-            if (state == static_cast<uint8_t>(VisionState::Visible)) continue;
-
-            int32_t x = bounds.minX + cx * cell;
-            int32_t z = bounds.minZ + cz * cell;
-            int32_t top = static_cast<int32_t>(pivot.y) + 48;
-            while (top > 0 && world.getBlock(x + cell / 2, top, z + cell / 2).isAir()) --top;
-            if (top <= 0) continue;
-
-            float alpha = state == static_cast<uint8_t>(VisionState::Explored) ? 0.42f : 0.97f;
-            glm::vec3 center(glm::dvec3(x + cell * 0.5, top + 1.05, z + cell * 0.5) - cameraPos);
-            render::appendBillboard(overlay, center, glm::vec3(1, 0, 0), glm::vec3(0, 0, 1),
-                                    cell * 0.5f, cell * 0.5f, glm::vec4(0.02f, 0.03f, 0.06f, alpha));
-        }
+    overlay.reserve(overlay.size() + fogQuads.size() * 6);
+    for (const FogQuad& quad : fogQuads) {
+        render::appendBillboard(overlay, glm::vec3(quad.center - cameraPos), glm::vec3(1, 0, 0),
+                                glm::vec3(0, 0, 1), half, half,
+                                glm::vec4(0.02f, 0.03f, 0.06f, quad.alpha));
     }
 }
 
@@ -700,6 +817,18 @@ void GameClient::Impl::registerNatives() {
                 glm::vec3(number(args[1]), number(args[2]), number(args[3]));
         }
         return Value::nil();
+    });
+
+    // pick_view -> what the embodied view is looking at, as pick_block
+    e.registerFunction("pick_view", [this](ExecutionContext&, const Args&) -> Value {
+        RaycastResult hit = pickBlock(viewport * 0.5f);
+        if (!hit.hit) return Value::nil();
+        auto result = Value::map();
+        auto& map = result.asMap();
+        map.set(uiEngine->intern("x"), Value::integer(hit.blockPos.x));
+        map.set(uiEngine->intern("y"), Value::integer(hit.blockPos.y));
+        map.set(uiEngine->intern("z"), Value::integer(hit.blockPos.z));
+        return result;
     });
 
     e.registerFunction("cam_focus", [this](ExecutionContext&, const Args& args) -> Value {
@@ -811,6 +940,17 @@ void GameClient::Impl::registerNatives() {
         glm::vec4 color = fraction > 0.5f ? glm::vec4(0.35f, 0.85f, 0.35f, 1.0f)
                                           : glm::vec4(0.9f, 0.45f, 0.2f, 1.0f);
         render::appendBillboard(out, barCenter, view.right, view.up, halfWidth * fraction, 0.05f, color);
+        return Value::nil();
+    });
+
+    // ui_rect x0 y0 x1 y1 r g b a: screen-space outline, drawn over everything
+    e.registerFunction("ui_rect", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 8) return Value::nil();
+        ImU32 color = ImGui::GetColorU32(ImVec4(float(number(args[4])), float(number(args[5])),
+                                                float(number(args[6])), float(number(args[7]))));
+        ImGui::GetForegroundDrawList()->AddRect(
+            ImVec2(float(number(args[0])), float(number(args[1]))),
+            ImVec2(float(number(args[2])), float(number(args[3]))), color, 0.0f, 0, 1.5f);
         return Value::nil();
     });
 

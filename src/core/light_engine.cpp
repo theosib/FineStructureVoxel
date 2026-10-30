@@ -233,7 +233,12 @@ uint8_t LightEngine::getSkyLight(const BlockCoord& pos) const {
     ChunkPos chunkPos = toChunkPos(pos);
     const SubChunk* subChunk = getSubChunkForLight(chunkPos);
     if (!subChunk) {
-        // No subchunk - could be above world (full sky light) or unloaded
+        // Above everything a loaded column holds is open sky. Anything else is unloaded.
+        const ChunkColumn* column = world_.getColumn(ColumnPos(chunkPos.x, chunkPos.z));
+        if (column) {
+            auto bounds = column->getYBounds();
+            if (!bounds || chunkPos.y > bounds->second) return SubChunk::MAX_LIGHT;
+        }
         return 0;
     }
     return subChunk->getSkyLight(toLocalIndex(pos));
@@ -420,14 +425,28 @@ void LightEngine::onBlockRemoved(const BlockCoord& pos, BlockTypeId oldType) {
         }
     }
 
-    // If this block was blocking sky light, re-propagate from above
-    if (queryCombinedBlocksSkyLight(oldType)) {
-        BlockCoord abovePos{pos.x, pos.y + 1, pos.z};
-        uint8_t aboveSkyLight = getSkyLight(abovePos);
-        if (aboveSkyLight > 0) {
-            propagateSkyLight(pos, aboveSkyLight > 1 ? aboveSkyLight - 1 : 0);
-        }
+    restoreSkyLight(pos);
+}
+
+void LightEngine::restoreSkyLight(const BlockCoord& pos) {
+    // Open sky comes straight down undiminished; everything else loses a level per step
+    uint8_t above = getSkyLight({pos.x, pos.y + 1, pos.z});
+    uint8_t best = above == SubChunk::MAX_LIGHT ? above : (above > 0 ? above - 1 : 0);
+
+    static const std::array<BlockCoord, 5> offsets = {{
+        {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}
+    }};
+    for (const auto& offset : offsets) {
+        uint8_t neighbor = getSkyLight({pos.x + offset.x, pos.y + offset.y, pos.z + offset.z});
+        if (neighbor > 1) best = std::max<uint8_t>(best, neighbor - 1);
     }
+
+    uint8_t attenuation = queryCombinedAttenuation(world_.getBlock(pos));
+    if (attenuation >= 15) return;
+    if (!world_.getBlock(pos).isAir()) {
+        best = best > attenuation ? best - attenuation : 0;
+    }
+    if (best > 0) propagateSkyLight(pos, best);
 }
 
 void LightEngine::propagateBlockLight(const BlockCoord& pos, uint8_t lightLevel) {
@@ -1108,6 +1127,12 @@ void LightEngine::processLightingUpdate(const LightingUpdate& update) {
             onBlockRemoved(update.pos, update.oldType);
         } else {
             onBlockPlaced(update.pos, update.oldType, update.newType);
+            // Thinner cover lets more through, even if the old block wasn't opaque.
+            // Air and foliage can share an attenuation, so air needs its own test.
+            if (newAttenuation < oldAttenuation ||
+                (update.newType.isAir() && !update.oldType.isAir())) {
+                restoreSkyLight(update.pos);
+            }
         }
     }
 

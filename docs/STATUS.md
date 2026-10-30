@@ -9,10 +9,10 @@
 
 | Item | Value |
 |------|-------|
-| Last completed phase | **Phase R4** — `ContentPackLoader` Extraction, `sky.conf` & `GameScriptEngine` Wiring, `useBlock` Interaction Routing, and `render_demo.cpp` Simplification (completing Reclamation Phases R0–R4) |
-| Test count | **2233** (headless+audio build) / **2274** (with Vulkan render tests), 100% green |
+| Last completed phase | **Phase K** — Game Runtime & RTS Primitives, driven by the Keystone game (see below) |
+| Test count | Run the binaries serially: `finevox_tests`, `finevox_script_tests`, `finevox_render_tests`. `ctest -j` gives false failures because fixtures share temp paths |
 | In-progress | — |
-| Libraries | 5 shared libraries (see Architecture) |
+| Libraries | 6 shared libraries (see Architecture), plus the `finevox_run` and `finevox_headless` executables |
 
 ---
 
@@ -182,6 +182,19 @@
   - Wired `GameScriptEngine::loadBlockScript` to register external `BlockHandler`s on `BlockRegistry::global()` (and unregister on `~GameScriptEngine()`), added `resources/scripts/workbench.fsc` (`script: scripts/workbench.fsc` in `workbench.model`), and instantiated `GameScriptEngine` in `render_demo.cpp`
   - Routed workbench and interactive block right-clicks in `render_demo.cpp` through `session->actions().useBlock(pos, face, playerId)` and `EventBus` `PlayerUseEvent` instead of render-thread interception, and wired `computeSkyParameters(timeOfDay, contentPack.skyConfig())` to use `resources/sky.conf`
 
+- [x] **Phase K** — Game Runtime & RTS Primitives, built for
+  [Keystone](../../Keystone/README.md). A game is now a content directory with no C++:
+  - **Runtime:** `GameRuntime` (`finevox_game`) turns `game.conf` plus content into a running game with no GPU dependency; `finevox_headless` runs it for scenario tests; `finevox_run` adds `GameClient`. See [systems/game-runtime.md](systems/game-runtime.md)
+  - **Game-wide scripting:** `ScriptGameSubsystem` (`on :start`, `on :tick`, `on :command`), `ent_*` natives addressing units by id, `GameActions::sendGameCommand` over the CBOR/finenet channel, `ui_publish` the other way
+  - **Rendering:** entities are finally drawn: `SceneRenderer`, `.emodel` box models, team tint, world markers. `BlockAtlas::buildFromTextures` honours `.model` textures, including per-face
+  - **Navigation:** `NavigationSystem`, budgeted A* with costs, ranged goals, and constructive Place/Dig steps; `WorkClaimRegistry`; surface `walk-speed`
+  - **Construction:** `.blueprint` text format, `BlueprintSite`, tracked against the live world
+  - **Conflict:** `FactionVision` (3D line of sight), `WorldReplica` (the client only holds what its faction saw), `ProjectileSystem` (ballistic, real cover)
+  - **Camera:** `TacticalCamera`, `screenRayToWorld`, `worldToScreen`
+  - **i18n:** `LabelRegistry` locale tables, named parameters, CLDR-style plurals; `loc` native
+  - **Worldgen:** placement in `.feature`/`.ore` files, `cluster` feature type
+  - **Fixed:** gravity pointed upward for all session mobs (signed config into a magnitude); `interpolatedYaw` wrapped radians at 180. All deps were built `-O0` (no `CMAKE_BUILD_TYPE`): build them Release, finescript runs 16–24× faster
+
 ---
 
 ## Deferred Items (From Completed Phases)
@@ -221,4 +234,5 @@ See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 | `libfinevox_worldgen` | `finevox::worldgen::` | Noise, BiomeRegistry, FeatureRegistry, GenerationPipeline, Schematics |
 | `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD, ParticleAtlas, ParticleRenderer |
 | `libfinevox_audio` | `finevox::audio::` | AudioEngine (miniaudio), SoundLoader, FootstepTracker |
-| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders, InventoryBridge, PlayerStatsBridge, ParticleBridge |
+| `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptGameSubsystem, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders, InventoryBridge, PlayerStatsBridge, ParticleBridge |
+| `libfinevox_game` | `finevox::game::` | GameRuntime, GameManifest, blueprint and conflict natives |

@@ -126,6 +126,12 @@ namespace finevox::render {
  */
 class SubChunkView {
 public:
+    /// Hand over the current meshes, leaving the view empty. A mesh may still be in
+    /// use by frames in flight, so replacing or releasing one must retire it through
+    /// the render surface's deferred deletion instead of destroying it here.
+    [[nodiscard]] finevk::RawMeshPtr takeMesh();
+    [[nodiscard]] finevk::RawMeshPtr takeFluidMesh();
+
     /// Create a view for a subchunk at the given position
     explicit SubChunkView(ChunkPos pos);
 

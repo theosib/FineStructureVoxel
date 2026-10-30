@@ -165,6 +165,10 @@ goes to the UI script as an `:action` event.
 
 ### Client (UI script)
 
+`ui_skin "ui/skin/x.fgs"` loads a textured skin and puts it in use, and `ui_skin` alone goes back
+to plain ImGui. It can be called at any time, say to change skin with the era. The format is in
+finegui's `docs/SKIN_SYSTEM.md`.
+
 ```
 send_command value       ui_show tree [=immediate true] -> id        ui_hide id
 window_size   mouse_pos  gui_has_mouse   fps

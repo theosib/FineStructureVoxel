@@ -31,6 +31,7 @@
 #include <finegui/map_renderer.hpp>
 #include <finegui/script_bindings.hpp>
 #include <finegui/script_gui_manager.hpp>
+#include <finegui/skin_loader.hpp>
 #include <finegui/texture_registry.hpp>
 
 #include <finescript/cbor.h>
@@ -121,6 +122,7 @@ struct GameClient::Impl {
     ~Impl() {
         // Members below hold GPU resources that in-flight frames may still use
         if (engine) engine->device().waitIdle();
+        finegui::setActiveSkin(nullptr);
     }
 
     game::GameRuntime& runtime;
@@ -132,6 +134,7 @@ struct GameClient::Impl {
     std::unique_ptr<finegui::MapRenderer> mapRenderer;
     std::unique_ptr<finegui::ScriptGuiManager> guiManager;
     std::unique_ptr<finegui::TextureRegistry> textureRegistry;
+    std::vector<std::unique_ptr<finegui::Skin>> skins;
     std::unique_ptr<ExecutionContext> uiCtx;
     std::unique_ptr<GameRootFinder> finder;
     script::FineVoxInterner interner;
@@ -798,6 +801,24 @@ void GameClient::Impl::registerNatives() {
             immediate = flag.truthy();
         }
         return Value::integer(mapRenderer->show(args[0], *uiCtx, immediate));
+    });
+
+    // ui_skin "ui/skin/x.fgs" -> true if loaded and now in use. With no path, back to plain ImGui.
+    e.registerFunction("ui_skin", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty() || !args[0].isString()) {
+            finegui::setActiveSkin(nullptr);
+            return Value::boolean(true);
+        }
+        std::string error;
+        fs::path path = runtime.gameRoot() / std::string(args[0].asString());
+        auto skin = finegui::loadSkin(*gui, path, *uiEngine, *uiCtx, error);
+        if (!skin) {
+            std::cerr << "[ui script] skin " << path.string() << ": " << error << "\n";
+            return Value::boolean(false);
+        }
+        skins.push_back(std::move(skin));
+        finegui::setActiveSkin(skins.back().get());
+        return Value::boolean(true);
     });
 
     e.registerFunction("ui_hide", [this](ExecutionContext&, const Args& args) -> Value {

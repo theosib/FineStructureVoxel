@@ -25,6 +25,8 @@ namespace finevox::game {
 
 namespace fs = std::filesystem;
 
+void registerBlueprintNatives(GameRuntime& runtime);
+
 namespace {
 
 // `source "x"` in game scripts resolves against the game root
@@ -83,6 +85,7 @@ void GameRuntime::load() {
     if (options_.radiusOverride) manifest_.worldRadius = *options_.radiusOverride;
 
     ResourceLocator::instance().setGameRoot(options_.gameRoot);
+    blueprints_.loadDirectory(options_.gameRoot / "blueprints");
 
     content_ = std::make_unique<ContentPackLoader>(manifest_.contentNamespace);
     content_->loadAll(options_.gameRoot);
@@ -116,20 +119,7 @@ void GameRuntime::load() {
         [this](std::vector<uint8_t> message) { uiOutbox_.push(std::move(message)); });
     session_->addSubsystem(gameScript_);
 
-    scripts_->engine().registerFunction(
-        "game_exit", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
-            requestExit(args.empty() ? 0 : static_cast<int>(args[0].asNumber()));
-            return finescript::Value::nil();
-        });
-
-    // set_time_of_day fraction: 0 dawn, 0.25 noon, 0.5 dusk, 0.75 midnight
-    scripts_->engine().registerFunction(
-        "set_time_of_day", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
-            if (!args.empty() && args[0].isNumeric()) {
-                session_->worldTime().setTime(static_cast<int64_t>(args[0].asNumber() * WorldTime::TICKS_PER_DAY));
-            }
-            return finescript::Value::nil();
-        });
+    registerNatives();
 
     session_->setGameCommandHandler(
         [this](const finescript::Value& command) { gameScript_->deliverCommand(command); });
@@ -152,6 +142,25 @@ void GameRuntime::load() {
         }
     }
     gameScript_->fire("start");
+}
+
+void GameRuntime::registerNatives() {
+    scripts_->engine().registerFunction(
+        "game_exit", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            requestExit(args.empty() ? 0 : static_cast<int>(args[0].asNumber()));
+            return finescript::Value::nil();
+        });
+
+    // set_time_of_day fraction: 0 dawn, 0.25 noon, 0.5 dusk, 0.75 midnight
+    scripts_->engine().registerFunction(
+        "set_time_of_day", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (!args.empty() && args[0].isNumeric()) {
+                session_->worldTime().setTime(static_cast<int64_t>(args[0].asNumber() * WorldTime::TICKS_PER_DAY));
+            }
+            return finescript::Value::nil();
+        });
+
+    registerBlueprintNatives(*this);
 }
 
 void GameRuntime::generateWorld() {

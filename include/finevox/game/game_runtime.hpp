@@ -18,12 +18,14 @@
 #include "finevox/game/game_manifest.hpp"
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/script_game_subsystem.hpp"
+#include "finevox/worldgen/blueprint.hpp"
 
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace finevox::game {
@@ -65,6 +67,11 @@ public:
     [[nodiscard]] script::ScriptGameSubsystem& gameScript() { return *gameScript_; }
     [[nodiscard]] NavigationSystem& navigation() { return *navigation_; }
     [[nodiscard]] WorkClaimRegistry& workClaims() { return workClaims_; }
+    [[nodiscard]] worldgen::BlueprintLibrary& blueprints() { return blueprints_; }
+
+    /// Sites under construction, by the id scripts hold
+    [[nodiscard]] std::unordered_map<int64_t, worldgen::BlueprintSite>& sites() { return sites_; }
+    [[nodiscard]] int64_t allocateSiteId() { return nextSiteId_++; }
 
     /// CBOR messages from ui_publish, for the client to drain
     [[nodiscard]] Queue<std::vector<uint8_t>>& uiOutbox() { return uiOutbox_; }
@@ -79,6 +86,7 @@ public:
 
 private:
     void generateWorld();
+    void registerNatives();
 
     RuntimeOptions options_;
     GameManifest manifest_;
@@ -88,6 +96,9 @@ private:
     std::shared_ptr<script::ScriptGameSubsystem> gameScript_;
     std::shared_ptr<NavigationSystem> navigation_;
     WorkClaimRegistry workClaims_;
+    worldgen::BlueprintLibrary blueprints_;
+    std::unordered_map<int64_t, worldgen::BlueprintSite> sites_;
+    int64_t nextSiteId_ = 1;
     Queue<std::vector<uint8_t>> uiOutbox_;
     bool threadsRunning_ = false;
     bool exitRequested_ = false;

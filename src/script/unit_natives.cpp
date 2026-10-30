@@ -25,6 +25,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <unordered_map>
 
 namespace finevox::script {
 
@@ -528,6 +529,43 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             result.push_back(coordValue(found[i].second));
         }
         return Value::array(std::move(result));
+    });
+
+    // count_blocks x0 y0 z0 x1 y1 z1 [block ...] -> {=name count ...}, inclusive box.
+    // With no block names, counts everything that isn't air.
+    e.registerFunction("count_blocks", [](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        auto result = Value::map();
+        if (!ud || !ud->world || args.size() < 6) return result;
+
+        BlockCoord a(static_cast<int32_t>(number(args[0])), static_cast<int32_t>(number(args[1])),
+                     static_cast<int32_t>(number(args[2])));
+        BlockCoord b(static_cast<int32_t>(number(args[3])), static_cast<int32_t>(number(args[4])),
+                     static_cast<int32_t>(number(args[5])));
+
+        std::vector<BlockTypeId> wanted;
+        for (size_t i = 6; i < args.size(); ++i) {
+            if (uint32_t sym = blockSymbol(args[i])) wanted.push_back(BlockTypeId(sym));
+        }
+
+        std::unordered_map<uint32_t, int64_t> counts;
+        for (int32_t x = std::min(a.x, b.x); x <= std::max(a.x, b.x); ++x) {
+            for (int32_t z = std::min(a.z, b.z); z <= std::max(a.z, b.z); ++z) {
+                for (int32_t y = std::min(a.y, b.y); y <= std::max(a.y, b.y); ++y) {
+                    BlockTypeId here = ud->world->getBlock(x, y, z);
+                    if (here.isAir()) continue;
+                    if (!wanted.empty() &&
+                        std::find(wanted.begin(), wanted.end(), here) == wanted.end()) {
+                        continue;
+                    }
+                    ++counts[here.id];
+                }
+            }
+        }
+        for (const auto& [id, count] : counts) {
+            result.asMap().set(id, Value::integer(count));
+        }
+        return result;
     });
 
     // ------------------------------------------------------------------------

@@ -245,6 +245,7 @@ add_library(finevox_worldgen SHARED
     src/worldgen/feature_tree.cpp
     src/worldgen/feature_ore.cpp
     src/worldgen/feature_cluster.cpp
+    src/worldgen/blueprint.cpp
     src/worldgen/feature_schematic.cpp
     src/worldgen/feature_registry.cpp
     src/worldgen/feature_loader.cpp
@@ -272,6 +273,7 @@ if(TARGET finevox_script)
     add_library(finevox_game SHARED
         src/game/game_manifest.cpp
         src/game/game_runtime.cpp
+        src/game/blueprint_natives.cpp
     )
 
     target_include_directories(finevox_game PUBLIC
@@ -654,6 +656,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_mob_event_hooks.cpp
         tests/test_ai_goal_params.cpp
         tests/test_navigation.cpp
+        tests/test_blueprint.cpp
+        tests/test_work_claims.cpp
         tests/test_tactical_camera.cpp
         tests/test_entity_model.cpp
         tests/test_navigation.cpp

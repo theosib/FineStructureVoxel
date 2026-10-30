@@ -347,7 +347,8 @@ void GameScriptEngine::registerNativeFunctions() {
         if (!extractPos(args, 0, x, y, z)) return finescript::Value::nil();
 
         BlockTypeId type = ud->world->getBlock(BlockCoord{x, y, z});
-        return finescript::Value::symbol(type.id);
+        static const uint32_t airSymbol = StringInterner::global().intern("air");
+        return finescript::Value::symbol(type.isAir() ? airSymbol : type.id);
     };
     engine_->registerFunction("world.get_block", getBlockFn);
     engine_->registerFunction("world_get_block", getBlockFn);
@@ -371,6 +372,10 @@ void GameScriptEngine::registerNativeFunctions() {
         } else {
             return finescript::Value::nil();
         }
+
+        // Script `:air` is an ordinary symbol, but real air is interned id 0
+        static const uint32_t airSymbol = StringInterner::global().intern("air");
+        if (typeId == airSymbol) typeId = AIR_INTERNED_ID;
 
         BlockCoord pos{x, y, z};
         BlockTypeId oldType = ud->world->getBlock(pos);

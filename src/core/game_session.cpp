@@ -889,7 +889,8 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
 
     // Entity system
     impl.entityManager = std::make_unique<EntityManager>(*impl.world, *impl.graphicsQueue);
-    impl.entityManager->physics().setGravity(config.gravity);
+    // Config holds signed acceleration (-14 is down); PhysicsSystem subtracts a magnitude
+    impl.entityManager->physics().setGravity(std::abs(config.gravity));
     if (config.enableSound) {
         impl.entityManager->setSoundQueue(impl.soundQueue.get());
     }

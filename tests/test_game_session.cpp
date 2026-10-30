@@ -1,3 +1,6 @@
+#include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/entity_type_def.hpp"
+#include "finevox/core/mob_entity.hpp"
 #include <gtest/gtest.h>
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/world.hpp"
@@ -252,7 +255,8 @@ TEST(GameSessionTest, CustomConfig) {
 
     auto session = GameSession::createLocal(config);
     EXPECT_FLOAT_EQ(session->worldTime().ticksPerSecond(), 10.0f);
-    EXPECT_FLOAT_EQ(session->entities().physics().gravity(), -9.8f);
+    EXPECT_FLOAT_EQ(session->entities().physics().gravity(), 9.8f)
+        << "PhysicsSystem subtracts a magnitude; a signed value would make things fall up";
     EXPECT_EQ(session->scheduler().tickConfig().randomTicksPerSubchunk, 12u);
     EXPECT_EQ(session->world().lightEngine(), nullptr);
 
@@ -751,4 +755,18 @@ TEST(GameSessionTest, PlayerPredictionDoesNotFalseCorrectOnMovementButCorrectsWa
     EXPECT_EQ(correctionCount, 1);
 }
 
+TEST(GameSessionPhysics, MobsFallDownward) {
+    EntityTypeDef def;
+    def.name = "session_faller";
+    def.aiType = AIType::None;
+    EntityTypeRegistry::global().registerType("session_faller", std::move(def));
 
+    auto session = GameSession::createLocal();
+    auto mob = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("session_faller"));
+    mob->setPosition(Vec3(0.5f, 100.0f, 0.5f));
+    EntityId id = session->entities().spawnEntity(std::move(mob));
+
+    for (int i = 0; i < 30; ++i) session->tick(1.0f / 30.0f);
+
+    EXPECT_LT(session->entities().getMob(id)->position().y, 99.0f);
+}

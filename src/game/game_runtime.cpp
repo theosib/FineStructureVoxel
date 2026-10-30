@@ -108,9 +108,8 @@ void GameRuntime::load() {
     content_->bindScripts(*scripts_);
     session_->entities().setMobEventHooksProvider(scripts_->createHooksProvider());
 
-    static std::unique_ptr<GameRootFinder> finder;
-    finder = std::make_unique<GameRootFinder>(options_.gameRoot);
-    scripts_->engine().setResourceFinder(finder.get());
+    resourceFinder_ = std::make_unique<GameRootFinder>(options_.gameRoot);
+    scripts_->engine().setResourceFinder(resourceFinder_.get());
 
     navigation_ = std::make_shared<NavigationSystem>(world, session_->entities());
     scripts_->setNavigation(navigation_.get());

@@ -23,6 +23,8 @@
 #include "finevox/script/script_game_subsystem.hpp"
 #include "finevox/worldgen/blueprint.hpp"
 
+#include <finescript/resource_finder.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -98,6 +100,7 @@ private:
     GameManifest manifest_;
     std::unique_ptr<ContentPackLoader> content_;
     std::unique_ptr<GameSession> session_;
+    std::unique_ptr<finescript::ResourceFinder> resourceFinder_;
     std::unique_ptr<script::GameScriptEngine> scripts_;
     std::shared_ptr<script::ScriptGameSubsystem> gameScript_;
     std::shared_ptr<NavigationSystem> navigation_;

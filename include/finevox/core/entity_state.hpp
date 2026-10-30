@@ -34,6 +34,7 @@ class DataContainer;
 struct EntityState {
     EntityId id = INVALID_ENTITY_ID;
     uint16_t entityType = 0;           // EntityType as uint16_t for POD/serialization
+    uint16_t faction = 0;              // Entity::faction()
 
     // Position/motion — doubles for precision at large world coordinates
     glm::dvec3 position{0.0};

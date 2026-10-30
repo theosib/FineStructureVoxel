@@ -26,6 +26,13 @@ namespace finevox {
 
 class World;
 
+/// Texture names for a block's faces, relative to <root>/textures, no extension.
+struct BlockTextureSet {
+    std::string top;
+    std::string bottom;
+    std::string side;
+};
+
 /// Summary statistics from loading a content pack directory
 struct ContentPackLoadStats {
     size_t blocksLoaded = 0;
@@ -152,6 +159,11 @@ public:
         return blockGeometries_;
     }
 
+    /// Map of BlockTypeId::id -> face textures, as declared by .model files
+    [[nodiscard]] const std::unordered_map<uint32_t, BlockTextureSet>& blockTextures() const {
+        return blockTextures_;
+    }
+
     /// Look up custom geometry for a block type (returns nullptr for standard cubes)
     [[nodiscard]] const BlockGeometry* getGeometry(BlockTypeId type) const;
 
@@ -207,6 +219,7 @@ private:
 
     std::string defaultNamespace_;
     std::unordered_map<uint32_t, BlockGeometry> blockGeometries_;
+    std::unordered_map<uint32_t, BlockTextureSet> blockTextures_;
     size_t customGeometryModelCount_ = 0;
     std::vector<ScriptedBlockEntry> scriptedBlocks_;
     SkyConfig skyConfig_;

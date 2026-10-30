@@ -105,6 +105,7 @@ add_library(finevox SHARED
     src/core/entity_spatial_index.cpp
     src/core/mob_entity.cpp
     src/core/pathfinder.cpp
+    src/core/navigation.cpp
     src/core/entity_senses.cpp
     src/core/ai_goals.cpp
     src/core/skeleton.cpp
@@ -237,6 +238,7 @@ add_library(finevox_worldgen SHARED
     src/worldgen/biome_loader.cpp
     src/worldgen/feature_tree.cpp
     src/worldgen/feature_ore.cpp
+    src/worldgen/feature_cluster.cpp
     src/worldgen/feature_schematic.cpp
     src/worldgen/feature_registry.cpp
     src/worldgen/feature_loader.cpp
@@ -593,6 +595,8 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_label_registry.cpp
         tests/test_mob_event_hooks.cpp
         tests/test_ai_goal_params.cpp
+        tests/test_navigation.cpp
+        tests/test_navigation.cpp
         tests/test_ai_driver.cpp
         tests/test_entity_spatial_index.cpp
         tests/test_combat_bridge.cpp

@@ -170,6 +170,8 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
         model.setParticle(particleEntry->value.asStringOwned());
     }
 
+    parseSurfaceProperties(*doc, model);
+
     cleanup();
     return model;
 }
@@ -355,7 +357,26 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
         model.setParticle(particleEntry->value.asStringOwned());
     }
 
+    parseSurfaceProperties(doc, model);
+
     return model;
+}
+
+void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockModel& model) {
+    auto faceTexture = [&doc](const char* key) -> std::string {
+        const ConfigEntry* entry = doc.get(key);
+        return entry ? entry->value.asStringOwned() : std::string{};
+    };
+    model.setFaceTextures(faceTexture("texture-top"), faceTexture("texture-bottom"),
+                          faceTexture("texture-side"));
+
+    if (const ConfigEntry* speedEntry = doc.get("walk-speed")) {
+        model.setWalkSpeed(speedEntry->value.asFloat(1.0f));
+    }
+
+    if (const ConfigEntry* opaqueEntry = doc.get("opaque")) {
+        model.setOpaque(opaqueEntry->value.asBool(true));
+    }
 }
 
 std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(

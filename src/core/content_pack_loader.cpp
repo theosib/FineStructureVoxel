@@ -190,6 +190,15 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
         }
         blockType.setLightAttenuation(model->lightAttenuation());
 
+        blockType.setWalkSpeed(model->walkSpeed());
+        if (model->hasOpaqueOverride()) {
+            blockType.setOpaque(model->opaque());
+            if (!model->opaque()) {
+                blockType.setTransparent(true);
+                blockType.setBlocksSkyLight(false);
+            }
+        }
+
         if (model->hasCustomGeometry()) {
             blockType.setHasCustomMesh(true);
         }
@@ -225,6 +234,18 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
         registry.registerOrUpdateType(bareId, blockType);
         if (qualifiedId != bareId) {
             registry.registerOrUpdateType(qualifiedId, blockType);
+        }
+
+        if (!model->texture().empty() || !model->textureTop().empty()) {
+            BlockTextureSet textures;
+            textures.top = model->textureTop().empty() ? model->texture() : model->textureTop();
+            textures.bottom =
+                model->textureBottom().empty() ? model->texture() : model->textureBottom();
+            textures.side = model->textureSide().empty() ? model->texture() : model->textureSide();
+            blockTextures_[bareId.id] = textures;
+            if (qualifiedId != bareId) {
+                blockTextures_[qualifiedId.id] = std::move(textures);
+            }
         }
 
         if (model->hasCustomGeometry()) {

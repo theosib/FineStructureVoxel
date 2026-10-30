@@ -135,6 +135,10 @@ public:
     /// Get the current movement target
     [[nodiscard]] const glm::dvec3& moveTarget() const { return moveTarget_; }
 
+    /// How close (horizontally) counts as having reached a move target
+    void setArriveRadius(float radius) { arriveRadius_ = radius; }
+    [[nodiscard]] float arriveRadius() const { return arriveRadius_; }
+
     /// Turn to face a position
     void lookAt(const glm::dvec3& target);
 
@@ -174,6 +178,7 @@ private:
     glm::dvec3 moveTarget_{0.0};
     bool hasMoveTarget_ = false;
     float speedMultiplier_ = 1.0f;
+    float arriveRadius_ = 0.5f;
 
     /// Apply movement toward target
     void updateMovement(float dt);

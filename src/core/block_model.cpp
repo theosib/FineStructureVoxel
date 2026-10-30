@@ -267,6 +267,25 @@ BlockModel& BlockModel::setTexture(const std::string& texture) {
     return *this;
 }
 
+BlockModel& BlockModel::setFaceTextures(const std::string& top, const std::string& bottom,
+                                        const std::string& side) {
+    textureTop_ = top;
+    textureBottom_ = bottom;
+    textureSide_ = side;
+    return *this;
+}
+
+BlockModel& BlockModel::setWalkSpeed(float multiplier) {
+    walkSpeed_ = multiplier;
+    return *this;
+}
+
+BlockModel& BlockModel::setOpaque(bool opaque) {
+    hasOpaqueOverride_ = true;
+    opaque_ = opaque;
+    return *this;
+}
+
 BlockModel& BlockModel::setSounds(const std::string& sounds) {
     sounds_ = sounds;
     return *this;

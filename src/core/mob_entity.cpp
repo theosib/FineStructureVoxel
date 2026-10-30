@@ -5,6 +5,7 @@
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/ai_goals.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
@@ -149,12 +150,20 @@ void MobEntity::updateMovement(float dt) {
     float maxSpeed = def ? def->maxSpeed : 4.0f;
     maxSpeed *= speedMultiplier_;
 
+    // Roads and rough ground: speed follows the block underfoot
+    if (world_) {
+        BlockTypeId floor = world_->getBlock(toBlockCoord(position_ + Vec3(0.0f, -0.1f, 0.0f)));
+        if (!floor.isAir()) {
+            maxSpeed *= BlockRegistry::global().getType(floor).walkSpeed();
+        }
+    }
+
     // Direction to target (XZ plane only)
     double dx = moveTarget_.x - position_.x;
     double dz = moveTarget_.z - position_.z;
     double distXZ = std::sqrt(dx * dx + dz * dz);
 
-    if (distXZ < 0.5) {
+    if (distXZ < arriveRadius_) {
         // Close enough — stop
         hasMoveTarget_ = false;
         velocity_.x *= 0.5f;

@@ -18,6 +18,7 @@ std::unique_ptr<DataContainer> EntitySerializer::entityToData(const Entity& enti
 
     // Entity type - stored as the EntityType enum value
     dc->set<int64_t>("entity_type", static_cast<int64_t>(entity.type()));
+    dc->set<int64_t>("faction", static_cast<int64_t>(entity.faction()));
 
     // Position
     dc->set<double>("x", entity.position().x);
@@ -128,6 +129,8 @@ std::unique_ptr<Entity> EntitySerializer::entityFromData(const DataContainer& da
     } else {
         entity = std::make_unique<Entity>(INVALID_ENTITY_ID, entityType);
     }
+
+    entity->setFaction(static_cast<uint16_t>(data.get<int64_t>("faction", 0)));
 
     // Position
     entity->setPosition(Vec3(

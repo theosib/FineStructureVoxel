@@ -194,6 +194,16 @@ public:
     /// Set texture name
     BlockModel& setTexture(const std::string& texture);
 
+    /// Per-face texture overrides (empty = use texture()). Cube blocks only.
+    BlockModel& setFaceTextures(const std::string& top, const std::string& bottom,
+                                const std::string& side);
+
+    /// Movement speed multiplier for entities walking on this block (1 = normal)
+    BlockModel& setWalkSpeed(float multiplier);
+
+    /// Explicit opacity override; unset keeps the BlockType default (opaque).
+    BlockModel& setOpaque(bool opaque);
+
     /// Set sound set name
     BlockModel& setSounds(const std::string& sounds);
 
@@ -248,6 +258,14 @@ public:
     /// Get texture name
     [[nodiscard]] const std::string& texture() const { return texture_; }
 
+    [[nodiscard]] const std::string& textureTop() const { return textureTop_; }
+    [[nodiscard]] const std::string& textureBottom() const { return textureBottom_; }
+    [[nodiscard]] const std::string& textureSide() const { return textureSide_; }
+
+    [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
+    [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
+    [[nodiscard]] bool opaque() const { return opaque_; }
+
     /// Get sound set name
     [[nodiscard]] const std::string& sounds() const { return sounds_; }
 
@@ -288,6 +306,12 @@ private:
     std::vector<uint8_t> customRotations_;
     float hardness_ = 1.0f;
     std::string texture_;
+    std::string textureTop_;
+    std::string textureBottom_;
+    std::string textureSide_;
+    float walkSpeed_ = 1.0f;
+    bool hasOpaqueOverride_ = false;
+    bool opaque_ = true;
     std::string sounds_;
     std::string script_;
     std::string loot_;

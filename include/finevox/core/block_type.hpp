@@ -111,6 +111,9 @@ public:
     /// Used by the engine's block-break path and any script that queries it.
     BlockType& setParticleEmitter(EmitterPresetId preset);
 
+    /// Set movement speed multiplier for entities walking on this block
+    BlockType& setWalkSpeed(float multiplier) { walkSpeed_ = multiplier; return *this; }
+
     /// Set propagation policy for cross-chunk neighbor notifications
     BlockType& setPropagationPolicy(PropagationPolicy policy);
 
@@ -169,6 +172,9 @@ public:
     /// Get propagation policy for cross-chunk neighbor notifications
     [[nodiscard]] PropagationPolicy propagationPolicy() const { return propagationPolicy_; }
 
+    /// Movement speed multiplier for entities walking on this block
+    [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -183,6 +189,7 @@ private:
     uint8_t lightEmission_ = 0;      // No light emission by default
     uint8_t lightAttenuation_ = 15;  // Full attenuation by default (opaque)
     float hardness_ = 1.0f;          // Default mining difficulty
+    float walkSpeed_ = 1.0f;         // Entity speed multiplier when standing on this block
     bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
     SoundSetId soundSet_;            // Sound set for this block type

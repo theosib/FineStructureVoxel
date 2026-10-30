@@ -138,6 +138,9 @@ private:
      * @param nextCustomIndex Next available index for custom faces
      * @return Parsed FaceGeometry, or nullopt on error
      */
+    /// Shared by both model entry points: per-face textures, walk speed, opacity
+    void parseSurfaceProperties(const ConfigDocument& doc, BlockModel& model);
+
     [[nodiscard]] std::optional<FaceGeometry> parseFaceEntry(
         const ConfigEntry& entry,
         int& nextCustomIndex);

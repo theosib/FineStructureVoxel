@@ -307,6 +307,12 @@ void StructurePass::generate(GenerationContext& ctx) {
                 // Height range check
                 if (surfaceY < placement.minHeight || surfaceY > placement.maxHeight) continue;
 
+                if (!placement.requiredSurface.isAir() &&
+                    ctx.world.getBlock(BlockCoord(worldX + lx, surfaceY, worldZ + lz)) !=
+                        placement.requiredSurface) {
+                    continue;
+                }
+
                 FeaturePlacementContext fctx{
                     ctx.world,
                     BlockCoord(worldX + lx, surfaceY + 1, worldZ + lz),

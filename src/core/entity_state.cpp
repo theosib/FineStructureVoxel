@@ -54,6 +54,7 @@ EntityState EntityState::fromEntity(const Entity& entity) {
     EntityState state;
     state.id = entity.id();
     state.entityType = static_cast<uint16_t>(entity.type());
+    state.faction = entity.faction();
     state.position = glm::dvec3(entity.position());
     state.velocity = glm::dvec3(entity.velocity());
     state.onGround = entity.isOnGround();
@@ -77,8 +78,8 @@ EntityState EntityState::fromEntity(const Entity& entity) {
 std::vector<uint8_t> EntityState::toCBOR() const {
     std::vector<uint8_t> out;
 
-    // Count fields: 11 base fields + 1 if extra is present
-    size_t fieldCount = 11;
+    // Count fields: 12 base fields + 1 if extra is present
+    size_t fieldCount = 12;
     if (extra && !extra->empty()) ++fieldCount;
 
     cbor::encodeMapHeader(out, fieldCount);
@@ -88,6 +89,9 @@ std::vector<uint8_t> EntityState::toCBOR() const {
 
     cbor::encodeString(out, "entity_type");
     cbor::encodeInt(out, entityType);
+
+    cbor::encodeString(out, "faction");
+    cbor::encodeInt(out, faction);
 
     cbor::encodeString(out, "pos");
     cbor::encodeArrayHeader(out, 3);
@@ -165,6 +169,8 @@ EntityState EntityState::fromCBOR(std::span<const uint8_t> data) {
             state.id = static_cast<EntityId>(dec.readInt());
         } else if (key == "entity_type") {
             state.entityType = static_cast<uint16_t>(dec.readInt());
+        } else if (key == "faction") {
+            state.faction = static_cast<uint16_t>(dec.readInt());
         } else if (key == "pos") {
             auto [aMt, aLen] = dec.readHeader();
             if (aMt == cbor::ARRAY && aLen >= 3) {

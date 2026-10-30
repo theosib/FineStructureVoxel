@@ -125,6 +125,11 @@ public:
     [[nodiscard]] bool hasGravity() const override { return hasGravity_; }
     void setHasGravity(bool g) { hasGravity_ = g; }
 
+    /// Team/allegiance tag (0 = unaligned). Meaning is game policy; the engine
+    /// only carries it for vision filtering, tinting, and targeting queries.
+    [[nodiscard]] uint16_t faction() const { return faction_; }
+    void setFaction(uint16_t faction) { faction_ = faction; }
+
     [[nodiscard]] float maxStepHeight() const override { return maxStepHeight_; }
     void setMaxStepHeight(float h) { maxStepHeight_ = h; }
 
@@ -241,6 +246,7 @@ protected:
     // Ground state
     bool onGround_ = false;
     bool hasGravity_ = true;
+    uint16_t faction_ = 0;
     float maxStepHeight_ = MAX_STEP_HEIGHT;
 
     // Look direction

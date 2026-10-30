@@ -8,6 +8,7 @@
 #include "finevox/worldgen/feature_loader.hpp"
 #include "finevox/worldgen/feature_tree.hpp"
 #include "finevox/worldgen/feature_ore.hpp"
+#include "finevox/worldgen/feature_cluster.hpp"
 #include "finevox/worldgen/feature_registry.hpp"
 #include "finevox/core/config_parser.hpp"
 
@@ -27,6 +28,11 @@ std::shared_ptr<Feature> FeatureLoader::loadFeatureFile(
         auto config = parseTreeConfig(*doc);
         if (!config) return nullptr;
         return std::make_shared<TreeFeature>(std::string(featureName), *config);
+    }
+    if (typeStr == "cluster") {
+        auto config = parseClusterConfig(*doc);
+        if (!config) return nullptr;
+        return std::make_shared<ClusterFeature>(std::string(featureName), *config);
     }
 
     // Unknown feature type
@@ -83,6 +89,41 @@ std::optional<OreConfig> FeatureLoader::parseOreConfig(const ConfigDocument& doc
     return config;
 }
 
+std::optional<ClusterConfig> FeatureLoader::parseClusterConfig(const ConfigDocument& doc) {
+    ClusterConfig config;
+
+    auto blockStr = doc.getString("block");
+    if (blockStr.empty()) return std::nullopt;
+    config.block = BlockTypeId::fromName(blockStr);
+
+    auto belowStr = doc.getString("on");
+    if (!belowStr.empty()) config.requiredBelow = BlockTypeId::fromName(belowStr);
+
+    config.attempts = doc.getInt("attempts", config.attempts);
+    config.radius = doc.getInt("radius", config.radius);
+    config.minHeight = doc.getInt("min_stack", config.minHeight);
+    config.maxHeight = doc.getInt("max_stack", config.maxHeight);
+
+    return config;
+}
+
+std::optional<FeaturePlacement> FeatureLoader::parsePlacement(const ConfigDocument& doc,
+                                                              std::string_view featureName) {
+    if (!doc.get("density")) return std::nullopt;
+
+    FeaturePlacement placement;
+    placement.featureName = std::string(featureName);
+    placement.density = doc.getFloat("density", placement.density);
+    placement.minHeight = doc.getInt("place_min_height", placement.minHeight);
+    placement.maxHeight = doc.getInt("place_max_height", placement.maxHeight);
+    placement.requiresSurface = doc.getBool("requires_surface", placement.requiresSurface);
+
+    auto surfaceStr = doc.getString("surface");
+    if (!surfaceStr.empty()) placement.requiredSurface = BlockTypeId::fromName(surfaceStr);
+
+    return placement;
+}
+
 size_t FeatureLoader::loadDirectory(const std::string& dirPath,
                                      const std::string& namePrefix) {
     size_t count = 0;
@@ -109,6 +150,13 @@ size_t FeatureLoader::loadDirectory(const std::string& dirPath,
         if (feature) {
             FeatureRegistry::global().registerFeature(std::move(feature));
             ++count;
+
+            ConfigParser placementParser;
+            if (auto doc = placementParser.parseFile(entry.path().string())) {
+                if (auto placement = parsePlacement(*doc, name)) {
+                    FeatureRegistry::global().addPlacement(std::move(*placement));
+                }
+            }
         }
     }
 

@@ -8,6 +8,8 @@
 #pragma once
 
 #include "finevox/worldgen/feature.hpp"
+#include "finevox/worldgen/feature_cluster.hpp"
+#include "finevox/worldgen/feature_registry.hpp"
 
 #include <memory>
 #include <optional>
@@ -43,7 +45,17 @@ public:
     [[nodiscard]] static std::optional<OreConfig> parseOreConfig(
         const ConfigDocument& doc);
 
-    /// Load all .feature and .ore files from a directory and register them
+    /// Parse a ClusterConfig from a ConfigDocument
+    [[nodiscard]] static std::optional<ClusterConfig> parseClusterConfig(
+        const ConfigDocument& doc);
+
+    /// Parse placement rules from a feature file's keys. Returns nullopt when the
+    /// file has no `density` key, meaning the game places the feature itself.
+    [[nodiscard]] static std::optional<FeaturePlacement> parsePlacement(
+        const ConfigDocument& doc, std::string_view featureName);
+
+    /// Load all .feature and .ore files from a directory and register them.
+    /// Files declaring `density` also register their placement rule.
     /// @return Number of features successfully loaded
     static size_t loadDirectory(const std::string& dirPath,
                                 const std::string& namePrefix = "");

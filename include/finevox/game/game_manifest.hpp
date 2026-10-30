@@ -33,6 +33,7 @@ struct GameManifest {
     /// horizon. An overhead camera keeps most of the map in the transition zone, where
     /// meshes visibly swap as it moves, so such games turn this off.
     bool lod = true;
+    int navMaxFall = 3;           ///< Largest drop path-following units will take
     std::string defaultLocale = "en";
 
     bool fogOfWar = true;

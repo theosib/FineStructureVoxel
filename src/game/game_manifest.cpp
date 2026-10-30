@@ -23,6 +23,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.gravity = doc->getFloat("gravity", m.gravity);
     m.viewDistance = doc->getFloat("view_distance", m.viewDistance);
     m.lod = doc->getBool("lod", m.lod);
+    m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.defaultLocale = std::string(doc->getString("default_locale", m.defaultLocale));
     m.fogOfWar = doc->getBool("fog_of_war", m.fogOfWar);
     m.viewerFaction = static_cast<uint16_t>(doc->getInt("viewer_faction", m.viewerFaction));

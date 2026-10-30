@@ -194,6 +194,51 @@ TEST_F(NavigationTest, TakesShortDropsButNotLongOnes) {
     EXPECT_FALSE(findNavPath(world, out).has_value());
 }
 
+TEST_F(NavigationTest, LongerMaxFallGetsAStrandedUnitDown) {
+    // A tower too tall to step down, with nothing to walk to from its top
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 10; x < 13; ++x) {
+            for (int z = 10; z < 13; ++z) world.setBlock(x, GROUND_Y + y, z, stone);
+        }
+    }
+    NavQuery query;
+    query.start = glm::dvec3(11.5, GROUND_Y + 8, 11.5);
+    query.goal = glm::dvec3(20.5, GROUND_Y, 11.5);
+    EXPECT_FALSE(findNavPath(world, query).has_value()) << "out of reach at the default";
+
+    query.maxFall = 24;
+    auto path = findNavPath(world, query);
+    ASSERT_TRUE(path.has_value());
+    EXPECT_EQ(path->steps.back().pos.y, GROUND_Y);
+}
+
+TEST_F(NavigationTest, LongFallIsALastResortNotAShortcut) {
+    // A cliff with a staircase a little way along it: walking to the stairs beats jumping
+    for (int x = 0; x < 30; ++x) {
+        for (int z = 0; z < 8; ++z) {
+            for (int y = 0; y < 6; ++y) world.setBlock(x, GROUND_Y + y, z, stone);
+        }
+    }
+    for (int x = 14; x <= 16; ++x) {
+        for (int z = 8; z < 14; ++z) {
+            int height = 13 - z;
+            for (int y = 0; y < height; ++y) world.setBlock(x, GROUND_Y + y, z, stone);
+        }
+    }
+    NavQuery query;
+    query.start = glm::dvec3(10.5, GROUND_Y + 6, 6.5);
+    query.goal = glm::dvec3(10.5, GROUND_Y, 16.5);
+    query.maxFall = 24;
+    auto path = findNavPath(world, query);
+    ASSERT_TRUE(path.has_value());
+
+    int largestDrop = 0;
+    for (size_t i = 1; i < path->steps.size(); ++i) {
+        largestDrop = std::max(largestDrop, path->steps[i - 1].pos.y - path->steps[i].pos.y);
+    }
+    EXPECT_LE(largestDrop, query.comfortableFall);
+}
+
 TEST_F(NavigationTest, DoesNotSqueezeThroughDiagonalGaps) {
     // Blocks touching only at their corners form a barrier: x=4 below z=5, then a
     // diagonal chain, then x=7 above z=6. The only way across would be between

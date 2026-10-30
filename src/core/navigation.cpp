@@ -253,7 +253,9 @@ private:
                 BlockCoord cell = down(next, drop);
                 if (!probe_.clear(cell)) break;
                 if (probe_.solid(down(cell))) {
-                    consider(key, node, cell, walkCost(cell, 1.0f + 0.3f * drop));
+                    int excess = std::max(drop - query_.comfortableFall, 0);
+                    consider(key, node, cell,
+                             walkCost(cell, 1.0f + 0.3f * drop) + excess * query_.fallPenalty);
                     landed = true;
                     break;
                 }
@@ -444,6 +446,7 @@ void NavigationSystem::runSearches() {
         query.allowPlace = agent.order.allowPlace;
         query.allowDig = agent.order.allowDig;
         query.maxNodes = agent.order.maxNodes;
+        query.maxFall = maxFall_;
         query.allowPartial = agent.order.allowPartial;
 
         int nodes = 0;

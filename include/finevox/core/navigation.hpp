@@ -45,6 +45,10 @@ struct NavQuery {
     float goalRange = 0.0f;    ///< Accept any standable cell this close (horizontally) to goal
     int maxNodes = 12000;      ///< Expansion cap
     int maxFall = 3;           ///< Largest drop taken without building
+    /// Drops up to this are ordinary walking. Each block past it costs fallPenalty, so
+    /// a longer maxFall is a way down when there's no other, not a shortcut.
+    int comfortableFall = 3;
+    float fallPenalty = 6.0f;
     bool allowPlace = false;   ///< May route through cells that need a block placed
     bool allowDig = false;     ///< May route through cells that need a block removed
     float placeCost = 5.0f;
@@ -119,6 +123,10 @@ public:
     /// Send an agent somewhere, replacing any current order
     void order(EntityId id, const NavOrder& order);
 
+    /// Largest drop agents will take. Raise it where falling doesn't hurt, or a unit
+    /// that ends up on anything tall has no way back to the ground.
+    void setMaxFall(int blocks) { maxFall_ = blocks; }
+
     /// Cancel orders and stop the agent
     void stop(EntityId id);
 
@@ -159,6 +167,7 @@ private:
     void beginNextHop(EntityId id, Agent& agent, MobEntity& mob);
 
     World& world_;
+    int maxFall_ = NavQuery{}.maxFall;
     EntityManager& entities_;
     std::unordered_map<EntityId, Agent> agents_;
     std::deque<EntityId> searchQueue_;

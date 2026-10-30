@@ -112,6 +112,7 @@ void GameRuntime::load() {
     scripts_->engine().setResourceFinder(resourceFinder_.get());
 
     navigation_ = std::make_shared<NavigationSystem>(world, session_->entities());
+    navigation_->setMaxFall(manifest_.navMaxFall);
     scripts_->setNavigation(navigation_.get());
     session_->addSubsystem(navigation_);
     session_->addSubsystem(std::make_shared<WorkClaimClock>(workClaims_));

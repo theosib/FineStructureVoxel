@@ -2,7 +2,15 @@
 
 #include <finevk/device/logical_device.hpp>
 
+// finevk's texture.cpp provides the implementation
+#include <stb_image.h>
+
+#include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <map>
 #include <random>
 
 namespace finevox::render {
@@ -117,6 +125,106 @@ void BlockAtlas::createPlaceholderAtlas(
     cellHeight_ = 1.0f / static_cast<float>(gridHeight);
 }
 
+namespace {
+
+constexpr int ATLAS_TILE = 32;
+constexpr int ATLAS_BORDER = 2;
+
+void magenta(std::vector<uint8_t>& pixels) {
+    pixels.resize(ATLAS_TILE * ATLAS_TILE * 4);
+    for (int i = 0; i < ATLAS_TILE * ATLAS_TILE; ++i) {
+        pixels[i * 4 + 0] = 255;
+        pixels[i * 4 + 1] = 0;
+        pixels[i * 4 + 2] = 255;
+        pixels[i * 4 + 3] = 255;
+    }
+}
+
+bool loadTile(const std::string& path, std::vector<uint8_t>& pixels) {
+    int width = 0, height = 0, channels = 0;
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (!data) return false;
+
+    // Nearest-neighbour resample, so a stray size can't corrupt the grid
+    pixels.resize(ATLAS_TILE * ATLAS_TILE * 4);
+    for (int y = 0; y < ATLAS_TILE; ++y) {
+        for (int x = 0; x < ATLAS_TILE; ++x) {
+            int sx = x * width / ATLAS_TILE;
+            int sy = y * height / ATLAS_TILE;
+            std::memcpy(&pixels[(y * ATLAS_TILE + x) * 4], &data[(sy * width + sx) * 4], 4);
+        }
+    }
+    stbi_image_free(data);
+    return true;
+}
+
+}  // namespace
+
+void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::CommandPool* commandPool,
+                                   const std::string& textureRoot,
+                                   const std::unordered_map<uint32_t, BlockTextureSet>& blocks) {
+    // std::map: stable tile order regardless of registry iteration
+    std::map<std::string, uint32_t> tiles;
+    for (const auto& [id, set] : blocks) {
+        tiles.try_emplace(set.top, 0);
+        tiles.try_emplace(set.bottom, 0);
+        tiles.try_emplace(set.side, 0);
+    }
+    uint32_t index = 0;
+    for (auto& [name, tile] : tiles) tile = index++;
+
+    uint32_t grid = std::max<uint32_t>(
+        1, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(tiles.size())))));
+    const int cell = ATLAS_TILE + ATLAS_BORDER * 2;
+
+    atlasWidth_ = grid * cell;
+    atlasHeight_ = grid * cell;
+    gridWidth_ = grid;
+    gridHeight_ = grid;
+    borderPixels_ = ATLAS_BORDER;
+    cellWidth_ = 1.0f / static_cast<float>(grid);
+    cellHeight_ = 1.0f / static_cast<float>(grid);
+
+    std::vector<uint8_t> atlas(static_cast<size_t>(atlasWidth_) * atlasHeight_ * 4, 0);
+    std::vector<uint8_t> pixels;
+    for (const auto& [name, tile] : tiles) {
+        std::string path = (std::filesystem::path(textureRoot) / (name + ".png")).string();
+        if (!loadTile(path, pixels)) {
+            std::cerr << "[BlockAtlas] missing texture: " << path << "\n";
+            magenta(pixels);
+        }
+
+        int originX = static_cast<int>(tile % grid) * cell;
+        int originY = static_cast<int>(tile / grid) * cell;
+        // Wrap into the border so filtering at a tile edge sees the tile's far
+        // edge, which is what a repeating surface should show.
+        for (int y = 0; y < cell; ++y) {
+            for (int x = 0; x < cell; ++x) {
+                int sx = (x - ATLAS_BORDER + ATLAS_TILE) % ATLAS_TILE;
+                int sy = (y - ATLAS_BORDER + ATLAS_TILE) % ATLAS_TILE;
+                size_t dest = (static_cast<size_t>(originY + y) * atlasWidth_ + originX + x) * 4;
+                std::memcpy(&atlas[dest], &pixels[(sy * ATLAS_TILE + sx) * 4], 4);
+            }
+        }
+    }
+
+    texture_ = finevk::Texture::fromMemory(device, atlas.data(), atlasWidth_, atlasHeight_,
+                                           commandPool, false, true);
+
+    for (const auto& [id, set] : blocks) {
+        auto face = [&](const std::string& name) {
+            uint32_t tile = tiles.at(name);
+            return gridToUV(tile % grid, tile / grid);
+        };
+        BlockTextureInfo info;
+        info.setTopBottom(face(set.top), face(set.bottom), face(set.side));
+        blockTextures_[id] = info;
+    }
+
+    // Unmapped blocks stay obvious rather than picking up tile 0
+    defaultTexture_.setAll(gridToUV(0, 0));
+}
+
 BlockFaceTexture BlockAtlas::gridToUV(uint32_t gridX, uint32_t gridY) const {
     BlockFaceTexture tex;
 
@@ -124,7 +232,7 @@ BlockFaceTexture BlockAtlas::gridToUV(uint32_t gridX, uint32_t gridY) const {
     // excluding the 2-pixel border used for filtering safety.
     // Cell layout: [2px border][12px content][2px border] = 16px total
     // UV should span the content area only.
-    const float borderPixels = 2.0f;
+    const float borderPixels = borderPixels_;
 
     // Border size in UV coordinates
     float borderU = borderPixels / static_cast<float>(atlasWidth_);

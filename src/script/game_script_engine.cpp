@@ -104,6 +104,7 @@ GameScriptEngine::GameScriptEngine(World& world)
     registerSpatialNativeFunctions();
     registerCombatNativeFunctions();
     registerUnitNativeFunctions();
+    registerLocalizationNatives(*engine_);
 }
 
 GameScriptEngine::~GameScriptEngine() {

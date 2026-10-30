@@ -21,6 +21,7 @@
 #include "finevox/core/wake_signal.hpp"
 
 #include <chrono>
+#include <functional>
 
 // FineStructureVK types
 #include <finevk/engine/camera.hpp>
@@ -214,6 +215,14 @@ public:
     }
     [[nodiscard]] ParticleRenderer* particleRenderer() const { return particleRenderer_; }
 
+    /// Draw hooks inside the render pass. Opaque runs after chunks, so anything
+    /// drawn there depth-tests against the world; translucent runs last.
+    using PassCallback = std::function<void(finevk::CommandBuffer&)>;
+    void setOpaquePassCallback(PassCallback callback) { opaquePassCallback_ = std::move(callback); }
+    void setTranslucentPassCallback(PassCallback callback) {
+        translucentPassCallback_ = std::move(callback);
+    }
+
     // ========================================================================
     // Mesh Worker Pool
     // ========================================================================
@@ -362,6 +371,10 @@ public:
      * for the push-based architecture.
      */
     void rebuildAllMeshes();
+
+    /// Queue every subchunk for meshing, nearest to `center` first, so the area in
+    /// view appears quickly while a large world finishes in the background.
+    void rebuildAllMeshesNear(const glm::dvec3& center);
 
     // ========================================================================
     // Rendering
@@ -741,6 +754,8 @@ private:
     // Particle renderer (non-owning; set via setParticleRenderer).
     // Drawn inside render() after the fluid pass.
     ParticleRenderer* particleRenderer_ = nullptr;
+    PassCallback opaquePassCallback_;
+    PassCallback translucentPassCallback_;
 
     // Frame timing and wake signal for deadline-based waiting
     WakeSignal wakeSignal_;

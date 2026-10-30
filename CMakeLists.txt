@@ -202,6 +202,7 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/player_stats_bridge.cpp
         src/script/particle_bridge.cpp
         src/script/unit_natives.cpp
+        src/script/localization_natives.cpp
         src/script/script_game_subsystem.cpp
     )
 
@@ -325,6 +326,8 @@ if(FINEVOX_BUILD_RENDER)
         src/render/overlay_render_layer.cpp
         src/render/particle_atlas.cpp
         src/render/particle_renderer.cpp
+        src/render/scene_geometry.cpp
+        src/render/scene_renderer.cpp
         src/render/frame_capture.cpp
         src/render/visual_test_harness.cpp
     )
@@ -392,6 +395,8 @@ if(FINEVOX_BUILD_RENDER)
             ${SHADER_DIR}/overlay.frag
             ${SHADER_DIR}/particle.vert
             ${SHADER_DIR}/particle.frag
+            ${SHADER_DIR}/scene.vert
+            ${SHADER_DIR}/scene.frag
         )
 
         foreach(SHADER ${SHADER_SOURCES})
@@ -475,6 +480,28 @@ if(FINEVOX_BUILD_RENDER)
         )
 
         message(STATUS "FineStructureVoxel: Building render demo")
+
+        # Game client: runs a game from its content directory
+        if(TARGET finevox_game AND EXISTS "${FINEGUI_DIR}/build/libfinegui-script.a")
+            add_executable(finevox_run
+                apps/finevox_run.cpp
+                src/client/game_client.cpp
+            )
+            target_include_directories(finevox_run PRIVATE
+                ${FINEGUI_DIR}/include
+                ${FINEGUI_DIR}/third_party/imgui
+            )
+            target_link_libraries(finevox_run PRIVATE
+                finevox_render
+                finevox_game
+                "${FINEGUI_DIR}/build/libfinegui.a"
+                "${FINEGUI_DIR}/build/libfinegui-script.a"
+                "${FINEGUI_DIR}/build/libfinegui-retained.a"
+            )
+            target_compile_definitions(finevox_run PRIVATE
+                FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders")
+            add_dependencies(finevox_run finevox_shaders)
+        endif()
     endif()
 endif()
 

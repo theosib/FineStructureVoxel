@@ -362,6 +362,24 @@ void WorldRenderer::rebuildAllMeshes() {
     }
 }
 
+void WorldRenderer::rebuildAllMeshesNear(const glm::dvec3& center) {
+    if (!meshRebuildQueue_) return;
+
+    auto positions = world_.getAllSubChunkPositions();
+    auto distance = [&center](const ChunkPos& pos) {
+        double dx = pos.x * 16.0 + 8.0 - center.x;
+        double dy = pos.y * 16.0 + 8.0 - center.y;
+        double dz = pos.z * 16.0 + 8.0 - center.z;
+        return dx * dx + dy * dy + dz * dz;
+    };
+    std::sort(positions.begin(), positions.end(),
+              [&](const ChunkPos& a, const ChunkPos& b) { return distance(a) < distance(b); });
+
+    for (const auto& pos : positions) {
+        meshRebuildQueue_->push(pos, MeshRebuildRequest::normal());
+    }
+}
+
 void WorldRenderer::markAllDirty() {
     rebuildAllMeshes();
 }
@@ -431,6 +449,10 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
         ++lastRenderedCount_;
         lastRenderedVertices_ += view->vertexCount();
         lastRenderedTriangles_ += view->triangleCount();
+    }
+
+    if (opaquePassCallback_) {
+        opaquePassCallback_(cmd);
     }
 
     // ====================================================================
@@ -520,6 +542,10 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             activeFogColor, activeFogStart, activeFogEnd,
             skyParams_.skyBrightness, skyParams_.ambientLevel);
         particleRenderer_->render(cmd);
+    }
+
+    if (translucentPassCallback_) {
+        translucentPassCallback_(cmd);
     }
 }
 

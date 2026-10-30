@@ -386,11 +386,14 @@ size_t ContentPackLoader::loadLocalization(const fs::path& rootDir,
         langFiles.push_back(preferredFile);
     }
 
+    auto& labels = LabelRegistry::global();
     size_t count = 0;
     for (const auto& path : langFiles) {
-        LabelRegistry::global().loadFile(path.string());
+        labels.loadLocaleFile(path.stem().string(), path.string());
         ++count;
     }
+    labels.setFallbackLocale(std::string(defaultLocale));
+    labels.setLocale(std::string(defaultLocale));
     return count;
 }
 

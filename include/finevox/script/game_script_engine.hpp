@@ -47,6 +47,10 @@ struct ScriptUserData {
     ScriptGameSubsystem* gameScript = nullptr;
 };
 
+/// `loc` and friends. Separate from GameScriptEngine so a UI script engine, which
+/// has no World, can have them too.
+void registerLocalizationNatives(finescript::ScriptEngine& engine);
+
 class GameScriptEngine {
 public:
     explicit GameScriptEngine(World& world);

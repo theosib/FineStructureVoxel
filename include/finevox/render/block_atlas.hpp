@@ -9,6 +9,7 @@
 
 #include "finevox/core/position.hpp"
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/content_pack_loader.hpp"
 #include "finevox/core/mesh.hpp"
 
 #include <finevk/high/texture.hpp>
@@ -144,6 +145,20 @@ public:
         uint32_t gridHeight = 16
     );
 
+    /**
+     * @brief Build an atlas from block textures declared by a content pack
+     *
+     * Loads <textureRoot>/<name>.png for each distinct name, packs them with
+     * edge-extended borders, and maps every block's faces. A missing file logs
+     * and draws magenta so the gap is obvious in-game.
+     */
+    void buildFromTextures(
+        finevk::LogicalDevice* device,
+        finevk::CommandPool* commandPool,
+        const std::string& textureRoot,
+        const std::unordered_map<uint32_t, BlockTextureSet>& blocks
+    );
+
     // ========================================================================
     // Texture Mapping
     // ========================================================================
@@ -234,6 +249,7 @@ private:
     uint32_t atlasHeight_ = 0;
     uint32_t gridWidth_ = 1;
     uint32_t gridHeight_ = 1;
+    float borderPixels_ = 2.0f;
     float cellWidth_ = 1.0f;   // UV width of one cell
     float cellHeight_ = 1.0f;  // UV height of one cell
 

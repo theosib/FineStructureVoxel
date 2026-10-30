@@ -1,0 +1,775 @@
+#include "finevox/client/game_client.hpp"
+
+#include "finevox/core/action_dispatch.hpp"
+#include "finevox/core/entity_manager.hpp"
+#include "finevox/core/entity_model.hpp"
+#include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/graphics_event_queue.hpp"
+#include "finevox/core/input_action_system.hpp"
+#include "finevox/core/light_engine.hpp"
+#include "finevox/core/physics.hpp"
+#include "finevox/core/sky.hpp"
+#include "finevox/core/tactical_camera.hpp"
+#include "finevox/core/world.hpp"
+#include "finevox/core/world_time.hpp"
+#include "finevox/render/block_atlas.hpp"
+#include "finevox/render/engine.hpp"
+#include "finevox/render/entity_renderer.hpp"
+#include "finevox/render/frame_capture.hpp"
+#include "finevox/render/particle_atlas.hpp"
+#include "finevox/render/particle_renderer.hpp"
+#include "finevox/render/scene_renderer.hpp"
+#include "finevox/render/world_render_layer.hpp"
+#include "finevox/render/world_renderer.hpp"
+#include "finevox/script/event_value.hpp"
+#include "finevox/script/finevox_interner.hpp"
+
+#include <finegui/finegui.hpp>
+#include <finegui/map_renderer.hpp>
+#include <finegui/script_bindings.hpp>
+#include <finegui/script_gui_manager.hpp>
+#include <finegui/texture_registry.hpp>
+
+#include <finescript/cbor.h>
+#include <finescript/execution_context.h>
+#include <finescript/map_data.h>
+#include <finescript/resource_finder.h>
+#include <finescript/script_engine.h>
+
+#include <finevk/device/staging_pool.hpp>
+#include <finevk/engine/camera.hpp>
+#include <finevk/engine/input_manager.hpp>
+#include <finevk/finevk.hpp>
+#include <finevk/high/simple_renderer.hpp>
+#include <finevk/rendering/swapchain.hpp>
+#include <finevk/window/window.hpp>
+
+#include <cmath>
+#include <iostream>
+#include <unordered_set>
+
+namespace finevox::client {
+
+namespace fs = std::filesystem;
+using finescript::ExecutionContext;
+using finescript::Value;
+using Args = std::vector<Value>;
+using render::SceneVertex;
+
+namespace {
+
+constexpr float FOV_DEGREES = 55.0f;
+constexpr float NEAR_PLANE = 0.2f;
+constexpr float FAR_PLANE = 900.0f;
+constexpr float CAMERA_PAN_SPEED = 0.9f;   // Fraction of arm length per second
+constexpr float CAMERA_ORBIT_SPEED = 1.6f;
+constexpr float PICK_RANGE = 700.0f;
+
+class GameRootFinder : public finescript::ResourceFinder {
+public:
+    explicit GameRootFinder(fs::path root) : root_(std::move(root)) {}
+
+    fs::path resolve(std::string_view name) override {
+        for (const char* suffix : {"", ".fs", ".fsc"}) {
+            fs::path candidate = root_ / (std::string(name) + suffix);
+            if (fs::is_regular_file(candidate)) return candidate;
+        }
+        return {};
+    }
+
+private:
+    fs::path root_;
+};
+
+class GuiLayer : public RenderLayer {
+public:
+    std::function<void(const RenderContext&)> renderFn;
+    [[nodiscard]] std::string_view name() const override { return "GUI"; }
+    [[nodiscard]] RenderPhase phase() const override { return RenderPhase::GUI; }
+    void render(const RenderContext& ctx) override {
+        if (renderFn) renderFn(ctx);
+    }
+};
+
+double number(const Value& v, double fallback = 0.0) {
+    return v.isNumeric() ? v.asNumber() : fallback;
+}
+
+glm::vec4 colorArg(const Args& args, size_t index) {
+    glm::vec4 color(1.0f);
+    for (int c = 0; c < 4 && index + c < args.size(); ++c) {
+        color[c] = static_cast<float>(number(args[index + c], c == 3 ? 1.0 : 0.0));
+    }
+    return color;
+}
+
+}  // namespace
+
+struct GameClient::Impl {
+    Impl(game::GameRuntime& rt, ClientOptions opts) : runtime(rt), options(std::move(opts)) {}
+
+    ~Impl() {
+        // Members below hold GPU resources that in-flight frames may still use
+        if (engine) engine->device().waitIdle();
+    }
+
+    game::GameRuntime& runtime;
+    ClientOptions options;
+
+    std::unique_ptr<Engine> engine;
+    std::unique_ptr<finegui::GuiSystem> gui;
+    std::unique_ptr<finescript::ScriptEngine> uiEngine;
+    std::unique_ptr<finegui::MapRenderer> mapRenderer;
+    std::unique_ptr<finegui::ScriptGuiManager> guiManager;
+    std::unique_ptr<finegui::TextureRegistry> textureRegistry;
+    std::unique_ptr<ExecutionContext> uiCtx;
+    std::unique_ptr<GameRootFinder> finder;
+    script::FineVoxInterner interner;
+
+    // Atlases outlive the renderers: mesh workers read them until WorldRenderer stops
+    std::unique_ptr<render::BlockAtlas> atlas;
+    std::unique_ptr<render::ParticleAtlas> particleAtlas;
+    std::unique_ptr<render::WorldRenderer> worldRenderer;
+    std::unique_ptr<render::ParticleRenderer> particleRenderer;
+    std::unique_ptr<render::SceneRenderer> sceneRenderer;
+    render::EntityRenderer entityRenderer;
+    EntityModelRegistry models;
+    render::EntityPoseScratch poseScratch;
+
+    finevk::Camera camera;
+    TacticalCamera tactical;
+    ViewBasis view;
+    glm::vec2 viewport{1600.0f, 900.0f};
+    SkyParameters sky;
+    std::unordered_map<uint16_t, glm::vec3> factionColors;
+
+    InputActionSystem inputActions;
+    bool panLeft = false, panRight = false, panForward = false, panBack = false;
+    bool orbitLeft = false, orbitRight = false;
+    glm::vec2 mouse{0.0f};
+
+    finevk::StagingPoolPtr stagingPool;
+    uint64_t frameCount = 0;
+    bool screenshotRequested = false;
+    std::string screenshotPath;
+    int fps = 0;
+    int framesThisSecond = 0;
+    float fpsTimer = 0.0f;
+
+    void setup();
+    void registerNatives();
+    void loadUiScript();
+    void fireUi(uint32_t symbol);
+    void bindInput();
+    void updateCamera(float dt);
+    void buildScene();
+    void drainUiMessages();
+    glm::vec3 factionColor(uint16_t faction) const;
+    [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
+
+    uint32_t symFrame = 0, symMouse = 0, symAction = 0, symState = 0, symKey = 0;
+};
+
+glm::vec3 GameClient::Impl::factionColor(uint16_t faction) const {
+    auto it = factionColors.find(faction);
+    return it == factionColors.end() ? glm::vec3(0.7f) : it->second;
+}
+
+void GameClient::Impl::fireUi(uint32_t symbol) {
+    auto& handlers = uiCtx->eventHandlers();
+    for (size_t i = 0; i < handlers.size(); ++i) {
+        if (handlers[i].eventSymbol != symbol) continue;
+        try {
+            uiEngine->callFunction(handlers[i].handlerFunction, {}, *uiCtx);
+        } catch (const std::exception& e) {
+            static std::unordered_set<std::string> seen;
+            if (seen.insert(e.what()).second) std::cerr << "[ui script] " << e.what() << "\n";
+        }
+    }
+}
+
+void GameClient::Impl::setup() {
+    const game::GameManifest& manifest = runtime.manifest();
+    GameSession& session = runtime.session();
+    World& world = session.world();
+
+    EngineConfig engineConfig;
+    engineConfig.windowTitle = manifest.windowTitle;
+    engineConfig.windowWidth = options.width;
+    engineConfig.windowHeight = options.height;
+    engineConfig.enableValidation = options.validation;
+    engine = std::make_unique<Engine>(engineConfig);
+
+    auto& window = engine->window();
+    auto& device = engine->device();
+    auto& renderer = engine->renderer();
+
+    stagingPool = finevk::StagingPool::create(&device).initialSize(4 * 1024 * 1024).build();
+
+    finegui::GuiConfig guiConfig;
+    guiConfig.fontSize = 16.0f;
+    guiConfig.msaaSamples = renderer.msaaSamples();
+    if (window.isHighDPI()) guiConfig.dpiScale = window.contentScale().x;
+    gui = std::make_unique<finegui::GuiSystem>(&device, guiConfig);
+    gui->initialize(&renderer);
+
+    uiEngine = std::make_unique<finescript::ScriptEngine>();
+    uiEngine->setInterner(&interner);
+    finegui::registerGuiBindings(*uiEngine);
+    script::registerLocalizationNatives(*uiEngine);
+    mapRenderer = std::make_unique<finegui::MapRenderer>(*uiEngine);
+    guiManager = std::make_unique<finegui::ScriptGuiManager>(*uiEngine, *mapRenderer);
+    textureRegistry = std::make_unique<finegui::TextureRegistry>();
+    mapRenderer->setTextureRegistry(textureRegistry.get());
+    finder = std::make_unique<GameRootFinder>(runtime.gameRoot());
+    uiEngine->setResourceFinder(finder.get());
+    uiCtx = std::make_unique<ExecutionContext>(*uiEngine);
+
+    symFrame = uiEngine->intern("frame");
+    symMouse = uiEngine->intern("mouse");
+    symAction = uiEngine->intern("action");
+    symState = uiEngine->intern("state");
+    symKey = uiEngine->intern("key");
+
+    render::WorldRendererConfig worldConfig;
+    worldConfig.viewDistance = manifest.viewDistance;
+    worldRenderer = std::make_unique<render::WorldRenderer>(&device, &renderer, world, worldConfig);
+
+    std::string shaderDir = options.shaderDir.string() + "/";
+    worldRenderer->loadShaders(shaderDir + "chunk.vert.spv", shaderDir + "chunk.frag.spv");
+    worldRenderer->loadFluidShader(shaderDir + "fluid.frag.spv");
+
+    atlas = std::make_unique<render::BlockAtlas>();
+    atlas->buildFromTextures(&device, renderer.commandPool(),
+                             (runtime.gameRoot() / "textures").string(),
+                             runtime.content().blockTextures());
+    worldRenderer->setBlockAtlas(atlas->texture());
+    worldRenderer->setTextureProvider(atlas->createProvider());
+    worldRenderer->setGeometryProvider(runtime.content().geometryProvider());
+    worldRenderer->setFaceOccludesProvider(runtime.content().faceOccludesProvider(world));
+    worldRenderer->initialize();
+
+    particleAtlas = std::make_unique<render::ParticleAtlas>();
+    fs::path particleDir = runtime.gameRoot() / "textures" / "particles";
+    if (particleAtlas->loadFromDirectory(&device, renderer.commandPool(), particleDir.string()) == 0) {
+        particleAtlas->createPlaceholder(&device, renderer.commandPool());
+    }
+    particleAtlas->applyToRegistry(ParticleTypeRegistry::global(), nullptr);
+    particleRenderer = std::make_unique<render::ParticleRenderer>(&device, &renderer, session.particles());
+    particleRenderer->loadShaders(shaderDir + "particle.vert.spv", shaderDir + "particle.frag.spv");
+    particleRenderer->setAtlas(particleAtlas.get());
+    particleRenderer->initialize();
+    worldRenderer->setParticleRenderer(particleRenderer.get());
+
+    sceneRenderer = std::make_unique<render::SceneRenderer>(&device, &renderer);
+    sceneRenderer->loadShaders(shaderDir + "scene.vert.spv", shaderDir + "scene.frag.spv");
+    sceneRenderer->initialize();
+    worldRenderer->setOpaquePassCallback(
+        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawOpaque(cmd); });
+    worldRenderer->setTranslucentPassCallback(
+        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawTranslucent(cmd); });
+
+    models.loadDirectory(runtime.gameRoot() / "models");
+    EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
+        if (def.model == 0) return;
+        const EntityModel* model = models.find(StringInterner::global().lookup(def.model));
+        if (!model) return;
+        for (const auto& [state, slot] : def.animationStates) {
+            auto clip = model->clips.find(state);
+            if (clip != model->clips.end()) {
+                entityRenderer.registerAnimationClip(id, slot, clip->second.get());
+            }
+        }
+    });
+
+    LightEngine& light = session.lightEngine();
+    worldRenderer->setLightProvider([&light](const BlockCoord& pos) -> uint8_t {
+        return static_cast<uint8_t>((light.getSkyLight(pos) << 4) | light.getBlockLight(pos));
+    });
+    worldRenderer->setSmoothLighting(true);
+    light.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
+    world.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
+    world.setAlwaysDeferMeshRebuild(false);
+    glm::dvec3 start(0.0, double(manifest.seaLevel + 10), 0.0);
+    worldRenderer->rebuildAllMeshesNear(start);
+
+    int32_t radius = manifest.worldRadius * 16;
+    tactical.setBounds(glm::vec2(float(-radius)), glm::vec2(float(radius)));
+    camera.setPerspective(FOV_DEGREES, float(window.width()) / float(window.height()), NEAR_PLANE,
+                          FAR_PLANE);
+    tactical.setPivot(start);
+
+    std::string bindings = (runtime.gameRoot() / "input" / "default.bindings").string();
+    if (fs::exists(bindings)) inputActions.loadBindings(bindings);
+
+    registerNatives();
+    bindInput();
+    loadUiScript();
+
+    auto worldLayer = std::make_shared<render::WorldRenderLayer>(*worldRenderer);
+    engine->addRenderLayer(worldLayer);
+
+    auto guiLayer = std::make_shared<GuiLayer>();
+    guiLayer->renderFn = [this](const RenderContext& ctx) {
+        gui->beginFrame();
+        fireUi(symFrame);
+        guiManager->processPendingMessages();
+        mapRenderer->renderAll();
+        gui->endFrame();
+        if (ctx.commandBuffer) gui->render(*ctx.commandBuffer);
+    };
+    engine->addRenderLayer(guiLayer);
+
+    FrameCallbacks callbacks;
+    callbacks.onUpdate = [this](float dt) {
+        auto& input = engine->inputManager();
+        mouse = input.mousePosition();
+        glm::ivec2 size = engine->window().windowSize();
+        viewport = glm::vec2(float(size.x), float(size.y));
+
+        auto framePeriod = worldRenderer->recordFrameStart();
+
+        GameSession& s = runtime.session();
+        sky = computeSkyParameters(s.worldTime().timeOfDay(), runtime.content().skyConfig());
+        worldRenderer->setSkyParameters(sky);
+        if (worldRenderer->fogDynamicColor()) worldRenderer->setFogColor(sky.fogColor);
+
+        entityRenderer.processEvents(s.graphicsEvents());
+        entityRenderer.update(dt, camera.positionD());
+        drainUiMessages();
+
+        updateCamera(dt);
+        worldRenderer->updateCamera(camera.state(), camera.positionD());
+        sceneRenderer->updateCamera(camera.state(), camera.positionD());
+        sceneRenderer->setSky(sky.sunDirection, glm::vec3(sky.fogColor), 0.0f, 0.0f,
+                              sky.skyBrightness, sky.ambientLevel);
+        buildScene();
+
+        auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::microseconds(framePeriod.count() / 2);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (!worldRenderer->waitForMeshUploads(deadline)) break;
+            worldRenderer->updateMeshes(0);
+        }
+
+        ++framesThisSecond;
+        fpsTimer += dt;
+        if (fpsTimer >= 1.0f) {
+            fps = framesThisSecond;
+            framesThisSecond = 0;
+            fpsTimer -= 1.0f;
+            if (options.printStats) {
+                std::cout << "[client] fps=" << fps << " chunks=" << worldRenderer->renderedChunkCount()
+                          << "/" << worldRenderer->loadedChunkCount()
+                          << " culled=" << worldRenderer->culledChunkCount()
+                          << " tris=" << worldRenderer->renderedTriangleCount()
+                          << " entities=" << entityRenderer.entityCount()
+                          << " cam=" << camera.positionD().x << "," << camera.positionD().y << ","
+                          << camera.positionD().z << std::endl;
+            }
+        }
+    };
+    callbacks.onResize = [this](uint32_t width, uint32_t height) {
+        if (height > 0) {
+            camera.setPerspective(FOV_DEGREES, float(width) / float(height), NEAR_PLANE, FAR_PLANE);
+        }
+    };
+    callbacks.getClearColor = [this]() -> glm::vec4 { return sky.skyColor; };
+    callbacks.onPostRender = [this]() {
+        ++frameCount;
+        if (!options.screenshotPath.empty() &&
+            frameCount == static_cast<uint64_t>(options.screenshotFrame)) {
+            screenshotPath = options.screenshotPath;
+            screenshotRequested = true;
+        }
+        if (screenshotRequested) {
+            screenshotRequested = false;
+            auto& r = engine->renderer();
+            finevk::SwapChain* swapChain = r.swapChain();
+            if (swapChain) {
+                uint32_t index = engine->window().currentImageIndex();
+                bool ok = render::FrameCapture::captureImage(swapChain->image(index), *stagingPool,
+                                                             screenshotPath,
+                                                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                std::cout << (ok ? "Screenshot saved: " : "Screenshot FAILED: ") << screenshotPath
+                          << std::endl;
+            }
+        }
+        if (options.exitAfterFrames > 0 &&
+            frameCount >= static_cast<uint64_t>(options.exitAfterFrames)) {
+            engine->requestStop();
+        }
+    };
+    engine->setFrameCallbacks(std::move(callbacks));
+    engine->setFenceWakeSignal(worldRenderer->wakeSignal());
+}
+
+void GameClient::Impl::bindInput() {
+    auto& input = engine->inputManager();
+    input.setCursorMode(finevk::CursorMode::Normal);
+    gui->setGuiMode(finegui::GuiMode::Auto);
+    gui->connectToInputManager(input);
+
+    input.addListener(
+        [this](const finevk::InputEvent& e) -> finevk::ListenerResult {
+            switch (e.type) {
+                case finevk::InputEventType::MouseButtonPress:
+                case finevk::InputEventType::MouseButtonRelease: {
+                    static const char* buttons[] = {"left", "right", "middle"};
+                    int button = e.mouseButton;
+                    uiCtx->set("mouse_event", Value::symbol(uiEngine->intern(
+                        e.type == finevk::InputEventType::MouseButtonPress ? "down" : "up")));
+                    uiCtx->set("mouse_button", Value::symbol(uiEngine->intern(
+                        button >= 0 && button < 3 ? buttons[button] : "other")));
+                    uiCtx->set("mouse_x", Value::number(e.state.mousePosition.x));
+                    uiCtx->set("mouse_y", Value::number(e.state.mousePosition.y));
+                    uiCtx->set("mouse_shift", Value::boolean(e.state.isShiftPressed()));
+                    fireUi(symMouse);
+                    return finevk::ListenerResult::Consumed;
+                }
+                case finevk::InputEventType::MouseScroll: {
+                    float notch = e.state.scrollDelta.y;
+                    if (notch != 0.0f) tactical.zoom(notch > 0.0f ? 0.88f : 1.0f / 0.88f);
+                    return finevk::ListenerResult::Consumed;
+                }
+                case finevk::InputEventType::KeyPress:
+                case finevk::InputEventType::KeyRelease: {
+                    RawInputEvent raw;
+                    raw.type = e.type == finevk::InputEventType::KeyPress ? RawEventType::KeyPress
+                                                                          : RawEventType::KeyRelease;
+                    raw.keyOrButton = e.key;
+                    raw.modifiers = InputModifier::None;
+                    if (e.state.isShiftPressed()) raw.modifiers = raw.modifiers | InputModifier::Shift;
+                    if (e.state.isControlPressed()) raw.modifiers = raw.modifiers | InputModifier::Control;
+                    if (e.state.isAltPressed()) raw.modifiers = raw.modifiers | InputModifier::Alt;
+
+                    ActionResult result = inputActions.processEvent(raw);
+                    if (!result.matched()) return finevk::ListenerResult::Reject;
+
+                    const std::string& action = result.actionName;
+                    if (action == "begin_pan_left") panLeft = true;
+                    else if (action == "end_pan_left") panLeft = false;
+                    else if (action == "begin_pan_right") panRight = true;
+                    else if (action == "end_pan_right") panRight = false;
+                    else if (action == "begin_pan_forward") panForward = true;
+                    else if (action == "end_pan_forward") panForward = false;
+                    else if (action == "begin_pan_back") panBack = true;
+                    else if (action == "end_pan_back") panBack = false;
+                    else if (action == "begin_orbit_left") orbitLeft = true;
+                    else if (action == "end_orbit_left") orbitLeft = false;
+                    else if (action == "begin_orbit_right") orbitRight = true;
+                    else if (action == "end_orbit_right") orbitRight = false;
+                    else {
+                        uiCtx->set("action", Value::symbol(uiEngine->intern(action)));
+                        uiCtx->set("action_arg", Value::string(result.argExpression));
+                        fireUi(symAction);
+                    }
+                    return finevk::ListenerResult::Consumed;
+                }
+                default:
+                    return finevk::ListenerResult::Reject;
+            }
+        },
+        finevk::InputPriority::Game);
+}
+
+void GameClient::Impl::updateCamera(float dt) {
+    float pan = CAMERA_PAN_SPEED * tactical.distance() * dt;
+    float right = (panRight ? pan : 0.0f) - (panLeft ? pan : 0.0f);
+    float forward = (panForward ? pan : 0.0f) - (panBack ? pan : 0.0f);
+
+    // Edge scroll, except while the cursor sits on a GUI widget
+    constexpr float EDGE = 4.0f;
+    if (!gui->wantCaptureMouse() && mouse.x >= 0.0f && mouse.y >= 0.0f && mouse.x <= viewport.x &&
+        mouse.y <= viewport.y) {
+        if (mouse.x < EDGE) right -= pan;
+        if (mouse.x > viewport.x - EDGE) right += pan;
+        if (mouse.y < EDGE) forward += pan;
+        if (mouse.y > viewport.y - EDGE) forward -= pan;
+    }
+    if (right != 0.0f || forward != 0.0f) tactical.pan(right, forward);
+
+    if (orbitLeft) tactical.orbit(CAMERA_ORBIT_SPEED * dt, 0.0f);
+    if (orbitRight) tactical.orbit(-CAMERA_ORBIT_SPEED * dt, 0.0f);
+
+    // Keep the pivot on the ground so zooming goes where you're looking
+    glm::dvec3 target = tactical.targetPivot();
+    World& world = runtime.session().world();
+    int32_t tx = static_cast<int32_t>(std::floor(target.x));
+    int32_t tz = static_cast<int32_t>(std::floor(target.z));
+    for (int32_t y = 200; y > 0; --y) {
+        if (!world.getBlock(tx, y, tz).isAir()) {
+            tactical.setPivotHeight(double(y + 1));
+            break;
+        }
+    }
+    tactical.update(dt);
+
+    camera.moveTo(tactical.position());
+    camera.setOrientation(tactical.forward(), glm::vec3(0.0f, 1.0f, 0.0f));
+    camera.updateState();
+
+    view = makeViewBasis(tactical.position(), tactical.forward(), FOV_DEGREES,
+                         viewport.x / std::max(viewport.y, 1.0f));
+}
+
+void GameClient::Impl::buildScene() {
+    LightEngine& light = runtime.session().lightEngine();
+    glm::dvec3 cameraPos = camera.positionD();
+    float tickRate = static_cast<float>(runtime.manifest().tickRate);
+    auto& opaque = sceneRenderer->opaque();
+
+    for (const auto& [id, state] : entityRenderer.entities()) {
+        if (!state.visible || !state.active) continue;
+
+        const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId);
+        float alpha = state.interpolationAlpha(tickRate);
+        glm::dvec3 pos = state.interpolatedPosition(alpha);
+
+        BlockCoord cell(static_cast<int32_t>(std::floor(pos.x)),
+                        static_cast<int32_t>(std::floor(pos.y)) + 1,
+                        static_cast<int32_t>(std::floor(pos.z)));
+        float skyLight = light.getSkyLight(cell) / 15.0f * sky.skyBrightness;
+        float blockLight = light.getBlockLight(cell) / 15.0f;
+        float brightness = std::max({skyLight, blockLight, 0.3f}) * 1.6f;
+
+        glm::vec3 team = factionColor(state.faction);
+        const EntityModel* model =
+            def && def->model != 0 ? models.find(StringInterner::global().lookup(def->model)) : nullptr;
+        if (model) {
+            render::appendEntity(opaque, *model, state, cameraPos, team, brightness, tickRate,
+                                 poseScratch);
+        } else {
+            glm::vec3 half = def ? def->halfExtents : glm::vec3(0.3f, 0.9f, 0.3f);
+            glm::vec3 center(pos - cameraPos);
+            center.y += half.y;
+            render::appendBox(opaque, center, half, glm::vec4(team * brightness, 1.0f));
+        }
+    }
+}
+
+void GameClient::Impl::drainUiMessages() {
+    for (auto& bytes : runtime.uiOutbox().drainAll()) {
+        Value message = finescript::cborDecode(bytes, interner);
+        uiCtx->set("msg", std::move(message));
+        fireUi(symState);
+    }
+}
+
+RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor) const {
+    WorldRay ray = screenRayToWorld(view, cursor, viewport);
+    BlockShapeProvider shapes = createBlockShapeProvider(runtime.session().world());
+    Vec3 origin(static_cast<float>(ray.origin.x), static_cast<float>(ray.origin.y),
+                static_cast<float>(ray.origin.z));
+    return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, RaycastMode::Interaction, shapes);
+}
+
+void GameClient::Impl::registerNatives() {
+    auto& e = *uiEngine;
+    GameSession& session = runtime.session();
+
+    e.registerFunction("send_command", [this, &session](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        // Through CBOR so the game thread gets its own copy and nothing is shared
+        auto bytes = finescript::cborEncode(args[0], interner);
+        session.actions().sendGameCommand(finescript::cborDecode(bytes, interner));
+        return Value::nil();
+    });
+
+    // ui_show tree [=immediate true] -> id. Replaces ui.show, which needs a ScriptGui
+    // behind the context. This client has one flat UI context instead.
+    e.registerFunction("ui_show", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty() || !args[0].isMap()) return Value::nil();
+        bool immediate = false;
+        if (args.size() > 1 && args.back().isMap()) {
+            Value flag = const_cast<Value&>(args.back()).asMap().get(uiEngine->intern("immediate"));
+            immediate = flag.truthy();
+        }
+        return Value::integer(mapRenderer->show(args[0], *uiCtx, immediate));
+    });
+
+    e.registerFunction("ui_hide", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty() && args[0].isNumeric()) mapRenderer->hide(static_cast<int>(args[0].asNumber()));
+        return Value::nil();
+    });
+
+    e.registerFunction("window_size", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::array(std::vector<Value>{Value::number(viewport.x), Value::number(viewport.y)});
+    });
+
+    e.registerFunction("mouse_pos", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::array(std::vector<Value>{Value::number(mouse.x), Value::number(mouse.y)});
+    });
+
+    e.registerFunction("gui_has_mouse", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(gui->wantCaptureMouse());
+    });
+
+    e.registerFunction("fps", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::integer(fps);
+    });
+
+    // set_faction_color id r g b
+    e.registerFunction("set_faction_color", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() >= 4) {
+            factionColors[static_cast<uint16_t>(number(args[0]))] =
+                glm::vec3(number(args[1]), number(args[2]), number(args[3]));
+        }
+        return Value::nil();
+    });
+
+    e.registerFunction("cam_focus", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() >= 2) {
+            tactical.setPivot(glm::dvec3(number(args[0]), tactical.pivot().y, number(args[1])));
+        }
+        return Value::nil();
+    });
+
+    e.registerFunction("cam_set", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() >= 3) {
+            tactical.setDistance(static_cast<float>(number(args[0])));
+            tactical.orbit(static_cast<float>(number(args[1])) - tactical.yaw(),
+                           static_cast<float>(number(args[2])) - tactical.pitch());
+        }
+        return Value::nil();
+    });
+
+    // pick_block mx my -> {=x =y =z =nx =ny =nz} or nil
+    e.registerFunction("pick_block", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        RaycastResult hit = pickBlock(glm::vec2(number(args[0]), number(args[1])));
+        if (!hit.hit) return Value::nil();
+        auto result = Value::map();
+        auto& map = result.asMap();
+        BlockCoord n = BlockCoord(hit.blockPos.x, hit.blockPos.y, hit.blockPos.z);
+        map.set(uiEngine->intern("x"), Value::integer(n.x));
+        map.set(uiEngine->intern("y"), Value::integer(n.y));
+        map.set(uiEngine->intern("z"), Value::integer(n.z));
+        return result;
+    });
+
+    // pick_entities x0 y0 x1 y1 -> ids whose bodies project into the rectangle
+    e.registerFunction("pick_entities", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 4) return Value::array(std::vector<Value>{});
+        float x0 = static_cast<float>(number(args[0])), y0 = static_cast<float>(number(args[1]));
+        float x1 = static_cast<float>(number(args[2])), y1 = static_cast<float>(number(args[3]));
+        if (x0 > x1) std::swap(x0, x1);
+        if (y0 > y1) std::swap(y0, y1);
+
+        // Small rectangles are clicks: a click anywhere on a body should hit it
+        constexpr float SLOP = 6.0f;
+        x0 -= SLOP; y0 -= SLOP; x1 += SLOP; y1 += SLOP;
+
+        std::vector<Value> found;
+        for (const auto& [id, state] : entityRenderer.entities()) {
+            if (!state.visible || !state.active) continue;
+            glm::dvec3 feet = state.currentPosition;
+            auto top = worldToScreen(view, feet + glm::dvec3(0.0, 1.7, 0.0), viewport);
+            auto bottom = worldToScreen(view, feet, viewport);
+            if (!top || !bottom) continue;
+            float minY = std::min(top->y, bottom->y), maxY = std::max(top->y, bottom->y);
+            float centerX = (top->x + bottom->x) * 0.5f;
+            if (centerX >= x0 && centerX <= x1 && maxY >= y0 && minY <= y1) {
+                found.push_back(Value::integer(static_cast<int64_t>(id)));
+            }
+        }
+        return Value::array(std::move(found));
+    });
+
+    // entity_pos id -> [x y z] (as last received; nil if unknown or hidden)
+    e.registerFunction("entity_pos", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
+        if (!state || !state->visible) return Value::nil();
+        return Value::array(std::vector<Value>{Value::number(state->currentPosition.x),
+                                               Value::number(state->currentPosition.y),
+                                               Value::number(state->currentPosition.z)});
+    });
+
+    e.registerFunction("entity_faction", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
+        return state ? Value::integer(state->faction) : Value::nil();
+    });
+
+    // marker_ring x y z radius r g b [a]
+    e.registerFunction("marker_ring", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 7) return Value::nil();
+        glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
+                         camera.positionD());
+        float radius = static_cast<float>(number(args[3]));
+        render::appendRing(sceneRenderer->translucent(), center, radius, 0.12f, colorArg(args, 4));
+        return Value::nil();
+    });
+
+    // marker_box x y z sx sy sz r g b [a]: min corner and size, unlit
+    e.registerFunction("marker_box", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 9) return Value::nil();
+        glm::vec3 size(number(args[3]), number(args[4]), number(args[5]));
+        glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
+                         camera.positionD());
+        render::appendBox(sceneRenderer->translucent(), center + size * 0.5f, size * 0.5f,
+                          colorArg(args, 6), false);
+        return Value::nil();
+    });
+
+    // marker_bar x y z width fraction: health bar facing the camera
+    e.registerFunction("marker_bar", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 5) return Value::nil();
+        glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
+                         camera.positionD());
+        float halfWidth = static_cast<float>(number(args[3])) * 0.5f;
+        float fraction = std::clamp(static_cast<float>(number(args[4])), 0.0f, 1.0f);
+        auto& out = sceneRenderer->translucent();
+        render::appendBillboard(out, center, view.right, view.up, halfWidth, 0.07f,
+                                glm::vec4(0.08f, 0.08f, 0.08f, 0.85f));
+        glm::vec3 barCenter = center - view.right * (halfWidth * (1.0f - fraction));
+        glm::vec4 color = fraction > 0.5f ? glm::vec4(0.35f, 0.85f, 0.35f, 1.0f)
+                                          : glm::vec4(0.9f, 0.45f, 0.2f, 1.0f);
+        render::appendBillboard(out, barCenter, view.right, view.up, halfWidth * fraction, 0.05f, color);
+        return Value::nil();
+    });
+
+    e.registerFunction("request_screenshot", [this](ExecutionContext&, const Args& args) -> Value {
+        screenshotPath = args.empty() ? "screenshots/shot.png" : args[0].toString();
+        screenshotRequested = true;
+        return Value::nil();
+    });
+
+    e.registerFunction("quit_game", [this](ExecutionContext&, const Args&) -> Value {
+        engine->requestStop();
+        return Value::nil();
+    });
+}
+
+void GameClient::Impl::loadUiScript() {
+    fs::path path = runtime.gameRoot() / runtime.manifest().uiScript;
+    if (!fs::is_regular_file(path)) {
+        std::cerr << "[ui script] not found: " << path << "\n";
+        return;
+    }
+    auto* script = uiEngine->loadScript(path);
+    auto result = uiEngine->execute(*script, *uiCtx);
+    if (!result.success) {
+        std::cerr << "[ui script] " << path.string() << ":" << result.errorLine << ": "
+                  << result.error << "\n";
+    }
+}
+
+GameClient::GameClient(game::GameRuntime& runtime, ClientOptions options)
+    : impl_(std::make_unique<Impl>(runtime, std::move(options))) {
+    impl_->setup();
+}
+
+GameClient::~GameClient() {
+    impl_->runtime.stopThreads();
+}
+
+int GameClient::run() {
+    impl_->runtime.startThreads();
+    impl_->engine->run();
+    impl_->runtime.stopThreads();
+    return 0;
+}
+
+}  // namespace finevox::client

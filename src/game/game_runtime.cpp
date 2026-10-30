@@ -6,6 +6,7 @@
 #include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/resource_locator.hpp"
+#include "finevox/core/world_time.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/worldgen/biome_loader.hpp"
 #include "finevox/worldgen/biome_map.hpp"
@@ -118,6 +119,15 @@ void GameRuntime::load() {
     scripts_->engine().registerFunction(
         "game_exit", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
             requestExit(args.empty() ? 0 : static_cast<int>(args[0].asNumber()));
+            return finescript::Value::nil();
+        });
+
+    // set_time_of_day fraction: 0 dawn, 0.25 noon, 0.5 dusk, 0.75 midnight
+    scripts_->engine().registerFunction(
+        "set_time_of_day", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (!args.empty() && args[0].isNumeric()) {
+                session_->worldTime().setTime(static_cast<int64_t>(args[0].asNumber() * WorldTime::TICKS_PER_DAY));
+            }
             return finescript::Value::nil();
         });
 

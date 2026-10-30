@@ -208,6 +208,7 @@ if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
         src/script/unit_natives.cpp
         src/script/localization_natives.cpp
         src/script/script_game_subsystem.cpp
+        src/script/value_graph.cpp
     )
 
     # finevox already provides include dirs and finescript PUBLIC
@@ -277,6 +278,7 @@ if(TARGET finevox_script)
     add_library(finevox_game SHARED
         src/game/game_manifest.cpp
         src/game/game_runtime.cpp
+        src/game/game_save.cpp
         src/game/blueprint_natives.cpp
         src/game/conflict_natives.cpp
     )

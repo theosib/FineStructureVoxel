@@ -48,6 +48,27 @@ private:
     fs::path root_;
 };
 
+// Saves on game time, between ticks, so nothing is halfway through a change
+class AutosaveClock : public GameSubsystem {
+public:
+    AutosaveClock(GameRuntime& runtime, uint64_t intervalTicks)
+        : runtime_(runtime), interval_(intervalTicks) {}
+    [[nodiscard]] std::string_view name() const override { return "AutosaveClock"; }
+    [[nodiscard]] TickPhase phase() const override { return TickPhase::PostTick; }
+    [[nodiscard]] int32_t priority() const override { return 1000; }
+    void tick(float /*dt*/) override {
+        if (++ticks_ < interval_) return;
+        ticks_ = 0;
+        std::string error;
+        if (!runtime_.saveGame(error)) std::cerr << "[save] autosave failed: " << error << "\n";
+    }
+
+private:
+    GameRuntime& runtime_;
+    uint64_t interval_;
+    uint64_t ticks_ = 0;
+};
+
 // Runs as a subsystem so work claims expire on game time
 class WorkClaimClock : public GameSubsystem {
 public:
@@ -98,7 +119,13 @@ void GameRuntime::load() {
     config.randomTicksPerChunk = manifest_.randomTicks;
     session_ = GameSession::createLocal(config);
 
-    generateWorld();
+    resumed_ = saveExists() && !options_.newGame;
+    loadWorldContent();
+    if (resumed_) {
+        loadSavedWorld();
+    } else {
+        generateWorld();
+    }
 
     World& world = session_->world();
     scripts_ = std::make_unique<script::GameScriptEngine>(world);
@@ -167,7 +194,17 @@ void GameRuntime::load() {
             throw std::runtime_error("script failed: " + path.string());
         }
     }
-    gameScript_->fire("start");
+    if (resumed_) {
+        loadSavedState();
+        gameScript_->fire("resume");
+    } else {
+        gameScript_->fire("start");
+    }
+
+    if (manifest_.autosaveMinutes > 0.0f && !savePath().empty()) {
+        session_->addSubsystem(std::make_shared<AutosaveClock>(
+            *this, static_cast<uint64_t>(manifest_.autosaveMinutes * 60.0f * manifest_.tickRate)));
+    }
 
     // Don't open on a blank map: show what the starting units can see
     vision_->refresh(manifest_.viewerFaction);
@@ -175,6 +212,21 @@ void GameRuntime::load() {
 }
 
 void GameRuntime::registerNatives() {
+    auto& engine = scripts_->engine();
+
+    // game_state_store value: in `on :save`, hand over what to keep
+    engine.registerFunction(
+        "game_state_store", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            savedScriptState_ = args.empty() ? finescript::Value::nil() : args[0];
+            return finescript::Value::nil();
+        });
+
+    // game_state_load -> value: in `on :resume`, what `on :save` handed over
+    engine.registerFunction(
+        "game_state_load", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&) {
+            return savedScriptState_;
+        });
+
     scripts_->engine().registerFunction(
         "game_exit", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
             requestExit(args.empty() ? 0 : static_cast<int>(args[0].asNumber()));
@@ -194,13 +246,15 @@ void GameRuntime::registerNatives() {
     registerConflictNatives(*this);
 }
 
+void GameRuntime::loadWorldContent() {
+    std::string ns = manifest_.contentNamespace;
+    worldgen::BiomeLoader::loadDirectory((options_.gameRoot / "biomes").string(), ns);
+    worldgen::FeatureLoader::loadDirectory((options_.gameRoot / "features").string(), ns);
+}
+
 void GameRuntime::generateWorld() {
     auto started = std::chrono::steady_clock::now();
     World& world = session_->world();
-    std::string ns = manifest_.contentNamespace;
-
-    worldgen::BiomeLoader::loadDirectory((options_.gameRoot / "biomes").string(), ns);
-    worldgen::FeatureLoader::loadDirectory((options_.gameRoot / "features").string(), ns);
 
     uint64_t seed = manifest_.worldSeed;
     worldgen::GenerationPipeline pipeline;
@@ -223,6 +277,13 @@ void GameRuntime::generateWorld() {
         }
     }
 
+    lightWorld();
+    worldgenSeconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+}
+
+void GameRuntime::lightWorld() {
+    World& world = session_->world();
+
     // Structures write through the world after each column's heightmap was built
     std::vector<ColumnPos> columns;
     world.forEachColumn([&columns](ColumnPos pos, ChunkColumn& column) {
@@ -236,8 +297,6 @@ void GameRuntime::generateWorld() {
         light.initializeColumnLighting(pos);
         if (ChunkColumn* column = world.getColumn(pos)) column->markLightInitialized();
     }
-
-    worldgenSeconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 }
 
 void GameRuntime::runTicks(uint64_t count) {

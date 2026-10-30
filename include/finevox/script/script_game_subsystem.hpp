@@ -61,6 +61,7 @@ public:
 
     /// Total ticks since this subsystem started
     [[nodiscard]] uint64_t tickCount() const { return tickCount_; }
+    void setTickCount(uint64_t ticks) { tickCount_ = ticks; }
 
     [[nodiscard]] finescript::ExecutionContext& context() { return *ctx_; }
 

@@ -43,6 +43,21 @@ struct RuntimeOptions {
     std::vector<std::filesystem::path> extraScripts;
     /// Values defined in the game script's scope before anything runs
     std::vector<std::pair<std::string, std::string>> scriptDefines;
+    /// Where to save and resume from. Empty means the game's own slot, if it uses saves.
+    std::filesystem::path savePath;
+    /// Start over even if there's a save. The old one stays until the next save replaces it.
+    bool newGame = false;
+    /// Neither read nor write saves: for automation, which must not touch the player's game
+    bool noSaves = false;
+};
+
+/// What the client wants back on resuming: the world says nothing about where it was looking
+struct ClientSave {
+    glm::dvec3 pivot{0.0};
+    glm::dvec3 steward{0.0};
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+    float distance = 0.0f;
 };
 
 class GameRuntime {
@@ -59,6 +74,18 @@ public:
 
     /// Run ticks synchronously on this thread (headless)
     void runTicks(uint64_t count);
+
+    /// Save the game. Call between ticks: on the game thread, or with threads stopped. A
+    /// failure leaves any existing save as it was. True if saved, or if saving is off.
+    bool saveGame(std::string& error);
+
+    /// Empty if this run doesn't use saves
+    [[nodiscard]] std::filesystem::path savePath() const;
+    [[nodiscard]] bool saveExists() const;
+    [[nodiscard]] bool resumed() const { return resumed_; }
+
+    [[nodiscard]] const ClientSave& clientSave() const { return clientSave_; }
+    void setClientSave(const ClientSave& save) { clientSave_ = save; }
 
     /// Start/stop threaded operation (client)
     void startThreads();
@@ -93,8 +120,14 @@ public:
     [[nodiscard]] double worldgenSeconds() const { return worldgenSeconds_; }
 
 private:
+    void loadWorldContent();
     void generateWorld();
+    void lightWorld();
     void registerNatives();
+    void loadSavedWorld();
+    void loadSavedState();
+    [[nodiscard]] finescript::Value saveSites();
+    void loadSites(const finescript::Value& saved, int64_t nextId);
 
     RuntimeOptions options_;
     GameManifest manifest_;
@@ -110,6 +143,9 @@ private:
     WorkClaimRegistry workClaims_;
     worldgen::BlueprintLibrary blueprints_;
     std::unordered_map<int64_t, worldgen::BlueprintSite> sites_;
+    finescript::Value savedScriptState_;
+    ClientSave clientSave_;
+    bool resumed_ = false;
     int64_t nextSiteId_ = 1;
     Queue<std::vector<uint8_t>> uiOutbox_;
     bool threadsRunning_ = false;

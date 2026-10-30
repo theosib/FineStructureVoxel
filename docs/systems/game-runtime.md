@@ -33,6 +33,8 @@ sky.conf
 | `fog_of_war`, `viewer_faction` | `true`, `1` | Whose eyes the client sees through |
 | `view_distance`, `default_locale`, `tick_rate`, `gravity` | | |
 | `lod` | `true` | Merge distant blocks. Turn off for an overhead camera, which keeps the map in the transition zone where meshes visibly swap |
+| `saves` | `false` | Keep the game in `saves/autosave`, resume it on launch, and save on exit |
+| `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 
@@ -178,6 +180,7 @@ marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
+pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =block name} or nil
 request_screenshot path    quit_game
 ```
 
@@ -242,6 +245,33 @@ Any feature with `density` registers its own placement: `density`, `surface`,
 `attempts`, `radius`, `min_stack`, `max_stack`.
 
 ---
+
+## Saving
+
+With `saves: true`, every clean exit saves and the next launch resumes, firing `on :resume`
+instead of `on :start`. `--new` starts over, and `--no-save` or `--exit-after` leave saves alone.
+`finevox_headless` only saves when told: `--save DIR` at the end of a run, `--resume DIR` to load.
+
+The engine keeps the world, what the viewer has explored, entities under their ids, construction
+sites, vision, and the clocks. Anything else is the game's, in its handlers:
+
+```
+on :save do
+    game_state_store {=factions factions =contest contest}
+end
+on :resume do
+    let saved {game_state_load}
+    set factions saved.factions
+end
+```
+
+Plain data only, but shared references and cycles survive: two lists holding one record still
+hold one record. Paths, work claims, and shots in flight aren't kept, so `on :resume` must set
+units to choose new work. A save goes to one side and is renamed into place, so a failure leaves
+the last good one alone, and the save it replaces stays as `autosave.bak`. Saves run between
+ticks, on the game thread during play.
+
+`new_game` from the UI script saves and restarts the process with `--new`.
 
 ## Testing a Game
 

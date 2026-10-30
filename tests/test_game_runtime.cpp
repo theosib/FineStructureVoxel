@@ -1,4 +1,8 @@
 #include <gtest/gtest.h>
+#include "finevox/script/value_graph.hpp"
+#include <finescript/execution_context.h>
+#include <finescript/map_data.h>
+#include <finescript/script_engine.h>
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
@@ -205,4 +209,197 @@ on :start do
 end
 )");
     EXPECT_TRUE(game.session().world().getBlock(8, 40, 8).isAir());
+}
+
+// ============================================================================
+// Saving and resuming
+// ============================================================================
+
+namespace {
+
+finescript::Value evaluate(finescript::ScriptEngine& engine, const char* source) {
+    finescript::ExecutionContext context(engine);
+    auto result = engine.executeCommand(source, context);
+    EXPECT_TRUE(result.success) << result.error;
+    return result.returnValue;
+}
+
+}  // namespace
+
+TEST(ValueGraph, KeepsEveryKindOfValue) {
+    finescript::ScriptEngine engine;
+    auto value = evaluate(engine, R"({=i 3 =f 2.5 =whole 2.0 =s "text" =sym :timber =yes true =none nil =list [1 [2]]})");
+    auto back = script::decodeValueGraph(script::encodeValueGraph(value, engine.interner()), engine.interner());
+
+    auto& map = back.asMap();
+    auto at = [&](const char* name) { return map.get(engine.intern(name)); };
+    EXPECT_TRUE(at("i").isInt());
+    EXPECT_EQ(at("i").asInt(), 3);
+    EXPECT_TRUE(at("f").isFloat());
+    EXPECT_EQ(at("f").asFloat(), 2.5);
+    EXPECT_TRUE(at("whole").isFloat()) << "2.0 must not come back as an integer";
+    EXPECT_EQ(at("s").asString(), "text");
+    EXPECT_EQ(at("sym").asSymbol(), engine.intern("timber"));
+    EXPECT_TRUE(at("yes").asBool());
+    EXPECT_TRUE(at("none").isNil());
+    EXPECT_EQ(at("list").asArray()[1].asArray()[0].asInt(), 2);
+}
+
+TEST(ValueGraph, TwoReferencesToOneThingStayOneThing) {
+    finescript::ScriptEngine engine;
+    auto shared = finescript::Value::map();
+    auto root = finescript::Value::array(std::vector<finescript::Value>{shared, shared});
+
+    auto back = script::decodeValueGraph(script::encodeValueGraph(root, engine.interner()), engine.interner());
+    finescript::Value first = back.asArray()[0];
+    finescript::Value second = back.asArray()[1];
+    first.asMap().set(engine.intern("mark"), finescript::Value::integer(1));
+    EXPECT_EQ(second.asMap().get(engine.intern("mark")).asInt(), 1);
+}
+
+TEST(ValueGraph, ContainersCanHoldThemselves) {
+    finescript::ScriptEngine engine;
+    auto node = finescript::Value::map();
+    node.asMap().set(engine.intern("self"), node);
+
+    auto back = script::decodeValueGraph(script::encodeValueGraph(node, engine.interner()), engine.interner());
+    auto again = back.asMap().get(engine.intern("self"));
+    EXPECT_EQ(&again.asMap(), &back.asMap());
+}
+
+TEST(ValueGraph, AFunctionCannotBeSaved) {
+    finescript::ScriptEngine engine;
+    auto value = evaluate(engine, "fn [] do return 1 end");
+    EXPECT_THROW((void)script::encodeValueGraph(value, engine.interner()), std::runtime_error);
+}
+
+namespace {
+
+const char* const SAVING_SCRIPT = R"(
+set record {=count 0}
+on :start do
+    set record.count 41
+    set record.unit {ent_spawn :walker 1.5 40 2.5 =faction 2}
+    set record.site {site_create :hut 3 40 3}
+    world_set_block 5 45 5 :stone
+end
+on :tick do
+    set record.count (record.count + 1)
+end
+on :save do
+    game_state_store record
+end
+on :resume do
+    set record {game_state_load}
+end
+)";
+
+}  // namespace
+
+class SavedGameTest : public GameRuntimeTest {
+protected:
+    GameRuntime& bootWith(const fs::path& save, const std::string& script, bool fresh) {
+        write("scripts/main.fsc", script);
+        RuntimeOptions options;
+        options.gameRoot = root;
+        options.savePath = save;
+        options.newGame = fresh;
+        runtime = std::make_unique<GameRuntime>(options);
+        runtime->load();
+        return *runtime;
+    }
+
+    fs::path slot() { return root / "saves" / "slot"; }
+};
+
+TEST_F(SavedGameTest, AGameComesBackWhereItWas) {
+    GameRuntime& first = bootWith(slot(), SAVING_SCRIPT, true);
+    EXPECT_FALSE(first.resumed());
+    first.runTicks(9);
+    auto& scene = first.session().world();
+    BlockTypeId stone = scene.getBlock(5, 45, 5);
+    ASSERT_FALSE(stone.isAir());
+    EntityId unit = 0;
+    for (const auto& [id, entity] : first.session().entities().entities()) unit = id;
+    ASSERT_NE(unit, 0u);
+
+    std::string error;
+    ASSERT_TRUE(first.saveGame(error)) << error;
+    ASSERT_TRUE(fs::is_regular_file(slot() / "game.cbor"));
+    runtime.reset();
+
+    GameRuntime& second = bootWith(slot(), SAVING_SCRIPT, false);
+    EXPECT_TRUE(second.resumed());
+    EXPECT_EQ(second.gameScript().tickCount(), 9u);
+    EXPECT_EQ(second.session().world().getBlock(5, 45, 5), stone);
+
+    const Entity* entity = second.session().entities().getEntity(unit);
+    ASSERT_NE(entity, nullptr) << "scripts hold this id, so it has to survive";
+    EXPECT_EQ(entity->faction(), 2);
+    EXPECT_EQ(second.sites().size(), 1u);
+
+    second.runTicks(1);
+    finescript::Value record = second.gameScript().context().get("record");
+    ASSERT_TRUE(record.isMap());
+    EXPECT_EQ(record.asMap().get(second.scripts().engine().intern("count")).asInt(), 51);
+
+    // New things don't take the id of anything restored
+    EntityId fresh = second.session().entities().spawnEntity(
+        std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("walker")));
+    EXPECT_GT(fresh, unit);
+}
+
+TEST_F(SavedGameTest, AFailedSaveLeavesTheLastGoodOneAlone) {
+    GameRuntime& first = bootWith(slot(), SAVING_SCRIPT, true);
+    first.runTicks(3);
+    std::string error;
+    ASSERT_TRUE(first.saveGame(error)) << error;
+    auto written = fs::last_write_time(slot() / "game.cbor");
+    runtime.reset();
+
+    std::string broken = std::string(SAVING_SCRIPT) + R"(
+on :save do
+    game_state_store fn [] do return 1 end
+end
+)";
+    GameRuntime& second = bootWith(slot(), broken, true);
+    EXPECT_FALSE(second.saveGame(error));
+    EXPECT_NE(error.find("save"), std::string::npos) << error;
+    EXPECT_EQ(fs::last_write_time(slot() / "game.cbor"), written);
+    EXPECT_FALSE(fs::exists(fs::path(slot()).concat(".tmp")));
+}
+
+TEST_F(SavedGameTest, ThePreviousSaveIsKept) {
+    GameRuntime& game = bootWith(slot(), SAVING_SCRIPT, true);
+    std::string error;
+    ASSERT_TRUE(game.saveGame(error)) << error;
+    ASSERT_TRUE(game.saveGame(error)) << error;
+    EXPECT_TRUE(fs::is_regular_file(fs::path(slot()).concat(".bak") / "game.cbor"));
+}
+
+TEST_F(SavedGameTest, NothingIsWrittenWithoutASlot) {
+    GameRuntime& game = boot("on :start do\nend\n");
+    std::string error;
+    EXPECT_TRUE(game.saveGame(error));
+    EXPECT_FALSE(game.resumed());
+    EXPECT_FALSE(fs::exists(root / "saves"));
+}
+
+TEST_F(SavedGameTest, NoSavesLeavesAnExistingGameAlone) {
+    GameRuntime& first = bootWith(slot(), SAVING_SCRIPT, true);
+    std::string error;
+    ASSERT_TRUE(first.saveGame(error)) << error;
+    auto written = fs::last_write_time(slot() / "game.cbor");
+    runtime.reset();
+
+    write("scripts/main.fsc", SAVING_SCRIPT);
+    RuntimeOptions options;
+    options.gameRoot = root;
+    options.savePath = slot();
+    options.noSaves = true;
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+    EXPECT_FALSE(runtime->resumed());
+    EXPECT_TRUE(runtime->saveGame(error));
+    EXPECT_EQ(fs::last_write_time(slot() / "game.cbor"), written);
 }

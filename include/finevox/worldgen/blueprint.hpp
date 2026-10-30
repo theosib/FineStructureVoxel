@@ -83,6 +83,14 @@ public:
     /// Stamp a schematic at origin (its minimum corner), rotated in quarter turns
     BlueprintSite(const Schematic& schematic, BlockCoord origin, int quarterTurns);
 
+    /// A site as it was saved. Claims aren't kept: workers choose again on resuming.
+    [[nodiscard]] static BlueprintSite restored(BlockCoord origin, std::vector<SiteCell> cells) {
+        BlueprintSite site;
+        site.origin_ = origin;
+        site.cells_ = std::move(cells);
+        return site;
+    }
+
     /// Add a single cell, for structures built up by game logic. A position that
     /// already has a target keeps it, so foundations can't fight the structure.
     void addCell(BlockCoord pos, BlockTypeId block, Rotation rotation = Rotation::IDENTITY);

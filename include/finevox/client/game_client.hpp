@@ -51,6 +51,9 @@ public:
     /// Run until the window closes. Returns a process exit code.
     int run();
 
+    /// True if the player asked to start over, which the caller does by starting afresh
+    [[nodiscard]] bool newGameRequested() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

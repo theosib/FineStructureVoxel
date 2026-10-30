@@ -117,6 +117,9 @@ public:
      */
     EntityId spawnEntity(std::unique_ptr<Entity> entity);
 
+    /// Keep new ids at or above this: for after restoring entities under their old ones
+    void reserveIdsBelow(EntityId id);
+
     /**
      * @brief Despawn an entity
      * @param id Entity to despawn

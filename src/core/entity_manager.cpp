@@ -52,6 +52,11 @@ EntityId EntityManager::spawnEntity(EntityType type, Vec3 position) {
     return id;
 }
 
+void EntityManager::reserveIdsBelow(EntityId id) {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
+    nextEntityId_ = std::max(nextEntityId_, id);
+}
+
 EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
     std::lock_guard<std::recursive_mutex> guard(mutex_);
     EntityId id = entity->id();

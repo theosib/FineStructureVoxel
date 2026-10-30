@@ -50,6 +50,19 @@ struct VisionBounds {
     int32_t maxZ = 0;   ///< Exclusive
 };
 
+/// What of a FactionVision is worth keeping. Current sight comes back by itself.
+struct FactionVisionState {
+    struct Lookout {
+        int64_t handle;
+        uint16_t faction;
+        glm::dvec3 eye;
+        float radius;
+    };
+    std::vector<std::pair<uint16_t, std::vector<uint8_t>>> factions;  ///< Each faction's cells
+    std::vector<Lookout> lookouts;
+    int64_t nextHandle = 1;
+};
+
 class FactionVision : public GameSubsystem {
 public:
     static constexpr int32_t CELL_SIZE = 4;
@@ -74,6 +87,9 @@ public:
     /// Recompute a faction's sight now instead of waiting for its turn. Exact: unlike
     /// the periodic update, cells out of sight lapse at once.
     void refresh(uint16_t faction);
+
+    [[nodiscard]] FactionVisionState exportState() const;
+    void importState(const FactionVisionState& state);
 
     /// Default sight radius for entities with no `vision` property
     void setDefaultRadius(float radius) { defaultRadius_ = radius; }

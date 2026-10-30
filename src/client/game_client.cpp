@@ -181,6 +181,7 @@ struct GameClient::Impl {
     InputActionSystem inputActions;
     bool panLeft = false, panRight = false, panForward = false, panBack = false;
     float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
+    bool newGameRequested = false;
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
     glm::vec2 grabCursor{0.0f};
     bool orbitLeft = false, orbitRight = false;
@@ -207,10 +208,12 @@ struct GameClient::Impl {
     void drainUiMessages();
     void buildProjectiles();
     void updateFog(float dt);
+    void saveOnExit();
     void setEmbodied(bool on);
     void updateStewardView(float dt);
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
+    [[nodiscard]] Value blockNameAt(const RaycastResult& hit) const;
     bool handleAction(const ActionResult& result);
     [[nodiscard]] std::vector<int32_t> groundHeightsAround(const glm::dvec3& centre) const;
 
@@ -352,6 +355,12 @@ void GameClient::Impl::setup() {
     camera.setPerspective(FOV_DEGREES, float(window.width()) / float(window.height()), NEAR_PLANE,
                           FAR_PLANE);
     tactical.setPivot(start);
+    if (runtime.resumed()) {
+        const game::ClientSave& saved = runtime.clientSave();
+        tactical.setPivot(saved.pivot);
+        tactical.orbit(saved.yaw - tactical.yaw(), saved.pitch - tactical.pitch());
+        tactical.setDistance(saved.distance);
+    }
 
     std::string bindings = (runtime.gameRoot() / "input" / "default.bindings").string();
     if (fs::exists(bindings)) inputActions.loadBindings(bindings);
@@ -362,6 +371,10 @@ void GameClient::Impl::setup() {
         Vec3(0.0f, float(manifest.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
     steward.setPhysics(stewardBody.get(), stewardPhysics.get());
     steward.setFlyMode(false);
+    if (runtime.resumed()) {
+        const glm::dvec3& spot = runtime.clientSave().steward;
+        stewardBody->setPosition(Vec3(float(spot.x), float(spot.y), float(spot.z)));
+    }
     stewardId = session.entities().spawnPlayer(stewardBody->position());
     session.entities().setLocalPlayerId(stewardId);
     if (MobEntity* mob = session.entities().getMob(stewardId)) {
@@ -371,6 +384,7 @@ void GameClient::Impl::setup() {
     registerNatives();
     bindInput();
     uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
+    uiCtx->set("resumed", Value::boolean(runtime.resumed()));
     loadUiScript();
 
     auto worldLayer = std::make_shared<render::WorldRenderLayer>(*worldRenderer);
@@ -802,6 +816,24 @@ RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor) const {
     return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, RaycastMode::Interaction, shapes);
 }
 
+Value GameClient::Impl::blockNameAt(const RaycastResult& hit) const {
+    return Value::string(std::string(runtime.replica().world().getBlock(hit.blockPos).name()));
+}
+
+void GameClient::Impl::saveOnExit() {
+    game::ClientSave save;
+    save.pivot = tactical.pivot();
+    Vec3 body = stewardBody->position();
+    save.steward = glm::dvec3(body.x, body.y, body.z);
+    save.yaw = tactical.yaw();
+    save.pitch = tactical.pitch();
+    save.distance = tactical.distance();
+    runtime.setClientSave(save);
+
+    std::string error;
+    if (!runtime.saveGame(error)) std::cerr << "[save] couldn't save: " << error << "\n";
+}
+
 void GameClient::Impl::registerNatives() {
     auto& e = *uiEngine;
     GameSession& session = runtime.session();
@@ -897,6 +929,7 @@ void GameClient::Impl::registerNatives() {
         map.set(uiEngine->intern("x"), Value::integer(hit.blockPos.x));
         map.set(uiEngine->intern("y"), Value::integer(hit.blockPos.y));
         map.set(uiEngine->intern("z"), Value::integer(hit.blockPos.z));
+        map.set(uiEngine->intern("block"), blockNameAt(hit));
         return result;
     });
 
@@ -933,6 +966,7 @@ void GameClient::Impl::registerNatives() {
         map.set(uiEngine->intern("x"), Value::integer(n.x));
         map.set(uiEngine->intern("y"), Value::integer(n.y));
         map.set(uiEngine->intern("z"), Value::integer(n.z));
+        map.set(uiEngine->intern("block"), blockNameAt(hit));
         return result;
     });
 
@@ -1035,6 +1069,14 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // new_game: save this game and start another. Only a fresh process is sure of leaving
+    // nothing of the old one behind, so the caller of GameClient::run does the rest.
+    e.registerFunction("new_game", [this](ExecutionContext&, const Args&) -> Value {
+        newGameRequested = true;
+        engine->requestStop();
+        return Value::nil();
+    });
+
     e.registerFunction("quit_game", [this](ExecutionContext&, const Args&) -> Value {
         engine->requestStop();
         return Value::nil();
@@ -1064,10 +1106,15 @@ GameClient::~GameClient() {
     impl_->runtime.stopThreads();
 }
 
+bool GameClient::newGameRequested() const {
+    return impl_->newGameRequested;
+}
+
 int GameClient::run() {
     impl_->runtime.startThreads();
     impl_->engine->run();
     impl_->runtime.stopThreads();
+    impl_->saveOnExit();
     return 0;
 }
 

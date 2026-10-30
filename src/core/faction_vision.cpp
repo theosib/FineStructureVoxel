@@ -57,6 +57,31 @@ int32_t FactionVision::cellIndex(int32_t x, int32_t z) const {
     return cz * cellsX_ + cx;
 }
 
+FactionVisionState FactionVision::exportState() const {
+    std::shared_lock lock(mutex_);
+    FactionVisionState state;
+    state.nextHandle = nextSource_;
+    for (const auto& [faction, cells] : factions_) state.factions.emplace_back(faction, cells);
+    for (const auto& [handle, source] : sources_) {
+        state.lookouts.push_back({handle, source.faction, source.eye, source.radius});
+    }
+    return state;
+}
+
+void FactionVision::importState(const FactionVisionState& state) {
+    for (const auto& [faction, cells] : state.factions) addFaction(faction);
+
+    std::unique_lock lock(mutex_);
+    for (const auto& [faction, cells] : state.factions) {
+        auto found = factions_.find(faction);
+        if (found != factions_.end() && found->second.size() == cells.size()) found->second = cells;
+    }
+    for (const FactionVisionState::Lookout& lookout : state.lookouts) {
+        sources_[lookout.handle] = Source{lookout.faction, lookout.eye, lookout.radius};
+    }
+    nextSource_ = state.nextHandle;
+}
+
 void FactionVision::addFaction(uint16_t faction) {
     std::unique_lock lock(mutex_);
     if (factions_.count(faction)) return;

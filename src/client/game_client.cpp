@@ -527,6 +527,7 @@ void GameClient::Impl::bindInput() {
                     if (e.state.isShiftPressed()) raw.modifiers = raw.modifiers | InputModifier::Shift;
                     if (e.state.isControlPressed()) raw.modifiers = raw.modifiers | InputModifier::Control;
                     if (e.state.isAltPressed()) raw.modifiers = raw.modifiers | InputModifier::Alt;
+                    if (e.state.isSuperPressed()) raw.modifiers = raw.modifiers | InputModifier::Super;
 
                     return handleAction(inputActions.processEvent(raw)) ? finevk::ListenerResult::Consumed
                                                                         : finevk::ListenerResult::Reject;

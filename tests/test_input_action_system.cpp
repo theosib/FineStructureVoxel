@@ -209,6 +209,31 @@ context: gameplay
     EXPECT_EQ(r2.actionName, "secondary_action");
 }
 
+// A bare key matches whatever modifiers are held, so these depend on coming first
+TEST(InputActionSystemTest, ModifiedKeyBeatsTheSameKeyBoundBare) {
+    InputActionSystem sys;
+    sys.loadBindingsFromString(R"(
+context: gameplay
+  mod_super+key_q: quit
+  mod_ctrl+key_q: quit
+  keypress_q: begin_orbit_left
+)");
+
+    constexpr int KEY_Q = 81;
+    auto press = [&](InputModifier modifiers) {
+        RawInputEvent event;
+        event.type = RawEventType::KeyPress;
+        event.keyOrButton = KEY_Q;
+        event.modifiers = modifiers;
+        return sys.processEvent(event).actionName;
+    };
+
+    EXPECT_EQ(press(InputModifier::Super), "quit");
+    EXPECT_EQ(press(InputModifier::Control), "quit");
+    EXPECT_EQ(press(InputModifier::None), "begin_orbit_left");
+    EXPECT_EQ(press(InputModifier::Shift), "begin_orbit_left");
+}
+
 TEST(InputActionSystemTest, MatchModifier) {
     InputActionSystem sys;
     sys.loadBindingsFromString(R"(

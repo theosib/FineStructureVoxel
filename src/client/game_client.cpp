@@ -164,6 +164,8 @@ struct GameClient::Impl {
 
     InputActionSystem inputActions;
     bool panLeft = false, panRight = false, panForward = false, panBack = false;
+    int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
+    glm::vec2 grabCursor{0.0f};
     bool orbitLeft = false, orbitRight = false;
     glm::vec2 mouse{0.0f};
 
@@ -196,6 +198,7 @@ struct GameClient::Impl {
     void updateStewardView(float dt);
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
+    bool handleAction(const ActionResult& result);
 
     uint32_t symFrame = 0, symMouse = 0, symAction = 0, symState = 0, symKey = 0;
 };
@@ -485,6 +488,13 @@ void GameClient::Impl::bindInput() {
                     uiCtx->set("mouse_y", Value::number(e.state.mousePosition.y));
                     uiCtx->set("mouse_shift", Value::boolean(e.state.isShiftPressed()));
                     fireUi(symMouse);
+
+                    RawInputEvent raw;
+                    raw.type = e.type == finevk::InputEventType::MouseButtonPress
+                                   ? RawEventType::MouseButtonPress
+                                   : RawEventType::MouseButtonRelease;
+                    raw.keyOrButton = e.mouseButton;
+                    handleAction(inputActions.processEvent(raw));
                     return finevk::ListenerResult::Consumed;
                 }
                 case finevk::InputEventType::MouseScroll: {
@@ -503,34 +513,8 @@ void GameClient::Impl::bindInput() {
                     if (e.state.isControlPressed()) raw.modifiers = raw.modifiers | InputModifier::Control;
                     if (e.state.isAltPressed()) raw.modifiers = raw.modifiers | InputModifier::Alt;
 
-                    ActionResult result = inputActions.processEvent(raw);
-                    if (!result.matched()) return finevk::ListenerResult::Reject;
-
-                    const std::string& action = result.actionName;
-                    if (action == "begin_pan_left") panLeft = true;
-                    else if (action == "end_pan_left") panLeft = false;
-                    else if (action == "begin_pan_right") panRight = true;
-                    else if (action == "end_pan_right") panRight = false;
-                    else if (action == "begin_pan_forward") panForward = true;
-                    else if (action == "end_pan_forward") panForward = false;
-                    else if (action == "begin_pan_back") panBack = true;
-                    else if (action == "end_pan_back") panBack = false;
-                    else if (action == "toggle_view") setEmbodied(!embodied);
-                    else if (action == "begin_jump") {
-                        jumpHeld = true;
-                        if (embodied) steward.requestJump();
-                    }
-                    else if (action == "end_jump") jumpHeld = false;
-                    else if (action == "begin_orbit_left") orbitLeft = true;
-                    else if (action == "end_orbit_left") orbitLeft = false;
-                    else if (action == "begin_orbit_right") orbitRight = true;
-                    else if (action == "end_orbit_right") orbitRight = false;
-                    else {
-                        uiCtx->set("action", Value::symbol(uiEngine->intern(action)));
-                        uiCtx->set("action_arg", Value::string(result.argExpression));
-                        fireUi(symAction);
-                    }
-                    return finevk::ListenerResult::Consumed;
+                    return handleAction(inputActions.processEvent(raw)) ? finevk::ListenerResult::Consumed
+                                                                        : finevk::ListenerResult::Reject;
                 }
                 default:
                     return finevk::ListenerResult::Reject;
@@ -539,10 +523,45 @@ void GameClient::Impl::bindInput() {
         finevk::InputPriority::Game);
 }
 
+bool GameClient::Impl::handleAction(const ActionResult& result) {
+    if (!result.matched()) return false;
+
+    const std::string& action = result.actionName;
+    if (action == "begin_pan_left") panLeft = true;
+    else if (action == "end_pan_left") panLeft = false;
+    else if (action == "begin_pan_right") panRight = true;
+    else if (action == "end_pan_right") panRight = false;
+    else if (action == "begin_pan_forward") panForward = true;
+    else if (action == "end_pan_forward") panForward = false;
+    else if (action == "begin_pan_back") panBack = true;
+    else if (action == "end_pan_back") panBack = false;
+    else if (action == "begin_grab") {
+        if (grabHeld++ == 0) grabCursor = mouse;
+    }
+    else if (action == "end_grab") grabHeld = std::max(grabHeld - 1, 0);
+    else if (action == "toggle_view") setEmbodied(!embodied);
+    else if (action == "begin_jump") {
+        jumpHeld = true;
+        if (embodied) steward.requestJump();
+    }
+    else if (action == "end_jump") jumpHeld = false;
+    else if (action == "begin_orbit_left") orbitLeft = true;
+    else if (action == "end_orbit_left") orbitLeft = false;
+    else if (action == "begin_orbit_right") orbitRight = true;
+    else if (action == "end_orbit_right") orbitRight = false;
+    else {
+        uiCtx->set("action", Value::symbol(uiEngine->intern(action)));
+        uiCtx->set("action_arg", Value::string(result.argExpression));
+        fireUi(symAction);
+    }
+    return true;
+}
+
 void GameClient::Impl::setEmbodied(bool on) {
     embodied = on;
     auto& input = engine->inputManager();
     panLeft = panRight = panForward = panBack = false;
+    grabHeld = 0;
     steward.clearInput();
 
     if (on) {
@@ -603,16 +622,22 @@ void GameClient::Impl::updateCamera(float dt) {
     float right = (panRight ? pan : 0.0f) - (panLeft ? pan : 0.0f);
     float forward = (panForward ? pan : 0.0f) - (panBack ? pan : 0.0f);
 
-    // Edge scroll, except while the cursor sits on a GUI widget
+    // Edge scroll, except while the cursor sits on a GUI widget. Polled, because no events
+    // come from past the content area.
     constexpr float EDGE = 4.0f;
-    if (!gui->wantCaptureMouse() && mouse.x >= 0.0f && mouse.y >= 0.0f && mouse.x <= viewport.x &&
-        mouse.y <= viewport.y) {
-        if (mouse.x < EDGE) right -= pan;
-        if (mouse.x > viewport.x - EDGE) right += pan;
-        if (mouse.y < EDGE) forward += pan;
-        if (mouse.y > viewport.y - EDGE) forward -= pan;
+    auto& window = engine->window();
+    if (!gui->wantCaptureMouse() && window.isFocused()) {
+        glm::dvec2 cursor = window.mousePosition();
+        glm::vec2 push = edgeScroll(glm::vec2(cursor), viewport, EDGE, window.spansScreen());
+        right += push.x * pan;
+        forward += push.y * pan;
     }
     if (right != 0.0f || forward != 0.0f) tactical.pan(right, forward);
+
+    if (grabHeld > 0) {
+        tactical.grab(view, grabCursor, mouse, viewport);
+        grabCursor = mouse;
+    }
 
     if (orbitLeft) tactical.orbit(CAMERA_ORBIT_SPEED * dt, 0.0f);
     if (orbitRight) tactical.orbit(-CAMERA_ORBIT_SPEED * dt, 0.0f);

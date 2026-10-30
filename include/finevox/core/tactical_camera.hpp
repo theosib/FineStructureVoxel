@@ -39,6 +39,13 @@ struct WorldRay {
 [[nodiscard]] std::optional<glm::vec2> worldToScreen(const ViewBasis& view, const glm::dvec3& world,
                                                      glm::vec2 viewport);
 
+/// Which way a cursor near the window's edge scrolls the view: x is right, y is forward,
+/// each -1, 0, or 1. Past the edge of an ordinary window the cursor is off doing something
+/// else, so that's no scroll. Past the edge of one that spans the screen it has run out of
+/// room: full-screen content can stop short of the display, as it does below a camera notch.
+[[nodiscard]] glm::vec2 edgeScroll(glm::vec2 cursor, glm::vec2 viewport, float margin,
+                                   bool spansScreen);
+
 /// Orbit camera around a ground pivot: pan moves the pivot, zoom changes the arm.
 class TacticalCamera {
 public:
@@ -48,6 +55,10 @@ public:
     /// Pan along the ground, in the camera's own forward/right axes. Units are
     /// world blocks, scaled by the caller for zoom-independent feel if wanted.
     void pan(float right, float forward);
+
+    /// Pan so the ground under cursor `from` ends up under cursor `to`, as if dragging the
+    /// world by hand. Does nothing if either cursor is on or above the horizon.
+    void grab(const ViewBasis& view, glm::vec2 from, glm::vec2 to, glm::vec2 viewport);
 
     /// Rotate around the pivot
     void orbit(float yawRadians, float pitchRadians);
@@ -77,6 +88,8 @@ public:
     static constexpr float MAX_PITCH = 1.45f;
 
 private:
+    void moveTarget(const glm::vec2& move);
+
     glm::dvec3 pivot_{0.0};
     glm::dvec3 targetPivot_{0.0};
     float yaw_ = 0.6f;

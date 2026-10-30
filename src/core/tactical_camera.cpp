@@ -44,6 +44,18 @@ std::optional<glm::vec2> worldToScreen(const ViewBasis& view, const glm::dvec3& 
     return glm::vec2((ndcX + 1.0f) * 0.5f * viewport.x, (1.0f - ndcY) * 0.5f * viewport.y);
 }
 
+glm::vec2 edgeScroll(glm::vec2 cursor, glm::vec2 viewport, float margin, bool spansScreen) {
+    bool outside = cursor.x < 0.0f || cursor.y < 0.0f || cursor.x > viewport.x || cursor.y > viewport.y;
+    if (outside && !spansScreen) return glm::vec2(0.0f);
+
+    glm::vec2 direction(0.0f);
+    if (cursor.x < margin) direction.x = -1.0f;
+    if (cursor.x > viewport.x - margin) direction.x = 1.0f;
+    if (cursor.y < margin) direction.y = 1.0f;
+    if (cursor.y > viewport.y - margin) direction.y = -1.0f;
+    return direction;
+}
+
 void TacticalCamera::setPivot(const glm::dvec3& pivot) {
     pivot_ = pivot;
     targetPivot_ = pivot;
@@ -55,7 +67,27 @@ void TacticalCamera::pan(float right, float forward) {
     // Ground-plane axes: looking along -position offset from the pivot
     glm::vec2 groundForward(-sinYaw, -cosYaw);
     glm::vec2 groundRight(cosYaw, -sinYaw);
-    glm::vec2 move = groundForward * forward + groundRight * right;
+    moveTarget(groundForward * forward + groundRight * right);
+}
+
+void TacticalCamera::grab(const ViewBasis& view, glm::vec2 from, glm::vec2 to, glm::vec2 viewport) {
+    // A ray this close to level meets the ground absurdly far away, and the view would leap
+    constexpr float MIN_DESCENT = 0.02f;
+
+    auto groundUnder = [&](glm::vec2 cursor) -> std::optional<glm::dvec3> {
+        WorldRay ray = screenRayToWorld(view, cursor, viewport);
+        if (ray.direction.y > -MIN_DESCENT) return std::nullopt;
+        double t = (pivot_.y - ray.origin.y) / ray.direction.y;
+        return ray.origin + glm::dvec3(ray.direction) * t;
+    };
+
+    auto held = groundUnder(from);
+    auto now = groundUnder(to);
+    if (!held || !now) return;
+    moveTarget(glm::vec2(static_cast<float>(held->x - now->x), static_cast<float>(held->z - now->z)));
+}
+
+void TacticalCamera::moveTarget(const glm::vec2& move) {
     targetPivot_.x += move.x;
     targetPivot_.z += move.y;
     if (hasBounds_) {

@@ -119,6 +119,92 @@ TEST(TacticalCameraRig, RespectsLimits) {
     EXPECT_LE(std::abs(cam.targetPivot().z), 50.0);
 }
 
+TEST(EdgeScroll, PushesTowardTheEdgeTheCursorIsAt) {
+    const float MARGIN = 4.0f;
+    glm::vec2 centre = VIEWPORT * 0.5f;
+    EXPECT_EQ(edgeScroll(centre, VIEWPORT, MARGIN, false), glm::vec2(0.0f, 0.0f));
+
+    EXPECT_EQ(edgeScroll({0.0f, centre.y}, VIEWPORT, MARGIN, false), glm::vec2(-1.0f, 0.0f));
+    EXPECT_EQ(edgeScroll({VIEWPORT.x, centre.y}, VIEWPORT, MARGIN, false), glm::vec2(1.0f, 0.0f));
+    EXPECT_EQ(edgeScroll({centre.x, 0.0f}, VIEWPORT, MARGIN, false), glm::vec2(0.0f, 1.0f));
+    EXPECT_EQ(edgeScroll({centre.x, VIEWPORT.y}, VIEWPORT, MARGIN, false), glm::vec2(0.0f, -1.0f));
+    EXPECT_EQ(edgeScroll({0.0f, 0.0f}, VIEWPORT, MARGIN, false), glm::vec2(-1.0f, 1.0f));
+}
+
+TEST(EdgeScroll, CursorPastAnOrdinaryWindowIsDoingSomethingElse) {
+    glm::vec2 centre = VIEWPORT * 0.5f;
+    for (glm::vec2 outside : {glm::vec2(centre.x, -30.0f), glm::vec2(-30.0f, centre.y),
+                              glm::vec2(centre.x, VIEWPORT.y + 30.0f),
+                              glm::vec2(VIEWPORT.x + 30.0f, centre.y)}) {
+        EXPECT_EQ(edgeScroll(outside, VIEWPORT, 4.0f, false), glm::vec2(0.0f));
+    }
+}
+
+// The band above full-screen content, beside a camera notch, is still the top of the screen
+TEST(EdgeScroll, CursorPastAWindowSpanningTheScreenStillScrolls) {
+    glm::vec2 centre = VIEWPORT * 0.5f;
+    EXPECT_EQ(edgeScroll({centre.x, -30.0f}, VIEWPORT, 4.0f, true), glm::vec2(0.0f, 1.0f));
+    EXPECT_EQ(edgeScroll({-30.0f, centre.y}, VIEWPORT, 4.0f, true), glm::vec2(-1.0f, 0.0f));
+    EXPECT_EQ(edgeScroll({centre.x, VIEWPORT.y + 30.0f}, VIEWPORT, 4.0f, true), glm::vec2(0.0f, -1.0f));
+    EXPECT_EQ(edgeScroll({VIEWPORT.x + 30.0f, centre.y}, VIEWPORT, 4.0f, true), glm::vec2(1.0f, 0.0f));
+}
+
+namespace {
+
+ViewBasis rigView(const TacticalCamera& cam) {
+    return makeViewBasis(cam.position(), cam.forward(), 60.0f, VIEWPORT.x / VIEWPORT.y);
+}
+
+}  // namespace
+
+TEST(TacticalCameraGrab, GroundStaysUnderTheCursor) {
+    for (float yaw : {0.0f, 0.6f, 2.5f, -1.7f}) {
+        TacticalCamera cam;
+        cam.setPivot(glm::dvec3(40.0, 64.0, -25.0));
+        cam.orbit(yaw, 0.0f);
+        cam.update(10.0f);
+
+        for (glm::dvec3 held : {glm::dvec3(40.0, 64.0, -25.0), glm::dvec3(46.0, 64.0, -21.0),
+                                glm::dvec3(31.0, 64.0, -30.0)}) {
+            auto from = worldToScreen(rigView(cam), held, VIEWPORT);
+            ASSERT_TRUE(from.has_value());
+            glm::vec2 to = *from + glm::vec2(90.0f, -55.0f);
+
+            cam.grab(rigView(cam), *from, to, VIEWPORT);
+            cam.update(10.0f);
+
+            auto landed = worldToScreen(rigView(cam), held, VIEWPORT);
+            ASSERT_TRUE(landed.has_value());
+            EXPECT_NEAR(landed->x, to.x, 0.5f) << "yaw " << yaw;
+            EXPECT_NEAR(landed->y, to.y, 0.5f) << "yaw " << yaw;
+        }
+    }
+}
+
+TEST(TacticalCameraGrab, KeepsToBounds) {
+    TacticalCamera cam;
+    cam.setPivot(glm::dvec3(0.0, 64.0, 0.0));
+    cam.setBounds(glm::vec2(-5.0f), glm::vec2(5.0f));
+    cam.update(10.0f);
+    for (int i = 0; i < 50; ++i) {
+        cam.grab(rigView(cam), VIEWPORT * 0.5f, VIEWPORT * 0.5f + glm::vec2(200.0f, 0.0f), VIEWPORT);
+        cam.update(10.0f);
+    }
+    EXPECT_LE(std::abs(cam.targetPivot().x), 5.0);
+    EXPECT_LE(std::abs(cam.targetPivot().z), 5.0);
+}
+
+TEST(TacticalCameraGrab, IgnoresACursorAboveTheHorizon) {
+    TacticalCamera cam;
+    cam.setPivot(glm::dvec3(0.0, 64.0, 0.0));
+    cam.orbit(0.0f, TacticalCamera::MIN_PITCH - cam.pitch());
+    cam.update(10.0f);
+
+    glm::dvec3 before = cam.targetPivot();
+    cam.grab(rigView(cam), VIEWPORT * 0.5f, glm::vec2(VIEWPORT.x * 0.5f, 0.0f), VIEWPORT);
+    EXPECT_EQ(cam.targetPivot(), before);
+}
+
 TEST(TacticalCameraRig, SmoothingIsFrameRateIndependent) {
     auto settleAfterOneSecond = [](int fps) {
         TacticalCamera cam;

@@ -33,6 +33,7 @@ sky.conf
 | `fog_of_war`, `viewer_faction` | `true`, `1` | Whose eyes the client sees through |
 | `view_distance`, `default_locale`, `tick_rate`, `gravity` | | |
 | `lod` | `true` | Merge distant blocks. Turn off for an overhead camera, which keeps the map in the transition zone where meshes visibly swap |
+| `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 
 The content root must be self-contained: nothing falls back to the engine's `resources/`,
@@ -153,6 +154,14 @@ projectile_hits -> [{=x =y =z =entity =owner =faction =damage}...]
 ```
 
 For a fair AI, `vision_can_see_ent` is the gate: filter everything through it.
+
+### Camera bindings
+
+The client handles these actions from `input/default.bindings` itself: `begin_pan_*`/`end_pan_*`
+(`left`, `right`, `forward`, `back`), `begin_orbit_*`/`end_orbit_*`, and `begin_grab`/`end_grab`,
+which drag the ground along with the cursor for as long as any bound key or button is held.
+Mouse buttons take `mousepress_middle` and `mouserelease_middle` style names. Anything else
+goes to the UI script as an `:action` event.
 
 ### Client (UI script)
 

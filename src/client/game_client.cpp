@@ -62,6 +62,16 @@ using render::SceneVertex;
 
 namespace {
 
+/// `path`, or with a number added if that's taken: a screenshot shouldn't cost you the last one
+fs::path freshPath(const fs::path& path) {
+    fs::path candidate = path;
+    for (int n = 2; fs::exists(candidate); ++n) {
+        candidate = path.parent_path() /
+                    (path.stem().string() + "-" + std::to_string(n) + path.extension().string());
+    }
+    return candidate;
+}
+
 constexpr float FOV_DEGREES = 55.0f;
 constexpr float NEAR_PLANE = 0.2f;
 constexpr float FAR_PLANE = 900.0f;
@@ -710,6 +720,10 @@ void GameClient::Impl::buildScene() {
     for (const auto& [id, state] : entityRenderer.entities()) {
         if (!isCurrent(state)) continue;
 
+        // The camera is inside this one, or just past it: its drawn position trails the
+        // live body by a tick, which on walking backward puts it in front of the eye
+        if (embodied && id == stewardId) continue;
+
         const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId);
         float alpha = state.interpolationAlpha(tickRate);
         glm::dvec3 pos = state.interpolatedPosition(alpha);
@@ -1042,7 +1056,7 @@ void GameClient::Impl::registerNatives() {
     });
 
     e.registerFunction("request_screenshot", [this](ExecutionContext&, const Args& args) -> Value {
-        screenshotPath = args.empty() ? "screenshots/shot.png" : args[0].toString();
+        screenshotPath = freshPath(args.empty() ? "screenshots/shot.png" : args[0].toString()).string();
         screenshotRequested = true;
         return Value::nil();
     });

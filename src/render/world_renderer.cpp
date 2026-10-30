@@ -10,6 +10,7 @@
 #include <finevk/device/sampler.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 
 namespace finevox::render {
@@ -60,6 +61,32 @@ void WorldRenderer::setTextureProvider(BlockTextureProvider provider) {
     textureProvider_ = std::move(provider);
 }
 
+namespace {
+
+/// Must match RegionTintData in shaders/region_tint.glsl, down to where the cells begin
+struct RegionTintHeader {
+    glm::vec3 color;
+    float enabled;
+    glm::vec2 origin;
+    float cellSize;
+    int32_t columns;
+    int32_t rows;
+};
+static_assert(sizeof(RegionTintHeader) == 36);
+
+}  // namespace
+
+void WorldRenderer::setRegionTint(const glm::vec3& color, const glm::vec2& origin, float cellSize,
+                                  int32_t columns, int32_t rows, const float* cells) {
+    size_t count = static_cast<size_t>(columns) * rows;
+    if (count == 0 || count > config_.regionTintCells) return;
+
+    auto* mapped = static_cast<char*>(regionTintBuffers_[renderer_->currentFrame()]->map());
+    RegionTintHeader header{color, 1.0f, origin, cellSize, columns, rows};
+    std::memcpy(mapped, &header, sizeof(header));
+    std::memcpy(mapped + sizeof(header), cells, count * sizeof(float));
+}
+
 void WorldRenderer::initialize() {
     if (initialized_) return;
 
@@ -70,6 +97,7 @@ void WorldRenderer::initialize() {
     // Create descriptor layout
     descriptorLayout_ = finevk::DescriptorSetLayout::create(device_)
         .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .storageBuffer(2, VK_SHADER_STAGE_FRAGMENT_BIT)
         .combinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
@@ -102,9 +130,23 @@ void WorldRenderer::initialize() {
         blockSampler_ = builder.build();
     }
 
+    // A mapped buffer per frame, so a tint can change every frame with no upload to wait on.
+    // These stay all zero, meaning disabled, until setRegionTint is called.
+    for (uint32_t i = 0; i < renderer_->framesInFlight(); ++i) {
+        VkDeviceSize bytes = sizeof(RegionTintHeader) + std::max<size_t>(config_.regionTintCells, 1) * sizeof(float);
+        regionTintBuffers_.push_back(finevk::Buffer::create(device_)
+            .size(bytes)
+            .usage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+            .memoryUsage(finevk::MemoryUsage::CpuToGpu)
+            .build());
+        std::memset(regionTintBuffers_.back()->map(), 0, bytes);
+    }
+
     // Write descriptor sets
     finevk::DescriptorWriter writer(device_);
     for (uint32_t i = 0; i < renderer_->framesInFlight(); ++i) {
+        writer.writeBuffer(descriptorSets_[i], 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                           *regionTintBuffers_[i]);
         writer.writeBuffer(descriptorSets_[i], 0,
                           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                           *cameraUniform_->buffer(i));

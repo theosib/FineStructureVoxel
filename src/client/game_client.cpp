@@ -18,6 +18,7 @@
 #include "finevox/render/engine.hpp"
 #include "finevox/render/entity_renderer.hpp"
 #include "finevox/render/frame_capture.hpp"
+#include "finevox/core/region_tint.hpp"
 #include "finevox/render/particle_atlas.hpp"
 #include "finevox/render/particle_renderer.hpp"
 #include "finevox/render/scene_renderer.hpp"
@@ -79,6 +80,8 @@ constexpr float CAMERA_PAN_SPEED = 0.9f;   // Fraction of arm length per second
 constexpr float CAMERA_ORBIT_SPEED = 1.6f;
 constexpr float PICK_RANGE = 700.0f;
 constexpr uint64_t FOG_REFRESH_FRAMES = 15;
+constexpr float FOG_EXPLORED = 0.5f;                  ///< What was seen, now out of sight
+constexpr glm::vec3 FOG_COLOR(0.015f, 0.02f, 0.04f);  ///< The clear colour, so unseen land vanishes
 
 class GameRootFinder : public finescript::ResourceFinder {
 public:
@@ -183,12 +186,8 @@ struct GameClient::Impl {
     bool orbitLeft = false, orbitRight = false;
     glm::vec2 mouse{0.0f};
 
-    struct FogQuad {
-        glm::dvec3 center;
-        float alpha;
-    };
-    std::vector<uint8_t> fogCells;
-    std::vector<FogQuad> fogQuads;
+    std::unique_ptr<RegionTint> fog;
+    bool fogStarted = false;
 
     finevk::StagingPoolPtr stagingPool;
     uint64_t frameCount = 0;
@@ -207,7 +206,7 @@ struct GameClient::Impl {
     void buildScene();
     void drainUiMessages();
     void buildProjectiles();
-    void buildFogOverlay();
+    void updateFog(float dt);
     void setEmbodied(bool on);
     void updateStewardView(float dt);
     glm::vec3 factionColor(uint16_t faction) const;
@@ -282,6 +281,11 @@ void GameClient::Impl::setup() {
 
     render::WorldRendererConfig worldConfig;
     worldConfig.viewDistance = manifest.viewDistance;
+    if (manifest.fogOfWar) {
+        const FactionVision& vision = runtime.vision();
+        fog = std::make_unique<RegionTint>(vision.cellsX(), vision.cellsZ());
+        worldConfig.regionTintCells = fog->cells().size();
+    }
     worldRenderer = std::make_unique<render::WorldRenderer>(&device, &renderer, world, worldConfig);
     worldRenderer->setLODEnabled(manifest.lod);
 
@@ -408,7 +412,7 @@ void GameClient::Impl::setup() {
                               sky.skyBrightness, sky.ambientLevel);
         buildScene();
         buildProjectiles();
-        buildFogOverlay();
+        updateFog(dt);
 
         auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::microseconds(framePeriod.count() / 2);
@@ -441,7 +445,7 @@ void GameClient::Impl::setup() {
     };
     callbacks.getClearColor = [this]() -> glm::vec4 {
         // With fog on, the edge of the known world should read as darkness
-        return runtime.manifest().fogOfWar ? glm::vec4(0.015f, 0.02f, 0.04f, 1.0f) : sky.skyColor;
+        return runtime.manifest().fogOfWar ? glm::vec4(FOG_COLOR, 1.0f) : sky.skyColor;
     };
     callbacks.onPostRender = [this]() {
         ++frameCount;
@@ -764,53 +768,22 @@ void GameClient::Impl::buildProjectiles() {
     }
 }
 
-void GameClient::Impl::buildFogOverlay() {
-    if (!runtime.manifest().fogOfWar) return;
+void GameClient::Impl::updateFog(float dt) {
+    if (!fog) return;
 
-    // Vision and terrain change far slower than frames, and finding each cell's top
-    // means walking down a column of blocks. Do that a few times a second.
-    if (frameCount % FOG_REFRESH_FRAMES == 0 || fogCells.empty()) {
-        fogCells = runtime.vision().snapshot(runtime.manifest().viewerFaction);
-        fogQuads.clear();
-
-        const FactionVision& vision = runtime.vision();
-        const VisionBounds& bounds = vision.bounds();
-        int32_t cell = FactionVision::CELL_SIZE;
-        World& world = runtime.replica().world();
-        double range = tactical.distance() * 2.5 + 64.0;
-        glm::dvec3 pivot = tactical.pivot();
-
-        int32_t minCx = std::max(0, static_cast<int32_t>((pivot.x - range - bounds.minX) / cell));
-        int32_t maxCx = std::min(vision.cellsX() - 1, static_cast<int32_t>((pivot.x + range - bounds.minX) / cell));
-        int32_t minCz = std::max(0, static_cast<int32_t>((pivot.z - range - bounds.minZ) / cell));
-        int32_t maxCz = std::min(vision.cellsZ() - 1, static_cast<int32_t>((pivot.z + range - bounds.minZ) / cell));
-
-        for (int32_t cz = minCz; cz <= maxCz; ++cz) {
-            for (int32_t cx = minCx; cx <= maxCx; ++cx) {
-                uint8_t state = fogCells[size_t(cz) * vision.cellsX() + cx];
-                if (state == static_cast<uint8_t>(VisionState::Visible)) continue;
-
-                int32_t x = bounds.minX + cx * cell;
-                int32_t z = bounds.minZ + cz * cell;
-                int32_t top = static_cast<int32_t>(pivot.y) + 48;
-                while (top > 0 && world.getBlock(x + cell / 2, top, z + cell / 2).isAir()) --top;
-                if (top <= 0) continue;
-
-                float alpha = state == static_cast<uint8_t>(VisionState::Explored) ? 0.42f : 0.97f;
-                fogQuads.push_back({glm::dvec3(x + cell * 0.5, top + 1.05, z + cell * 0.5), alpha});
-            }
-        }
+    const FactionVision& vision = runtime.vision();
+    bool firstLook = !fogStarted;
+    if (firstLook || frameCount % FOG_REFRESH_FRAMES == 0) {
+        fog->setFromVision(vision.snapshot(runtime.manifest().viewerFaction), FOG_EXPLORED);
+        fogStarted = true;
     }
+    if (firstLook) fog->snapToTargets();
+    fog->advance(dt);
 
-    glm::dvec3 cameraPos = camera.positionD();
-    float half = FactionVision::CELL_SIZE * 0.5f;
-    auto& overlay = sceneRenderer->translucent();
-    overlay.reserve(overlay.size() + fogQuads.size() * 6);
-    for (const FogQuad& quad : fogQuads) {
-        render::appendBillboard(overlay, glm::vec3(quad.center - cameraPos), glm::vec3(1, 0, 0),
-                                glm::vec3(0, 0, 1), half, half,
-                                glm::vec4(0.02f, 0.03f, 0.06f, quad.alpha));
-    }
+    const VisionBounds& bounds = vision.bounds();
+    worldRenderer->setRegionTint(FOG_COLOR, glm::vec2(float(bounds.minX), float(bounds.minZ)),
+                                 float(FactionVision::CELL_SIZE), fog->columns(), fog->rows(),
+                                 fog->cells().data());
 }
 
 void GameClient::Impl::drainUiMessages() {

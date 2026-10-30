@@ -119,6 +119,7 @@ add_library(finevox SHARED
     src/core/entity_mesh.cpp
     src/core/entity_model.cpp
     src/core/tactical_camera.cpp
+    src/core/region_tint.cpp
     src/core/entity_render_state.cpp
     src/render/entity_renderer.cpp
     src/core/spawn_manager.cpp
@@ -411,7 +412,7 @@ if(FINEVOX_BUILD_RENDER)
             add_custom_command(
                 OUTPUT ${SHADER_OUTPUT}
                 COMMAND ${GLSLC} ${SHADER} -o ${SHADER_OUTPUT}
-                DEPENDS ${SHADER}
+                DEPENDS ${SHADER} ${SHADER_DIR}/region_tint.glsl
                 COMMENT "Compiling shader ${SHADER_NAME}"
             )
             list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
@@ -666,6 +667,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_projectile_system.cpp
         tests/test_work_claims.cpp
         tests/test_tactical_camera.cpp
+        tests/test_region_tint.cpp
         tests/test_world_concurrency.cpp
         tests/test_entity_model.cpp
         tests/test_navigation.cpp

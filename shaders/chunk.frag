@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // ============================================================================
 // Chunk Fragment Shader
@@ -35,6 +36,8 @@ layout(set = 0, binding = 0) uniform CameraUBO {
 
 // Block atlas texture (binding 1)
 layout(set = 0, binding = 1) uniform sampler2D blockAtlas;
+
+#include "region_tint.glsl"
 
 // Per-chunk push constants (must match vertex shader)
 layout(push_constant) uniform PushConstants {
@@ -187,6 +190,8 @@ void main() {
     // Apply distance fog
     float fogFactor = calculateFog(fragDistance);
     finalColor = mix(finalColor, chunk.fogColor, fogFactor);
+
+    finalColor = applyRegionTint(finalColor, fragWorldPos);
 
     // Assuming sRGB framebuffer handles gamma
     outColor = vec4(finalColor, texColor.a);

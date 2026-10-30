@@ -77,6 +77,9 @@ struct WorldRendererConfig {
     // Fog configuration
     FogConfig fog;
 
+    // Cells a region tint may have, across the map: see setRegionTint. 0 means none.
+    size_t regionTintCells = 0;
+
     // Debug: offset the render camera backwards from the cull camera
     // This reveals frustum culling edges for testing purposes.
     // When enabled, culling uses the real camera position, but rendering
@@ -320,6 +323,19 @@ public:
      * @param cameraState Current camera state from finevk::Camera
      */
     void updateCamera(const finevk::CameraState& cameraState);
+
+    /**
+     * @brief Dim the world by a grid laid over the map, for the frame being built
+     *
+     * Each pixel blends toward `color` by the value at that point on the map, read smoothly
+     * from `cells`: 0 is all `color`, 1 is unaffected. Outside the grid counts as 0. Call
+     * this each frame the tint is wanted, alongside updateCamera.
+     *
+     * @param origin World XZ of the corner of the grid
+     * @param cells Row by row, columns * rows of them, at most config.regionTintCells
+     */
+    void setRegionTint(const glm::vec3& color, const glm::vec2& origin, float cellSize,
+                       int32_t columns, int32_t rows, const float* cells);
 
     /**
      * @brief Update camera with high-precision position for large world support
@@ -719,6 +735,7 @@ private:
 
     // Uniform buffers (per-frame)
     std::unique_ptr<finevk::UniformBuffer<finevk::CameraUniform>> cameraUniform_;
+    std::vector<finevk::BufferPtr> regionTintBuffers_;     ///< One per frame in flight
     std::vector<VkDescriptorSet> descriptorSets_;
 
     // Block atlas

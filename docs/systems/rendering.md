@@ -390,3 +390,17 @@ rides in the general test bucket.
 - Frustum culling uses double-precision AABB for view-relative math
 - `BlockAtlas` must be initialized with all block textures before first `buildMesh()` call
 - `MeshWorkerPool` reads SubChunk with lock-free access (palette indices are stable — no writes during mesh gen)
+
+---
+
+## Region Tint
+
+`WorldRenderer::setRegionTint` dims the world by a grid laid over the map, without touching the
+blocks: each pixel in `chunk.frag` and `fluid.frag` blends toward a colour by the value at that
+point, read smoothly between cells. `core/region_tint.hpp` holds the values, fading them toward
+their targets. Fog of war is the one use today, and it hides unseen land by blending to the clear
+colour, so a revealed chunk's walls and the map's edge just fade out.
+
+The grid lives in a mapped storage buffer per frame in flight rather than a texture. An upload
+blocks for about 4ms, while this can change every frame for the cost of a `memcpy`. Set
+`WorldRendererConfig::regionTintCells` before `initialize`, since the buffers have a fixed size.

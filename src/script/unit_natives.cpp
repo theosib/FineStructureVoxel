@@ -371,6 +371,11 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         return Value::nil();
     });
 
+    e.registerFunction("nav_nodes_last_tick", [](ExecutionContext& ctx, const Args&) -> Value {
+        auto* ud = scriptData(ctx);
+        return Value::integer(ud && ud->navigation ? ud->navigation->nodesLastTick() : 0);
+    });
+
     e.registerFunction("ent_nav_ack", [](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         if (ud && ud->navigation) ud->navigation->acknowledge(entityArg(args));

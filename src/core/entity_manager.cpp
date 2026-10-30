@@ -393,7 +393,7 @@ void EntityManager::publishSnapshots() {
     batch.reserve(entities_.size());
 
     for (const auto& [id, entity] : entities_) {
-        if (entity->isAlive()) {
+        if (entity->isAlive() && (!snapshotFilter_ || snapshotFilter_(*entity))) {
             batch.push_back(GraphicsMessage::fromSnapshot(
                 EntitySnapshot::fromEntity(*entity, currentTick_)));
         }

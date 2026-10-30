@@ -107,6 +107,9 @@ add_library(finevox SHARED
     src/core/pathfinder.cpp
     src/core/navigation.cpp
     src/core/work_claims.cpp
+    src/core/faction_vision.cpp
+    src/core/projectile_system.cpp
+    src/core/world_replica.cpp
     src/core/entity_senses.cpp
     src/core/ai_goals.cpp
     src/core/skeleton.cpp
@@ -274,6 +277,7 @@ if(TARGET finevox_script)
         src/game/game_manifest.cpp
         src/game/game_runtime.cpp
         src/game/blueprint_natives.cpp
+        src/game/conflict_natives.cpp
     )
 
     target_include_directories(finevox_game PUBLIC
@@ -657,6 +661,9 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_ai_goal_params.cpp
         tests/test_navigation.cpp
         tests/test_blueprint.cpp
+        tests/test_faction_vision.cpp
+        tests/test_world_replica.cpp
+        tests/test_projectile_system.cpp
         tests/test_work_claims.cpp
         tests/test_tactical_camera.cpp
         tests/test_entity_model.cpp

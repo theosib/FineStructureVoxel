@@ -95,6 +95,12 @@ double number(const Value& v, double fallback = 0.0) {
     return v.isNumeric() ? v.asNumber() : fallback;
 }
 
+/// The server stops sending entities the viewer can't see, so silence means hidden
+bool isCurrent(const EntityRenderState& state) {
+    constexpr float STALE_SECONDS = 0.5f;
+    return state.visible && state.active && state.timeSinceSnapshot < STALE_SECONDS;
+}
+
 glm::vec4 colorArg(const Args& args, size_t index) {
     glm::vec4 color(1.0f);
     for (int c = 0; c < 4 && index + c < args.size(); ++c) {
@@ -148,6 +154,8 @@ struct GameClient::Impl {
     bool orbitLeft = false, orbitRight = false;
     glm::vec2 mouse{0.0f};
 
+    std::vector<uint8_t> fogCells;
+
     finevk::StagingPoolPtr stagingPool;
     uint64_t frameCount = 0;
     bool screenshotRequested = false;
@@ -164,6 +172,8 @@ struct GameClient::Impl {
     void updateCamera(float dt);
     void buildScene();
     void drainUiMessages();
+    void buildProjectiles();
+    void buildFogOverlay();
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
 
@@ -191,7 +201,8 @@ void GameClient::Impl::fireUi(uint32_t symbol) {
 void GameClient::Impl::setup() {
     const game::GameManifest& manifest = runtime.manifest();
     GameSession& session = runtime.session();
-    World& world = session.world();
+    // Everything drawn comes from the replica, which holds only what the viewer saw
+    World& world = runtime.replica().world();
 
     EngineConfig engineConfig;
     engineConfig.windowTitle = manifest.windowTitle;
@@ -344,6 +355,8 @@ void GameClient::Impl::setup() {
         sceneRenderer->setSky(sky.sunDirection, glm::vec3(sky.fogColor), 0.0f, 0.0f,
                               sky.skyBrightness, sky.ambientLevel);
         buildScene();
+        buildProjectiles();
+        buildFogOverlay();
 
         auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::microseconds(framePeriod.count() / 2);
@@ -374,7 +387,10 @@ void GameClient::Impl::setup() {
             camera.setPerspective(FOV_DEGREES, float(width) / float(height), NEAR_PLANE, FAR_PLANE);
         }
     };
-    callbacks.getClearColor = [this]() -> glm::vec4 { return sky.skyColor; };
+    callbacks.getClearColor = [this]() -> glm::vec4 {
+        // With fog on, the edge of the known world should read as darkness
+        return runtime.manifest().fogOfWar ? glm::vec4(0.015f, 0.02f, 0.04f, 1.0f) : sky.skyColor;
+    };
     callbacks.onPostRender = [this]() {
         ++frameCount;
         if (!options.screenshotPath.empty() &&
@@ -494,7 +510,7 @@ void GameClient::Impl::updateCamera(float dt) {
 
     // Keep the pivot on the ground so zooming goes where you're looking
     glm::dvec3 target = tactical.targetPivot();
-    World& world = runtime.session().world();
+    World& world = runtime.replica().world();
     int32_t tx = static_cast<int32_t>(std::floor(target.x));
     int32_t tz = static_cast<int32_t>(std::floor(target.z));
     for (int32_t y = 200; y > 0; --y) {
@@ -520,7 +536,7 @@ void GameClient::Impl::buildScene() {
     auto& opaque = sceneRenderer->opaque();
 
     for (const auto& [id, state] : entityRenderer.entities()) {
-        if (!state.visible || !state.active) continue;
+        if (!isCurrent(state)) continue;
 
         const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId);
         float alpha = state.interpolationAlpha(tickRate);
@@ -548,6 +564,60 @@ void GameClient::Impl::buildScene() {
     }
 }
 
+void GameClient::Impl::buildProjectiles() {
+    glm::dvec3 cameraPos = camera.positionD();
+    auto& opaque = sceneRenderer->opaque();
+    for (const ProjectileView& p : runtime.projectiles().snapshot()) {
+        glm::vec3 center(p.position - cameraPos);
+        glm::vec3 dir = glm::length(p.velocity) > 0.01f ? glm::normalize(p.velocity) : glm::vec3(0, 1, 0);
+        for (float along : {-0.3f, -0.1f, 0.1f, 0.3f}) {
+            render::appendBox(opaque, center + dir * along, glm::vec3(0.05f),
+                              glm::vec4(0.25f, 0.18f, 0.1f, 1.0f));
+        }
+    }
+}
+
+void GameClient::Impl::buildFogOverlay() {
+    if (!runtime.manifest().fogOfWar) return;
+
+    // Vision changes a few times a second; heights only when terrain arrives
+    if (frameCount % 12 == 0 || fogCells.empty()) {
+        fogCells = runtime.vision().snapshot(runtime.manifest().viewerFaction);
+    }
+
+    const FactionVision& vision = runtime.vision();
+    const VisionBounds& bounds = vision.bounds();
+    int32_t cell = FactionVision::CELL_SIZE;
+    World& world = runtime.replica().world();
+    glm::dvec3 cameraPos = camera.positionD();
+    double range = tactical.distance() * 2.2 + 48.0;
+    glm::dvec3 pivot = tactical.pivot();
+    auto& overlay = sceneRenderer->translucent();
+
+    int32_t minCx = std::max(0, static_cast<int32_t>((pivot.x - range - bounds.minX) / cell));
+    int32_t maxCx = std::min(vision.cellsX() - 1, static_cast<int32_t>((pivot.x + range - bounds.minX) / cell));
+    int32_t minCz = std::max(0, static_cast<int32_t>((pivot.z - range - bounds.minZ) / cell));
+    int32_t maxCz = std::min(vision.cellsZ() - 1, static_cast<int32_t>((pivot.z + range - bounds.minZ) / cell));
+
+    for (int32_t cz = minCz; cz <= maxCz; ++cz) {
+        for (int32_t cx = minCx; cx <= maxCx; ++cx) {
+            uint8_t state = fogCells[size_t(cz) * vision.cellsX() + cx];
+            if (state == static_cast<uint8_t>(VisionState::Visible)) continue;
+
+            int32_t x = bounds.minX + cx * cell;
+            int32_t z = bounds.minZ + cz * cell;
+            int32_t top = static_cast<int32_t>(pivot.y) + 48;
+            while (top > 0 && world.getBlock(x + cell / 2, top, z + cell / 2).isAir()) --top;
+            if (top <= 0) continue;
+
+            float alpha = state == static_cast<uint8_t>(VisionState::Explored) ? 0.42f : 0.97f;
+            glm::vec3 center(glm::dvec3(x + cell * 0.5, top + 1.05, z + cell * 0.5) - cameraPos);
+            render::appendBillboard(overlay, center, glm::vec3(1, 0, 0), glm::vec3(0, 0, 1),
+                                    cell * 0.5f, cell * 0.5f, glm::vec4(0.02f, 0.03f, 0.06f, alpha));
+        }
+    }
+}
+
 void GameClient::Impl::drainUiMessages() {
     for (auto& bytes : runtime.uiOutbox().drainAll()) {
         Value message = finescript::cborDecode(bytes, interner);
@@ -558,7 +628,7 @@ void GameClient::Impl::drainUiMessages() {
 
 RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor) const {
     WorldRay ray = screenRayToWorld(view, cursor, viewport);
-    BlockShapeProvider shapes = createBlockShapeProvider(runtime.session().world());
+    BlockShapeProvider shapes = createBlockShapeProvider(runtime.replica().world());
     Vec3 origin(static_cast<float>(ray.origin.x), static_cast<float>(ray.origin.y),
                 static_cast<float>(ray.origin.z));
     return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, RaycastMode::Interaction, shapes);
@@ -591,6 +661,20 @@ void GameClient::Impl::registerNatives() {
     e.registerFunction("ui_hide", [this](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty() && args[0].isNumeric()) mapRenderer->hide(static_cast<int>(args[0].asNumber()));
         return Value::nil();
+    });
+
+    // blueprint_size name -> [x y z], for footprint previews. The library doesn't
+    // change after load, so reading it from this thread is safe.
+    e.registerFunction("blueprint_size", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        std::string name = args[0].isSymbol()
+            ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+            : args[0].toString();
+        const auto* schematic = runtime.blueprints().find(name);
+        if (!schematic) return Value::nil();
+        return Value::array(std::vector<Value>{Value::integer(schematic->sizeX()),
+                                               Value::integer(schematic->sizeY()),
+                                               Value::integer(schematic->sizeZ())});
     });
 
     e.registerFunction("window_size", [this](ExecutionContext&, const Args&) -> Value {
@@ -662,7 +746,7 @@ void GameClient::Impl::registerNatives() {
 
         std::vector<Value> found;
         for (const auto& [id, state] : entityRenderer.entities()) {
-            if (!state.visible || !state.active) continue;
+            if (!isCurrent(state)) continue;
             glm::dvec3 feet = state.currentPosition;
             auto top = worldToScreen(view, feet + glm::dvec3(0.0, 1.7, 0.0), viewport);
             auto bottom = worldToScreen(view, feet, viewport);
@@ -680,7 +764,7 @@ void GameClient::Impl::registerNatives() {
     e.registerFunction("entity_pos", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty()) return Value::nil();
         const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
-        if (!state || !state->visible) return Value::nil();
+        if (!state || !isCurrent(*state)) return Value::nil();
         return Value::array(std::vector<Value>{Value::number(state->currentPosition.x),
                                                Value::number(state->currentPosition.y),
                                                Value::number(state->currentPosition.z)});

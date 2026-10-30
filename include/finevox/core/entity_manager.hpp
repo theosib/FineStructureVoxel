@@ -87,6 +87,11 @@ public:
     EntityManager(World& world, GraphicsEventQueue& graphicsQueue);
     ~EntityManager();
 
+    /// Decide which entities a client hears about. Unset means all of them. A hidden
+    /// entity simply stops getting snapshots, so a renderer must let stale ones lapse.
+    using SnapshotFilter = std::function<bool(const Entity&)>;
+    void setSnapshotFilter(SnapshotFilter filter) { snapshotFilter_ = std::move(filter); }
+
     // Non-copyable, non-movable
     EntityManager(const EntityManager&) = delete;
     EntityManager& operator=(const EntityManager&) = delete;
@@ -355,6 +360,7 @@ private:
 
     // Entity storage
     EntitySpatialIndex spatialIndex_;
+    SnapshotFilter snapshotFilter_;
     std::unordered_map<EntityId, std::unique_ptr<Entity>> entities_;
     EntityId nextEntityId_ = 1;
     uint64_t currentTick_ = 0;

@@ -18,6 +18,7 @@
 #include <finescript/script_engine.h>
 
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
@@ -26,6 +27,7 @@ namespace finevox::game {
 namespace fs = std::filesystem;
 
 void registerBlueprintNatives(GameRuntime& runtime);
+void registerConflictNatives(GameRuntime& runtime);
 
 namespace {
 
@@ -114,6 +116,29 @@ void GameRuntime::load() {
     session_->addSubsystem(navigation_);
     session_->addSubsystem(std::make_shared<WorkClaimClock>(workClaims_));
 
+    int32_t half = manifest_.worldRadius * 16;
+    VisionBounds bounds{-half, -half, half, half};
+    vision_ = std::make_shared<FactionVision>(world, session_->entities(), bounds);
+    vision_->addFaction(manifest_.viewerFaction);
+    session_->addSubsystem(vision_);
+
+    projectiles_ = std::make_shared<ProjectileSystem>(world, session_->entities());
+    session_->addSubsystem(projectiles_);
+
+    replica_ = std::make_shared<WorldReplica>(world, *vision_, manifest_.viewerFaction);
+    replica_->setRevealAll(!manifest_.fogOfWar);
+    session_->addSubsystem(replica_);
+
+    if (manifest_.fogOfWar) {
+        uint16_t viewer = manifest_.viewerFaction;
+        session_->entities().setSnapshotFilter([this, viewer](const Entity& entity) {
+            if (entity.faction() == viewer) return true;
+            Vec3 pos = entity.position();
+            return vision_->isVisible(viewer, static_cast<int32_t>(std::floor(pos.x)),
+                                      static_cast<int32_t>(std::floor(pos.z)));
+        });
+    }
+
     gameScript_ = std::make_shared<script::ScriptGameSubsystem>(*scripts_);
     gameScript_->setMessageSink(
         [this](std::vector<uint8_t> message) { uiOutbox_.push(std::move(message)); });
@@ -142,6 +167,10 @@ void GameRuntime::load() {
         }
     }
     gameScript_->fire("start");
+
+    // Don't open on a blank map: show what the starting units can see
+    vision_->refresh(manifest_.viewerFaction);
+    replica_->syncAll();
 }
 
 void GameRuntime::registerNatives() {
@@ -161,6 +190,7 @@ void GameRuntime::registerNatives() {
         });
 
     registerBlueprintNatives(*this);
+    registerConflictNatives(*this);
 }
 
 void GameRuntime::generateWorld() {

@@ -30,6 +30,9 @@ struct GameManifest {
     float viewDistance = 256.0f;
     std::string defaultLocale = "en";
 
+    bool fogOfWar = true;
+    uint16_t viewerFaction = 1;   ///< Whose eyes the local client sees through
+
     /// Parse <gameRoot>/game.conf. nullopt if the file is missing or unreadable.
     [[nodiscard]] static std::optional<GameManifest> load(const std::filesystem::path& gameRoot);
 };

@@ -11,10 +11,13 @@
  */
 
 #include "finevox/core/content_pack_loader.hpp"
+#include "finevox/core/faction_vision.hpp"
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/navigation.hpp"
+#include "finevox/core/projectile_system.hpp"
 #include "finevox/core/queue.hpp"
 #include "finevox/core/work_claims.hpp"
+#include "finevox/core/world_replica.hpp"
 #include "finevox/game/game_manifest.hpp"
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/script_game_subsystem.hpp"
@@ -68,6 +71,9 @@ public:
     [[nodiscard]] NavigationSystem& navigation() { return *navigation_; }
     [[nodiscard]] WorkClaimRegistry& workClaims() { return workClaims_; }
     [[nodiscard]] worldgen::BlueprintLibrary& blueprints() { return blueprints_; }
+    [[nodiscard]] FactionVision& vision() { return *vision_; }
+    [[nodiscard]] ProjectileSystem& projectiles() { return *projectiles_; }
+    [[nodiscard]] WorldReplica& replica() { return *replica_; }
 
     /// Sites under construction, by the id scripts hold
     [[nodiscard]] std::unordered_map<int64_t, worldgen::BlueprintSite>& sites() { return sites_; }
@@ -95,6 +101,9 @@ private:
     std::unique_ptr<script::GameScriptEngine> scripts_;
     std::shared_ptr<script::ScriptGameSubsystem> gameScript_;
     std::shared_ptr<NavigationSystem> navigation_;
+    std::shared_ptr<FactionVision> vision_;
+    std::shared_ptr<ProjectileSystem> projectiles_;
+    std::shared_ptr<WorldReplica> replica_;
     WorkClaimRegistry workClaims_;
     worldgen::BlueprintLibrary blueprints_;
     std::unordered_map<int64_t, worldgen::BlueprintSite> sites_;

@@ -1069,6 +1069,13 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // gui_hover x y -> rests the mouse there, as gui_click does, so a script can see a tooltip
+    e.registerFunction("gui_hover", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        ImGui::GetIO().AddMousePosEvent(float(number(args[0])), float(number(args[1])));
+        return Value::nil();
+    });
+
     // pick_entities x0 y0 x1 y1 -> ids whose bodies project into the rectangle
     e.registerFunction("pick_entities", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 4) return Value::array(std::vector<Value>{});

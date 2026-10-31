@@ -178,7 +178,7 @@ send_command value       ui_show tree [=immediate true] -> id        ui_hide id
 window_size   mouse_pos  gui_has_mouse   fps
 pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 y1 -> ids
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
-do_action name     gui_click x y   (for scripted UI tests)
+do_action name     gui_click x y   gui_hover x y   (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  set_faction_color id r g b
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]

@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -164,9 +165,11 @@ public:
     /**
      * @brief Spawn a player entity
      * @param position Initial position
+     * @param type Entity type of the player's body, for its model and stats. If it isn't
+     *             registered, the body gets default stats and no model.
      * @return ID of the new player
      */
-    EntityId spawnPlayer(Vec3 position);
+    EntityId spawnPlayer(Vec3 position, std::string_view type = "finevox:player");
 
     /**
      * @brief Get the local player entity (for single-player)

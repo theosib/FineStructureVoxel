@@ -37,6 +37,7 @@ sky.conf
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
+| `player_entity` | `finevox:player` | Entity type of the player's body, as seen when they aren't in it. With no such type, or one without a model, it draws as a box in the viewer's faction colour |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 
 The content root must be self-contained: nothing falls back to the engine's `resources/`,

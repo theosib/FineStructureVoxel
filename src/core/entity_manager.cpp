@@ -165,9 +165,9 @@ bool EntityManager::hasEntity(EntityId id) const {
 // Player Management
 // ============================================================================
 
-EntityId EntityManager::spawnPlayer(Vec3 position) {
+EntityId EntityManager::spawnPlayer(Vec3 position, std::string_view type) {
     // Try to use a registered player entity type; fall back to defaults
-    auto playerTypeId = EntityTypeId::fromName("finevox:player");
+    auto playerTypeId = EntityTypeId::fromName(type);
     std::unique_ptr<MobEntity> mob;
 
     if (!playerTypeId.isEmpty() && EntityTypeRegistry::global().hasType(playerTypeId)) {

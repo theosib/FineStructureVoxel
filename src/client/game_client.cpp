@@ -394,7 +394,7 @@ void GameClient::Impl::setup() {
         const glm::dvec3& spot = runtime.clientSave().steward;
         stewardBody->setPosition(Vec3(float(spot.x), float(spot.y), float(spot.z)));
     }
-    stewardId = session.entities().spawnPlayer(stewardBody->position());
+    stewardId = session.entities().spawnPlayer(stewardBody->position(), manifest.playerEntity);
     session.entities().setLocalPlayerId(stewardId);
     if (MobEntity* mob = session.entities().getMob(stewardId)) {
         mob->setFaction(manifest.viewerFaction);
@@ -1198,6 +1198,8 @@ void GameClient::Impl::registerNatives() {
         std::vector<Value> found;
         for (const auto& [id, state] : entityRenderer.entities()) {
             if (!isCurrent(state)) continue;
+            // The player's own body takes no orders, wherever it was left standing
+            if (id == stewardId) continue;
             if (bodyInScreenRect(view, state.currentPosition, BODY_HEIGHT, BODY_RADIUS, viewport,
                                  rectMin, rectMax)) {
                 found.push_back(Value::integer(static_cast<int64_t>(id)));

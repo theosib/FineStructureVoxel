@@ -223,6 +223,35 @@ TEST_F(AIDriverTest, SpawnPlayerHasCorrectDefaults) {
     EXPECT_FLOAT_EQ(mob->maxStepHeight(), 0.6f);
 }
 
+TEST_F(AIDriverTest, SpawnPlayerTakesTheTypeItIsGiven) {
+    auto world = std::make_unique<World>();
+    GraphicsEventQueue queue;
+    EntityManager em(*world, queue);
+
+    EntityId playerId = em.spawnPlayer(Vec3(5.0f, 64.0f, 5.0f), "test_driver_pig");
+    auto* mob = dynamic_cast<MobEntity*>(em.getEntity(playerId));
+    ASSERT_NE(mob, nullptr);
+
+    ASSERT_NE(mob->typeDef(), nullptr);
+    EXPECT_EQ(mob->typeName(), "test_driver_pig");
+    EXPECT_FLOAT_EQ(mob->maxHealth(), 10.0f);
+    EXPECT_TRUE(isPlayer(*mob));
+    EXPECT_NE(mob->driver(), nullptr);
+}
+
+TEST_F(AIDriverTest, SpawnPlayerFallsBackOnAnUnknownType) {
+    auto world = std::make_unique<World>();
+    GraphicsEventQueue queue;
+    EntityManager em(*world, queue);
+
+    EntityId playerId = em.spawnPlayer(Vec3(5.0f, 64.0f, 5.0f), "test_driver_nobody");
+    auto* mob = dynamic_cast<MobEntity*>(em.getEntity(playerId));
+    ASSERT_NE(mob, nullptr);
+
+    EXPECT_EQ(mob->typeDef(), nullptr);
+    EXPECT_FLOAT_EQ(mob->maxHealth(), 20.0f);
+}
+
 TEST_F(AIDriverTest, PlayerEntityNotSerialized) {
     // Verify isPlayer works for serialization skip
     auto typeId = EntityTypeId::fromName("test_driver_pig");

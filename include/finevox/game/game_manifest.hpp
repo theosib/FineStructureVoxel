@@ -35,6 +35,7 @@ struct GameManifest {
     bool lod = true;
     int navMaxFall = 3;           ///< Largest drop path-following units will take
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
+    std::string playerEntity = "finevox:player";  ///< Entity type of the player's body
     bool saves = false;           ///< Keep the game in <gameRoot>/saves and resume it
     float autosaveMinutes = 0.0f; ///< Save during play this often; 0 only saves on exit
     std::string defaultLocale = "en";

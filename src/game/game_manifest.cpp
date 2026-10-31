@@ -25,6 +25,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.lod = doc->getBool("lod", m.lod);
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
+    m.playerEntity = std::string(doc->getString("player_entity", m.playerEntity));
     m.saves = doc->getBool("saves", m.saves);
     m.autosaveMinutes = doc->getFloat("autosave_minutes", m.autosaveMinutes);
     m.defaultLocale = std::string(doc->getString("default_locale", m.defaultLocale));

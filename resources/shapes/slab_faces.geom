@@ -22,31 +22,31 @@ face:slab_top:
 
 # West face (-X) - custom face, half height
 face:slab_west:
-    0 0   1    0 0
-    0 0   0    1 0
-    0 0.5 0    1 0.5
-    0 0.5 1    0 0.5
+    0 0   1    1 1
+    0 0   0    0 1
+    0 0.5 0    0 0.5
+    0 0.5 1    1 0.5
 
 # East face (+X) - custom face, half height
 face:slab_east:
-    1 0   0    0 0
-    1 0   1    1 0
-    1 0.5 1    1 0.5
-    1 0.5 0    0 0.5
+    1 0   0    1 1
+    1 0   1    0 1
+    1 0.5 1    0 0.5
+    1 0.5 0    1 0.5
 
 # North face (-Z) - custom face, half height
 face:slab_north:
-    0 0   0    0 0
-    1 0   0    1 0
-    1 0.5 0    1 0.5
-    0 0.5 0    0 0.5
+    0 0   0    1 1
+    1 0   0    0 1
+    1 0.5 0    0 0.5
+    0 0.5 0    1 0.5
 
 # South face (+Z) - custom face, half height
 face:slab_south:
-    1 0   1    0 0
-    0 0   1    1 0
-    0 0.5 1    1 0.5
-    1 0.5 1    0 0.5
+    1 0   1    1 1
+    0 0   1    0 1
+    0 0.5 1    0 0.5
+    1 0.5 1    1 0.5
 
 # Bottom face is solid (occludes neighbor's top face)
 solid-faces: bottom

@@ -138,6 +138,80 @@ TEST(MeshDataTest, MemoryUsage) {
 // MeshBuilder tests - Empty subchunk
 // ============================================================================
 
+// Every side face shows its texture upright and unmirrored, seen from outside: the top row of
+// the image along the top of the face, and its left column at the viewer's left. "Up" and
+// "left" come from the geometry here, so this doesn't lean on how the mesher orders corners.
+void expectSideFacesUpright(const MeshData& mesh, const glm::vec4& tile) {
+    int sides = 0;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        const glm::vec3 normal = mesh.vertices[i].normal;
+        if (normal.y != 0.0f) continue;
+        ++sides;
+
+        // Looking at the face, forward is -normal
+        const glm::vec3 viewerRight = glm::cross(-normal, glm::vec3(0.0f, 1.0f, 0.0f));
+        const float tileHeight = tile.w - tile.y;
+        const float tileWidth = tile.z - tile.x;
+
+        float topY = -1e9f, bottomY = 1e9f, rightMost = -1e9f, leftMost = 1e9f;
+        for (size_t j = 0; j < 4; ++j) {
+            const glm::vec3& p = mesh.vertices[i + j].position;
+            topY = std::max(topY, p.y);
+            bottomY = std::min(bottomY, p.y);
+            rightMost = std::max(rightMost, glm::dot(p, viewerRight));
+            leftMost = std::min(leftMost, glm::dot(p, viewerRight));
+        }
+
+        for (size_t j = 0; j < 4; ++j) {
+            const ChunkVertex& v = mesh.vertices[i + j];
+            const float fromTop = topY - v.position.y;
+            const float fromLeft = glm::dot(v.position, viewerRight) - leftMost;
+            EXPECT_NEAR(v.texCoord.y, tile.y + fromTop * tileHeight, 1e-5f)
+                << "normal " << normal.x << " " << normal.z;
+            EXPECT_NEAR(v.texCoord.x, tile.x + fromLeft * tileWidth, 1e-5f)
+                << "normal " << normal.x << " " << normal.z;
+        }
+    }
+    EXPECT_GE(sides, 4);
+}
+
+TEST_F(MeshTest, SideFacesAreUpright) {
+    SubChunk subChunk;
+    subChunk.setBlock(5, 5, 5, BlockTypeId::fromName("stone"));
+
+    const glm::vec4 tile(0.25f, 0.5f, 0.5f, 0.75f);
+    auto oneTile = [&](BlockTypeId, Face) { return tile; };
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos(0, 0, 0), nothingOpaque, oneTile);
+    expectSideFacesUpright(mesh, tile);
+}
+
+TEST_F(MeshTest, GreedySideFacesAreUprightAcrossAMergedQuad) {
+    builder.setGreedyMeshing(true);
+
+    // A wall 4 wide and 3 high in each direction, so that a merged quad tiles both ways
+    SubChunk subChunk;
+    for (int x = 2; x < 6; ++x) {
+        for (int y = 2; y < 5; ++y) {
+            for (int z = 2; z < 6; ++z) {
+                subChunk.setBlock(x, y, z, BlockTypeId::fromName("stone"));
+            }
+        }
+    }
+
+    const glm::vec4 tile(0.25f, 0.5f, 0.5f, 0.75f);
+    auto oneTile = [&](BlockTypeId, Face) { return tile; };
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos(0, 0, 0), nothingOpaque, oneTile);
+    expectSideFacesUpright(mesh, tile);
+
+    // Light and AO split some quads, but this is only worth anything if some stay merged
+    float tallest = 0.0f;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        if (mesh.vertices[i].normal.y != 0.0f) continue;
+        tallest = std::max(tallest, mesh.vertices[i + 2].position.y - mesh.vertices[i].position.y);
+    }
+    EXPECT_GT(tallest, 1.5f);
+}
+
 TEST_F(MeshTest, EmptySubchunkGeneratesEmptyMesh) {
     SubChunk subChunk;  // Default is all air
     ChunkPos pos{0, 0, 0};

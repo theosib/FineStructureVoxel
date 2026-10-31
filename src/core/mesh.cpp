@@ -10,7 +10,9 @@ namespace finevox {
 
 // Face data for each of the 6 faces
 // Positions are relative to block corner (0,0,0), CCW winding when looking at front
-// UV offsets map to texture coordinates
+// UV offsets map to texture coordinates, with (0, 0) the top left of the image as a viewer
+// outside the face sees it, so a side face's top edge shows the image's top row. A side's v0
+// is at the viewer's bottom right.
 // IMPORTANT: Array order must match Face enum: NegX=0, PosX=1, NegY=2, PosY=3, NegZ=4, PosZ=5
 const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
     // [0] NegX (-X face) - left side of block
@@ -23,10 +25,10 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
         }},
         .normal = {-1.0f, 0.0f, 0.0f},
         .uvOffsets = {{
-            {0.0f, 0.0f},
-            {1.0f, 0.0f},
             {1.0f, 1.0f},
-            {0.0f, 1.0f}
+            {0.0f, 1.0f},
+            {0.0f, 0.0f},
+            {1.0f, 0.0f}
         }}
     },
     // [1] PosX (+X face) - right side of block
@@ -39,10 +41,10 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
         }},
         .normal = {1.0f, 0.0f, 0.0f},
         .uvOffsets = {{
-            {0.0f, 0.0f},
-            {1.0f, 0.0f},
             {1.0f, 1.0f},
-            {0.0f, 1.0f}
+            {0.0f, 1.0f},
+            {0.0f, 0.0f},
+            {1.0f, 0.0f}
         }}
     },
     // [2] NegY (-Y face) - bottom of block
@@ -80,17 +82,17 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
     // [4] NegZ (-Z face) - back of block
     {
         .positions = {{
-            {0.0f, 0.0f, 0.0f},  // bottom-left  (v0)
-            {1.0f, 0.0f, 0.0f},  // bottom-right (v1)
-            {1.0f, 1.0f, 0.0f},  // top-right    (v2)
-            {0.0f, 1.0f, 0.0f}   // top-left     (v3)
+            {0.0f, 0.0f, 0.0f},  // bottom-right (v0)
+            {1.0f, 0.0f, 0.0f},  // bottom-left  (v1)
+            {1.0f, 1.0f, 0.0f},  // top-left     (v2)
+            {0.0f, 1.0f, 0.0f}   // top-right    (v3)
         }},
         .normal = {0.0f, 0.0f, -1.0f},
         .uvOffsets = {{
-            {0.0f, 0.0f},
-            {1.0f, 0.0f},
             {1.0f, 1.0f},
-            {0.0f, 1.0f}
+            {0.0f, 1.0f},
+            {0.0f, 0.0f},
+            {1.0f, 0.0f}
         }}
     },
     // [5] PosZ (+Z face) - front of block
@@ -103,10 +105,10 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
         }},
         .normal = {0.0f, 0.0f, 1.0f},
         .uvOffsets = {{
-            {0.0f, 0.0f},
-            {1.0f, 0.0f},
             {1.0f, 1.0f},
-            {0.0f, 1.0f}
+            {0.0f, 1.0f},
+            {0.0f, 0.0f},
+            {1.0f, 0.0f}
         }}
     }
 }};
@@ -781,17 +783,13 @@ void MeshBuilder::addGreedyQuad(
     float tileWidth = maxU - minU;
     float tileHeight = maxV - minV;
 
-    // UV coordinates that tile across the merged region
-    // Corner 0: (0, 0) in tile space -> minU, minV
-    // Corner 1: (width, 0) -> minU + width * tileWidth, minV
-    // Corner 2: (width, height) -> minU + width * tileWidth, minV + height * tileHeight
-    // Corner 3: (0, height) -> minU, minV + height * tileHeight
-    glm::vec2 uvs[4] = {
-        {minU, minV},
-        {minU + static_cast<float>(width) * tileWidth, minV},
-        {minU + static_cast<float>(width) * tileWidth, minV + static_cast<float>(height) * tileHeight},
-        {minU, minV + static_cast<float>(height) * tileHeight}
-    };
+    // UV coordinates that tile across the merged region. The corners are in FACE_DATA's order,
+    // so its offsets scaled up orient the tiles as a single block's face.
+    glm::vec2 uvs[4];
+    for (int i = 0; i < 4; ++i) {
+        uvs[i] = glm::vec2(minU + faceData.uvOffsets[i].x * static_cast<float>(width) * tileWidth,
+                           minV + faceData.uvOffsets[i].y * static_cast<float>(height) * tileHeight);
+    }
 
     // For greedy quads, we use uniform AO and light across the quad
     // (averaging would be complex and greedy meshing typically assumes uniform lighting)
@@ -1921,12 +1919,11 @@ void MeshBuilder::addGreedyLODQuad(
         uvHeight = static_cast<float>(height) * blockHeight;
     }
 
-    glm::vec2 uvs[4] = {
-        {minU, minV},
-        {minU + uvWidth * tileWidth, minV},
-        {minU + uvWidth * tileWidth, minV + uvHeight * tileHeight},
-        {minU, minV + uvHeight * tileHeight}
-    };
+    glm::vec2 uvs[4];
+    for (int i = 0; i < 4; ++i) {
+        uvs[i] = glm::vec2(minU + faceData.uvOffsets[i].x * uvWidth * tileWidth,
+                           minV + faceData.uvOffsets[i].y * uvHeight * tileHeight);
+    }
 
     // Add vertices
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());

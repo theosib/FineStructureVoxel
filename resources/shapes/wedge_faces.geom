@@ -16,31 +16,31 @@ face:bottom:
 
 # Diagonal top face (slopes from z=0,y=1 to z=1,y=0) - custom, not a full top
 face:wedge_slope:
-    0 1 0    0 1
-    1 1 0    1 1
-    1 0 1    1 0
-    0 0 1    0 0
+    0 1 0    0 0
+    1 1 0    1 0
+    1 0 1    1 1
+    0 0 1    0 1
 
 # North face (-Z, full height, rectangular) - standard face index 4
 face:north:
-    0 0 0    0 0
-    1 0 0    1 0
-    1 1 0    1 1
-    0 1 0    0 1
+    0 0 0    1 1
+    1 0 0    0 1
+    1 1 0    0 0
+    0 1 0    1 0
 
 # South face (+Z) - no face, wedge ends at ground level
 
 # West face (-X, triangular) - custom, not a full west face
 face:wedge_west:
-    0 0 1    0 0
-    0 0 0    1 0
-    0 1 0    1 1
+    0 0 1    1 1
+    0 0 0    0 1
+    0 1 0    0 0
 
 # East face (+X, triangular) - custom, not a full east face
 face:wedge_east:
-    1 0 0    0 0
-    1 0 1    1 0
-    1 1 0    0 1
+    1 0 0    1 1
+    1 0 1    0 1
+    1 1 0    1 0
 
 # Bottom and north faces are solid
 solid-faces: bottom north

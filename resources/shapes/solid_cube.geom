@@ -18,31 +18,31 @@ face:top:
 
 # West face (-X)
 face:west:
-    0 0 1    0 0
-    0 0 0    1 0
-    0 1 0    1 1
-    0 1 1    0 1
+    0 0 1    1 1
+    0 0 0    0 1
+    0 1 0    0 0
+    0 1 1    1 0
 
 # East face (+X)
 face:east:
-    1 0 0    0 0
-    1 0 1    1 0
-    1 1 1    1 1
-    1 1 0    0 1
+    1 0 0    1 1
+    1 0 1    0 1
+    1 1 1    0 0
+    1 1 0    1 0
 
 # North face (-Z)
 face:north:
-    0 0 0    0 0
-    1 0 0    1 0
-    1 1 0    1 1
-    0 1 0    0 1
+    0 0 0    1 1
+    1 0 0    0 1
+    1 1 0    0 0
+    0 1 0    1 0
 
 # South face (+Z)
 face:south:
-    1 0 1    0 0
-    0 0 1    1 0
-    0 1 1    1 1
-    1 1 1    0 1
+    1 0 1    1 1
+    0 0 1    0 1
+    0 1 1    0 0
+    1 1 1    1 0
 
 # All faces are solid (occlude neighbors)
 solid-faces: bottom top west east north south

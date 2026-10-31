@@ -19,6 +19,7 @@
 #include <functional>
 #include <array>
 #include <optional>
+#include <utility>
 
 namespace finevox {
 
@@ -202,6 +203,27 @@ struct ChunkPos {
 };
 
 // Column position (full-height column, x and z only)
+/// Call `visit` with the subchunk holding a block and every subchunk whose mesh can depend on
+/// it: those across each face, edge and corner it touches.
+template <typename Visit>
+void forEachChunkTouching(const BlockCoord& block, Visit&& visit) {
+    const ChunkPos home = ChunkPos::fromBlock(block);
+    const auto reach = [](int32_t coordinate) -> std::pair<int32_t, int32_t> {
+        const int32_t local = coordinate & 15;
+        return {local == 0 ? -1 : 0, local == 15 ? 1 : 0};
+    };
+    const auto [x0, x1] = reach(block.x);
+    const auto [y0, y1] = reach(block.y);
+    const auto [z0, z1] = reach(block.z);
+    for (int32_t dx = x0; dx <= x1; ++dx) {
+        for (int32_t dy = y0; dy <= y1; ++dy) {
+            for (int32_t dz = z0; dz <= z1; ++dz) {
+                visit(ChunkPos{home.x + dx, home.y + dy, home.z + dz});
+            }
+        }
+    }
+}
+
 struct ColumnPos {
     int32_t x = 0;
     int32_t z = 0;

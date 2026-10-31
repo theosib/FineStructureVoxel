@@ -542,11 +542,12 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
         update.triggerMeshRebuild = true;
         lightEngine_->enqueue(update);
     } else {
-        // Queue is not empty - push remesh immediately for the changed block's chunk
+        // Queue is not empty - push remesh immediately for every chunk the block touches
         // Lighting thread may push additional remeshes if light actually changes
         if (meshRebuildQueue_) {
-            ChunkPos chunkPos = ChunkPos::fromBlock(pos);
-            meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal());
+            forEachChunkTouching(pos, [this](const ChunkPos& chunkPos) {
+                meshRebuildQueue_->push(chunkPos, MeshRebuildRequest::normal());
+            });
         }
 
         // Enqueue lighting update without triggerMeshRebuild

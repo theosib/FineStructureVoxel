@@ -1067,33 +1067,9 @@ void LightEngine::lightingThreadLoop() {
 }
 
 void LightEngine::recordAffectedChunk(const BlockCoord& pos) {
-    ChunkPos chunkPos = toChunkPos(pos);
-    batchAffectedChunks_.insert(chunkPos);
-
-    // Check if position is at subchunk boundary - if so, also mark adjacent chunk
-    // since faces in neighboring chunks may sample light from this position.
-    // Local coordinates within a 16x16x16 subchunk
-    int32_t localX = ((pos.x % 16) + 16) % 16;
-    int32_t localY = ((pos.y % 16) + 16) % 16;
-    int32_t localZ = ((pos.z % 16) + 16) % 16;
-
-    if (localX == 0) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x - 1, chunkPos.y, chunkPos.z});
-    } else if (localX == 15) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x + 1, chunkPos.y, chunkPos.z});
-    }
-
-    if (localY == 0) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y - 1, chunkPos.z});
-    } else if (localY == 15) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y + 1, chunkPos.z});
-    }
-
-    if (localZ == 0) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y, chunkPos.z - 1});
-    } else if (localZ == 15) {
-        batchAffectedChunks_.insert(ChunkPos{chunkPos.x, chunkPos.y, chunkPos.z + 1});
-    }
+    // Faces in neighbouring chunks may sample light from this position, and a block that joins
+    // its diagonal neighbours reaches across chunk corners as well
+    forEachChunkTouching(pos, [this](const ChunkPos& chunkPos) { batchAffectedChunks_.insert(chunkPos); });
 }
 
 void LightEngine::flushAffectedChunks() {

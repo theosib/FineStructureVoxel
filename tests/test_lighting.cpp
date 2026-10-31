@@ -2,6 +2,8 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include <set>
+#include <tuple>
 #include "finevox/core/light_data.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/block_type.hpp"
@@ -479,6 +481,62 @@ TEST(LightingDeferralTest, TriggerMeshRebuildFlag) {
     // Default should be false
     LightingUpdate defaultUpdate;
     EXPECT_FALSE(defaultUpdate.triggerMeshRebuild);
+}
+
+// A block at a chunk's corner shows in the meshes of everything across that corner, whichever
+// way the rebuild gets requested.
+TEST(LightingDeferralTest, ChangesRemeshChunksAcrossCorners) {
+    const BlockCoord corner{15, 15, 15};
+    std::set<std::tuple<int, int, int>> expected;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                ChunkPos chunk = ChunkPos::fromBlock(BlockCoord{corner.x + dx, corner.y + dy, corner.z + dz});
+                expected.insert({chunk.x, chunk.y, chunk.z});
+            }
+        }
+    }
+    ASSERT_EQ(expected.size(), 8u);
+
+    auto drain = [](MeshRebuildQueue& queue) {
+        std::set<std::tuple<int, int, int>> chunks;
+        while (auto item = queue.tryPop()) chunks.insert({item->first.x, item->first.y, item->first.z});
+        return chunks;
+    };
+
+    // Lighting backed up: the world asks for the rebuild itself
+    {
+        World world;
+        LightEngine engine(world);
+        MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+        engine.setMeshRebuildQueue(&meshQueue);
+        world.setLightEngine(&engine);
+        world.setMeshRebuildQueue(&meshQueue);
+        world.setAlwaysDeferMeshRebuild(false);
+        engine.enqueue(LightingUpdate{BlockCoord{100, 0, 100}, AIR_BLOCK_TYPE, AIR_BLOCK_TYPE, {}, {}});
+
+        world.enqueueLightingUpdateWithRemesh(corner, AIR_BLOCK_TYPE, BlockTypeId::fromName("test:corner"));
+        EXPECT_EQ(drain(meshQueue), expected);
+    }
+
+    // Lighting idle: the light thread asks once it's done
+    {
+        World world;
+        LightEngine engine(world);
+        MeshRebuildQueue meshQueue(mergeMeshRebuildRequest);
+        engine.setMeshRebuildQueue(&meshQueue);
+        world.setLightEngine(&engine);
+        world.setMeshRebuildQueue(&meshQueue);
+        world.setAlwaysDeferMeshRebuild(false);
+
+        world.enqueueLightingUpdateWithRemesh(corner, AIR_BLOCK_TYPE, BlockTypeId::fromName("test:corner"));
+        engine.start();
+        for (int i = 0; i < 200 && meshQueue.empty(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        engine.stop();
+        EXPECT_EQ(drain(meshQueue), expected);
+    }
 }
 
 TEST(LightingDeferralTest, MeshRebuildQueueIntegration) {

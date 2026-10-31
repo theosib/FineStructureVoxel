@@ -311,3 +311,41 @@ TEST(TacticalCameraRig, SmoothingIsFrameRateIndependent) {
     };
     EXPECT_NEAR(settleAfterOneSecond(30), settleAfterOneSecond(240), 0.01);
 }
+
+TEST(BodyInScreenRect, AClickAnywhereOnABodyHitsItAtAnyZoom) {
+    // Looking down at the feet from further and further away, as the player zooms out
+    for (float distance : {6.0f, 12.0f, 24.0f, 60.0f}) {
+        glm::dvec3 feet(0.0, 0.0, 0.0);
+        glm::vec3 forward = glm::normalize(glm::vec3(0.0f, -1.0f, 1.0f));
+        ViewBasis view = makeViewBasis(feet - glm::dvec3(forward) * double(distance), forward, 55.0f,
+                                       VIEWPORT.x / VIEWPORT.y);
+
+        // The very edge of the shoulder, worked out from the world and not the helper
+        auto edge = worldToScreen(view, feet + glm::dvec3(0.0, 0.9, 0.0) + glm::dvec3(view.right) * 0.4,
+                                  VIEWPORT);
+        ASSERT_TRUE(edge.has_value());
+        EXPECT_TRUE(bodyInScreenRect(view, feet, 1.9f, 0.45f, VIEWPORT, *edge, *edge)) << distance;
+
+        // A body's width beyond that is a miss
+        auto away = worldToScreen(view, feet + glm::dvec3(0.0, 0.9, 0.0) + glm::dvec3(view.right) * 1.2,
+                                  VIEWPORT);
+        ASSERT_TRUE(away.has_value());
+        EXPECT_FALSE(bodyInScreenRect(view, feet, 1.9f, 0.45f, VIEWPORT, *away, *away)) << distance;
+    }
+}
+
+TEST(BodyInScreenRect, LookingStraightDownABodyStillHasAnArea) {
+    glm::dvec3 feet(0.0, 0.0, 0.0);
+    ViewBasis view = makeViewBasis(feet + glm::dvec3(0.0, 12.0, 0.0), glm::vec3(0.0f, -1.0f, 0.0f), 55.0f,
+                                   VIEWPORT.x / VIEWPORT.y);
+    auto beside = worldToScreen(view, feet + glm::dvec3(view.right) * 0.4, VIEWPORT);
+    ASSERT_TRUE(beside.has_value());
+    EXPECT_TRUE(bodyInScreenRect(view, feet, 1.9f, 0.45f, VIEWPORT, *beside, *beside));
+}
+
+TEST(BodyInScreenRect, BehindTheCameraIsNeverHit) {
+    ViewBasis view = makeViewBasis(glm::dvec3(0.0), glm::vec3(0.0f, 0.0f, 1.0f), 55.0f,
+                                   VIEWPORT.x / VIEWPORT.y);
+    EXPECT_FALSE(bodyInScreenRect(view, glm::dvec3(0.0, 0.0, -10.0), 1.9f, 0.45f, VIEWPORT,
+                                  glm::vec2(0.0f), VIEWPORT));
+}

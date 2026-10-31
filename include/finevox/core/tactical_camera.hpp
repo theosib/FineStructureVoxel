@@ -40,6 +40,13 @@ struct WorldRay {
 [[nodiscard]] std::optional<glm::vec2> worldToScreen(const ViewBasis& view, const glm::dvec3& world,
                                                      glm::vec2 viewport);
 
+/// Whether an upright body standing at `feet` shows inside a screen rectangle. The body has its
+/// real size on screen, so that at any zoom a click anywhere on it counts, and looking straight
+/// down it still has an area.
+[[nodiscard]] bool bodyInScreenRect(const ViewBasis& view, const glm::dvec3& feet, float height,
+                                    float radius, glm::vec2 viewport, glm::vec2 rectMin,
+                                    glm::vec2 rectMax);
+
 /// Which way a cursor near the window's edge scrolls the view: x is right, y is forward,
 /// each -1, 0, or 1. Past the edge of an ordinary window the cursor is off doing something
 /// else, so that's no scroll. Past the edge of one that spans the screen it has run out of

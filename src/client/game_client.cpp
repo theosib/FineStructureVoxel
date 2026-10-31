@@ -193,6 +193,8 @@ struct GameClient::Impl {
     bool panLeft = false, panRight = false, panForward = false, panBack = false;
     float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
     float stepLag = 0.0f;           ///< How far the eye is still to rise after a step up
+    std::vector<render::SceneVertex> markers;  ///< From the UI, relative to markerCamera
+    glm::dvec3 markerCamera{0.0};
     bool newGameRequested = false;
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
     glm::vec2 grabCursor{0.0f};
@@ -217,6 +219,7 @@ struct GameClient::Impl {
     void bindInput();
     void updateCamera(float dt);
     void buildScene();
+    void flushMarkers();
     void drainUiMessages();
     void buildProjectiles();
     void updateFog(float dt);
@@ -443,6 +446,7 @@ void GameClient::Impl::setup() {
         buildScene();
         buildProjectiles();
         buildGhosts();
+        flushMarkers();
         updateFog(dt);
 
         auto deadline = std::chrono::steady_clock::now() +
@@ -815,6 +819,21 @@ void GameClient::Impl::buildProjectiles() {
     }
 }
 
+void GameClient::Impl::flushMarkers() {
+    // The UI runs after the scene has drawn, so its markers show on the next frame. They were
+    // placed from this frame's camera, and a marker hugging the ground has no room for the
+    // difference: with the camera coming down, it would sink out of sight.
+    glm::dvec3 now = camera.positionD();
+    glm::vec3 shift(markerCamera - now);
+    auto& out = sceneRenderer->translucent();
+    for (render::SceneVertex vertex : markers) {
+        vertex.position += shift;
+        out.push_back(vertex);
+    }
+    markers.clear();
+    markerCamera = now;
+}
+
 void GameClient::Impl::buildGhosts() {
     auto ghosts = runtime.siteGhosts();
     if (ghosts != ghostSource) {
@@ -1138,6 +1157,25 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // predict_block x y z name: the player's own action, shown now and settled by the server.
+    // expect_change x y z: an action the client can't foresee, so look again soon.
+    e.registerFunction("predict_block", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 4) return Value::nil();
+        BlockCoord pos(static_cast<int32_t>(number(args[0])), static_cast<int32_t>(number(args[1])),
+                       static_cast<int32_t>(number(args[2])));
+        std::string name = args[3].toString();
+        runtime.replica().predictBlock(pos, name == "air" ? BlockTypeId() : BlockTypeId::fromName(name));
+        return Value::nil();
+    });
+
+    e.registerFunction("expect_change", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3) return Value::nil();
+        runtime.replica().expectChange(BlockCoord(static_cast<int32_t>(number(args[0])),
+                                                  static_cast<int32_t>(number(args[1])),
+                                                  static_cast<int32_t>(number(args[2]))));
+        return Value::nil();
+    });
+
     // input_held -> true if the game thinks any movement key is down
     e.registerFunction("input_held", [this](ExecutionContext&, const Args&) -> Value {
         return Value::boolean(panForward || panBack || panLeft || panRight);
@@ -1151,20 +1189,17 @@ void GameClient::Impl::registerNatives() {
         if (x0 > x1) std::swap(x0, x1);
         if (y0 > y1) std::swap(y0, y1);
 
-        // Small rectangles are clicks: a click anywhere on a body should hit it
-        constexpr float SLOP = 6.0f;
-        x0 -= SLOP; y0 -= SLOP; x1 += SLOP; y1 += SLOP;
+        // Small rectangles are clicks: allow for a hand that isn't quite on the body
+        constexpr float SLOP = 3.0f;
+        constexpr float BODY_HEIGHT = 1.9f;  // To the top of a helmet
+        constexpr float BODY_RADIUS = 0.45f;
+        glm::vec2 rectMin(x0 - SLOP, y0 - SLOP), rectMax(x1 + SLOP, y1 + SLOP);
 
         std::vector<Value> found;
         for (const auto& [id, state] : entityRenderer.entities()) {
             if (!isCurrent(state)) continue;
-            glm::dvec3 feet = state.currentPosition;
-            auto top = worldToScreen(view, feet + glm::dvec3(0.0, 1.7, 0.0), viewport);
-            auto bottom = worldToScreen(view, feet, viewport);
-            if (!top || !bottom) continue;
-            float minY = std::min(top->y, bottom->y), maxY = std::max(top->y, bottom->y);
-            float centerX = (top->x + bottom->x) * 0.5f;
-            if (centerX >= x0 && centerX <= x1 && maxY >= y0 && minY <= y1) {
+            if (bodyInScreenRect(view, state.currentPosition, BODY_HEIGHT, BODY_RADIUS, viewport,
+                                 rectMin, rectMax)) {
                 found.push_back(Value::integer(static_cast<int64_t>(id)));
             }
         }
@@ -1193,7 +1228,7 @@ void GameClient::Impl::registerNatives() {
         glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
                          camera.positionD());
         float radius = static_cast<float>(number(args[3]));
-        render::appendRing(sceneRenderer->translucent(), center, radius, 0.12f, colorArg(args, 4));
+        render::appendRing(markers, center, radius, 0.12f, colorArg(args, 4));
         return Value::nil();
     });
 
@@ -1203,8 +1238,7 @@ void GameClient::Impl::registerNatives() {
         glm::vec3 size(number(args[3]), number(args[4]), number(args[5]));
         glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
                          camera.positionD());
-        render::appendBox(sceneRenderer->translucent(), center + size * 0.5f, size * 0.5f,
-                          colorArg(args, 6), false);
+        render::appendBox(markers, center + size * 0.5f, size * 0.5f, colorArg(args, 6), false);
         return Value::nil();
     });
 
@@ -1215,7 +1249,7 @@ void GameClient::Impl::registerNatives() {
                          camera.positionD());
         float halfWidth = static_cast<float>(number(args[3])) * 0.5f;
         float fraction = std::clamp(static_cast<float>(number(args[4])), 0.0f, 1.0f);
-        auto& out = sceneRenderer->translucent();
+        auto& out = markers;
         render::appendBillboard(out, center, view.right, view.up, halfWidth, 0.07f,
                                 glm::vec4(0.08f, 0.08f, 0.08f, 0.85f));
         glm::vec3 barCenter = center - view.right * (halfWidth * (1.0f - fraction));

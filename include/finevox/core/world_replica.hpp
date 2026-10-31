@@ -21,7 +21,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string_view>
+#include <vector>
 #include <unordered_map>
 
 namespace finevox {
@@ -46,6 +48,15 @@ public:
     /// Stop filtering: everything replicates, unseen or not
     void setRevealAll(bool reveal) { revealAll_ = reveal; }
 
+    /// Show the block the viewer's own action should leave here, right away, and take the
+    /// server's word for it once it's had time to act on the command. It's safe to call from
+    /// the render thread.
+    void predictBlock(BlockCoord pos, BlockTypeId block);
+
+    /// The server's about to change this column in a way the client can't foresee. Look again
+    /// when it's had time, not when the sweep comes round.
+    void expectChange(BlockCoord pos);
+
     [[nodiscard]] size_t columnsKnown() const { return versions_.size(); }
 
 private:
@@ -57,6 +68,19 @@ private:
     uint16_t viewer_;
     World replica_;
     bool revealAll_ = false;
+
+    void remesh(BlockCoord pos);
+    /// Settle what's due, and return where's still waiting on the server
+    void settlePredictions();
+
+    /// Copy from the server only once a tick has passed for it to see the command
+    struct Prediction {
+        BlockCoord pos;
+        uint64_t dueTick;
+    };
+    std::mutex predictionMutex_;
+    std::vector<Prediction> predictions_;
+    uint64_t tick_ = 0;
 
     /// Last copied block version per subchunk
     std::unordered_map<uint64_t, uint64_t> versions_;

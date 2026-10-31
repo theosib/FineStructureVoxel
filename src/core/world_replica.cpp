@@ -4,6 +4,7 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 
+#include <algorithm>
 #include <vector>
 
 namespace finevox {
@@ -12,6 +13,10 @@ namespace {
 
 /// Columns examined per tick; a 32x32-column map cycles about once a second
 constexpr int32_t COLUMNS_PER_TICK = 40;
+
+/// Ticks a prediction stands before the server's word settles it. A command is run in the first
+/// tick after it's sent, and this subsystem runs late in the tick, so two would do.
+constexpr uint64_t PREDICTION_TICKS = 3;
 
 uint64_t subchunkKey(const ChunkPos& pos) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(pos.x) & 0xFFFFF) << 40) |
@@ -55,12 +60,21 @@ void WorldReplica::syncColumn(ColumnPos pos) {
         if (!inserted && it->second == version) return;
         it->second = version;
 
+        // A prediction is ahead of the server for now, so this copy must leave it be
+        std::vector<BlockCoord> predicted;
+        {
+            std::lock_guard lock(predictionMutex_);
+            for (const Prediction& p : predictions_) predicted.push_back(p.pos);
+        }
+
         for (int32_t lx = 0; lx < 16; ++lx) {
             for (int32_t lz = 0; lz < 16; ++lz) {
                 for (int32_t ly = 0; ly < 16; ++ly) {
                     BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
                     BlockTypeId block = subchunk.getBlock(lx, ly, lz);
-                    if (replica_.getBlock(world) != block) changes.emplace_back(world, block);
+                    if (replica_.getBlock(world) == block) continue;
+                    if (std::find(predicted.begin(), predicted.end(), world) != predicted.end()) continue;
+                    changes.emplace_back(world, block);
                 }
             }
         }
@@ -107,7 +121,54 @@ void WorldReplica::syncAll() {
     }
 }
 
+void WorldReplica::remesh(BlockCoord pos) {
+    if (auto* queue = replica_.meshRebuildQueue()) {
+        for (const ChunkPos& affected : replica_.getAffectedSubChunks(pos)) {
+            queue->push(affected, MeshRebuildRequest::immediate());
+        }
+    }
+}
+
+void WorldReplica::predictBlock(BlockCoord pos, BlockTypeId block) {
+    {
+        std::lock_guard lock(predictionMutex_);
+        predictions_.push_back({pos, tick_ + PREDICTION_TICKS});
+    }
+    replica_.setBlock(pos, block);
+    remesh(pos);
+}
+
+void WorldReplica::expectChange(BlockCoord pos) {
+    std::lock_guard lock(predictionMutex_);
+    predictions_.push_back({pos, tick_ + PREDICTION_TICKS});
+}
+
+void WorldReplica::settlePredictions() {
+    std::vector<BlockCoord> due;
+    {
+        std::lock_guard lock(predictionMutex_);
+        ++tick_;
+        auto settled = std::stable_partition(predictions_.begin(), predictions_.end(),
+                                             [this](const Prediction& p) { return p.dueTick > tick_; });
+        for (auto it = settled; it != predictions_.end(); ++it) due.push_back(it->pos);
+        predictions_.erase(settled, predictions_.end());
+    }
+
+    for (const BlockCoord& pos : due) {
+        BlockTypeId actual = source_.getBlock(pos);
+        if (replica_.getBlock(pos) != actual) {
+            replica_.setBlock(pos, actual);
+            remesh(pos);
+        }
+        // What else the action did, such as a felled tree, needn't wait for the sweep
+        ColumnPos column(pos.x >> 4, pos.z >> 4);
+        syncColumn(column);
+    }
+}
+
 void WorldReplica::tick(float /*dt*/) {
+    settlePredictions();
+
     const auto& bounds = vision_.bounds();
     int32_t minX = bounds.minX >> 4;
     int32_t maxX = (bounds.maxX + 15) >> 4;

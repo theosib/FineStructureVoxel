@@ -44,6 +44,21 @@ std::optional<glm::vec2> worldToScreen(const ViewBasis& view, const glm::dvec3& 
     return glm::vec2((ndcX + 1.0f) * 0.5f * viewport.x, (1.0f - ndcY) * 0.5f * viewport.y);
 }
 
+bool bodyInScreenRect(const ViewBasis& view, const glm::dvec3& feet, float height, float radius,
+                      glm::vec2 viewport, glm::vec2 rectMin, glm::vec2 rectMax) {
+    glm::dvec3 middle = feet + glm::dvec3(0.0, height * 0.5, 0.0);
+    auto top = worldToScreen(view, feet + glm::dvec3(0.0, height, 0.0), viewport);
+    auto bottom = worldToScreen(view, feet, viewport);
+    auto centre = worldToScreen(view, middle, viewport);
+    auto side = worldToScreen(view, middle + glm::dvec3(view.right * radius), viewport);
+    if (!top || !bottom || !centre || !side) return false;
+
+    float reach = glm::length(*side - *centre);
+    float minX = std::min(top->x, bottom->x) - reach, maxX = std::max(top->x, bottom->x) + reach;
+    float minY = std::min(top->y, bottom->y) - reach, maxY = std::max(top->y, bottom->y) + reach;
+    return maxX >= rectMin.x && minX <= rectMax.x && maxY >= rectMin.y && minY <= rectMax.y;
+}
+
 glm::vec2 edgeScroll(glm::vec2 cursor, glm::vec2 viewport, float margin, bool spansScreen) {
     bool outside = cursor.x < 0.0f || cursor.y < 0.0f || cursor.x > viewport.x || cursor.y > viewport.y;
     if (outside && !spansScreen) return glm::vec2(0.0f);

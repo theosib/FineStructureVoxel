@@ -93,6 +93,57 @@ TEST_F(WorldReplicaTest, RevealAllShowsEverything) {
     EXPECT_EQ(replica->world().getBlock(100, GROUND_Y - 1, 16), stone);
 }
 
+TEST_F(WorldReplicaTest, APredictionShowsAtOnceAndStaysIfTheServerAgrees) {
+    lookFrom(16);
+    BlockCoord spot(16, GROUND_Y, 16);
+
+    replica->predictBlock(spot, marker);
+    EXPECT_EQ(replica->world().getBlock(spot), marker);
+
+    world.setBlock(spot, marker);
+    for (int i = 0; i < 10; ++i) replica->tick(0.033f);
+    EXPECT_EQ(replica->world().getBlock(spot), marker);
+}
+
+TEST_F(WorldReplicaTest, TheServerCorrectsAPredictionItDidntAllow) {
+    lookFrom(16);
+    BlockCoord spot(16, GROUND_Y, 16);
+
+    replica->predictBlock(spot, marker);
+    for (int i = 0; i < 2; ++i) replica->tick(0.033f);
+    EXPECT_EQ(replica->world().getBlock(spot), marker);  // Time to act on the command first
+
+    // The server's version of this block never changed, so only the prediction can undo it
+    for (int i = 0; i < 2; ++i) replica->tick(0.033f);
+    EXPECT_TRUE(replica->world().getBlock(spot).isAir());
+}
+
+TEST_F(WorldReplicaTest, AnotherChangeNearbyDoesntUndoAPrediction) {
+    lookFrom(16);
+    BlockCoord spot(16, GROUND_Y, 16);
+    BlockCoord other(17, GROUND_Y, 16);
+
+    replica->predictBlock(spot, marker);
+    world.setBlock(other, stone);  // A Hand working next door, in the same subchunk
+    replica->syncAll();
+
+    EXPECT_EQ(replica->world().getBlock(other), stone);
+    EXPECT_EQ(replica->world().getBlock(spot), marker);
+}
+
+TEST_F(WorldReplicaTest, AnExpectedChangeArrivesWithoutWaitingForTheSweep) {
+    lookFrom(16);
+    BlockCoord spot(16, GROUND_Y, 16);
+    BlockCoord trunk(19, GROUND_Y + 3, 18);  // The rest of what the action did, in this column
+
+    replica->expectChange(spot);
+    world.setBlock(trunk, stone);
+    EXPECT_TRUE(replica->world().getBlock(trunk).isAir());
+
+    for (int i = 0; i < 4; ++i) replica->tick(0.033f);
+    EXPECT_EQ(replica->world().getBlock(trunk), stone);
+}
+
 TEST_F(WorldReplicaTest, TickingEventuallyCoversTheMap) {
     vision->addSource(VIEWER, glm::dvec3(100.5, GROUND_Y + 2.0, 16.5), 20.0f);
     vision->refresh(VIEWER);

@@ -317,6 +317,9 @@ private:
     BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
     BlockConnectsProvider connectsProvider_;
 
+    // Light for a custom face. `sky` and `block` come in as the block's own cell.
+    void customFaceLight(const FaceGeometry& face, BlockCoord pos, float& sky, float& block) const;
+
     // Add a single face to the mesh data
     void addFace(
         MeshData& mesh,

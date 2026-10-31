@@ -2,6 +2,9 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/world.hpp"
 
+#include <algorithm>
+#include <optional>
+
 namespace finevox {
 
 // ============================================================================
@@ -302,13 +305,7 @@ void MeshBuilder::buildSimpleMesh(
                         // Calculate lighting for this face
                         float faceSkyLight = baseSkyLight;
                         float faceBlockLight = baseBlockLight;
-                        if (faceGeom.isStandardFace() && lightProvider_) {
-                            Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockCoord faceAirPos = blockWorldPos.neighbor(face);
-                            uint8_t packed = lightProvider_(faceAirPos);
-                            faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
-                            faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
-                        }
+                        customFaceLight(faceGeom, blockWorldPos, faceSkyLight, faceBlockLight);
 
                         // Add the custom face
                         addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
@@ -481,13 +478,7 @@ void MeshBuilder::buildGreedyMesh(
                         // Calculate lighting for this face
                         float faceSkyLight = baseSkyLight;
                         float faceBlockLight = baseBlockLight;
-                        if (faceGeom.isStandardFace() && lightProvider_) {
-                            Face face = static_cast<Face>(faceGeom.faceIndex);
-                            BlockCoord faceAirPos = blockWorldPos.neighbor(face);
-                            uint8_t packed = lightProvider_(faceAirPos);
-                            faceSkyLight = static_cast<float>(packed >> 4) / 15.0f;
-                            faceBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
-                        }
+                        customFaceLight(faceGeom, blockWorldPos, faceSkyLight, faceBlockLight);
 
                         addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
                     }
@@ -911,6 +902,51 @@ uint8_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) con
         }
     }
     return joined;
+}
+
+namespace {
+
+/// The cube face a custom face looks out through, if it looks straight along an axis
+std::optional<Face> axisOf(const FaceGeometry& face) {
+    const glm::vec3& v0 = face.vertices[0].position;
+    glm::vec3 normal = glm::cross(face.vertices[2].position - v0, face.vertices[1].position - v0);
+    float length = glm::length(normal);
+    if (length < 1e-6f) return std::nullopt;
+    normal /= length;
+
+    constexpr float STRAIGHT = 0.999f;
+    if (normal.x > STRAIGHT) return Face::PosX;
+    if (normal.x < -STRAIGHT) return Face::NegX;
+    if (normal.y > STRAIGHT) return Face::PosY;
+    if (normal.y < -STRAIGHT) return Face::NegY;
+    if (normal.z > STRAIGHT) return Face::PosZ;
+    if (normal.z < -STRAIGHT) return Face::NegZ;
+    return std::nullopt;
+}
+
+}  // namespace
+
+void MeshBuilder::customFaceLight(const FaceGeometry& face, BlockCoord pos, float& sky, float& block) const {
+    if (!lightProvider_) return;
+
+    if (face.isStandardFace()) {
+        uint8_t packed = lightProvider_(pos.neighbor(static_cast<Face>(face.faceIndex)));
+        sky = static_cast<float>(packed >> 4) / 15.0f;
+        block = static_cast<float>(packed & 0x0F) / 15.0f;
+        return;
+    }
+    if (!smoothLighting_ && !flatLighting_) return;
+
+    // A face inside the cell, like the top of a part-full stack, is lit by the cell it's in. But
+    // that cell may read dark: the client's blocks lag the server's and its light doesn't, so a
+    // block the server has made solid has already lost its light here while it still draws as
+    // the partial one it was. What the face looks out at doesn't have that problem. It can't take
+    // that alone, though, as a slab under a roof gets its light from the side.
+    if (std::optional<Face> axis = axisOf(face)) {
+        uint8_t packed = lightProvider_(pos.neighbor(*axis));
+        sky = std::max(sky, static_cast<float>(packed >> 4) / 15.0f);
+        block = std::max(block, static_cast<float>(packed & 0x0F) / 15.0f);
+    }
 }
 
 void MeshBuilder::addCustomFace(

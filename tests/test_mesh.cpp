@@ -1319,6 +1319,102 @@ TEST_F(CustomGeometryMeshTest, FacesLightLikeTheCubeFacesTheyCopy) {
     }
 }
 
+namespace {
+
+/// One face across the cell at height `h`, looking up, as a stack part way full has
+BlockGeometry topFaceAt(float h) {
+    FaceGeometry face;
+    face.name = "fill_top";
+    for (glm::vec3 corner : {glm::vec3(0, h, 0), glm::vec3(1, h, 0), glm::vec3(1, h, 1), glm::vec3(0, h, 1)}) {
+        face.vertices.push_back(ModelVertex(corner, glm::vec2(0.0f)));
+    }
+    BlockGeometry geom;
+    geom.addFace(std::move(face));
+    return geom;
+}
+
+}  // namespace
+
+// The client's blocks lag the server's while its light doesn't. So a stack the server has just
+// filled is still partial here, in a cell the light thread has already zeroed for being solid.
+TEST_F(CustomGeometryMeshTest, APartialTopDoesntGoDarkWhenItsOwnCellDoes) {
+    BlockTypeId block = BlockTypeId::fromName("test:stack");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    BlockGeometry geom = topFaceAt(0.875f);
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+    builder.setSmoothLighting(true);
+    builder.setLightProvider([](const BlockCoord& pos) -> uint8_t {
+        return pos == BlockCoord(8, 8, 8) ? 0x00 : 0xF0;
+    });
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(mesh.vertexCount(), 4);
+    for (const ChunkVertex& vertex : mesh.vertices) EXPECT_FLOAT_EQ(vertex.skyLight, 1.0f);
+}
+
+// And the cell a face looks at isn't the only light it gets: this one's under a roof, with the
+// sides open
+TEST_F(CustomGeometryMeshTest, APartialTopUnderARoofKeepsItsOwnCellsLight) {
+    BlockTypeId block = BlockTypeId::fromName("test:stack");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    BlockGeometry geom = topFaceAt(0.5f);
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+    builder.setSmoothLighting(true);
+    builder.setLightProvider([](const BlockCoord& pos) -> uint8_t {
+        return pos == BlockCoord(8, 8, 8) ? 0x90 : 0x00;
+    });
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(mesh.vertexCount(), 4);
+    for (const ChunkVertex& vertex : mesh.vertices) EXPECT_FLOAT_EQ(vertex.skyLight, 9.0f / 15.0f);
+}
+
+// Block light and sky light come from different places, so each takes its own best
+TEST_F(CustomGeometryMeshTest, APartialFaceTakesEachKindOfLightSeparately) {
+    BlockTypeId block = BlockTypeId::fromName("test:stack");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    BlockGeometry geom = topFaceAt(0.5f);
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+    builder.setSmoothLighting(true);
+    builder.setLightProvider([](const BlockCoord& pos) -> uint8_t {
+        if (pos == BlockCoord(8, 8, 8)) return 0x3C;
+        return pos == BlockCoord(8, 9, 8) ? 0xA2 : 0x00;
+    });
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(mesh.vertexCount(), 4);
+    for (const ChunkVertex& vertex : mesh.vertices) {
+        EXPECT_FLOAT_EQ(vertex.skyLight, 10.0f / 15.0f);
+        EXPECT_FLOAT_EQ(vertex.blockLight, 12.0f / 15.0f);
+    }
+}
+
+// A leaning face looks at no one cell, so it has only its own
+TEST_F(CustomGeometryMeshTest, ALeaningFaceLightsFromItsOwnCell) {
+    BlockTypeId block = BlockTypeId::fromName("test:ramp");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    FaceGeometry face;
+    face.name = "ramp";
+    for (glm::vec3 corner : {glm::vec3(0, 0, 0), glm::vec3(1, 1, 0), glm::vec3(1, 1, 1), glm::vec3(0, 0, 1)}) {
+        face.vertices.push_back(ModelVertex(corner, glm::vec2(0.0f)));
+    }
+    BlockGeometry geom;
+    geom.addFace(std::move(face));
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+    builder.setSmoothLighting(true);
+    builder.setLightProvider([](const BlockCoord& pos) -> uint8_t {
+        return pos == BlockCoord(8, 8, 8) ? 0x50 : 0xF0;
+    });
+
+    MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(mesh.vertexCount(), 4);
+    for (const ChunkVertex& vertex : mesh.vertices) EXPECT_FLOAT_EQ(vertex.skyLight, 5.0f / 15.0f);
+}
+
 // Every shipped shape, as a game would load it. By the divergence theorem a closed shape's
 // faces sum to its volume only if every normal points out, so one flipped face shows.
 TEST_F(CustomGeometryMeshTest, ShippedShapesFaceOutward) {

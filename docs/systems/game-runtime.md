@@ -36,6 +36,7 @@ sky.conf
 | `saves` | `false` | Keep the game in `saves/autosave`, resume it on launch, and save on exit |
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
+| `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 
 The content root must be self-contained: nothing falls back to the engine's `resources/`,

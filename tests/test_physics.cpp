@@ -1229,6 +1229,37 @@ TEST(PhysicsSystemTest, PerBodyStepHeightHigherAllowsHigherStep) {
     }
 }
 
+TEST(PhysicsSystemTest, StepHeightJustOverOneClimbsAWholeBlockButNotTwo) {
+    SimpleBlockWorld world;
+    for (int x = -2; x <= 10; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            world.setBlock(BlockCoord(x, 0, z), true);
+        }
+    }
+    world.setBlock(BlockCoord(3, 1, 0), true);
+    world.setBlock(BlockCoord(6, 1, 0), true);
+    world.setBlock(BlockCoord(6, 2, 0), true);
+    auto shapeProvider = [&world](const BlockCoord& pos, RaycastMode mode) {
+        return world.getShape(pos, mode);
+    };
+    PhysicsSystem physics(shapeProvider);
+
+    // Standing as a body does at rest, a margin above the floor
+    SimplePhysicsBody body(Vec3(1.5f, 1.0f + COLLISION_MARGIN, 0.5f), Vec3(0.3f, 0.9f, 0.3f));
+    body.setMaxStepHeight(1.05f);
+
+    float highest = body.position().y;
+    for (int frame = 0; frame < 300; ++frame) {
+        body.setOnGround(true);
+        physics.moveBody(body, Vec3(0.1f, -0.01f, 0.0f));
+        highest = std::max(highest, body.position().y);
+    }
+
+    EXPECT_NEAR(highest, 2.0f, 0.01f);                   // Over the block at x=3
+    EXPECT_NEAR(body.position().y, 1.0f, 0.01f);         // And back down the far side
+    EXPECT_NEAR(body.position().x, 6.0f - 0.3f, 0.01f);  // Stopped by the two at x=6
+}
+
 TEST(PhysicsSystemTest, PerBodyStepHeightLimited) {
     SimpleBlockWorld world;
     // Create a floor at y=0

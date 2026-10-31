@@ -192,6 +192,7 @@ struct GameClient::Impl {
     InputActionSystem inputActions;
     bool panLeft = false, panRight = false, panForward = false, panBack = false;
     float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
+    float stepLag = 0.0f;           ///< How far the eye is still to rise after a step up
     bool newGameRequested = false;
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
     glm::vec2 grabCursor{0.0f};
@@ -271,6 +272,7 @@ void GameClient::Impl::setup() {
 
     finegui::GuiConfig guiConfig;
     guiConfig.fontSize = 16.0f;
+    guiConfig.enableKeyboard = false;  // The keys are the game's, even after a panel is clicked
     guiConfig.msaaSamples = renderer.msaaSamples();
     if (window.isHighDPI()) guiConfig.dpiScale = window.contentScale().x;
     gui = std::make_unique<finegui::GuiSystem>(&device, guiConfig);
@@ -382,6 +384,7 @@ void GameClient::Impl::setup() {
     stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
     stewardBody = std::make_unique<SimplePhysicsBody>(
         Vec3(0.0f, float(manifest.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
+    stewardBody->setMaxStepHeight(manifest.stepHeight);
     steward.setPhysics(stewardBody.get(), stewardPhysics.get());
     steward.setFlyMode(false);
     if (runtime.resumed()) {
@@ -610,7 +613,14 @@ void GameClient::Impl::setEmbodied(bool on) {
     auto& input = engine->inputManager();
     panLeft = panRight = panForward = panBack = false;
     grabHeld = 0;
+    stepLag = 0.0f;
     steward.clearInput();
+
+    // On foot the cursor is hidden, but it still has a position. Left alone it wanders over the
+    // panels, and a click meant for the world lands on a button nobody can see.
+    ImGuiIO& io = ImGui::GetIO();
+    if (on) io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    else io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 
     if (on) {
         // Step down at the point the overhead view was looking at
@@ -637,10 +647,19 @@ void GameClient::Impl::updateStewardView(float dt) {
 
     glm::vec2 delta = input.mouseDelta();
     if (delta.x != 0.0f || delta.y != 0.0f) steward.look(delta.x, delta.y);
+    float footing = stewardBody->position().y;
     steward.update(dt);
 
     Vec3 pos = stewardBody->position();
-    Vec3 eye(pos.x, pos.y + steward.eyeHeight(), pos.z);
+
+    // A step up is one frame's move for the body. Bring the eye up after it, so that a ledge
+    // feels like a stair. It can't sink through anything: the body is clear down to its feet.
+    constexpr float STEP_FRAME_RISE = 0.2f;  // More than a jump manages in a frame
+    constexpr float EYE_RISE_RATE = 14.0f;
+    if (pos.y - footing > STEP_FRAME_RISE) stepLag += pos.y - footing;
+    stepLag *= std::exp(-EYE_RISE_RATE * dt);
+
+    Vec3 eye(pos.x, pos.y + steward.eyeHeight() - stepLag, pos.z);
     Vec3 safeOrigin(pos.x, pos.y + 0.9f, pos.z);
     Vec3 adjusted = adjustCameraForWallCollision(safeOrigin, eye, stewardShapes);
     glm::dvec3 cameraPos(adjusted.x, adjusted.y, adjusted.z);
@@ -1008,6 +1027,12 @@ void GameClient::Impl::registerNatives() {
                                                Value::number(pivot.z)});
     });
 
+    e.registerFunction("cam_pos", [this](ExecutionContext&, const Args&) -> Value {
+        glm::dvec3 pos = camera.positionD();
+        return Value::array(std::vector<Value>{Value::number(pos.x), Value::number(pos.y),
+                                               Value::number(pos.z)});
+    });
+
     e.registerFunction("cam_set", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() >= 3) {
             tactical.setDistance(static_cast<float>(number(args[0])));
@@ -1075,6 +1100,47 @@ void GameClient::Impl::registerNatives() {
         if (args.size() < 2) return Value::nil();
         ImGui::GetIO().AddMousePosEvent(float(number(args[0])), float(number(args[1])));
         return Value::nil();
+    });
+
+    // input_key name down, input_button index down x y, input_move dx dy: real events, sent down
+    // the whole listener chain. gui_click goes straight to ImGui, so it can't show who gets what.
+    e.registerFunction("input_key", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        auto& input = engine->inputManager();
+        finevk::InputEvent event;
+        event.type = args[1].truthy() ? finevk::InputEventType::KeyPress
+                                      : finevk::InputEventType::KeyRelease;
+        event.key = InputActionSystem::keyNameToCode(args[0].toString());
+        event.state.mousePosition = input.mousePosition();
+        input.injectEvent(event);
+        return Value::nil();
+    });
+
+    e.registerFunction("input_button", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 4) return Value::nil();
+        finevk::InputEvent event;
+        event.type = args[1].truthy() ? finevk::InputEventType::MouseButtonPress
+                                      : finevk::InputEventType::MouseButtonRelease;
+        event.mouseButton = static_cast<int>(number(args[0]));
+        event.state.mousePosition = glm::vec2(number(args[2]), number(args[3]));
+        engine->inputManager().injectEvent(event);
+        return Value::nil();
+    });
+
+    e.registerFunction("input_move", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        auto& input = engine->inputManager();
+        finevk::InputEvent event;
+        event.type = finevk::InputEventType::MouseMove;
+        event.state.mouseDelta = glm::vec2(number(args[0]), number(args[1]));
+        event.state.mousePosition = input.mousePosition() + event.state.mouseDelta;
+        input.injectEvent(event);
+        return Value::nil();
+    });
+
+    // input_held -> true if the game thinks any movement key is down
+    e.registerFunction("input_held", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(panForward || panBack || panLeft || panRight);
     });
 
     // pick_entities x0 y0 x1 y1 -> ids whose bodies project into the rectangle

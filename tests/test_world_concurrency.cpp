@@ -101,7 +101,7 @@ TEST_F(WorldConcurrencyTest, ASubchunkPointerOutlivesTheSubchunkLeavingTheWorld)
     ASSERT_NE(back, nullptr);
     EXPECT_EQ(back->nonAirCount(), 1);
     EXPECT_EQ(back->getBlock(7, 0, 5), stone);
-    EXPECT_EQ(back->getSkyLight(0, 0, 0), 0);
+    EXPECT_EQ(back->getSkyLight(0, 0, 0), SubChunk::MAX_LIGHT) << "open sky, as a new one starts";
     EXPECT_GT(back->blockVersion(), version) << "a replica must not mistake it for what it had";
 }
 

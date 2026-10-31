@@ -10,6 +10,8 @@
  */
 
 #include "finevox/game/game_runtime.hpp"
+#include "finevox/core/game_session.hpp"
+#include "finevox/core/light_engine.hpp"
 
 #include <chrono>
 #include <iostream>
@@ -77,7 +79,10 @@ int main(int argc, char* argv[]) {
                   << runtime.worldgenSeconds() << "s\n";
 
         auto started = std::chrono::steady_clock::now();
+        // As in the client, where the light thread keeps up with what the game changes
+        runtime.session().lightEngine().start();
         runtime.runTicks(ticks);
+        runtime.session().lightEngine().stop();
         double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 

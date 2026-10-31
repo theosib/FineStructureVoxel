@@ -1402,6 +1402,9 @@ TEST(CrossSubchunkBoundaryTest, MeshBeforeAndAfterLightPropagation) {
         return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
     };
 
+    // This is about block light, and nothing's been done to keep the sky out
+    subchunk->fillSkyLight(0);
+
     // Check light BEFORE onBlockRemoved
     uint8_t lightBeforePropagation = engine.getBlockLight(breakPos);
     std::cout << "Light at (5,5,5) BEFORE onBlockRemoved: " << (int)lightBeforePropagation << "\n";
@@ -1654,4 +1657,31 @@ TEST_F(SkyLightClearingTest, ClearingFoliageRemovesItsShade) {
     }
     settle();
     EXPECT_GE(engine.getSkyLight({8, 21, 8}), 14) << "no canopy, no shade";
+}
+
+TEST_F(SkyLightClearingTest, ASubchunkBroughtBackIsOpenToTheSky) {
+    world.setBlock(3, 40, 3, log);
+    initialise();
+
+    // Felling the only thing up here empties the subchunk, and a later block brings it back
+    world.setBlock(3, 40, 3, BlockTypeId());
+    world.setBlock(3, 41, 3, log);
+
+    EXPECT_EQ(engine.getSkyLight({8, 40, 8}), 15);
+    EXPECT_EQ(engine.getSkyLight({8, 33, 8}), 15);
+}
+
+TEST_F(SkyLightClearingTest, ANewSubchunkAboveTheGroundIsOpenToTheSky) {
+    initialise();
+    world.setBlock(3, 40, 3, log);
+    EXPECT_EQ(engine.getSkyLight({8, 40, 8}), 15);
+}
+
+TEST_F(SkyLightClearingTest, ANewSubchunkUnderARoofStaysDark) {
+    world.setBlock(8, 70, 8, log);
+    initialise();
+
+    world.setBlock(3, 40, 3, log);
+
+    EXPECT_EQ(engine.getSkyLight({8, 40, 8}), 0) << "something's above it, so it isn't open sky";
 }

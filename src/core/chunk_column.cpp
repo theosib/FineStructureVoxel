@@ -100,6 +100,8 @@ SubChunk& ChunkColumn::getOrCreateSubChunk(int32_t chunkY) {
         owners_[slot] = std::make_shared<SubChunk>();
         owners_[slot]->setPosition(toChunkPos(chunkY));
     }
+    // It starts as what a missing subchunk reads as: with nothing above, that's open sky
+    if (!hasContentAbove(chunkY)) owners_[slot]->fillSkyLight(SubChunk::MAX_LIGHT);
     if (chunkY > topChunkY_.load(std::memory_order_relaxed)) {
         topChunkY_.store(chunkY, std::memory_order_relaxed);
     }

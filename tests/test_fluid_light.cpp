@@ -354,6 +354,9 @@ TEST_F(FluidLightTest, SkyLightAttenuatedByWater) {
         world.setFluid(BlockCoord{8, y, 8}, waterId_, FLUID_SOURCE_LEVEL);
     }
 
+    // A subchunk with nothing above starts open to the sky, and light only ever rises here
+    world.getSubChunk(ChunkPos(0, 1, 0))->fillSkyLight(0);
+
     // Now propagate sky light from above — it will attenuate through water
     engine.propagateSkyLight(BlockCoord{8, 20, 8}, 15);
 

@@ -14,6 +14,7 @@
 #include "finevox/worldgen/generation_passes.hpp"
 #include "finevox/worldgen/world_generator.hpp"
 
+#include <finescript/map_data.h>
 #include <finescript/resource_finder.h>
 #include <finescript/script_engine.h>
 
@@ -240,6 +241,20 @@ void GameRuntime::registerNatives() {
                 session_->worldTime().setTime(static_cast<int64_t>(args[0].asNumber() * WorldTime::TICKS_PER_DAY));
             }
             return finescript::Value::nil();
+        });
+
+    // light_at x y z -> {=sky =block}, each 0 to 15
+    scripts_->engine().registerFunction(
+        "light_at", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.size() < 3) return finescript::Value::nil();
+            BlockCoord pos(static_cast<int32_t>(args[0].asNumber()), static_cast<int32_t>(args[1].asNumber()),
+                           static_cast<int32_t>(args[2].asNumber()));
+            auto& interner = StringInterner::global();
+            auto result = finescript::Value::map();
+            auto& map = result.asMap();
+            map.set(interner.intern("sky"), finescript::Value::integer(session_->lightEngine().getSkyLight(pos)));
+            map.set(interner.intern("block"), finescript::Value::integer(session_->lightEngine().getBlockLight(pos)));
+            return result;
         });
 
     registerBlueprintNatives(*this);

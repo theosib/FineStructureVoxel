@@ -316,6 +316,7 @@ void GameClient::Impl::setup() {
     worldRenderer->setTextureProvider(atlas->createProvider());
     worldRenderer->setGeometryProvider(runtime.content().geometryProvider());
     worldRenderer->setFaceOccludesProvider(runtime.content().faceOccludesProvider(world));
+    worldRenderer->setConnectsProvider(runtime.content().connectsProvider(world));
     worldRenderer->initialize();
 
     particleAtlas = std::make_unique<render::ParticleAtlas>();

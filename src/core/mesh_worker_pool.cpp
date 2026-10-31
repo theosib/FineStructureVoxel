@@ -125,12 +125,14 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         BlockLightProvider lightProvider;
         BlockGeometryProvider geometryProvider;
         BlockFaceOccludesProvider faceOccludesProvider;
+        BlockConnectsProvider connectsProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
             textureProvider = textureProvider_;
             lightProvider = lightProvider_;
             geometryProvider = geometryProvider_;
             faceOccludesProvider = faceOccludesProvider_;
+            connectsProvider = connectsProvider_;
         }
 
         // Use default texture provider if none set (returns (0,0,1,1) UVs)
@@ -150,6 +152,9 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         }
         if (geometryProvider) {
             builder.setGeometryProvider(geometryProvider);
+        }
+        if (connectsProvider) {
+            builder.setConnectsProvider(connectsProvider);
         }
         if (faceOccludesProvider) {
             builder.setFaceOccludesProvider(faceOccludesProvider);

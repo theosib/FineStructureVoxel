@@ -266,9 +266,14 @@ void MeshBuilder::buildSimpleMesh(
                         baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
+                    const uint8_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
                         if (!faceGeom.isValid()) {
+                            continue;
+                        }
+                        if (faceGeom.connection >= 0 && !(joined & (1 << faceGeom.connection))) {
                             continue;
                         }
 
@@ -440,9 +445,14 @@ void MeshBuilder::buildGreedyMesh(
                         baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
+                    const uint8_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
                         if (!faceGeom.isValid()) {
+                            continue;
+                        }
+                        if (faceGeom.connection >= 0 && !(joined & (1 << faceGeom.connection))) {
                             continue;
                         }
 
@@ -878,6 +888,31 @@ void MeshBuilder::addFace(
     mesh.indices.push_back(baseVertex + 0);
     mesh.indices.push_back(baseVertex + 2);
     mesh.indices.push_back(baseVertex + 3);
+}
+
+// A diagonal only joins where neither straight neighbour beside it does: three blocks in an L
+// make a corner, not a triangle.
+uint8_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) const {
+    if (!connectsProvider_) return 0;
+
+    static constexpr int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    static constexpr int DZ[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    uint8_t found = 0;
+    for (int i = 0; i < 8; ++i) {
+        if (connectsProvider_(BlockCoord(pos.x + DX[i], pos.y, pos.z + DZ[i]), type)) {
+            found |= static_cast<uint8_t>(1 << i);
+        }
+    }
+
+    uint8_t joined = found & 0b01010101;
+    for (int i = 1; i < 8; i += 2) {
+        const int before = 1 << (i - 1);
+        const int after = 1 << ((i + 1) % 8);
+        if ((found & (1 << i)) && !(found & before) && !(found & after)) {
+            joined |= static_cast<uint8_t>(1 << i);
+        }
+    }
+    return joined;
 }
 
 void MeshBuilder::addCustomFace(

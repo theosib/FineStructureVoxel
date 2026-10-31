@@ -1285,6 +1285,63 @@ TEST_F(CustomGeometryMeshTest, ShippedShapesFaceOutward) {
     EXPECT_EQ(checked, volumes.size());
 }
 
+// Every arrangement of eight neighbours. A post with one face per direction, each at its own
+// height so the mesh says which showed.
+TEST_F(CustomGeometryMeshTest, ConnectionsFollowEveryNeighbourArrangement) {
+    static constexpr int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    static constexpr int DZ[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
+    BlockGeometry geom;
+    FaceGeometry post;
+    post.name = "post";
+    post.vertices = {ModelVertex(glm::vec3(0, 0, 0), glm::vec2(0)), ModelVertex(glm::vec3(1, 0, 0), glm::vec2(0)),
+                     ModelVertex(glm::vec3(1, 0, 1), glm::vec2(0))};
+    geom.addFace(post);
+    for (int i = 0; i < 8; ++i) {
+        const float y = 0.1f * static_cast<float>(i + 1);
+        FaceGeometry arm;
+        arm.name = "arm" + std::to_string(i);
+        arm.connection = i;
+        arm.vertices = {ModelVertex(glm::vec3(0, y, 0), glm::vec2(0)), ModelVertex(glm::vec3(1, y, 0), glm::vec2(0)),
+                        ModelVertex(glm::vec3(1, y, 1), glm::vec2(0))};
+        geom.addFace(arm);
+    }
+    ASSERT_TRUE(geom.hasConnections());
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+
+    BlockTypeId block = BlockTypeId::fromName("test:post");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    ChunkPos pos{0, 0, 0};
+
+    for (int neighbours = 0; neighbours < 256; ++neighbours) {
+        auto present = [neighbours](int dx, int dz) {
+            for (int i = 0; i < 8; ++i) {
+                if (DX[i] == dx && DZ[i] == dz) return (neighbours & (1 << i)) != 0;
+            }
+            return false;
+        };
+        builder.setConnectsProvider([&present](const BlockCoord& at, BlockTypeId) {
+            EXPECT_EQ(at.y, 8);
+            return present(at.x - 8, at.z - 8);
+        });
+
+        MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+
+        bool shown[8] = {};
+        for (const auto& vertex : mesh.vertices) {
+            const int arm = static_cast<int>(std::lround((vertex.position.y - 8.0f) * 10.0f)) - 1;
+            if (arm >= 0) shown[arm] = true;
+        }
+        for (int i = 0; i < 8; ++i) {
+            const bool straight = DX[i] == 0 || DZ[i] == 0;
+            const bool expected = present(DX[i], DZ[i]) &&
+                                  (straight || (!present(DX[i], 0) && !present(0, DZ[i])));
+            EXPECT_EQ(shown[i], expected) << "neighbours " << neighbours << " direction " << i;
+        }
+    }
+}
+
 TEST_F(CustomGeometryMeshTest, WithoutGeometryProviderRendersAsCube) {
     // When no geometry provider is set, blocks should render as cubes
     BlockTypeId customBlock = BlockTypeId::fromName("test:custom_no_provider");

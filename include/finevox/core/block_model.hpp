@@ -56,6 +56,7 @@ struct FaceGeometry {
     std::string name;                    // Face name (e.g., "top", "step_top")
     int faceIndex = -1;                  // 0-5 for standard, 6+ for extra, -1 if unset
     bool isSolid = false;                // Does this face fully occlude neighbor?
+    int connection = -1;                 // Direction it reaches, 0-7 clockwise from north, or -1
 
     FaceGeometry() = default;
 
@@ -110,6 +111,9 @@ public:
     /// Get solid faces as bitmask (bit N set if face N is solid)
     [[nodiscard]] uint8_t solidFacesMask() const;
 
+    /// Has faces that only show when joined to a neighbour, so meshing needs to look around
+    [[nodiscard]] bool hasConnections() const { return hasConnections_; }
+
     /// Compute collision shape from solid faces
     /// Each solid face contributes an AABB covering its extent
     [[nodiscard]] CollisionShape computeCollisionFromFaces() const;
@@ -123,6 +127,7 @@ private:
     std::unordered_map<int, size_t> facesByIndex_;
     AABB bounds_;
     int nextCustomIndex_ = 6;  // Next index for custom faces
+    bool hasConnections_ = false;
 
     void updateBounds(const FaceGeometry& face);
 };
@@ -204,6 +209,9 @@ public:
     /// Explicit opacity override; unset keeps the BlockType default (opaque).
     BlockModel& setOpaque(bool opaque);
 
+    /// Blocks naming the same group join up, showing their connect_* faces
+    BlockModel& setConnects(std::string group);
+
     /// Set sound set name
     BlockModel& setSounds(const std::string& sounds);
 
@@ -264,6 +272,7 @@ public:
 
     [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
+    [[nodiscard]] const std::string& connects() const { return connects_; }
     [[nodiscard]] bool opaque() const { return opaque_; }
 
     /// Get sound set name
@@ -312,6 +321,7 @@ private:
     float walkSpeed_ = 1.0f;
     bool hasOpaqueOverride_ = false;
     bool opaque_ = true;
+    std::string connects_;
     std::string sounds_;
     std::string script_;
     std::string loot_;
@@ -347,6 +357,10 @@ private:
  * @brief Check if a name is a standard face alias
  */
 [[nodiscard]] bool isStandardFaceName(const std::string& name);
+
+/// The direction in a face name of the form connect_<dir>_<anything>, where dir is one of
+/// n ne e se s sw w nw: 0-7 clockwise from north (-Z). -1 for any other name.
+[[nodiscard]] int parseConnection(const std::string& name);
 
 /**
  * @brief Get the canonical name for a face index

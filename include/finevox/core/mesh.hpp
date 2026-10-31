@@ -172,6 +172,9 @@ using BlockGeometryProvider = std::function<const BlockGeometry*(BlockTypeId typ
 // For air/transparent blocks, no faces occlude
 using BlockFaceOccludesProvider = std::function<bool(const BlockCoord& pos, Face face)>;
 
+// Does the block at this position join up with a block of this type?
+using BlockConnectsProvider = std::function<bool(const BlockCoord& pos, BlockTypeId type)>;
+
 // ============================================================================
 // MeshBuilder - Generates mesh data from subchunk blocks
 // ============================================================================
@@ -256,6 +259,9 @@ public:
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) { faceOccludesProvider_ = std::move(provider); }
     void clearFaceOccludesProvider() { faceOccludesProvider_ = nullptr; }
 
+    // Set connects provider, for custom geometry whose connect_* faces follow its neighbours
+    void setConnectsProvider(BlockConnectsProvider provider) { connectsProvider_ = std::move(provider); }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -309,6 +315,7 @@ private:
     BlockLightProvider lightProvider_;  // Optional provider for smooth/flat lighting
     BlockGeometryProvider geometryProvider_;  // Optional provider for custom block geometry
     BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
+    BlockConnectsProvider connectsProvider_;
 
     // Add a single face to the mesh data
     void addFace(
@@ -320,6 +327,9 @@ private:
         const std::array<float, 4>& skyLightValues = {1.0f, 1.0f, 1.0f, 1.0f},
         const std::array<float, 4>& blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f}
     );
+
+    // Which directions a block joins up in: bit N for FaceGeometry::connection N
+    [[nodiscard]] uint8_t connectionMask(const BlockCoord& pos, BlockTypeId type) const;
 
     // Add a custom face from BlockGeometry (for non-cube blocks)
     // Handles arbitrary vertex counts (3-6 vertices per face)

@@ -170,6 +170,10 @@ public:
     /// Callback suitable for WorldRenderer::setGeometryProvider(...)
     [[nodiscard]] std::function<const BlockGeometry*(BlockTypeId)> geometryProvider() const;
 
+    /// Callback suitable for WorldRenderer::setConnectsProvider(...). Holds `world` by reference.
+    [[nodiscard]] std::function<bool(const BlockCoord&, BlockTypeId)> connectsProvider(
+        const World& world) const;
+
     /// Callback suitable for WorldRenderer::setFaceOccludesProvider(...)
     [[nodiscard]] std::function<bool(const BlockCoord&, Face)> faceOccludesProvider(
         const World& world) const;
@@ -219,6 +223,7 @@ private:
 
     std::string defaultNamespace_;
     std::unordered_map<uint32_t, BlockGeometry> blockGeometries_;
+    std::unordered_map<uint32_t, uint32_t> blockConnects_;  ///< Block id to its group's interned name
     std::unordered_map<uint32_t, BlockTextureSet> blockTextures_;
     size_t customGeometryModelCount_ = 0;
     std::vector<ScriptedBlockEntry> scriptedBlocks_;

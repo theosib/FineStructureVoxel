@@ -462,6 +462,36 @@ face:west:
     EXPECT_TRUE(west->isValid());
 }
 
+TEST(BlockModelLoaderTest, ConnectFacesNameTheirDirection) {
+    const std::vector<std::pair<std::string, int>> names = {
+        {"connect_n_side", 0}, {"connect_ne_side", 1}, {"connect_e_top", 2}, {"connect_se_a_b", 3},
+        {"connect_s_x", 4},    {"connect_sw_x", 5},    {"connect_w_x", 6},   {"connect_nw_x", 7},
+        {"connect_up_x", -1},  {"connect_n", -1},      {"connector", -1},    {"top", -1}};
+    for (const auto& [name, direction] : names) {
+        EXPECT_EQ(parseConnection(name), direction) << name;
+    }
+
+    BlockModelLoader loader;
+    auto geom = loader.parseGeometryFromString(R"(
+face:post:
+    0 0 0  0 0
+    1 0 0  1 0
+    1 1 0  1 1
+face:connect_se_arm:
+    0 0 0  0 0
+    1 0 0  1 0
+    1 1 0  1 1
+)");
+    ASSERT_TRUE(geom.has_value());
+    EXPECT_TRUE(geom->hasConnections());
+    EXPECT_EQ(geom->getFace("post")->connection, -1);
+    EXPECT_EQ(geom->getFace("connect_se_arm")->connection, 3);
+
+    auto model = loader.parseModelFromString("connects: fence\n");
+    ASSERT_TRUE(model.has_value());
+    EXPECT_EQ(model->connects(), "fence");
+}
+
 TEST(BlockModelLoaderTest, ParseCustomFaceName) {
     BlockModelLoader loader;
 

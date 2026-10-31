@@ -241,9 +241,14 @@ switching for free.
 
 ### .model additions
 
-`texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `opaque`. With `opaque:
+`texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`. With `opaque:
 false` a block lets sky light through; its `light-attenuation` defaults to 1, so foliage
 casts shade rather than a black hole.
+
+`connects: <group>` makes blocks of a group join up. A geometry face named
+`connect_<dir>_<anything>`, with dir one of `n ne e se s sw w nw`, shows only towards a
+neighbour of the same group at the same height. A diagonal joins only where neither straight
+neighbour beside it does, so three blocks in an L make a corner, not a triangle.
 
 ### .feature additions
 

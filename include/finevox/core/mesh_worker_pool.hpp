@@ -156,6 +156,11 @@ public:
 
     // Set face occludes provider for directional face culling (slabs, stairs, etc.)
     // Thread-safe: can be called while workers are running
+    void setConnectsProvider(BlockConnectsProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        connectsProvider_ = std::move(provider);
+    }
+
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
         std::lock_guard<std::mutex> lock(providerMutex_);
         faceOccludesProvider_ = std::move(provider);
@@ -211,6 +216,7 @@ private:
     // Custom geometry for non-cube blocks
     BlockGeometryProvider geometryProvider_;
     BlockFaceOccludesProvider faceOccludesProvider_;
+    BlockConnectsProvider connectsProvider_;
 
     // Statistics
     Stats stats_;

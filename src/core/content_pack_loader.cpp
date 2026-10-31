@@ -252,6 +252,12 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             }
         }
 
+        if (!model->connects().empty()) {
+            const uint32_t group = StringInterner::global().intern(model->connects());
+            blockConnects_[bareId.id] = group;
+            blockConnects_[qualifiedId.id] = group;
+        }
+
         if (model->hasCustomGeometry()) {
             blockGeometries_[bareId.id] = model->geometry();
             if (qualifiedId != bareId) {
@@ -429,6 +435,16 @@ const BlockGeometry* ContentPackLoader::getGeometry(BlockTypeId type) const {
 std::function<const BlockGeometry*(BlockTypeId)> ContentPackLoader::geometryProvider() const {
     return [this](BlockTypeId type) -> const BlockGeometry* {
         return getGeometry(type);
+    };
+}
+
+std::function<bool(const BlockCoord&, BlockTypeId)> ContentPackLoader::connectsProvider(
+    const World& world) const {
+    return [this, &world](const BlockCoord& pos, BlockTypeId type) -> bool {
+        auto self = blockConnects_.find(type.id);
+        if (self == blockConnects_.end()) return false;
+        auto other = blockConnects_.find(world.getBlock(pos).id);
+        return other != blockConnects_.end() && other->second == self->second;
     };
 }
 

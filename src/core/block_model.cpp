@@ -1,6 +1,8 @@
 #include "finevox/core/block_model.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <string_view>
 
 namespace finevox {
 
@@ -85,6 +87,8 @@ void BlockGeometry::addFace(FaceGeometry face) {
 
     // Update bounds
     updateBounds(faces_[idx]);
+
+    if (faces_[idx].connection >= 0) hasConnections_ = true;
 }
 
 const FaceGeometry* BlockGeometry::getFace(const std::string& name) const {
@@ -280,6 +284,11 @@ BlockModel& BlockModel::setWalkSpeed(float multiplier) {
     return *this;
 }
 
+BlockModel& BlockModel::setConnects(std::string group) {
+    connects_ = std::move(group);
+    return *this;
+}
+
 BlockModel& BlockModel::setOpaque(bool opaque) {
     hasOpaqueOverride_ = true;
     opaque_ = opaque;
@@ -378,6 +387,20 @@ int parseFaceName(const std::string& name) {
     }
 
     // Unknown custom name - return -1 to signal caller should assign new index
+    return -1;
+}
+
+int parseConnection(const std::string& name) {
+    static constexpr std::array<std::string_view, 8> DIRECTIONS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
+    static constexpr std::string_view PREFIX = "connect_";
+    if (name.rfind(PREFIX, 0) != 0) return -1;
+    const size_t start = PREFIX.size();
+    const size_t end = name.find('_', start);
+    if (end == std::string::npos) return -1;
+    const std::string_view direction = std::string_view(name).substr(start, end - start);
+    for (size_t i = 0; i < DIRECTIONS.size(); ++i) {
+        if (DIRECTIONS[i] == direction) return static_cast<int>(i);
+    }
     return -1;
 }
 

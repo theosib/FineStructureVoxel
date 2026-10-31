@@ -183,6 +183,10 @@ void WorldRenderer::initialize() {
         meshWorkerPool_->setGeometryProvider(geometryProvider_);
     }
 
+    if (connectsProvider_) {
+        meshWorkerPool_->setConnectsProvider(connectsProvider_);
+    }
+
     // Copy face occludes provider for directional face culling
     if (faceOccludesProvider_) {
         meshWorkerPool_->setFaceOccludesProvider(faceOccludesProvider_);
@@ -882,6 +886,14 @@ void WorldRenderer::setGeometryProvider(BlockGeometryProvider provider) {
 
     if (meshWorkerPool_) {
         meshWorkerPool_->setGeometryProvider(provider);
+    }
+}
+
+void WorldRenderer::setConnectsProvider(BlockConnectsProvider provider) {
+    connectsProvider_ = provider;
+    meshBuilder_.setConnectsProvider(provider);
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setConnectsProvider(std::move(provider));
     }
 }
 

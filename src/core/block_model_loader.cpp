@@ -377,6 +377,10 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
     if (const ConfigEntry* opaqueEntry = doc.get("opaque")) {
         model.setOpaque(opaqueEntry->value.asBool(true));
     }
+
+    if (const ConfigEntry* connectsEntry = doc.get("connects")) {
+        model.setConnects(connectsEntry->value.asStringOwned());
+    }
 }
 
 std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
@@ -399,6 +403,7 @@ std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
         // Custom face name - assign next available index
         face.faceIndex = nextCustomIndex++;
     }
+    face.connection = parseConnection(entry.suffix);
 
     // Parse vertices from data lines
     for (const auto& dataLine : entry.dataLines) {

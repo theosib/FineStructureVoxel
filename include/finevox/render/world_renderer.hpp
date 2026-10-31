@@ -515,6 +515,9 @@ public:
      */
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider);
 
+    /// Set the connects provider, for blocks that join up with their neighbours
+    void setConnectsProvider(BlockConnectsProvider provider);
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================
@@ -744,6 +747,7 @@ private:
     BlockLightProvider lightProvider_;  // Stored separately for worker pool
     BlockGeometryProvider geometryProvider_;  // For custom mesh blocks
     BlockFaceOccludesProvider faceOccludesProvider_;  // For directional face culling
+    BlockConnectsProvider connectsProvider_;  // For blocks that join up
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

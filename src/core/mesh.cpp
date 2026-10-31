@@ -895,13 +895,14 @@ void MeshBuilder::addCustomFace(
 
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
 
-    // Compute face normal from first 3 vertices (cross product)
+    // Compute face normal from first 3 vertices (cross product). Faces wind like the cube
+    // in FACE_DATA, the winding that survives back-face culling: edge2 x edge1 points out.
     const glm::vec3& v0 = face.vertices[0].position;
     const glm::vec3& v1 = face.vertices[1].position;
     const glm::vec3& v2 = face.vertices[2].position;
     glm::vec3 edge1 = v1 - v0;
     glm::vec3 edge2 = v2 - v0;
-    glm::vec3 normal = glm::normalize(glm::cross(edge1, edge2));
+    glm::vec3 normal = glm::normalize(glm::cross(edge2, edge1));
 
     // Extract UV bounds for atlas wrapping
     float minU = uvBounds.x;

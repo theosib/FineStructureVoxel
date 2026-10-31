@@ -3,7 +3,12 @@
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/block_model.hpp"
+#include "finevox/core/block_model_loader.hpp"
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
 
 using namespace finevox;
 
@@ -1058,7 +1063,8 @@ protected:
         return false;
     };
 
-    // Create a slab geometry (bottom half of a block, y from 0 to 0.5)
+    // Create a slab geometry (bottom half of a block, y from 0 to 0.5), wound like
+    // resources/shapes/slab_faces.geom
     BlockGeometry createSlabGeometry() {
         BlockGeometry geom;
 
@@ -1068,10 +1074,10 @@ protected:
         bottom.faceIndex = 2;  // NegY
         bottom.isSolid = true;
         bottom.vertices = {
-            ModelVertex(glm::vec3(0, 0, 1), glm::vec2(0, 1)),
-            ModelVertex(glm::vec3(0, 0, 0), glm::vec2(0, 0)),
+            ModelVertex(glm::vec3(1, 0, 1), glm::vec2(1, 1)),
             ModelVertex(glm::vec3(1, 0, 0), glm::vec2(1, 0)),
-            ModelVertex(glm::vec3(1, 0, 1), glm::vec2(1, 1))
+            ModelVertex(glm::vec3(0, 0, 0), glm::vec2(0, 0)),
+            ModelVertex(glm::vec3(0, 0, 1), glm::vec2(0, 1))
         };
         geom.addFace(std::move(bottom));
 
@@ -1081,10 +1087,10 @@ protected:
         top.faceIndex = 3;  // PosY
         top.isSolid = false;
         top.vertices = {
-            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(0, 0)),
-            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(1, 0)),
             ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1)),
-            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(1, 0))
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(0, 0))
         };
         geom.addFace(std::move(top));
 
@@ -1093,10 +1099,10 @@ protected:
         west.name = "west";
         west.faceIndex = 0;  // NegX
         west.vertices = {
-            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
-            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1)),
             ModelVertex(glm::vec3(0, 0,    0), glm::vec2(1, 0.5f)),
-            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1))
+            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1))
         };
         geom.addFace(std::move(west));
 
@@ -1105,10 +1111,10 @@ protected:
         east.name = "east";
         east.faceIndex = 1;  // PosX
         east.vertices = {
-            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1)),
-            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1)),
             ModelVertex(glm::vec3(1, 0,    1), glm::vec2(1, 0.5f)),
-            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1))
+            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1))
         };
         geom.addFace(std::move(east));
 
@@ -1117,10 +1123,10 @@ protected:
         north.name = "north";
         north.faceIndex = 4;  // NegZ
         north.vertices = {
-            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1)),
-            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1)),
             ModelVertex(glm::vec3(0, 0,    0), glm::vec2(1, 0.5f)),
-            ModelVertex(glm::vec3(0, 0.5f, 0), glm::vec2(1, 1))
+            ModelVertex(glm::vec3(1, 0,    0), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 0), glm::vec2(0, 1))
         };
         geom.addFace(std::move(north));
 
@@ -1129,10 +1135,10 @@ protected:
         south.name = "south";
         south.faceIndex = 5;  // PosZ
         south.vertices = {
-            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1)),
-            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1)),
             ModelVertex(glm::vec3(1, 0,    1), glm::vec2(1, 0.5f)),
-            ModelVertex(glm::vec3(1, 0.5f, 1), glm::vec2(1, 1))
+            ModelVertex(glm::vec3(0, 0,    1), glm::vec2(0, 0.5f)),
+            ModelVertex(glm::vec3(0, 0.5f, 1), glm::vec2(0, 1))
         };
         geom.addFace(std::move(south));
 
@@ -1207,6 +1213,76 @@ TEST_F(CustomGeometryMeshTest, CustomGeometryProviderIsUsed) {
                 << "Should NOT find top face at y=9 (that would be a full cube)";
         }
     }
+}
+
+// The cube's table is the winding back-face culling keeps, so a custom face with the
+// same vertices in the same order has to light the same way.
+TEST_F(CustomGeometryMeshTest, FacesLightLikeTheCubeFacesTheyCopy) {
+    BlockTypeId block = BlockTypeId::fromName("test:cube_copy");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    ChunkPos pos{0, 0, 0};
+
+    MeshData cube = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(cube.vertexCount(), 24);
+
+    BlockGeometry geom;
+    for (size_t i = 0; i < 6; ++i) {
+        FaceGeometry face;
+        face.name = "copy_" + std::to_string(i);
+        for (size_t v = 0; v < 4; ++v) {
+            const ChunkVertex& vertex = cube.vertices[i * 4 + v];
+            face.vertices.push_back(ModelVertex(vertex.position - glm::vec3(8.0f), glm::vec2(0.0f)));
+        }
+        geom.addFace(std::move(face));
+    }
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+
+    MeshData custom = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+    ASSERT_EQ(custom.vertexCount(), 24);
+    for (size_t i = 0; i < 24; ++i) {
+        EXPECT_EQ(custom.vertices[i].normal, cube.vertices[i].normal) << "vertex " << i;
+    }
+}
+
+// Every shipped shape, as a game would load it. By the divergence theorem a closed shape's
+// faces sum to its volume only if every normal points out, so one flipped face shows.
+TEST_F(CustomGeometryMeshTest, ShippedShapesFaceOutward) {
+    const auto shapes = std::filesystem::path(__FILE__).parent_path().parent_path() / "resources" / "shapes";
+    const std::unordered_map<std::string, float> volumes = {
+        {"solid_cube", 1.0f}, {"slab_faces", 0.5f}, {"stairs_faces", 0.75f}, {"wedge_faces", 0.5f}};
+    BlockTypeId block = BlockTypeId::fromName("test:shipped_shape");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+    ChunkPos pos{0, 0, 0};
+
+    size_t checked = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(shapes)) {
+        if (entry.path().extension() != ".geom") continue;
+        const std::string name = entry.path().stem().string();
+        ASSERT_TRUE(volumes.contains(name)) << name << " needs a volume here";
+
+        std::ifstream in(entry.path());
+        std::stringstream text;
+        text << in.rdbuf();
+        BlockModelLoader loader;
+        auto geom = loader.parseGeometryFromString(text.str());
+        ASSERT_TRUE(geom.has_value()) << name << ": " << loader.lastError();
+        builder.setGeometryProvider([&geom](BlockTypeId) { return &*geom; });
+
+        MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
+        float volume = 0.0f;
+        for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+            const ChunkVertex& a = mesh.vertices[mesh.indices[i]];
+            const ChunkVertex& b = mesh.vertices[mesh.indices[i + 1]];
+            const ChunkVertex& c = mesh.vertices[mesh.indices[i + 2]];
+            float area = glm::length(glm::cross(b.position - a.position, c.position - a.position)) / 2.0f;
+            volume += area * glm::dot(a.normal, a.position) / 3.0f;
+        }
+        EXPECT_NEAR(volume, volumes.at(name), 0.001f) << name;
+        ++checked;
+    }
+    EXPECT_EQ(checked, volumes.size());
 }
 
 TEST_F(CustomGeometryMeshTest, WithoutGeometryProviderRendersAsCube) {

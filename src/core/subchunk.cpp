@@ -640,7 +640,8 @@ bool SubChunk::hasFluidLayer() const {
 }
 
 bool SubChunk::hasFluid() const {
-    return fluid() != nullptr && !fluid()->isEmpty();
+    const FluidLayer* layer = fluid();
+    return layer != nullptr && !layer->isEmpty();
 }
 
 void SubChunk::removeFluidLayer() {
@@ -655,8 +656,9 @@ FluidTypeId SubChunk::getFluid(int32_t x, int32_t y, int32_t z) const {
 }
 
 FluidTypeId SubChunk::getFluid(int32_t index) const {
-    if (!fluid() || index < 0 || index >= VOLUME) return EMPTY_FLUID_TYPE;
-    return fluid()->getFluidType(index);
+    const FluidLayer* layer = fluid();
+    if (!layer || index < 0 || index >= VOLUME) return EMPTY_FLUID_TYPE;
+    return layer->getFluidType(index);
 }
 
 uint8_t SubChunk::getFluidLevel(int32_t x, int32_t y, int32_t z) const {
@@ -664,8 +666,9 @@ uint8_t SubChunk::getFluidLevel(int32_t x, int32_t y, int32_t z) const {
 }
 
 uint8_t SubChunk::getFluidLevel(int32_t index) const {
-    if (!fluid() || index < 0 || index >= VOLUME) return 0;
-    return fluid()->getLevel(index);
+    const FluidLayer* layer = fluid();
+    if (!layer || index < 0 || index >= VOLUME) return 0;
+    return layer->getLevel(index);
 }
 
 bool SubChunk::hasFluid(int32_t x, int32_t y, int32_t z) const {
@@ -673,8 +676,9 @@ bool SubChunk::hasFluid(int32_t x, int32_t y, int32_t z) const {
 }
 
 bool SubChunk::hasFluid(int32_t index) const {
-    if (!fluid() || index < 0 || index >= VOLUME) return false;
-    return fluid()->hasFluid(index);
+    const FluidLayer* layer = fluid();
+    if (!layer || index < 0 || index >= VOLUME) return false;
+    return layer->hasFluid(index);
 }
 
 bool SubChunk::setFluid(int32_t x, int32_t y, int32_t z, FluidTypeId type, uint8_t level) {
@@ -703,8 +707,8 @@ bool SubChunk::removeFluid(int32_t index) {
 }
 
 uint64_t SubChunk::fluidVersion() const {
-    if (!fluid()) return 0;
-    return fluid()->version();
+    const FluidLayer* layer = fluid();
+    return layer ? layer->version() : 0;
 }
 
 }  // namespace finevox

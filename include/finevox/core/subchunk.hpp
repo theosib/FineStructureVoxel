@@ -444,6 +444,7 @@ private:
     // pointer with no lock. Removing the layer unpublishes it and reuse publishes it again.
     std::unique_ptr<FluidLayer> fluidLayer_;
     std::atomic<FluidLayer*> publishedFluidLayer_{nullptr};
+    // Readers call this once and keep the result: a second look can find the layer gone
     [[nodiscard]] FluidLayer* fluid() const { return publishedFluidLayer_.load(std::memory_order_acquire); }
 
     // Game tick registry: local indices of blocks that want game ticks

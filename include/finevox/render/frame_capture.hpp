@@ -97,6 +97,18 @@ public:
                                     VkImageLayout layout =
                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
+    /// Read back a region, shrink it so that neither side exceeds `maxSide` (0 keeps it as it
+    /// is), and encode it as a JPEG in memory. `quality` is 1..100.
+    static bool captureJPEG(finevk::Image& image,
+                             finevk::StagingPool& pool,
+                             const CaptureRect& rect,
+                             uint32_t maxSide,
+                             int quality,
+                             std::vector<uint8_t>& out,
+                             uint32_t& outWidth, uint32_t& outHeight,
+                             VkImageLayout layout =
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
     /// Read back pixels into `out` without writing to disk.  Handles BGRA →
     /// RGBA swizzle so callers always receive RGBA8.  `outWidth`/`outHeight`
     /// receive the final dimensions.  Returns false on failure.

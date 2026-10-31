@@ -166,6 +166,71 @@ bool FrameCapture::captureImageRegion(finevk::Image& image,
     return savePNG(path, w, h, rgba);
 }
 
+namespace {
+
+/// Each output pixel averages the source pixels it covers, so that shrinking a lot doesn't
+/// shimmer the way dropping pixels does
+void shrinkRGBA(const std::vector<uint8_t>& in, uint32_t w, uint32_t h, uint32_t outW, uint32_t outH,
+                std::vector<uint8_t>& out)
+{
+    out.resize(size_t(outW) * outH * 4);
+    for (uint32_t y = 0; y < outH; ++y) {
+        uint32_t y0 = uint64_t(y) * h / outH;
+        uint32_t y1 = std::max(y0 + 1, uint32_t(uint64_t(y + 1) * h / outH));
+        for (uint32_t x = 0; x < outW; ++x) {
+            uint32_t x0 = uint64_t(x) * w / outW;
+            uint32_t x1 = std::max(x0 + 1, uint32_t(uint64_t(x + 1) * w / outW));
+            uint32_t sum[4] = {0, 0, 0, 0};
+            for (uint32_t sy = y0; sy < y1; ++sy) {
+                for (uint32_t sx = x0; sx < x1; ++sx) {
+                    const uint8_t* pixel = &in[(size_t(sy) * w + sx) * 4];
+                    for (int c = 0; c < 4; ++c) sum[c] += pixel[c];
+                }
+            }
+            uint32_t count = (y1 - y0) * (x1 - x0);
+            uint8_t* target = &out[(size_t(y) * outW + x) * 4];
+            for (int c = 0; c < 4; ++c) target[c] = static_cast<uint8_t>(sum[c] / count);
+        }
+    }
+}
+
+void appendBytes(void* context, void* data, int size) {
+    auto* out = static_cast<std::vector<uint8_t>*>(context);
+    auto* bytes = static_cast<uint8_t*>(data);
+    out->insert(out->end(), bytes, bytes + size);
+}
+
+}  // namespace
+
+bool FrameCapture::captureJPEG(finevk::Image& image,
+                                finevk::StagingPool& pool,
+                                const CaptureRect& rect,
+                                uint32_t maxSide,
+                                int quality,
+                                std::vector<uint8_t>& out,
+                                uint32_t& outWidth, uint32_t& outHeight,
+                                VkImageLayout layout)
+{
+    std::vector<uint8_t> rgba;
+    uint32_t w = 0, h = 0;
+    if (!readbackRGBA(image, pool, rect, rgba, w, h, layout)) return false;
+
+    outWidth = w;
+    outHeight = h;
+    std::vector<uint8_t> small;
+    uint32_t longest = std::max(w, h);
+    if (maxSide > 0 && longest > maxSide) {
+        outWidth = std::max(1u, uint32_t(uint64_t(w) * maxSide / longest));
+        outHeight = std::max(1u, uint32_t(uint64_t(h) * maxSide / longest));
+        shrinkRGBA(rgba, w, h, outWidth, outHeight, small);
+    }
+
+    out.clear();
+    const std::vector<uint8_t>& pixels = small.empty() ? rgba : small;
+    return stbi_write_jpg_to_func(appendBytes, &out, static_cast<int>(outWidth),
+                                  static_cast<int>(outHeight), 4, pixels.data(), quality) != 0;
+}
+
 // =============================================================================
 // OffscreenSurface& convenience overloads (forward to Image& primary API)
 // =============================================================================

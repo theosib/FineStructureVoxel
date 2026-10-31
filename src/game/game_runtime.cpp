@@ -8,6 +8,7 @@
 #include "finevox/core/resource_locator.hpp"
 #include "finevox/core/world_time.hpp"
 #include "finevox/core/world.hpp"
+#include "finevox/game/mcp_tools.hpp"
 #include "finevox/worldgen/biome_loader.hpp"
 #include "finevox/worldgen/biome_map.hpp"
 #include "finevox/worldgen/feature_loader.hpp"
@@ -21,6 +22,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace finevox::game {
@@ -71,6 +73,35 @@ private:
 };
 
 // Runs as a subsystem so work claims expire on game time
+/// Times the tick for `status`. These two only exist when there's a server to tell.
+class McpTickStart : public GameSubsystem {
+public:
+    explicit McpTickStart(McpServer& server) : server_(server) {}
+    [[nodiscard]] std::string_view name() const override { return "McpTickStart"; }
+    [[nodiscard]] TickPhase phase() const override { return TickPhase::PreTick; }
+    [[nodiscard]] int32_t priority() const override { return std::numeric_limits<int32_t>::min(); }
+    void tick(float) override { server_.noteTickStart(); }
+
+private:
+    McpServer& server_;
+};
+
+/// Last in the tick, so that a tool sees everything the tick did and nothing half done
+class McpTickEnd : public GameSubsystem {
+public:
+    explicit McpTickEnd(McpServer& server) : server_(server) {}
+    [[nodiscard]] std::string_view name() const override { return "McpTickEnd"; }
+    [[nodiscard]] TickPhase phase() const override { return TickPhase::LateTick; }
+    [[nodiscard]] int32_t priority() const override { return std::numeric_limits<int32_t>::max(); }
+    void tick(float) override {
+        server_.noteTickEnd();
+        server_.pump(McpSide::Game);
+    }
+
+private:
+    McpServer& server_;
+};
+
 class WorkClaimClock : public GameSubsystem {
 public:
     explicit WorkClaimClock(WorkClaimRegistry& claims) : claims_(claims) {}
@@ -210,6 +241,16 @@ void GameRuntime::load() {
     // Don't open on a blank map: show what the starting units can see
     vision_->refresh(manifest_.viewerFaction);
     replica_->syncAll();
+
+    if (options_.mcpPort) startMcp();
+}
+
+void GameRuntime::startMcp() {
+    mcp_ = std::make_unique<McpServer>(*options_.mcpPort, options_.mcpPlayerOnly);
+    mcp_->captureOutput();
+    addServerMcpTools(*mcp_, *this);
+    session_->addSubsystem(std::make_shared<McpTickStart>(*mcp_));
+    session_->addSubsystem(std::make_shared<McpTickEnd>(*mcp_));
 }
 
 void GameRuntime::registerNatives() {
@@ -326,10 +367,21 @@ void GameRuntime::startThreads() {
     session_->lightEngine().start();
     session_->startGameThread();
     threadsRunning_ = true;
+
+    // Last, so that the game is running by the time anyone can call a tool
+    if (mcp_) {
+        std::string error;
+        if (mcp_->start(error)) {
+            std::cerr << "[mcp] listening on http://127.0.0.1:" << mcp_->port() << "/mcp\n";
+        } else {
+            std::cerr << "[mcp] " << error << ": running without it\n";
+        }
+    }
 }
 
 void GameRuntime::stopThreads() {
     if (!threadsRunning_) return;
+    if (mcp_) mcp_->stop();
     session_->stopGameThread();
     session_->lightEngine().stop();
     threadsRunning_ = false;

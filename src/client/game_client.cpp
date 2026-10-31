@@ -14,6 +14,7 @@
 #include "finevox/core/tactical_camera.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/world_time.hpp"
+#include "finevox/game/mcp_tools.hpp"
 #include "finevox/render/block_atlas.hpp"
 #include "finevox/render/engine.hpp"
 #include "finevox/render/entity_renderer.hpp"
@@ -208,12 +209,14 @@ struct GameClient::Impl {
     uint64_t frameCount = 0;
     bool screenshotRequested = false;
     std::string screenshotPath;
+    game::McpServer* mcp = nullptr;  // Null unless this run asked for one
     int fps = 0;
     int framesThisSecond = 0;
     float fpsTimer = 0.0f;
 
     void setup();
     void registerNatives();
+    void registerMcpTools();
     void loadUiScript();
     void fireUi(uint32_t symbol);
     void bindInput();
@@ -401,6 +404,7 @@ void GameClient::Impl::setup() {
     }
 
     registerNatives();
+    registerMcpTools();
     bindInput();
     uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
     uiCtx->set("resumed", Value::boolean(runtime.resumed()));
@@ -413,6 +417,7 @@ void GameClient::Impl::setup() {
     guiLayer->renderFn = [this](const RenderContext& ctx) {
         gui->beginFrame();
         fireUi(symFrame);
+        if (mcp) mcp->pump(game::McpSide::Frame);
         guiManager->processPendingMessages();
         mapRenderer->renderAll();
         gui->endFrame();
@@ -484,6 +489,10 @@ void GameClient::Impl::setup() {
     };
     callbacks.onPostRender = [this]() {
         ++frameCount;
+        if (mcp) {
+            mcp->noteFrame();
+            mcp->pump(game::McpSide::AfterFrame);
+        }
         if (!options.screenshotPath.empty() && options.screenshotFrame > 0) {
             int64_t since = static_cast<int64_t>(frameCount) - options.screenshotFrame;
             if (since == 0) {
@@ -1290,6 +1299,155 @@ void GameClient::Impl::registerNatives() {
         engine->requestStop();
         return Value::nil();
     });
+}
+
+void GameClient::Impl::registerMcpTools() {
+    mcp = runtime.mcp();
+    if (!mcp) return;
+    using nlohmann::json;
+    using game::McpResult;
+    using game::McpSide;
+    using game::McpTool;
+
+    McpTool state;
+    state.name = "client_state";
+    state.description =
+        "What the client is doing: its view, camera, window size, frame rate and what it's "
+        "drawing. In tactical view the cursor is at `mouse`; on foot it's the crosshair.";
+    state.inputSchema = {{"type", "object"}, {"properties", json::object()}};
+    state.side = McpSide::Frame;
+    state.player = true;
+    state.run = [this](const json&) {
+        glm::dvec3 eye = camera.positionD();
+        glm::dvec3 pivot = tactical.pivot();
+        Vec3 body = stewardBody->position();
+        return McpResult::value(
+            {{"embodied", embodied},
+             {"camera", {eye.x, eye.y, eye.z}},
+             {"pivot", {pivot.x, pivot.y, pivot.z}},
+             {"yaw", tactical.yaw()},
+             {"pitch", tactical.pitch()},
+             {"distance", tactical.distance()},
+             {"player_body", {body.x, body.y, body.z}},
+             {"viewport", {viewport.x, viewport.y}},
+             {"mouse", {mouse.x, mouse.y}},
+             {"fps", fps},
+             {"frame", frameCount},
+             {"chunks_drawn", worldRenderer->renderedChunkCount()},
+             {"triangles", worldRenderer->renderedTriangleCount()},
+             {"entities", entityRenderer.entityCount()}});
+    };
+    mcp->addTool(std::move(state));
+
+    McpTool eval;
+    eval.name = "client_eval";
+    eval.description =
+        "Run finescript on the render thread, with the UI script's globals and natives, where "
+        "its :frame handlers run. Drives the game as a player would: gui_click, input_key, "
+        "input_button, input_move, do_action, cam_focus, cam_set. Calls need braces.";
+    eval.inputSchema = game::mcpEvalSchema();
+    eval.side = McpSide::Frame;
+    eval.run = [this](const json& args) { return game::mcpEval(args, *uiEngine, *uiCtx); };
+    mcp->addTool(std::move(eval));
+
+    McpTool entities;
+    entities.name = "client_entities";
+    entities.description =
+        "Entities this client can see, so fog of war hides what it should. Compare with "
+        "server_entities. Positions are as last received. Filter with type, faction, near "
+        "and radius.";
+    entities.inputSchema = game::mcpEntityFilterSchema();
+    entities.side = McpSide::Frame;
+    entities.player = true;
+    entities.run = [this](const json& args) {
+        size_t limit = static_cast<size_t>(std::max(0, args.value("limit", 100)));
+        json out = json::array();
+        size_t matched = 0;
+        for (const auto& [id, view] : entityRenderer.entities()) {
+            if (!isCurrent(view)) continue;
+            const glm::dvec3& pos = view.currentPosition;
+            std::string type(view.typeId.name());
+            if (!game::mcpEntityMatches(args, type, view.faction, pos.x, pos.y, pos.z)) continue;
+            if (++matched > limit) continue;
+            out.push_back({{"id", id},
+                           {"type", type},
+                           {"faction", view.faction},
+                           {"position", {pos.x, pos.y, pos.z}},
+                           {"you", id == stewardId}});
+        }
+        return McpResult::value({{"entities", std::move(out)}, {"matched", matched}});
+    };
+    mcp->addTool(std::move(entities));
+
+    McpTool blocks;
+    blocks.name = "client_blocks";
+    blocks.description =
+        "A region of the world as this client knows it, as server_blocks shows the real one: "
+        "unexplored cells are air, and it can lag the server by a second. Limit 32768 cells.";
+    blocks.inputSchema = game::mcpBlocksSchema();
+    blocks.side = McpSide::Frame;
+    blocks.player = true;
+    blocks.run = [this](const json& args) { return game::mcpBlocks(args, runtime.replica().world()); };
+    mcp->addTool(std::move(blocks));
+
+    McpTool command;
+    command.name = "client_command";
+    command.description =
+        "Send a game command, exactly as the UI's send_command does. This is how a player acts: "
+        "the game's commands are whatever its `on :command` handler takes.";
+    command.inputSchema = game::mcpCommandSchema();
+    command.side = McpSide::Frame;
+    command.player = true;
+    command.run = [this](const json& args) {
+        // Through CBOR so the game thread gets its own copy and nothing is shared
+        auto bytes = finescript::cborEncode(game::mcpCommandValue(args, *uiEngine), interner);
+        runtime.session().actions().sendGameCommand(finescript::cborDecode(bytes, interner));
+        return McpResult::text("sent; the game thread takes it up between ticks");
+    };
+    mcp->addTool(std::move(command));
+
+    McpTool screenshot;
+    screenshot.name = "client_screenshot";
+    screenshot.description =
+        "The window as it looks now. A JPEG, 800 pixels on its longest side unless you ask "
+        "otherwise. `region` picks out part of it, in framebuffer pixels: viewport times the "
+        "display's scale, so 2x on a Retina screen. Images stay in the conversation and are "
+        "sent again with every request, so ask for no more than you need.";
+    screenshot.inputSchema = {
+        {"type", "object"},
+        {"properties",
+         {{"max_size", {{"type", "integer"}, {"description", "Longest side in pixels (default 800)"}}},
+          {"quality", {{"type", "integer"}, {"description", "JPEG quality, 1 to 100 (default 80)"}}},
+          {"region", {{"type", "array"}, {"description", "[x, y, width, height] in framebuffer pixels"}}}}}};
+    screenshot.side = McpSide::AfterFrame;
+    screenshot.player = true;
+    screenshot.run = [this](const json& args) {
+        finevk::SwapChain* swapChain = engine->renderer().swapChain();
+        if (!swapChain) return McpResult::error("no swap chain");
+
+        render::CaptureRect rect;
+        if (args.contains("region")) {
+            const json& region = args["region"];
+            if (region.size() != 4) return McpResult::error("region must be [x, y, width, height]");
+            rect = {region[0].get<uint32_t>(), region[1].get<uint32_t>(), region[2].get<uint32_t>(),
+                    region[3].get<uint32_t>()};
+        }
+        std::vector<uint8_t> bytes;
+        uint32_t width = 0, height = 0;
+        bool ok = render::FrameCapture::captureJPEG(
+            swapChain->image(engine->window().currentImageIndex()), *stagingPool, rect,
+            static_cast<uint32_t>(std::max(0, args.value("max_size", 800))),
+            std::clamp(args.value("quality", 80), 1, 100), bytes, width, height,
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        if (!ok) return McpResult::error("capture failed: is the region inside the window?");
+
+        McpResult result = McpResult::image(bytes, "image/jpeg");
+        result.content.push_back({{"type", "text"},
+                                  {"text", std::to_string(width) + "x" + std::to_string(height) + ", " +
+                                               std::to_string(bytes.size()) + " bytes"}});
+        return result;
+    };
+    mcp->addTool(std::move(screenshot));
 }
 
 void GameClient::Impl::loadUiScript() {

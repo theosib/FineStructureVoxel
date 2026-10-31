@@ -287,6 +287,71 @@ ticks, on the game thread during play.
 
 `new_game` from the UI script saves and restarts the process with `--new`.
 
+## MCP server
+
+`--mcp` (or `--mcp-port N`) serves the running game over Model Context Protocol, for debugging
+and for LLMs. `finevox_headless --mcp` plays in real time until `game_exit`, and ignores
+`--ticks`.
+
+```text
+client  --stdio-->  tools/mcp_bridge.py  --HTTP-->  game, on 127.0.0.1:7801/mcp
+```
+
+The bridge exists because a client doesn't retry a server that failed when it connected, so a
+server only inside the game would be missing from any session that began first. The bridge
+always connects, and with no game a tool call is an ordinary tool error. It remembers the last
+tool list in `~/.cache/finevox`, and sends `tools/list_changed` when a game offers a different
+one. It uses the standard library alone, so there's no venv.
+
+**One endpoint, tools by side.** Client and server share a process, so they share a port, and
+each registers its own tools: `server_*` in `addServerMcpTools`, `client_*` in
+`GameClient::Impl::registerMcpTools`. A headless process has server tools alone, so if the two
+split into separate processes each will offer its own without changing a tool.
+
+| Tool | Runs on | Player | |
+|------|---------|--------|---|
+| `status` | HTTP thread | yes | Tick and frame counts and ages, so a hang shows as a growing age |
+| `logs` | HTTP thread | | stdout and stderr, the last 5000 lines |
+| `wait` | HTTP thread | yes | Until N more ticks or frames |
+| `server_state`, `server_eval`, `server_entities`, `server_blocks`, `server_command` | Game thread, last in the tick | | The real simulation |
+| `client_state`, `client_entities`, `client_blocks`, `client_command` | Render thread, after UI scripts | yes | What the player knows: fog of war applies |
+| `client_eval` | The same | | UI script globals and natives. Input goes through this: `input_key`, `gui_click`, `do_action` |
+| `client_screenshot` | Render thread, after the frame | yes | A JPEG, 800 pixels unless asked |
+
+`--mcp-player` offers only the tools marked Player, for an LLM to play with. The others are
+refused as well as unlisted.
+
+**Threads.** The HTTP thread queues a call for the thread that owns its data, and that thread runs
+it at a safe point, so a tool reads what its thread may read, with no locks. A thread that doesn't
+arrive in 10 seconds gives a tool error with `status` in it. `McpSide::Any` tools answer even when
+the game has hung, so they may touch only atomics. A running tool can't be interrupted: a script
+in `*_eval` that never returns holds that thread. A game behind time runs up to 10 ticks in a row
+before it reads commands, so a command can land several ticks after it's sent.
+
+**Adding a tool.** Fill in an `McpTool` and pick its `side`. Arguments are checked against
+`inputSchema` first, and an unknown one is refused, so a misspelt option can't quietly answer a
+different question. `player = true` promises it shows nothing a player couldn't see.
+
+**Runtime, not compile time.** Off, the game thread has nothing extra to do: the tick hooks are
+subsystems that only exist when there's a server. A frame has two pointer checks. There's no
+socket and no thread, and output capture only starts with the server. Measured on 2400 Keystone
+ticks, five interleaved runs each:
+
+| | Median ms/tick | Range |
+|---|---|---|
+| Off | 1.38 | 1.33-1.98 |
+| On, idle | 1.43 | 1.30-1.60 |
+| On, about 100 calls a second | 1.37 | 1.32-1.64 |
+
+That's noise, and a compile-time switch would buy nothing for its `#ifdef`s. A tool costs the
+wait for its safe point: 28ms for the game thread and 12ms for the render thread. Screenshots,
+the only tool with real work in it, took 16ms at 800 pixels and 29ms at full size, including that
+wait, and five a second held 60 fps.
+
+Only 127.0.0.1 is served, and a request with a non-local `Origin` is refused, because a web page
+could otherwise post scripts to it. Nothing else guards it: anything already running as you can
+use `*_eval`, so it stays off unless asked for.
+
 ## Testing a Game
 
 ```

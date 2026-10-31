@@ -4,10 +4,12 @@
  *
  *   finevox_run --game-root DIR [--seed S] [--radius R] [--script FILE]
  *               [--screenshot PATH --screenshot-frame N] [--exit-after N]
+ *               [--mcp] [--mcp-port N] [--mcp-player]
  */
 
 #include "finevox/client/game_client.hpp"
 #include "finevox/game/game_runtime.hpp"
+#include "finevox/game/mcp_server.hpp"
 
 #include <finevk/core/logging.hpp>
 
@@ -57,6 +59,13 @@ int main(int argc, char* argv[]) {
             runtimeOptions.newGame = true;
         } else if (arg == "--no-save") {
             runtimeOptions.noSaves = true;
+        } else if (arg == "--mcp") {
+            if (!runtimeOptions.mcpPort) runtimeOptions.mcpPort = game::MCP_DEFAULT_PORT;
+        } else if (arg == "--mcp-port") {
+            runtimeOptions.mcpPort = std::stoi(value());
+        } else if (arg == "--mcp-player") {
+            if (!runtimeOptions.mcpPort) runtimeOptions.mcpPort = game::MCP_DEFAULT_PORT;
+            runtimeOptions.mcpPlayerOnly = true;
         } else if (arg == "--screenshot") {
             clientOptions.screenshotPath = value();
         } else if (arg == "--screenshot-frame") {

@@ -25,6 +25,7 @@
 
 #include <finescript/resource_finder.h>
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -35,6 +36,8 @@
 #include <vector>
 
 namespace finevox::game {
+
+class McpServer;
 
 struct RuntimeOptions {
     std::filesystem::path gameRoot;
@@ -50,6 +53,10 @@ struct RuntimeOptions {
     bool newGame = false;
     /// Neither read nor write saves: for automation, which must not touch the player's game
     bool noSaves = false;
+    /// Serve MCP on this port (see mcp_server.hpp). Unset, the game has no server at all.
+    std::optional<int> mcpPort;
+    /// Offer only the tools a player could fairly use, for an LLM to play with
+    bool mcpPlayerOnly = false;
 };
 
 /// What the client wants back on resuming: the world says nothing about where it was looking
@@ -104,6 +111,8 @@ public:
     [[nodiscard]] FactionVision& vision() { return *vision_; }
     [[nodiscard]] ProjectileSystem& projectiles() { return *projectiles_; }
     [[nodiscard]] WorldReplica& replica() { return *replica_; }
+    /// Null unless this run asked for one
+    [[nodiscard]] McpServer* mcp() { return mcp_.get(); }
 
     /// Sites under construction, by the id scripts hold
     [[nodiscard]] std::unordered_map<int64_t, worldgen::BlueprintSite>& sites() { return sites_; }
@@ -134,6 +143,8 @@ private:
     [[nodiscard]] finescript::Value saveSites();
     void loadSites(const finescript::Value& saved, int64_t nextId);
 
+    void startMcp();
+
     RuntimeOptions options_;
     GameManifest manifest_;
     std::unique_ptr<ContentPackLoader> content_;
@@ -145,6 +156,7 @@ private:
     std::shared_ptr<FactionVision> vision_;
     std::shared_ptr<ProjectileSystem> projectiles_;
     std::shared_ptr<WorldReplica> replica_;
+    std::unique_ptr<McpServer> mcp_;
     WorkClaimRegistry workClaims_;
     worldgen::BlueprintLibrary blueprints_;
     std::unordered_map<int64_t, worldgen::BlueprintSite> sites_;
@@ -156,7 +168,7 @@ private:
     int64_t nextSiteId_ = 1;
     Queue<std::vector<uint8_t>> uiOutbox_;
     bool threadsRunning_ = false;
-    bool exitRequested_ = false;
+    std::atomic<bool> exitRequested_{false};
     int exitCode_ = 0;
     double worldgenSeconds_ = 0.0;
 };

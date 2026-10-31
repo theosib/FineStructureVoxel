@@ -4,18 +4,23 @@
  *
  *   finevox_headless --game-root DIR [--ticks N] [--seed S] [--radius R]
  *                    [--script FILE]... [--define NAME=VALUE]... [--save DIR | --resume DIR]
+ *                    [--mcp] [--mcp-port N] [--mcp-player]
  *
  * Exits with the script's `game_exit` code. Any game script error makes the
  * exit code nonzero, so a broken handler can't pass silently.
+ *
+ * With --mcp it plays in real time, ignoring --ticks, until something calls `game_exit`.
  */
 
 #include "finevox/game/game_runtime.hpp"
+#include "finevox/game/mcp_server.hpp"
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/light_engine.hpp"
 
 #include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 
 using namespace finevox::game;
 
@@ -49,6 +54,13 @@ int main(int argc, char* argv[]) {
             options.radiusOverride = std::stoi(value());
         } else if (arg == "--script") {
             options.extraScripts.emplace_back(value());
+        } else if (arg == "--mcp") {
+            if (!options.mcpPort) options.mcpPort = MCP_DEFAULT_PORT;
+        } else if (arg == "--mcp-port") {
+            options.mcpPort = std::stoi(value());
+        } else if (arg == "--mcp-player") {
+            if (!options.mcpPort) options.mcpPort = MCP_DEFAULT_PORT;
+            options.mcpPlayerOnly = true;
         } else if (arg == "--define") {
             std::string define = value();
             auto eq = define.find('=');
@@ -79,10 +91,18 @@ int main(int argc, char* argv[]) {
                   << runtime.worldgenSeconds() << "s\n";
 
         auto started = std::chrono::steady_clock::now();
-        // As in the client, where the light thread keeps up with what the game changes
-        runtime.session().lightEngine().start();
-        runtime.runTicks(ticks);
-        runtime.session().lightEngine().stop();
+        if (runtime.mcp()) {
+            runtime.startThreads();
+            while (!runtime.exitRequested()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            runtime.stopThreads();
+        } else {
+            // As in the client, where the light thread keeps up with what the game changes
+            runtime.session().lightEngine().start();
+            runtime.runTicks(ticks);
+            runtime.session().lightEngine().stop();
+        }
         double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 

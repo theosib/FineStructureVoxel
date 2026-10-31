@@ -31,6 +31,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+# JSON for the MCP server. Header-only.
+FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # ============================================================================
 # Core library (namespace: finevox)
 # ============================================================================
@@ -281,6 +290,8 @@ if(TARGET finevox_script)
         src/game/game_save.cpp
         src/game/blueprint_natives.cpp
         src/game/conflict_natives.cpp
+        src/game/mcp_server.cpp
+        src/game/mcp_tools.cpp
     )
 
     target_include_directories(finevox_game PUBLIC
@@ -293,7 +304,8 @@ if(TARGET finevox_script)
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
     )
 
-    target_link_libraries(finevox_game PUBLIC finevox finevox_worldgen finevox_script)
+    target_link_libraries(finevox_game PUBLIC finevox finevox_worldgen finevox_script
+                          nlohmann_json::nlohmann_json)
 
     add_executable(finevox_headless apps/finevox_headless.cpp)
     target_link_libraries(finevox_headless PRIVATE finevox_game)
@@ -703,6 +715,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_entity_script_wiring.cpp
             tests/test_player_stats_bridge.cpp
             tests/test_game_runtime.cpp
+            tests/test_mcp_server.cpp
         )
 
         target_link_libraries(finevox_script_tests PRIVATE

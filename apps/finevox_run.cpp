@@ -9,6 +9,8 @@
 #include "finevox/client/game_client.hpp"
 #include "finevox/game/game_runtime.hpp"
 
+#include <finevk/core/logging.hpp>
+
 #include <iostream>
 #include <string>
 #include <unistd.h>
@@ -21,6 +23,7 @@ int main(int argc, char* argv[]) {
     game::RuntimeOptions runtimeOptions;
     client::ClientOptions clientOptions;
     clientOptions.shaderDir = FINEVOX_SHADER_DIR;
+    bool verbose = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -48,6 +51,8 @@ int main(int argc, char* argv[]) {
             clientOptions.printStats = true;
         } else if (arg == "--validation") {
             clientOptions.validation = true;
+        } else if (arg == "--verbose") {
+            verbose = true;
         } else if (arg == "--new") {
             runtimeOptions.newGame = true;
         } else if (arg == "--no-save") {
@@ -75,6 +80,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "usage: finevox_run --game-root DIR [options]\n";
         return 2;
     }
+
+    // Every mesh upload logs at Debug, which buries anything worth reading
+    finevk::Logger::global().setMinLevel(verbose ? finevk::LogLevel::Debug : finevk::LogLevel::Info);
 
     bool startOver = false;
     try {

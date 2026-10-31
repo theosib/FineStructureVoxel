@@ -76,6 +76,12 @@ struct SiteProgress {
     [[nodiscard]] bool complete() const { return done >= total; }
 };
 
+/// What's left of a site, for showing where it will go
+struct SiteGhost {
+    float built = 0.0f;  ///< Fraction of its blocks in place, 0 to 1
+    std::vector<BlockCoord> cells;
+};
+
 class BlueprintSite {
 public:
     BlueprintSite() = default;

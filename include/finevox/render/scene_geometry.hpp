@@ -23,9 +23,10 @@ struct SceneVertex {
     glm::vec4 color;
 };
 
-/// Axis-aligned box. `lit` false gives a flat, unlit marker.
+/// Axis-aligned box. `lit` false gives a flat, unlit marker. `faces` has a bit per side, in
+/// the order of finevox::Face, so stacked boxes can leave out the sides they share.
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& center, const glm::vec3& halfExtents,
-               const glm::vec4& color, bool lit = true);
+               const glm::vec4& color, bool lit = true, uint8_t faces = 0x3F);
 
 /// Flat ring on the ground, facing up
 void appendRing(std::vector<SceneVertex>& out, const glm::vec3& center, float radius, float width,

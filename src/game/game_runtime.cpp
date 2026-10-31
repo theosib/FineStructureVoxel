@@ -320,6 +320,17 @@ void GameRuntime::stopThreads() {
     threadsRunning_ = false;
 }
 
+void GameRuntime::setSiteGhosts(std::vector<worldgen::SiteGhost> ghosts) {
+    auto published = std::make_shared<const std::vector<worldgen::SiteGhost>>(std::move(ghosts));
+    std::lock_guard<std::mutex> guard(ghostMutex_);
+    siteGhosts_ = std::move(published);
+}
+
+std::shared_ptr<const std::vector<worldgen::SiteGhost>> GameRuntime::siteGhosts() const {
+    std::lock_guard<std::mutex> guard(ghostMutex_);
+    return siteGhosts_;
+}
+
 void GameRuntime::requestExit(int code) {
     exitRequested_ = true;
     exitCode_ = code;

@@ -166,6 +166,32 @@ void registerBlueprintNatives(GameRuntime& runtime) {
         return result;
     });
 
+    // site_show_ghosts [id ...]: draw what's left of these sites, in place of what was drawn.
+    // Clearing a cell is work too, but there's nothing there to show.
+    e.registerFunction("site_show_ghosts", [=](ExecutionContext&, const Args& args) -> Value {
+        std::vector<worldgen::SiteGhost> ghosts;
+        if (!args.empty() && args[0].isArray()) {
+            for (const Value& id : args[0].asArray()) {
+                const auto* target = site(id);
+                if (!target) continue;
+                worldgen::SiteGhost ghost;
+                for (const auto& cell : target->remaining(rt->session().world())) {
+                    if (!cell.block.isAir()) ghost.cells.push_back(cell.pos);
+                }
+                size_t total = 0;
+                for (const auto& cell : target->cells()) {
+                    if (!cell.block.isAir()) ++total;
+                }
+                if (total > 0) {
+                    ghost.built = 1.0f - static_cast<float>(ghost.cells.size()) / static_cast<float>(total);
+                }
+                if (!ghost.cells.empty()) ghosts.push_back(std::move(ghost));
+            }
+        }
+        rt->setSiteGhosts(std::move(ghosts));
+        return Value::nil();
+    });
+
     e.registerFunction("site_remove", [=](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty()) rt->sites().erase(static_cast<int64_t>(number(args[0])));
         return Value::nil();

@@ -174,6 +174,17 @@ struct GameClient::Impl {
     EntityId stewardId = INVALID_ENTITY_ID;
     bool embodied = false;
     bool jumpHeld = false;
+
+    struct GhostFace {
+        BlockCoord cell;
+        uint8_t faces;
+        float built;
+    };
+    std::shared_ptr<const std::vector<worldgen::SiteGhost>> ghostSource;
+    std::vector<GhostFace> ghostFaces;
+    glm::vec3 ghostColor{0.35f, 0.75f, 1.0f};
+    float ghostFaint = 0.15f;
+    float ghostSolid = 0.45f;
     glm::vec2 viewport{1600.0f, 900.0f};
     SkyParameters sky;
     std::unordered_map<uint16_t, glm::vec3> factionColors;
@@ -211,9 +222,10 @@ struct GameClient::Impl {
     void saveOnExit();
     void setEmbodied(bool on);
     void updateStewardView(float dt);
+    void buildGhosts();
     glm::vec3 factionColor(uint16_t faction) const;
-    [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor) const;
-    [[nodiscard]] Value blockNameAt(const RaycastResult& hit) const;
+    [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor, RaycastMode mode) const;
+    [[nodiscard]] Value pickResult(const RaycastResult& hit) const;
     bool handleAction(const ActionResult& result);
     [[nodiscard]] std::vector<int32_t> groundHeightsAround(const glm::dvec3& centre) const;
 
@@ -426,6 +438,7 @@ void GameClient::Impl::setup() {
                               sky.skyBrightness, sky.ambientLevel);
         buildScene();
         buildProjectiles();
+        buildGhosts();
         updateFog(dt);
 
         auto deadline = std::chrono::steady_clock::now() +
@@ -782,6 +795,36 @@ void GameClient::Impl::buildProjectiles() {
     }
 }
 
+void GameClient::Impl::buildGhosts() {
+    auto ghosts = runtime.siteGhosts();
+    if (ghosts != ghostSource) {
+        ghostSource = ghosts;
+        ghostFaces.clear();
+        for (size_t i = 0; ghosts && i < ghosts->size(); ++i) {
+            const worldgen::SiteGhost& ghost = (*ghosts)[i];
+            std::unordered_set<BlockCoord> cells(ghost.cells.begin(), ghost.cells.end());
+            // Only the outside of a ghost, or its layers pile up into something near opaque
+            for (const BlockCoord& cell : ghost.cells) {
+                uint8_t faces = 0;
+                for (size_t f = 0; f < FACE_COUNT; ++f) {
+                    if (!cells.count(cell.neighbor(static_cast<Face>(f)))) faces |= uint8_t(1 << f);
+                }
+                if (faces != 0) ghostFaces.push_back({cell, faces, ghost.built});
+            }
+        }
+    }
+
+    // A hair larger than a block, so that it doesn't fight the ground it stands on
+    constexpr glm::vec3 HALF(0.505f);
+    glm::dvec3 cameraPos = camera.positionD();
+    auto& out = sceneRenderer->translucent();
+    for (const GhostFace& ghost : ghostFaces) {
+        glm::vec3 center(glm::dvec3(ghost.cell.x + 0.5, ghost.cell.y + 0.5, ghost.cell.z + 0.5) - cameraPos);
+        float opacity = ghostFaint + (ghostSolid - ghostFaint) * ghost.built;
+        render::appendBox(out, center, HALF, glm::vec4(ghostColor, opacity), true, ghost.faces);
+    }
+}
+
 void GameClient::Impl::updateFog(float dt) {
     if (!fog) return;
 
@@ -808,16 +851,29 @@ void GameClient::Impl::drainUiMessages() {
     }
 }
 
-RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor) const {
+RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor, RaycastMode mode) const {
     WorldRay ray = screenRayToWorld(view, cursor, viewport);
     BlockShapeProvider shapes = createBlockShapeProvider(runtime.replica().world());
     Vec3 origin(static_cast<float>(ray.origin.x), static_cast<float>(ray.origin.y),
                 static_cast<float>(ray.origin.z));
-    return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, RaycastMode::Interaction, shapes);
+    return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, mode, shapes);
 }
 
-Value GameClient::Impl::blockNameAt(const RaycastResult& hit) const {
-    return Value::string(std::string(runtime.replica().world().getBlock(hit.blockPos).name()));
+Value GameClient::Impl::pickResult(const RaycastResult& hit) const {
+    if (!hit.hit) return Value::nil();
+    auto result = Value::map();
+    auto& map = result.asMap();
+    auto normal = faceNormal(hit.face);
+    map.set(uiEngine->intern("x"), Value::integer(hit.blockPos.x));
+    map.set(uiEngine->intern("y"), Value::integer(hit.blockPos.y));
+    map.set(uiEngine->intern("z"), Value::integer(hit.blockPos.z));
+    map.set(uiEngine->intern("nx"), Value::integer(normal[0]));
+    map.set(uiEngine->intern("ny"), Value::integer(normal[1]));
+    map.set(uiEngine->intern("nz"), Value::integer(normal[2]));
+    map.set(uiEngine->intern("distance"), Value::number(hit.distance));
+    map.set(uiEngine->intern("block"),
+            Value::string(std::string(runtime.replica().world().getBlock(hit.blockPos).name())));
+    return result;
 }
 
 void GameClient::Impl::saveOnExit() {
@@ -922,15 +978,7 @@ void GameClient::Impl::registerNatives() {
 
     // pick_view -> what the embodied view is looking at, as pick_block
     e.registerFunction("pick_view", [this](ExecutionContext&, const Args&) -> Value {
-        RaycastResult hit = pickBlock(viewport * 0.5f);
-        if (!hit.hit) return Value::nil();
-        auto result = Value::map();
-        auto& map = result.asMap();
-        map.set(uiEngine->intern("x"), Value::integer(hit.blockPos.x));
-        map.set(uiEngine->intern("y"), Value::integer(hit.blockPos.y));
-        map.set(uiEngine->intern("z"), Value::integer(hit.blockPos.z));
-        map.set(uiEngine->intern("block"), blockNameAt(hit));
-        return result;
+        return pickResult(pickBlock(viewport * 0.5f, RaycastMode::Interaction));
     });
 
     e.registerFunction("cam_focus", [this](ExecutionContext&, const Args& args) -> Value {
@@ -955,19 +1003,57 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
-    // pick_block mx my -> {=x =y =z =nx =ny =nz} or nil
+    // pick_block mx my -> {=x =y =z =nx =ny =nz =distance =block} or nil: what's under the
+    // cursor, as seen. pick_ground is the same, but looks through whatever a body can walk
+    // through, so that an order aimed past a tree's leaves lands on the ground.
     e.registerFunction("pick_block", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 2) return Value::nil();
-        RaycastResult hit = pickBlock(glm::vec2(number(args[0]), number(args[1])));
-        if (!hit.hit) return Value::nil();
-        auto result = Value::map();
-        auto& map = result.asMap();
-        BlockCoord n = BlockCoord(hit.blockPos.x, hit.blockPos.y, hit.blockPos.z);
-        map.set(uiEngine->intern("x"), Value::integer(n.x));
-        map.set(uiEngine->intern("y"), Value::integer(n.y));
-        map.set(uiEngine->intern("z"), Value::integer(n.z));
-        map.set(uiEngine->intern("block"), blockNameAt(hit));
-        return result;
+        return pickResult(pickBlock(glm::vec2(number(args[0]), number(args[1])), RaycastMode::Interaction));
+    });
+
+    e.registerFunction("pick_ground", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        return pickResult(pickBlock(glm::vec2(number(args[0]), number(args[1])), RaycastMode::Collision));
+    });
+
+    // avatar_overlaps x y z -> whether a block in that cell would stand in the avatar's body
+    e.registerFunction("avatar_overlaps", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3) return Value::boolean(false);
+        AABB body = stewardBody->boundingBox();
+        Vec3 low(float(number(args[0])), float(number(args[1])), float(number(args[2])));
+        Vec3 high = low + Vec3(1.0f);
+        return Value::boolean(body.max.x > low.x && body.min.x < high.x && body.max.y > low.y &&
+                              body.min.y < high.y && body.max.z > low.z && body.min.z < high.z);
+    });
+
+    // set_ghost_style r g b faint solid: the colour of unbuilt sites, and how opaque they are
+    // when just begun and when nearly done
+    e.registerFunction("set_ghost_style", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() >= 5) {
+            ghostColor = glm::vec3(number(args[0]), number(args[1]), number(args[2]));
+            ghostFaint = float(number(args[3]));
+            ghostSolid = float(number(args[4]));
+        }
+        return Value::nil();
+    });
+
+    // do_action name: as if a key bound to that action had been pressed
+    e.registerFunction("do_action", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        ActionResult action;
+        action.actionName = args[0].toString();
+        handleAction(action);
+        return Value::nil();
+    });
+
+    // gui_click x y: a left click on the GUI, for scenarios that test it through the buttons
+    e.registerFunction("gui_click", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddMousePosEvent(float(number(args[0])), float(number(args[1])));
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        return Value::nil();
     });
 
     // pick_entities x0 y0 x1 y1 -> ids whose bodies project into the rectangle

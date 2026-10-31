@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -108,6 +109,10 @@ public:
     [[nodiscard]] std::unordered_map<int64_t, worldgen::BlueprintSite>& sites() { return sites_; }
     [[nodiscard]] int64_t allocateSiteId() { return nextSiteId_++; }
 
+    /// Sites the viewer sees as ghosts. Set by the game thread, read by the render thread.
+    void setSiteGhosts(std::vector<worldgen::SiteGhost> ghosts);
+    [[nodiscard]] std::shared_ptr<const std::vector<worldgen::SiteGhost>> siteGhosts() const;
+
     /// CBOR messages from ui_publish, for the client to drain
     [[nodiscard]] Queue<std::vector<uint8_t>>& uiOutbox() { return uiOutbox_; }
 
@@ -143,6 +148,8 @@ private:
     WorkClaimRegistry workClaims_;
     worldgen::BlueprintLibrary blueprints_;
     std::unordered_map<int64_t, worldgen::BlueprintSite> sites_;
+    mutable std::mutex ghostMutex_;
+    std::shared_ptr<const std::vector<worldgen::SiteGhost>> siteGhosts_;
     finescript::Value savedScriptState_;
     ClientSave clientSave_;
     bool resumed_ = false;

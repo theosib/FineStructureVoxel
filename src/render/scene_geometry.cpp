@@ -1,4 +1,5 @@
 #include "finevox/render/scene_geometry.hpp"
+#include "finevox/core/position.hpp"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -21,7 +22,7 @@ void pushQuad(std::vector<SceneVertex>& out, const glm::vec3& a, const glm::vec3
 }  // namespace
 
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec3& h,
-               const glm::vec4& color, bool lit) {
+               const glm::vec4& color, bool lit, uint8_t faces) {
     glm::vec3 p[8] = {
         {c.x - h.x, c.y - h.y, c.z - h.z}, {c.x + h.x, c.y - h.y, c.z - h.z},
         {c.x + h.x, c.y + h.y, c.z - h.z}, {c.x - h.x, c.y + h.y, c.z - h.z},
@@ -31,12 +32,13 @@ void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec
     auto normal = [lit](float x, float y, float z) {
         return lit ? glm::vec3(x, y, z) : glm::vec3(0.0f);
     };
-    pushQuad(out, p[1], p[5], p[6], p[2], normal(1, 0, 0), color);
-    pushQuad(out, p[4], p[0], p[3], p[7], normal(-1, 0, 0), color);
-    pushQuad(out, p[3], p[2], p[6], p[7], normal(0, 1, 0), color);
-    pushQuad(out, p[4], p[5], p[1], p[0], normal(0, -1, 0), color);
-    pushQuad(out, p[5], p[4], p[7], p[6], normal(0, 0, 1), color);
-    pushQuad(out, p[0], p[1], p[2], p[3], normal(0, 0, -1), color);
+    auto side = [faces](Face face) { return (faces >> static_cast<uint8_t>(face)) & 1; };
+    if (side(Face::PosX)) pushQuad(out, p[1], p[5], p[6], p[2], normal(1, 0, 0), color);
+    if (side(Face::NegX)) pushQuad(out, p[4], p[0], p[3], p[7], normal(-1, 0, 0), color);
+    if (side(Face::PosY)) pushQuad(out, p[3], p[2], p[6], p[7], normal(0, 1, 0), color);
+    if (side(Face::NegY)) pushQuad(out, p[4], p[5], p[1], p[0], normal(0, -1, 0), color);
+    if (side(Face::PosZ)) pushQuad(out, p[5], p[4], p[7], p[6], normal(0, 0, 1), color);
+    if (side(Face::NegZ)) pushQuad(out, p[0], p[1], p[2], p[3], normal(0, 0, -1), color);
 }
 
 void appendRing(std::vector<SceneVertex>& out, const glm::vec3& center, float radius, float width,

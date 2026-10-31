@@ -565,6 +565,53 @@ float PhysicsSystem::resolveAxisCollision(
     return result;
 }
 
+Vec3 PhysicsSystem::escapeOverlap(const AABB& box, const std::vector<AABB>& colliders) const {
+    // Past this, resolveAxisCollision ignores a collider
+    constexpr float TOLERANCE = COLLISION_MARGIN * 2.0f;
+    constexpr int MAX_PUSHES = 8;
+
+    auto overlapped = [&](const AABB& current) -> const AABB* {
+        for (const AABB& collider : colliders) {
+            bool inside = true;
+            for (int i = 0; i < 3; ++i) {
+                float depth = std::min(current.max[i] - collider.min[i], collider.max[i] - current.min[i]);
+                if (depth <= TOLERANCE) {
+                    inside = false;
+                    break;
+                }
+            }
+            if (inside) return &collider;
+        }
+        return nullptr;
+    };
+
+    Vec3 offset(0.0f);
+    AABB current = box;
+    for (int push = 0; push < MAX_PUSHES; ++push) {
+        const AABB* collider = overlapped(current);
+        if (!collider) return offset;
+
+        // The shortest way out, never down: under a floor is no place to end up
+        const Vec3 ways[5] = {
+            Vec3(collider->max.x - current.min.x + COLLISION_MARGIN, 0.0f, 0.0f),
+            Vec3(collider->min.x - current.max.x - COLLISION_MARGIN, 0.0f, 0.0f),
+            Vec3(0.0f, 0.0f, collider->max.z - current.min.z + COLLISION_MARGIN),
+            Vec3(0.0f, 0.0f, collider->min.z - current.max.z - COLLISION_MARGIN),
+            Vec3(0.0f, collider->max.y - current.min.y + COLLISION_MARGIN, 0.0f),
+        };
+        Vec3 way = ways[0];
+        for (const Vec3& candidate : ways) {
+            if (glm::dot(candidate, candidate) < glm::dot(way, way)) way = candidate;
+        }
+        offset += way;
+        current = current.translated(way);
+    }
+
+    // Buried, with solid all around. Up, and again next frame, reaches the surface.
+    const AABB* collider = overlapped(box);
+    return collider ? Vec3(0.0f, collider->max.y - box.min.y + COLLISION_MARGIN, 0.0f) : offset;
+}
+
 Vec3 PhysicsSystem::tryStepClimbing(
     const AABB& entityBox,
     const std::vector<AABB>& colliders,
@@ -616,6 +663,12 @@ Vec3 PhysicsSystem::moveBody(PhysicsBody& body, const Vec3& desiredMovement) {
     Vec3 absMove(std::abs(desiredMovement.x), std::abs(desiredMovement.y), std::abs(desiredMovement.z));
     AABB searchRegion = entityBox.expanded(absMove + Vec3(1.0f));
     auto colliders = collectColliders(searchRegion);
+
+    Vec3 escape = escapeOverlap(entityBox, colliders);
+    if (glm::dot(escape, escape) > 0.0f) {
+        body.setPosition(body.position() + escape);
+        entityBox = body.boundingBox();
+    }
 
     // Try step-climbing for horizontal movement when on ground
     if (body.isOnGround() && body.canStepUp() &&

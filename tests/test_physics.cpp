@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include "finevox/core/physics.hpp"
+#include <algorithm>
 #include <cmath>
+#include <set>
+#include <tuple>
 #include <unordered_set>
 
 using namespace finevox;
@@ -1600,4 +1603,176 @@ TEST(FluidPhysicsTest, NoForcesWhenNoFluid) {
     EXPECT_FLOAT_EQ(vel.x, origVel.x);
     EXPECT_FLOAT_EQ(vel.y, origVel.y);
     EXPECT_FLOAT_EQ(vel.z, origVel.z);
+}
+
+// ============================================================================
+// Camera clearance
+// ============================================================================
+
+namespace {
+
+// What the client passes: a body 0.7 wide and 1.8 tall, with the eye at 1.65
+constexpr float CLEARANCE_HALF_WIDTH = 0.35f;
+constexpr float CLEARANCE_HEIGHT = 1.8f;
+constexpr float CLEARANCE_EYE = 1.65f;
+
+struct SolidCells {
+    std::set<std::tuple<int, int, int>> cells;
+
+    void add(int x, int y, int z) { cells.insert({x, y, z}); }
+    [[nodiscard]] bool has(int x, int y, int z) const { return cells.count({x, y, z}) > 0; }
+
+    [[nodiscard]] BlockShapeProvider provider() const {
+        return [this](const BlockCoord& pos, RaycastMode) -> const CollisionShape* {
+            return has(pos.x, pos.y, pos.z) ? &CollisionShape::FULL_BLOCK : nullptr;
+        };
+    }
+
+    [[nodiscard]] bool bodyFits(const Vec3& feet) const {
+        for (const auto& [x, y, z] : cells) {
+            if (feet.x + CLEARANCE_HALF_WIDTH <= x || feet.x - CLEARANCE_HALF_WIDTH >= x + 1) continue;
+            if (feet.z + CLEARANCE_HALF_WIDTH <= z || feet.z - CLEARANCE_HALF_WIDTH >= z + 1) continue;
+            if (feet.y + CLEARANCE_HEIGHT <= y || feet.y >= y + 1) continue;
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] float clearance(const Vec3& point) const {
+        float nearest = 1000.0f;
+        for (const auto& [x, y, z] : cells) {
+            float dx = std::max({float(x) - point.x, 0.0f, point.x - float(x + 1)});
+            float dy = std::max({float(y) - point.y, 0.0f, point.y - float(y + 1)});
+            float dz = std::max({float(z) - point.z, 0.0f, point.z - float(z + 1)});
+            nearest = std::min(nearest, std::sqrt(dx * dx + dy * dy + dz * dz));
+        }
+        return nearest;
+    }
+};
+
+float worstClearance(const SolidCells& scene) {
+    float worst = 1000.0f;
+    auto shapes = scene.provider();
+    for (float x = -3.0f; x <= 3.0f; x += 0.05f) {
+        for (float z = -3.0f; z <= 3.0f; z += 0.05f) {
+            Vec3 feet(x, 1.0f, z);
+            if (!scene.bodyFits(feet)) continue;
+            Vec3 safe(x, 1.9f, z);
+            Vec3 eye(x, 1.0f + CLEARANCE_EYE, z);
+            Vec3 adjusted = adjustCameraForWallCollision(safe, eye, shapes);
+            worst = std::min(worst, scene.clearance(adjusted));
+        }
+    }
+    return worst;
+}
+
+SolidCells floorScene() {
+    SolidCells scene;
+    for (int x = -5; x <= 5; ++x) {
+        for (int z = -5; z <= 5; ++z) scene.add(x, 0, z);
+    }
+    return scene;
+}
+
+}  // namespace
+
+// The near plane's corners, from the client's 0.2 near plane and 55 degree FOV at 21:9
+constexpr float NEAR_PLANE_REACH = 0.33f;
+
+TEST(CameraClearance, StaysClearOfSolidsAtEveryStandingSpot) {
+    auto column = [](SolidCells& scene, int x, int z) {
+        for (int y = 1; y <= 3; ++y) scene.add(x, y, z);
+    };
+
+    SolidCells wall = floorScene();
+    for (int z = -5; z <= 5; ++z) column(wall, 1, z);
+
+    SolidCells corner = wall;
+    for (int x = -5; x <= 1; ++x) column(corner, x, 1);
+
+    SolidCells door = floorScene();
+    for (int z = -5; z <= 5; ++z) {
+        if (z != 0) column(door, 1, z);
+    }
+    door.add(1, 3, 0);
+
+    SolidCells overhang = wall;
+    for (int z = -5; z <= 5; ++z) overhang.add(0, 3, z);
+
+    SolidCells pillar = floorScene();
+    column(pillar, 0, 0);
+
+    SolidCells roof = floorScene();
+    for (int x = -5; x <= 5; ++x) {
+        for (int z = -5; z <= 5; ++z) roof.add(x, 3, z);
+    }
+
+    SolidCells alley = floorScene();
+    for (int z = -5; z <= 5; ++z) {
+        column(alley, -1, z);
+        column(alley, 1, z);
+    }
+
+    for (const SolidCells* scene : {&wall, &corner, &door, &overhang, &pillar, &roof, &alley}) {
+        EXPECT_GT(worstClearance(*scene), NEAR_PLANE_REACH);
+    }
+}
+
+TEST(EscapeOverlap, PushesABodyOutOfAWallTheShortWay) {
+    SolidCells scene = floorScene();
+    for (int z = -5; z <= 5; ++z) {
+        scene.add(1, 1, z);
+        scene.add(1, 2, z);
+    }
+    PhysicsSystem physics(scene.provider());
+    SimplePhysicsBody body(Vec3(0.8f, 1.0f, 0.0f), Vec3(CLEARANCE_HALF_WIDTH, 0.9f, CLEARANCE_HALF_WIDTH));
+
+    physics.moveBody(body, Vec3(0.0f, -0.01f, 0.0f));
+
+    EXPECT_TRUE(scene.bodyFits(body.position()));
+    EXPECT_LT(body.position().x, 0.66f);
+}
+
+TEST(EscapeOverlap, StopsABodyWalkingDeeperIntoAWall) {
+    SolidCells scene = floorScene();
+    for (int z = -5; z <= 5; ++z) {
+        scene.add(1, 1, z);
+        scene.add(1, 2, z);
+    }
+    PhysicsSystem physics(scene.provider());
+    SimplePhysicsBody body(Vec3(0.75f, 1.0f, 0.0f), Vec3(CLEARANCE_HALF_WIDTH, 0.9f, CLEARANCE_HALF_WIDTH));
+
+    for (int i = 0; i < 60; ++i) physics.moveBody(body, Vec3(0.1f, -0.01f, 0.0f));
+
+    EXPECT_TRUE(scene.bodyFits(body.position()));
+}
+
+TEST(EscapeOverlap, ABuriedBodyRisesToTheSurface) {
+    SolidCells scene;
+    for (int x = -5; x <= 5; ++x) {
+        for (int z = -5; z <= 5; ++z) {
+            for (int y = 0; y <= 6; ++y) scene.add(x, y, z);
+        }
+    }
+    PhysicsSystem physics(scene.provider());
+    SimplePhysicsBody body(Vec3(0.5f, 2.0f, 0.5f), Vec3(CLEARANCE_HALF_WIDTH, 0.9f, CLEARANCE_HALF_WIDTH));
+
+    for (int i = 0; i < 20; ++i) physics.moveBody(body, Vec3(0.0f));
+
+    EXPECT_GE(body.position().y, 7.0f);
+    EXPECT_TRUE(scene.bodyFits(body.position()));
+}
+
+TEST(EscapeOverlap, LeavesABodyAtRestAlone) {
+    SolidCells scene = floorScene();
+    scene.add(1, 1, 0);
+    PhysicsSystem physics(scene.provider());
+    Vec3 start(1.0f - CLEARANCE_HALF_WIDTH - COLLISION_MARGIN, 1.0f + COLLISION_MARGIN, 0.5f);
+    SimplePhysicsBody body(start, Vec3(CLEARANCE_HALF_WIDTH, 0.9f, CLEARANCE_HALF_WIDTH));
+
+    physics.moveBody(body, Vec3(0.0f));
+
+    EXPECT_EQ(body.position().x, start.x);
+    EXPECT_EQ(body.position().y, start.y);
+    EXPECT_EQ(body.position().z, start.z);
 }

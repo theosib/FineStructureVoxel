@@ -402,6 +402,10 @@ private:
 
     // Resolve collision along one axis
     // Returns the actual movement possible while maintaining COLLISION_MARGIN
+    /// How far to move a box that's inside a block to get it out, or zero. Collision only stops
+    /// a body reaching a surface, so nothing else frees one that's already past it.
+    [[nodiscard]] Vec3 escapeOverlap(const AABB& box, const std::vector<AABB>& colliders) const;
+
     [[nodiscard]] float resolveAxisCollision(
         const AABB& entityBox,
         const std::vector<AABB>& colliders,

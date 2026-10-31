@@ -139,6 +139,7 @@ site_create name x y z [turns] -> id     site_create -> empty site
 site_add id x y z block                  site_claim id agent x y z -> {=x =y =z =block}
 site_release id agent                    site_progress id -> {=done =total =complete}
 site_remaining id -> {=block n}          site_remove id
+light_at x y z -> {=sky =block}
 site_show_ghosts [id ...]                 what's left of these sites, drawn for the viewer
 ```
 
@@ -178,6 +179,7 @@ window_size   mouse_pos  gui_has_mouse   fps
 pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 y1 -> ids
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
 do_action name     gui_click x y   (for scripted UI tests)
+ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  set_faction_color id r g b
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a

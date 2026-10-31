@@ -932,6 +932,19 @@ void GameClient::Impl::registerNatives() {
         return Value::boolean(true);
     });
 
+    // ui_texture name "ui/x.png" -> true if loaded, for ui.image to show by name
+    e.registerFunction("ui_texture", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::boolean(false);
+        fs::path path = runtime.gameRoot() / args[1].toString();
+        finegui::TextureHandle handle = gui->loadSkinAtlas(path.string());
+        if (!handle.valid()) {
+            std::cerr << "[ui script] texture " << path.string() << " didn't load\n";
+            return Value::boolean(false);
+        }
+        textureRegistry->registerTexture(args[0].toString(), handle);
+        return Value::boolean(true);
+    });
+
     e.registerFunction("ui_hide", [this](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty() && args[0].isNumeric()) mapRenderer->hide(static_cast<int>(args[0].asNumber()));
         return Value::nil();

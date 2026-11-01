@@ -190,7 +190,7 @@ finegui's `docs/SKIN_SYSTEM.md`.
 
 ```
 send_command value       ui_show tree [=immediate true] -> id        ui_hide id
-window_size   mouse_pos  gui_has_mouse   fps   sym_name :x -> "x"
+window_size   mouse_pos  gui_has_mouse   key_held "left_shift"   fps   sym_name :x -> "x"
 pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 y1 -> ids
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
 do_action name     gui_click x y   gui_hover x y   input_text "abc"   (for scripted UI tests)

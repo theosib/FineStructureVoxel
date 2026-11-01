@@ -1353,6 +1353,10 @@ void GameClient::Impl::registerNatives() {
                                       : finevk::InputEventType::KeyRelease;
         event.key = InputActionSystem::keyNameToCode(args[0].toString());
         event.state.mousePosition = input.mousePosition();
+        if (input.isKeyDown(InputActionSystem::keyNameToCode("left_shift")) ||
+            input.isKeyDown(InputActionSystem::keyNameToCode("right_shift"))) {
+            event.state.modifiers = finevk::Modifier::Shift;
+        }
         input.injectEvent(event);
         return Value::nil();
     });
@@ -1414,6 +1418,12 @@ void GameClient::Impl::registerNatives() {
     // input_held -> true if the game thinks any movement key is down
     e.registerFunction("input_held", [this](ExecutionContext&, const Args&) -> Value {
         return Value::boolean(panForward || panBack || panLeft || panRight);
+    });
+
+    // key_held name -> true while that key is down, whoever got the event
+    e.registerFunction("key_held", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::boolean(false);
+        return Value::boolean(engine->inputManager().isKeyDown(InputActionSystem::keyNameToCode(args[0].toString())));
     });
 
     // pick_entities x0 y0 x1 y1 -> ids whose bodies project into the rectangle

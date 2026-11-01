@@ -12,7 +12,9 @@
 | Last completed phase | **Phase K** — Game Runtime & RTS Primitives, driven by the Keystone game (see below) |
 | Test count | Run the binaries serially: `finevox_tests`, `finevox_script_tests`, `finevox_render_tests`. `ctest -j` gives false failures because fixtures share temp paths |
 | In-progress | — |
-| Libraries | 6 shared libraries (see Architecture), plus the `finevox_run` and `finevox_headless` executables |
+| Libraries | 7 shared libraries (see Architecture), plus the `finevox_run`, `finevox_headless` and `finevox_bot` executables |
+| Multiplayer | Works over TCP on one Mac. What's missing and what's never been tried is at the end of [systems/multiplayer.md](systems/multiplayer.md) |
+| Platforms | Only macOS has ever built this. Keystone's `docs/PLATFORMS.md` has what's known of Linux and Windows |
 
 ---
 
@@ -235,4 +237,5 @@ See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 | `libfinevox_render` | `finevox::render::` | WorldRenderer, MeshWorkerPool, SubChunkView, BlockAtlas, LOD, ParticleAtlas, ParticleRenderer |
 | `libfinevox_audio` | `finevox::audio::` | AudioEngine (miniaudio), SoundLoader, FootstepTracker |
 | `libfinevox_script` | `finevox::script::` | GameScriptEngine, ScriptGameSubsystem, ScriptBlockHandler, BlockContextProxy, DataContainerProxy, EventSymbols, event\_value builders, InventoryBridge, PlayerStatsBridge, ParticleBridge |
-| `libfinevox_game` | `finevox::game::` | GameRuntime, GameManifest, blueprint and conflict natives |
+| `libfinevox_game` | `finevox::game::` | GameRuntime, GameManifest, GameHost, ReplicationServer, blueprint and conflict natives |
+| `libfinevox_net` | `finevox::net::` | The protocol and a client's side of it: ClientSession, ClientWorld, content. No GPU, no game |

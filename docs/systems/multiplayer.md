@@ -1,7 +1,7 @@
 # System: Multiplayer
 
 **Libraries:** `finenet` (transport, discovery), `finevox_net` (protocol, client session),
-`finevox_game` (host), `finevox_client` (window)
+`finevox_game` (host), `src/client/game_client.cpp` (window, built into `finevox_run`)
 **Wire format:** [../protocol/PROTOCOL.md](../protocol/PROTOCOL.md) is the normative spec. This file
 is how the engine implements it and why.
 
@@ -19,7 +19,7 @@ Everything else follows from that:
 |---|---|
 | Open a running game to the LAN | Start a listener and a beacon. The local client doesn't notice. |
 | Server-only | The same host with no local client. |
-| Standalone client or server | Link less: `finevox_client` needs `finevox_net`, not `finevox_game`. |
+| Standalone client or server | Link less: a client needs `finevox_net`, not `finevox_game`. |
 | Generic client | Don't ship a game root. The content phase fetches everything. |
 | Web client | Implement the spec. Nothing in it is C++-shaped. |
 | Hub | A hub is a source of listings. It hands out the same address a LAN browse does. |
@@ -299,7 +299,9 @@ Things that took time to learn:
 
 - **UDP.** TCP only, so packet loss on the internet stalls all channels for a moment.
 - **WebSocket, hub, generic client.** The seams are there: `Connection` over a transport, listings
-  from any source, content by hash. `finevox_client` still links `finevox_game` for `mcp_tools`.
+  from any source, content by hash. The windowed client is compiled into `finevox_run` and still
+  needs `finevox_game` for `mcp_tools`, so a lighter one starts by pulling those apart. A generic
+  client with a window hasn't been tried: only `finevox_bot` has joined with no game of its own.
 - **Encryption.** See [Trust](#trust).
 - **A server's second game.** A server plays one match, then needs restarting.
 - **Reconnecting from a lobby.** A dropped connection there just loses the seat. It's only held once
@@ -308,3 +310,19 @@ Things that took time to learn:
 - **Block rotation and particles from the server.** The wire has room for both; nothing uses them.
 - **Deltas.** One changed block resends its subchunk, about a kilobyte. That's fine for what
   Keystone does and wouldn't be for a game that changes thousands a second.
+- **Late tokens.** A reconnect token lives in memory, so a client that crashes or restarts has lost
+  its seat, even though the server is holding it.
+- **Resuming by name.** A resumed game gives seats back by name, which is anyone's to claim, and it
+  has only ever been run for the local player: a resumed game with remote players is untested.
+- **Content changing under a server.** The manifest is built once, for the first client to join.
+- **Limits are silent.** Commands past the rate limit are dropped, with nothing said to the client.
+- **A body can be anywhere.** Its position is the client's word, checked only for being finite.
+
+## Not Tested
+
+- **Two machines, Linux, Windows.** Only ever one Mac. See Keystone's `docs/PLATFORMS.md`.
+- **Hours of play, and long games.** Runs so far are about a minute. Nothing has measured a client
+  that's been connected for an hour, or a game with hundreds of units per client.
+- **Eight sides.** Up to four, and the large map not at all with players on it.
+- **The `vote` and `auto` launch policies, `lobby_kick`, and `immediate` start.** Keystone uses `host`
+  and has no button for kicking, so no client has exercised these.

@@ -1,8 +1,10 @@
 #include "finevox/game/game_runtime.hpp"
 
+#include "finevox/game/replication_server.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_manager.hpp"
+#include "finevox/core/mob_entity.hpp"
 #include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/resource_locator.hpp"
@@ -15,6 +17,7 @@
 #include "finevox/worldgen/generation_passes.hpp"
 #include "finevox/worldgen/world_generator.hpp"
 
+#include <finescript/cbor.h>
 #include <finescript/map_data.h>
 #include <finescript/resource_finder.h>
 #include <finescript/script_engine.h>
@@ -24,6 +27,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 
 namespace finevox::game {
 
@@ -138,6 +142,11 @@ void GameRuntime::load() {
     manifest_ = *manifest;
     if (options_.seedOverride) manifest_.worldSeed = *options_.seedOverride;
     if (options_.radiusOverride) manifest_.worldRadius = *options_.radiusOverride;
+    for (const auto& [key, value] : options_.manifestOverrides) {
+        if (!manifest_.applyOverride(key, value)) {
+            std::cerr << "[game] a setting can't change " << key << "\n";
+        }
+    }
 
     ResourceLocator::instance().setGameRoot(options_.gameRoot);
     blueprints_.loadDirectory(options_.gameRoot / "blueprints");
@@ -185,34 +194,48 @@ void GameRuntime::load() {
     projectiles_ = std::make_shared<ProjectileSystem>(world, session_->entities());
     session_->addSubsystem(projectiles_);
 
-    replica_ = std::make_shared<WorldReplica>(world, *vision_, manifest_.viewerFaction);
-    replica_->setRevealAll(!manifest_.fogOfWar);
-    session_->addSubsystem(replica_);
+    revealAll_ = !manifest_.fogOfWar;
+    replica_ = &replicaFor(manifest_.viewerFaction);
 
-    if (manifest_.fogOfWar) {
-        uint16_t viewer = manifest_.viewerFaction;
-        session_->entities().setSnapshotFilter([this, viewer](const Entity& entity) {
-            if (entity.faction() == viewer) return true;
-            Vec3 pos = entity.position();
-            return vision_->isVisible(viewer, static_cast<int32_t>(std::floor(pos.x)),
-                                      static_cast<int32_t>(std::floor(pos.z)));
-        });
-    }
+    // Clients get entities from replication, one view at a time
+    session_->entities().setSnapshotsEnabled(false);
 
     gameScript_ = std::make_shared<script::ScriptGameSubsystem>(*scripts_);
-    gameScript_->setMessageSink(
-        [this](std::vector<uint8_t> message) { uiOutbox_.push(std::move(message)); });
+    gameScript_->setMessageSink([this](std::vector<uint8_t> message, script::ScriptGameSubsystem::Audience audience) {
+        replication_->publish(std::move(message), audience.player, audience.faction);
+    });
     session_->addSubsystem(gameScript_);
+
+    replication_ = std::make_shared<ReplicationServer>(*this);
+    session_->addSubsystem(replication_);
 
     registerNatives();
 
-    session_->setGameCommandHandler(
-        [this](const finescript::Value& command) { gameScript_->deliverCommand(command); });
+    session_->setGameCommandHandler([this](const finescript::Value& command, int64_t player) {
+        gameScript_->deliverCommand(command, player);
+    });
 
     auto& ctx = gameScript_->context();
     ctx.set("WORLD_SEED", finescript::Value::integer(static_cast<int64_t>(manifest_.worldSeed)));
     ctx.set("WORLD_RADIUS", finescript::Value::integer(manifest_.worldRadius));
     ctx.set("SEA_LEVEL", finescript::Value::integer(manifest_.seaLevel));
+
+    auto& interner = scripts_->engine().interner();
+    ctx.set("SETTINGS", options_.settings.empty() ? finescript::Value::map()
+                                                  : finescript::cborDecode(options_.settings, interner));
+    {
+        std::vector<finescript::Value> players;
+        std::lock_guard lock(seatMutex_);
+        for (const PlayerSeed& seed : options_.players) {
+            Seat seat;
+            seat.id = seed.id;
+            seat.name = seed.name;
+            seat.local = seed.local;
+            players.push_back(playerValue(seat));
+            seats_.emplace(seat.id, std::move(seat));
+        }
+        ctx.set("PLAYERS", finescript::Value::array(std::move(players)));
+    }
     for (const auto& [name, value] : options_.scriptDefines) {
         ctx.set(name, finescript::Value::string(value));
     }
@@ -228,10 +251,12 @@ void GameRuntime::load() {
     }
     if (resumed_) {
         loadSavedState();
+        bindSeeds();
         gameScript_->fire("resume");
     } else {
         gameScript_->fire("start");
     }
+    bindTheUnbound();
 
     if (manifest_.autosaveMinutes > 0.0f && !savePath().empty()) {
         session_->addSubsystem(std::make_shared<AutosaveClock>(
@@ -239,15 +264,195 @@ void GameRuntime::load() {
     }
 
     // Don't open on a blank map: show what the starting units can see
-    vision_->refresh(manifest_.viewerFaction);
-    replica_->syncAll();
+    for (const auto& [faction, replica] : replicas_) {
+        vision_->refresh(faction);
+        replica->syncAll();
+    }
 
-    if (options_.mcpPort) startMcp();
+    if (options_.mcpPort || options_.mcpServer) startMcp();
+}
+
+WorldReplica& GameRuntime::replicaFor(uint16_t faction) {
+    auto& slot = replicas_[faction];
+    if (!slot) {
+        vision_->addFaction(faction);
+        slot = std::make_shared<WorldReplica>(session_->world(), *vision_, faction);
+        slot->setRevealAll(revealAll_);
+    }
+    return *slot;
+}
+
+void GameRuntime::tickReplicas(float dt) {
+    for (const auto& [faction, replica] : replicas_) replica->tick(dt);
+}
+
+void GameRuntime::setRevealAll(bool reveal) {
+    revealAll_ = reveal;
+    for (const auto& [faction, replica] : replicas_) replica->setRevealAll(reveal);
+}
+
+std::optional<Seat> GameRuntime::seat(int64_t player) const {
+    std::lock_guard lock(seatMutex_);
+    auto it = seats_.find(player);
+    if (it == seats_.end()) return std::nullopt;
+    return it->second;
+}
+
+std::vector<Seat> GameRuntime::seats() const {
+    std::lock_guard lock(seatMutex_);
+    std::vector<Seat> out;
+    for (const auto& [id, seat] : seats_) out.push_back(seat);
+    return out;
+}
+
+void GameRuntime::bindPlayer(int64_t player, uint16_t faction) {
+    Seat updated;
+    {
+        std::lock_guard lock(seatMutex_);
+        auto it = seats_.find(player);
+        if (it == seats_.end()) return;
+        it->second.faction = faction;
+        updated = it->second;
+    }
+
+    replicaFor(faction);
+
+    // A body the first time, and the same body if they change sides
+    EntityManager& entities = session_->entities();
+    if (updated.body == INVALID_ENTITY_ID) {
+        Vec3 spot(0.0f, float(manifest_.seaLevel + 16), 0.0f);
+        if (updated.local && resumed_) {
+            glm::dvec3 saved = clientSaveCopy().steward;
+            spot = Vec3(float(saved.x), float(saved.y), float(saved.z));
+        }
+        updated.body = entities.spawnPlayer(spot, manifest_.playerEntity);
+        updated.spawn = glm::dvec3(spot);
+        if (updated.local) entities.setLocalPlayerId(updated.body);
+    }
+    if (MobEntity* mob = entities.getMob(updated.body)) mob->setFaction(faction);
+
+    std::lock_guard lock(seatMutex_);
+    seats_[player] = updated;
+}
+
+finescript::Value GameRuntime::playerValue(const Seat& seat) const {
+    using finescript::Value;
+    auto& interner = StringInterner::global();
+    Value out = Value::map();
+    auto& map = out.asMap();
+    map.set(interner.intern("id"), Value::integer(seat.id));
+    map.set(interner.intern("name"), Value::string(seat.name));
+    map.set(interner.intern("local"), Value::boolean(seat.local));
+    return out;
+}
+
+void GameRuntime::playerJoined(int64_t player, const std::string& name, bool local) {
+    Seat seat;
+    seat.id = player;
+    seat.name = name;
+    seat.local = local;
+    {
+        std::lock_guard lock(seatMutex_);
+        seats_.emplace(player, seat);
+    }
+    gameScript_->context().set("player", playerValue(seat));
+    gameScript_->fire("player_join");
+    bindTheUnbound();
+}
+
+void GameRuntime::bindTheUnbound() {
+    // A game that says nothing about players has one point of view, and everyone gets it
+    for (const Seat& seat : seats()) {
+        if (seat.faction == 0) bindPlayer(seat.id, manifest_.viewerFaction);
+    }
+}
+
+void GameRuntime::postPlayerLeft(int64_t player) {
+    replication_->post([this, player] {
+        auto left = seat(player);
+        if (!left) return;
+        gameScript_->context().set("player", playerValue(*left));
+        gameScript_->fire("player_leave");
+    });
+}
+
+void GameRuntime::bindSeeds() {
+    // Each returning player to the faction they had: the host by being the host, others by name
+    for (const PlayerSeed& seed : options_.players) {
+        uint16_t faction = 0;
+        for (const SavedSeat& saved : savedSeats_) {
+            if ((seed.local && saved.local) || (!seed.local && saved.name == seed.name)) faction = saved.faction;
+        }
+        if (faction == 0 && seed.local) faction = manifest_.viewerFaction;
+        if (faction != 0) bindPlayer(seed.id, faction);
+    }
+}
+
+finescript::Value GameRuntime::clientState() const {
+    using finescript::Value;
+    ClientSave save = clientSaveCopy();
+    auto vector3 = [](const glm::dvec3& v) {
+        return Value::array(std::vector<Value>{Value::number(v.x), Value::number(v.y), Value::number(v.z)});
+    };
+    auto& interner = StringInterner::global();
+    Value out = Value::map();
+    auto& map = out.asMap();
+    map.set(interner.intern("pivot"), vector3(save.pivot));
+    map.set(interner.intern("steward"), vector3(save.steward));
+    map.set(interner.intern("camera"), vector3(glm::dvec3(save.yaw, save.pitch, save.distance)));
+    return out;
+}
+
+void GameRuntime::setClientState(const finescript::Value& state) {
+    using finescript::Value;
+    if (!state.isMap()) return;
+    auto& interner = StringInterner::global();
+    auto& map = const_cast<Value&>(state).asMap();
+    auto vector3 = [&](const char* name, glm::dvec3& out) {
+        Value value = map.get(interner.intern(name));
+        if (value.isArray() && value.asArray().size() == 3) {
+            const auto& v = value.asArray();
+            out = glm::dvec3(v[0].asNumber(), v[1].asNumber(), v[2].asNumber());
+        }
+    };
+    ClientSave save = clientSaveCopy();
+    glm::dvec3 camera(save.yaw, save.pitch, save.distance);
+    vector3("pivot", save.pivot);
+    vector3("steward", save.steward);
+    vector3("camera", camera);
+    save.yaw = float(camera.x);
+    save.pitch = float(camera.y);
+    save.distance = float(camera.z);
+
+    std::lock_guard lock(clientSaveMutex_);
+    clientSave_ = save;
+}
+
+ClientSave GameRuntime::clientSaveCopy() const {
+    std::lock_guard lock(clientSaveMutex_);
+    return clientSave_;
+}
+
+void GameRuntime::settleLight() {
+    LightEngine& light = session_->lightEngine();
+    light.start();
+
+    // Nothing lit what `on :start` built, and a client's first frame shouldn't show that
+    constexpr auto LIMIT = std::chrono::seconds(5);
+    auto deadline = std::chrono::steady_clock::now() + LIMIT;
+    while (!light.queue().empty() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    for (const auto& [faction, replica] : replicas_) replica->refreshLight();
 }
 
 void GameRuntime::startMcp() {
-    mcp_ = std::make_unique<McpServer>(*options_.mcpPort, options_.mcpPlayerOnly);
-    mcp_->captureOutput();
+    mcp_ = options_.mcpServer;
+    if (!mcp_) {
+        ownedMcp_ = std::make_unique<McpServer>(*options_.mcpPort, options_.mcpPlayerOnly);
+        mcp_ = ownedMcp_.get();
+        mcp_->captureOutput();
+    }
     addServerMcpTools(*mcp_, *this);
     session_->addSubsystem(std::make_shared<McpTickStart>(*mcp_));
     session_->addSubsystem(std::make_shared<McpTickEnd>(*mcp_));
@@ -306,6 +511,22 @@ void GameRuntime::registerNatives() {
             map.set(interner.intern("sky"), finescript::Value::integer(session_->lightEngine().getSkyLight(pos)));
             map.set(interner.intern("block"), finescript::Value::integer(session_->lightEngine().getBlockLight(pos)));
             return result;
+        });
+
+    // player_bind id faction: this player sees and acts as this faction
+    engine.registerFunction(
+        "player_bind", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.size() >= 2) bindPlayer(static_cast<int64_t>(args[0].asNumber()), static_cast<uint16_t>(args[1].asNumber()));
+            return finescript::Value::nil();
+        });
+
+    // player_faction id -> faction, or nil if they have none
+    engine.registerFunction(
+        "player_faction", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.empty() || !args[0].isNumeric()) return finescript::Value::nil();
+            auto found = seat(static_cast<int64_t>(args[0].asNumber()));
+            if (!found || found->faction == 0) return finescript::Value::nil();
+            return finescript::Value::integer(found->faction);
         });
 
     registerBlueprintNatives(*this);
@@ -379,7 +600,7 @@ void GameRuntime::startThreads() {
     threadsRunning_ = true;
 
     // Last, so that the game is running by the time anyone can call a tool
-    if (mcp_) {
+    if (ownedMcp_) {
         std::string error;
         if (mcp_->start(error)) {
             std::cerr << "[mcp] listening on http://127.0.0.1:" << mcp_->port() << "/mcp\n";
@@ -390,22 +611,21 @@ void GameRuntime::startThreads() {
 }
 
 void GameRuntime::stopThreads() {
+    // The light thread can be running without the rest: see settleLight
+    if (session_) session_->lightEngine().stop();
     if (!threadsRunning_) return;
-    if (mcp_) mcp_->stop();
+    if (ownedMcp_) ownedMcp_->stop();
     session_->stopGameThread();
-    session_->lightEngine().stop();
     threadsRunning_ = false;
 }
 
-void GameRuntime::setSiteGhosts(std::vector<worldgen::SiteGhost> ghosts) {
-    auto published = std::make_shared<const std::vector<worldgen::SiteGhost>>(std::move(ghosts));
-    std::lock_guard<std::mutex> guard(ghostMutex_);
-    siteGhosts_ = std::move(published);
+void GameRuntime::setSiteGhosts(uint16_t faction, std::vector<worldgen::SiteGhost> ghosts) {
+    siteGhosts_[faction] = std::make_shared<const std::vector<worldgen::SiteGhost>>(std::move(ghosts));
 }
 
-std::shared_ptr<const std::vector<worldgen::SiteGhost>> GameRuntime::siteGhosts() const {
-    std::lock_guard<std::mutex> guard(ghostMutex_);
-    return siteGhosts_;
+std::shared_ptr<const std::vector<worldgen::SiteGhost>> GameRuntime::siteGhosts(uint16_t faction) const {
+    auto it = siteGhosts_.find(faction);
+    return it == siteGhosts_.end() ? nullptr : it->second;
 }
 
 void GameRuntime::requestExit(int code) {

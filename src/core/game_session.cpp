@@ -122,6 +122,10 @@ void GameActions::sendGameCommand(finescript::Value command) {
     sendAction(makeGameCommandValue(std::move(command)));
 }
 
+void GameActions::sendPlayerCommand(int64_t player, finescript::Value command) {
+    sendAction(makeGameCommandValue(std::move(command), player));
+}
+
 // ============================================================================
 // LocalGameActions — single-player implementation
 //
@@ -276,7 +280,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
                            FluidTickManager* fluidTickManager,
                            ParticleSystem* particles,
                            EventBus* eventBus,
-                           const std::function<void(const finescript::Value&)>& gameCommandHandler,
+                           const GameCommandHandler& gameCommandHandler,
                            const finescript::Value& cmd) {
     auto typeStr = readEventType(cmd);
 
@@ -559,7 +563,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         particles->burst(preset, position, tint);
     }
     else if (typeStr == EVT_GAME_COMMAND) {
-        if (gameCommandHandler) gameCommandHandler(readGameCommandBody(cmd));
+        if (gameCommandHandler) gameCommandHandler(readGameCommandBody(cmd), readGameCommandPlayer(cmd));
     }
 }
 
@@ -650,7 +654,7 @@ struct GameSession::Impl {
 
     // EventBus
     std::shared_ptr<EventBus> eventBus;
-    std::function<void(const finescript::Value&)> gameCommandHandler;
+    GameCommandHandler gameCommandHandler;
 
     // Registered subsystems (sorted by phase/priority)
     std::vector<std::shared_ptr<GameSubsystem>> subsystems;
@@ -1002,7 +1006,7 @@ GraphicsEventQueue& GameSession::graphicsEvents() { return *impl_->graphicsQueue
 
 EventBus& GameSession::eventBus() { return *impl_->eventBus; }
 
-void GameSession::setGameCommandHandler(std::function<void(const finescript::Value&)> handler) {
+void GameSession::setGameCommandHandler(GameCommandHandler handler) {
     impl_->gameCommandHandler = std::move(handler);
 }
 

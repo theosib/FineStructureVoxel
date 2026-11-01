@@ -166,8 +166,8 @@ void registerBlueprintNatives(GameRuntime& runtime) {
         return result;
     });
 
-    // site_show_ghosts [id ...]: draw what's left of these sites, in place of what was drawn.
-    // Clearing a cell is work too, but there's nothing there to show.
+    // site_show_ghosts [id ...] [=faction f]: draw what's left of these sites for this faction,
+    // in place of what was drawn. Clearing a cell is work too, but there's nothing there to show.
     e.registerFunction("site_show_ghosts", [=](ExecutionContext&, const Args& args) -> Value {
         std::vector<worldgen::SiteGhost> ghosts;
         if (!args.empty() && args[0].isArray()) {
@@ -188,7 +188,12 @@ void registerBlueprintNatives(GameRuntime& runtime) {
                 if (!ghost.cells.empty()) ghosts.push_back(std::move(ghost));
             }
         }
-        rt->setSiteGhosts(std::move(ghosts));
+        uint16_t faction = rt->manifest().viewerFaction;
+        if (args.size() > 1 && args.back().isMap()) {
+            Value named = const_cast<Value&>(args.back()).asMap().get(StringInterner::global().intern("faction"));
+            if (named.isNumeric()) faction = static_cast<uint16_t>(named.asNumber());
+        }
+        rt->setSiteGhosts(faction, std::move(ghosts));
         return Value::nil();
     });
 

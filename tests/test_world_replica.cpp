@@ -93,44 +93,6 @@ TEST_F(WorldReplicaTest, RevealAllShowsEverything) {
     EXPECT_EQ(replica->world().getBlock(100, GROUND_Y - 1, 16), stone);
 }
 
-TEST_F(WorldReplicaTest, APredictionShowsAtOnceAndStaysIfTheServerAgrees) {
-    lookFrom(16);
-    BlockCoord spot(16, GROUND_Y, 16);
-
-    replica->predictBlock(spot, marker);
-    EXPECT_EQ(replica->world().getBlock(spot), marker);
-
-    world.setBlock(spot, marker);
-    for (int i = 0; i < 10; ++i) replica->tick(0.033f);
-    EXPECT_EQ(replica->world().getBlock(spot), marker);
-}
-
-TEST_F(WorldReplicaTest, TheServerCorrectsAPredictionItDidntAllow) {
-    lookFrom(16);
-    BlockCoord spot(16, GROUND_Y, 16);
-
-    replica->predictBlock(spot, marker);
-    for (int i = 0; i < 2; ++i) replica->tick(0.033f);
-    EXPECT_EQ(replica->world().getBlock(spot), marker);  // Time to act on the command first
-
-    // The server's version of this block never changed, so only the prediction can undo it
-    for (int i = 0; i < 2; ++i) replica->tick(0.033f);
-    EXPECT_TRUE(replica->world().getBlock(spot).isAir());
-}
-
-TEST_F(WorldReplicaTest, AnotherChangeNearbyDoesntUndoAPrediction) {
-    lookFrom(16);
-    BlockCoord spot(16, GROUND_Y, 16);
-    BlockCoord other(17, GROUND_Y, 16);
-
-    replica->predictBlock(spot, marker);
-    world.setBlock(other, stone);  // A Hand working next door, in the same subchunk
-    replica->syncAll();
-
-    EXPECT_EQ(replica->world().getBlock(other), stone);
-    EXPECT_EQ(replica->world().getBlock(spot), marker);
-}
-
 TEST_F(WorldReplicaTest, AnExpectedChangeArrivesWithoutWaitingForTheSweep) {
     lookFrom(16);
     BlockCoord spot(16, GROUND_Y, 16);
@@ -142,6 +104,82 @@ TEST_F(WorldReplicaTest, AnExpectedChangeArrivesWithoutWaitingForTheSweep) {
 
     for (int i = 0; i < 4; ++i) replica->tick(0.033f);
     EXPECT_EQ(replica->world().getBlock(trunk), stone);
+}
+
+TEST_F(WorldReplicaTest, AnExpectedChangeOutOfSightStaysHidden) {
+    lookFrom(16);
+    BlockCoord far(100, GROUND_Y, 16);
+    world.setBlock(far, marker);
+
+    // A client can't learn about a column by claiming it's about to change
+    replica->expectChange(far);
+    for (int i = 0; i < 4; ++i) replica->tick(0.033f);
+    EXPECT_TRUE(replica->world().getBlock(far).isAir());
+}
+
+TEST_F(WorldReplicaTest, LightComesAcrossWithTheBlocks) {
+    world.getOrCreateColumn(ColumnPos(1, 1)).getOrCreateSubChunk(1);
+    SubChunk* source = world.getSubChunk(ChunkPos(1, 1, 1));
+    ASSERT_NE(source, nullptr);
+    source->setSkyLight(3, 3, 3, 9);
+
+    lookFrom(16);
+    const SubChunk* copy = replica->world().getSubChunk(ChunkPos(1, 1, 1));
+    ASSERT_NE(copy, nullptr);
+    EXPECT_EQ(copy->getSkyLight(3, 3, 3), 9);
+}
+
+TEST_F(WorldReplicaTest, ALightChangeAloneCounts) {
+    lookFrom(16);
+    (void)replica->takeChanges();
+
+    SubChunk* source = world.getSubChunk(ChunkPos(1, 1, 1));
+    ASSERT_NE(source, nullptr);
+    source->setSkyLight(3, 3, 3, 4);
+    replica->syncAll();
+
+    EXPECT_EQ(replica->world().getSubChunk(ChunkPos(1, 1, 1))->getSkyLight(3, 3, 3), 4);
+    auto changed = replica->takeChanges();
+    ASSERT_EQ(changed.size(), 1u);
+    EXPECT_EQ(changed[0], ChunkPos(1, 1, 1));
+}
+
+TEST_F(WorldReplicaTest, ChangesAreReportedOnce) {
+    lookFrom(16);
+    EXPECT_FALSE(replica->takeChanges().empty());
+    EXPECT_TRUE(replica->takeChanges().empty());
+
+    replica->syncAll();
+    EXPECT_TRUE(replica->takeChanges().empty()) << "nothing changed";
+
+    world.setBlock(17, GROUND_Y, 16, marker);
+    world.setBlock(18, GROUND_Y, 16, marker);
+    replica->syncAll();
+    EXPECT_EQ(replica->takeChanges().size(), 1u) << "two blocks in one subchunk";
+}
+
+TEST_F(WorldReplicaTest, RefreshLightReachesTerrainOutOfSight) {
+    lookFrom(16);
+    lookFrom(100);
+    (void)replica->takeChanges();
+
+    SubChunk* source = world.getSubChunk(ChunkPos(1, 1, 1));
+    source->setSkyLight(3, 3, 3, 2);
+    replica->refreshLight();
+    EXPECT_EQ(replica->world().getSubChunk(ChunkPos(1, 1, 1))->getSkyLight(3, 3, 3), 2);
+}
+
+TEST_F(WorldReplicaTest, ClearedFluidClearsInTheCopy) {
+    lookFrom(16);
+    auto water = FluidTypeId::fromName("replica_water");
+    SubChunk* source = world.getSubChunk(ChunkPos(1, 1, 1));
+    ASSERT_TRUE(source->setFluid(2, 2, 2, water, 8));
+    replica->syncAll();
+    EXPECT_EQ(replica->world().getSubChunk(ChunkPos(1, 1, 1))->getFluid(2, 2, 2), water);
+
+    source->removeFluid(2, 2, 2);
+    replica->syncAll();
+    EXPECT_TRUE(replica->world().getSubChunk(ChunkPos(1, 1, 1))->getFluid(2, 2, 2).isEmpty());
 }
 
 TEST_F(WorldReplicaTest, TickingEventuallyCoversTheMap) {

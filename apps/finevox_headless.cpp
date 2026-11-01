@@ -5,13 +5,17 @@
  *   finevox_headless --game-root DIR [--ticks N] [--seed S] [--radius R]
  *                    [--script FILE]... [--define NAME=VALUE]... [--save DIR | --resume DIR]
  *                    [--mcp] [--mcp-port N] [--mcp-player]
+ *   finevox_headless --game-root DIR --serve [--config FILE] [--port N]
  *
  * Exits with the script's `game_exit` code. Any game script error makes the
  * exit code nonzero, so a broken handler can't pass silently.
  *
  * With --mcp it plays in real time, ignoring --ticks, until something calls `game_exit`.
+ *
+ * With --serve it's a server: it runs a game for clients to join, until killed or `game_exit`.
  */
 
+#include "finevox/game/game_host.hpp"
 #include "finevox/game/game_runtime.hpp"
 #include "finevox/game/mcp_server.hpp"
 #include "finevox/core/game_session.hpp"
@@ -28,6 +32,9 @@ int main(int argc, char* argv[]) {
     RuntimeOptions options;
     uint64_t ticks = 300;
     bool saveAtEnd = false;
+    bool serving = false;
+    std::filesystem::path serverConfig;
+    std::optional<int> serverPort;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -40,6 +47,12 @@ int main(int argc, char* argv[]) {
         };
         if (arg == "--game-root") {
             options.gameRoot = value();
+        } else if (arg == "--serve") {
+            serving = true;
+        } else if (arg == "--config") {
+            serverConfig = value();
+        } else if (arg == "--port") {
+            serverPort = std::stoi(value());
         } else if (arg == "--ticks") {
             ticks = std::stoull(value());
         } else if (arg == "--save") {
@@ -73,6 +86,14 @@ int main(int argc, char* argv[]) {
             std::cerr << "unknown argument: " << arg << "\n";
             return 2;
         }
+    }
+
+    if (serving) {
+        if (options.gameRoot.empty()) {
+            std::cerr << "usage: finevox_headless --game-root DIR --serve [--config FILE] [--port N]\n";
+            return 2;
+        }
+        return serve(std::move(options), serverConfig, serverPort);
     }
 
     // Saving is opt-in here: a scenario must never touch the player's own game

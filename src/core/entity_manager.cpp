@@ -396,6 +396,7 @@ void EntityManager::validatePlayerPredictions() {
 }
 
 void EntityManager::publishSnapshots() {
+    if (!snapshotsEnabled_) return;
     std::vector<GraphicsMessage> batch;
     batch.reserve(entities_.size());
 

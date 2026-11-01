@@ -63,14 +63,15 @@ void ScriptGameSubsystem::fire(std::string_view event) {
     }
 }
 
-void ScriptGameSubsystem::deliverCommand(const finescript::Value& command) {
+void ScriptGameSubsystem::deliverCommand(const finescript::Value& command, int64_t sender) {
     ctx_->set("cmd", command);
+    ctx_->set("sender", finescript::Value::integer(sender));
     fire("command");
 }
 
-void ScriptGameSubsystem::publish(const finescript::Value& message) {
+void ScriptGameSubsystem::publish(const finescript::Value& message, Audience audience) {
     if (!sink_) return;
-    sink_(finescript::cborEncode(message, scripts_.engine().interner()));
+    sink_(finescript::cborEncode(message, scripts_.engine().interner()), audience);
 }
 
 void ScriptGameSubsystem::reportError(const std::string& message) {

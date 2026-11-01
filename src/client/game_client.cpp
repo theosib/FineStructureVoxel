@@ -1,20 +1,28 @@
 #include "finevox/client/game_client.hpp"
 
 #include "finevox/core/action_dispatch.hpp"
-#include "finevox/core/entity_manager.hpp"
+#include "finevox/core/chunk_column.hpp"
+#include "finevox/core/content_pack_loader.hpp"
 #include "finevox/core/entity_model.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/input_action_system.hpp"
-#include "finevox/core/light_engine.hpp"
-#include "finevox/core/mob_entity.hpp"
+#include "finevox/core/particle_system.hpp"
 #include "finevox/core/physics.hpp"
 #include "finevox/core/player_controller.hpp"
+#include "finevox/core/position.hpp"
+#include "finevox/core/projectile_system.hpp"
+#include "finevox/core/resource_locator.hpp"
 #include "finevox/core/sky.hpp"
 #include "finevox/core/tactical_camera.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/world_time.hpp"
+#include "finevox/game/game_manifest.hpp"
+#include "finevox/game/mcp_server.hpp"
 #include "finevox/game/mcp_tools.hpp"
+#include "finevox/net/client_session.hpp"
+#include "finevox/net/content.hpp"
+#include "finevox/worldgen/blueprint.hpp"
 #include "finevox/render/block_atlas.hpp"
 #include "finevox/render/engine.hpp"
 #include "finevox/render/entity_renderer.hpp"
@@ -26,6 +34,7 @@
 #include "finevox/render/world_render_layer.hpp"
 #include "finevox/render/world_renderer.hpp"
 #include "finevox/script/event_value.hpp"
+#include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/finevox_interner.hpp"
 
 #include <finegui/finegui.hpp>
@@ -50,7 +59,11 @@
 #include <finevk/rendering/swapchain.hpp>
 #include <finevk/window/window.hpp>
 
+#include <finenet/discovery.hpp>
+#include <finenet/endpoint.hpp>
+
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <unordered_set>
 
@@ -84,11 +97,15 @@ constexpr uint64_t FOG_REFRESH_FRAMES = 15;
 constexpr float FOG_EXPLORED = 0.5f;                  ///< What was seen, now out of sight
 constexpr glm::vec3 FOG_COLOR(0.015f, 0.02f, 0.04f);  ///< The clear colour, so unseen land vanishes
 
-class GameRootFinder : public finescript::ResourceFinder {
+/// `source` in a UI script. A script may have come from a server, so it stays in the content root.
+class ContentRootFinder : public finescript::ResourceFinder {
 public:
-    explicit GameRootFinder(fs::path root) : root_(std::move(root)) {}
+    explicit ContentRootFinder(fs::path root) : root_(std::move(root)) {}
+
+    void setRoot(fs::path root) { root_ = std::move(root); }
 
     fs::path resolve(std::string_view name) override {
+        if (!net::isSafeContentPath(name)) return {};
         for (const char* suffix : {"", ".fs", ".fsc"}) {
             fs::path candidate = root_ / (std::string(name) + suffix);
             if (fs::is_regular_file(candidate)) return candidate;
@@ -125,7 +142,7 @@ glm::vec4 colorArg(const Args& args, size_t index) {
 }  // namespace
 
 struct GameClient::Impl {
-    Impl(game::GameRuntime& rt, ClientOptions opts) : runtime(rt), options(std::move(opts)) {}
+    explicit Impl(ClientOptions opts) : options(std::move(opts)) {}
 
     ~Impl() {
         // Members below hold GPU resources that in-flight frames may still use
@@ -133,8 +150,23 @@ struct GameClient::Impl {
         finegui::setActiveSkin(nullptr);
     }
 
-    game::GameRuntime& runtime;
     ClientOptions options;
+    game::GameManifest manifest;
+    fs::path contentRoot;          ///< Where this game's files are: ours, or what a server sent
+
+    std::unique_ptr<LocalHost> host;  // Declared before the session, so that it outlives it
+    std::unique_ptr<net::ClientSession> session;
+    std::unique_ptr<finenet::DiscoveryBrowser> browser;
+    std::unique_ptr<ContentPackLoader> ownContent;
+    ContentPackLoader* content = nullptr;
+    worldgen::BlueprintLibrary blueprints;
+    std::unique_ptr<ParticleSystem> particles;
+    net::WorldInfo worldInfo;
+    bool inWorld = false;
+    bool directStart = false;
+    bool restartRequested = false;
+    float viewHintTimer = 0.0f;
+    float playerStateTimer = 0.0f;
 
     std::unique_ptr<Engine> engine;
     std::unique_ptr<finegui::GuiSystem> gui;
@@ -144,7 +176,8 @@ struct GameClient::Impl {
     std::unique_ptr<finegui::TextureRegistry> textureRegistry;
     std::vector<std::unique_ptr<finegui::Skin>> skins;
     std::unique_ptr<ExecutionContext> uiCtx;
-    std::unique_ptr<GameRootFinder> finder;
+    std::vector<std::unique_ptr<ExecutionContext>> pastContexts;  ///< Hidden windows may still point here
+    std::unique_ptr<ContentRootFinder> finder;
     script::FineVoxInterner interner;
 
     // Atlases outlive the renderers: mesh workers read them until WorldRenderer stops
@@ -198,23 +231,33 @@ struct GameClient::Impl {
     bool screenshotRequested = false;
     std::string screenshotPath;
     game::McpServer* mcp = nullptr;  // Null unless this run asked for one
+    std::string playerName;
     int fps = 0;
     int framesThisSecond = 0;
     float fpsTimer = 0.0f;
 
-    void setup();
+    void setupShell();
+    void enterWorld();
+    void beginSession(const std::string& name, const std::string& password);
+    void startLocal(bool newGame);
+    void pumpSession();
+    void fireNet(std::string_view phase, std::string_view failure);
+    void shutdown();
+    [[nodiscard]] std::optional<fs::path> contentPath(std::string_view relative) const;
+    [[nodiscard]] fs::path recentPath() const;
+    [[nodiscard]] std::vector<std::string> recentServers() const;
+    void noteRecentServer(const std::string& address);
     void registerNatives();
+    void registerNetNatives();
     void registerMcpTools();
-    void loadUiScript();
+    void loadUiScript(const std::string& relative);
     void fireUi(uint32_t symbol);
     void bindInput();
     void updateCamera(float dt);
     void buildScene();
     void flushMarkers();
-    void drainUiMessages();
     void buildProjectiles();
     void updateFog(float dt);
-    void saveOnExit();
     void setEmbodied(bool on);
     void updateStewardView(float dt);
     void buildGhosts(float dt);
@@ -226,6 +269,7 @@ struct GameClient::Impl {
     [[nodiscard]] std::vector<int32_t> groundHeightsAround(const glm::dvec3& centre) const;
 
     uint32_t symFrame = 0, symMouse = 0, symAction = 0, symState = 0, symKey = 0;
+    uint32_t symNet = 0, symLobby = 0, symChat = 0;
 };
 
 glm::vec3 GameClient::Impl::factionColor(uint16_t faction) const {
@@ -246,11 +290,10 @@ void GameClient::Impl::fireUi(uint32_t symbol) {
     }
 }
 
-void GameClient::Impl::setup() {
-    const game::GameManifest& manifest = runtime.manifest();
-    GameSession& session = runtime.session();
-    // Everything drawn comes from the replica, which holds only what the viewer saw
-    World& world = runtime.replica().world();
+void GameClient::Impl::setupShell() {
+    contentRoot = options.gameRoot;
+    if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
+    playerName = options.playerName;
 
     EngineConfig engineConfig;
     engineConfig.windowTitle = manifest.windowTitle;
@@ -281,7 +324,7 @@ void GameClient::Impl::setup() {
     guiManager = std::make_unique<finegui::ScriptGuiManager>(*uiEngine, *mapRenderer);
     textureRegistry = std::make_unique<finegui::TextureRegistry>();
     mapRenderer->setTextureRegistry(textureRegistry.get());
-    finder = std::make_unique<GameRootFinder>(runtime.gameRoot());
+    finder = std::make_unique<ContentRootFinder>(contentRoot);
     uiEngine->setResourceFinder(finder.get());
     uiCtx = std::make_unique<ExecutionContext>(*uiEngine);
 
@@ -290,117 +333,22 @@ void GameClient::Impl::setup() {
     symAction = uiEngine->intern("action");
     symState = uiEngine->intern("state");
     symKey = uiEngine->intern("key");
+    symNet = uiEngine->intern("net");
+    symLobby = uiEngine->intern("lobby");
+    symChat = uiEngine->intern("chat");
 
-    render::WorldRendererConfig worldConfig;
-    worldConfig.viewDistance = manifest.viewDistance;
-    if (manifest.fogOfWar) {
-        const FactionVision& vision = runtime.vision();
-        fog = std::make_unique<RegionTint>(vision.cellsX(), vision.cellsZ());
-        worldConfig.regionTintCells = fog->cells().size();
-    }
-    worldRenderer = std::make_unique<render::WorldRenderer>(&device, &renderer, world, worldConfig);
-    worldRenderer->setLODEnabled(manifest.lod);
+    // The menu needs its words before there's a game to load them
+    ContentPackLoader(manifest.contentNamespace).loadLocalization(contentRoot);
 
-    std::string shaderDir = options.shaderDir.string() + "/";
-    worldRenderer->loadShaders(shaderDir + "chunk.vert.spv", shaderDir + "chunk.frag.spv");
-    worldRenderer->loadFluidShader(shaderDir + "fluid.frag.spv");
-
-    atlas = std::make_unique<render::BlockAtlas>();
-    atlas->buildFromTextures(&device, renderer.commandPool(),
-                             (runtime.gameRoot() / "textures").string(),
-                             runtime.content().blockTextures());
-    worldRenderer->setBlockAtlas(atlas->texture());
-    worldRenderer->setTextureProvider(atlas->createProvider());
-    worldRenderer->setGeometryProvider(runtime.content().geometryProvider());
-    worldRenderer->setFaceOccludesProvider(runtime.content().faceOccludesProvider(world));
-    worldRenderer->setConnectsProvider(runtime.content().connectsProvider(world));
-    worldRenderer->initialize();
-
-    particleAtlas = std::make_unique<render::ParticleAtlas>();
-    fs::path particleDir = runtime.gameRoot() / "textures" / "particles";
-    if (particleAtlas->loadFromDirectory(&device, renderer.commandPool(), particleDir.string()) == 0) {
-        particleAtlas->createPlaceholder(&device, renderer.commandPool());
-    }
-    particleAtlas->applyToRegistry(ParticleTypeRegistry::global(), nullptr);
-    particleRenderer = std::make_unique<render::ParticleRenderer>(&device, &renderer, session.particles());
-    particleRenderer->loadShaders(shaderDir + "particle.vert.spv", shaderDir + "particle.frag.spv");
-    particleRenderer->setAtlas(particleAtlas.get());
-    particleRenderer->initialize();
-    worldRenderer->setParticleRenderer(particleRenderer.get());
-
-    sceneRenderer = std::make_unique<render::SceneRenderer>(&device, &renderer);
-    sceneRenderer->loadShaders(shaderDir + "scene.vert.spv", shaderDir + "scene.frag.spv");
-    sceneRenderer->initialize();
-    worldRenderer->setOpaquePassCallback(
-        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawOpaque(cmd); });
-    worldRenderer->setTranslucentPassCallback(
-        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawTranslucent(cmd); });
-
-    models.loadDirectory(runtime.gameRoot() / "models");
-    EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
-        if (def.model == 0) return;
-        const EntityModel* model = models.find(StringInterner::global().lookup(def.model));
-        if (!model) return;
-        for (const auto& [state, slot] : def.animationStates) {
-            auto clip = model->clips.find(state);
-            if (clip != model->clips.end()) {
-                entityRenderer.registerAnimationClip(id, slot, clip->second.get());
-            }
-        }
-    });
-
-    LightEngine& light = session.lightEngine();
-    worldRenderer->setLightProvider([&light](const BlockCoord& pos) -> uint8_t {
-        return static_cast<uint8_t>((light.getSkyLight(pos) << 4) | light.getBlockLight(pos));
-    });
-    worldRenderer->setSmoothLighting(true);
-    light.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
-    world.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
-    world.setAlwaysDeferMeshRebuild(false);
-    glm::dvec3 start(0.0, double(manifest.seaLevel + 10), 0.0);
-    worldRenderer->rebuildAllMeshesNear(start);
-
-    int32_t radius = manifest.worldRadius * 16;
-    tactical.setBounds(glm::vec2(float(-radius)), glm::vec2(float(radius)));
-    camera.setPerspective(FOV_DEGREES, float(window.width()) / float(window.height()), NEAR_PLANE,
-                          FAR_PLANE);
-    tactical.setPivot(start);
-    if (runtime.resumed()) {
-        const game::ClientSave& saved = runtime.clientSave();
-        tactical.setPivot(saved.pivot);
-        tactical.orbit(saved.yaw - tactical.yaw(), saved.pitch - tactical.pitch());
-        tactical.setDistance(saved.distance);
-    }
-
-    std::string bindings = (runtime.gameRoot() / "input" / "default.bindings").string();
+    std::string bindings = (contentRoot / "input" / "default.bindings").string();
     if (fs::exists(bindings)) inputActions.loadBindings(bindings);
 
-    stewardShapes = createBlockShapeProvider(world);
-    stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
-    stewardBody = std::make_unique<SimplePhysicsBody>(
-        Vec3(0.0f, float(manifest.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
-    stewardBody->setMaxStepHeight(manifest.stepHeight);
-    steward.setPhysics(stewardBody.get(), stewardPhysics.get());
-    steward.setFlyMode(false);
-    if (runtime.resumed()) {
-        const glm::dvec3& spot = runtime.clientSave().steward;
-        stewardBody->setPosition(Vec3(float(spot.x), float(spot.y), float(spot.z)));
-    }
-    stewardId = session.entities().spawnPlayer(stewardBody->position(), manifest.playerEntity);
-    session.entities().setLocalPlayerId(stewardId);
-    if (MobEntity* mob = session.entities().getMob(stewardId)) {
-        mob->setFaction(manifest.viewerFaction);
-    }
-
     registerNatives();
+    registerNetNatives();
     registerMcpTools();
     bindInput();
     uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
-    uiCtx->set("resumed", Value::boolean(runtime.resumed()));
-    loadUiScript();
-
-    auto worldLayer = std::make_shared<render::WorldRenderLayer>(*worldRenderer);
-    engine->addRenderLayer(worldLayer);
+    uiCtx->set("resumed", Value::boolean(false));
 
     auto guiLayer = std::make_shared<GuiLayer>();
     guiLayer->renderFn = [this](const RenderContext& ctx) {
@@ -421,17 +369,37 @@ void GameClient::Impl::setup() {
         glm::ivec2 size = engine->window().windowSize();
         viewport = glm::vec2(float(size.x), float(size.y));
 
+        pumpSession();
+
+        ++framesThisSecond;
+        fpsTimer += dt;
+        if (fpsTimer >= 1.0f) {
+            fps = framesThisSecond;
+            framesThisSecond = 0;
+            fpsTimer -= 1.0f;
+            if (options.printStats && inWorld) {
+                std::cout << "[client] fps=" << fps << " chunks=" << worldRenderer->renderedChunkCount()
+                          << "/" << worldRenderer->loadedChunkCount()
+                          << " culled=" << worldRenderer->culledChunkCount()
+                          << " tris=" << worldRenderer->renderedTriangleCount()
+                          << " entities=" << entityRenderer.entityCount()
+                          << " cam=" << camera.positionD().x << "," << camera.positionD().y << ","
+                          << camera.positionD().z << std::endl;
+            }
+        }
+
+        if (!inWorld) return;
+
         auto framePeriod = worldRenderer->recordFrameStart();
 
-        GameSession& s = runtime.session();
-        sky = computeSkyParameters(s.worldTime().timeOfDay(), runtime.content().skyConfig());
+        sky = computeSkyParameters(session->timeOfDay(), content->skyConfig());
         worldRenderer->setSkyParameters(sky);
         if (worldRenderer->fogDynamicColor()) worldRenderer->setFogColor(sky.fogColor);
 
-        entityRenderer.processEvents(s.graphicsEvents());
+        entityRenderer.processEvents(session->graphics());
         entityRenderer.update(dt, camera.positionD());
         startDeathBursts();
-        drainUiMessages();
+        particles->tick(dt);
 
         updateCamera(dt);
         worldRenderer->updateCamera(camera.state(), camera.positionD());
@@ -444,28 +412,19 @@ void GameClient::Impl::setup() {
         flushMarkers();
         updateFog(dt);
 
+        // Tell the server where the player's looking, so that what's near goes first
+        viewHintTimer -= dt;
+        if (viewHintTimer <= 0.0f) {
+            viewHintTimer = 0.5f;
+            glm::dvec3 where = embodied ? camera.positionD() : tactical.pivot();
+            session->sendViewHint(where.x, where.z);
+        }
+
         auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::microseconds(framePeriod.count() / 2);
         while (std::chrono::steady_clock::now() < deadline) {
             if (!worldRenderer->waitForMeshUploads(deadline)) break;
             worldRenderer->updateMeshes(0);
-        }
-
-        ++framesThisSecond;
-        fpsTimer += dt;
-        if (fpsTimer >= 1.0f) {
-            fps = framesThisSecond;
-            framesThisSecond = 0;
-            fpsTimer -= 1.0f;
-            if (options.printStats) {
-                std::cout << "[client] fps=" << fps << " chunks=" << worldRenderer->renderedChunkCount()
-                          << "/" << worldRenderer->loadedChunkCount()
-                          << " culled=" << worldRenderer->culledChunkCount()
-                          << " tris=" << worldRenderer->renderedTriangleCount()
-                          << " entities=" << entityRenderer.entityCount()
-                          << " cam=" << camera.positionD().x << "," << camera.positionD().y << ","
-                          << camera.positionD().z << std::endl;
-            }
         }
     };
     callbacks.onResize = [this](uint32_t width, uint32_t height) {
@@ -475,10 +434,12 @@ void GameClient::Impl::setup() {
     };
     callbacks.getClearColor = [this]() -> glm::vec4 {
         // With fog on, the edge of the known world should read as darkness
-        return runtime.manifest().fogOfWar ? glm::vec4(FOG_COLOR, 1.0f) : sky.skyColor;
+        if (!inWorld || worldInfo.fog) return glm::vec4(FOG_COLOR, 1.0f);
+        return sky.skyColor;
     };
     callbacks.onPostRender = [this]() {
-        ++frameCount;
+        // A run that's going straight into a game counts from when it's there, as a script does
+        if (inWorld || !directStart) ++frameCount;
         if (mcp) {
             mcp->noteFrame();
             mcp->pump(game::McpSide::AfterFrame);
@@ -517,7 +478,287 @@ void GameClient::Impl::setup() {
         }
     };
     engine->setFrameCallbacks(std::move(callbacks));
+
+    switch (options.start) {
+        case ClientStart::Menu:
+            if (manifest.menuScript.empty()) {
+                directStart = true;
+                startLocal(false);
+            } else {
+                loadUiScript(manifest.menuScript);
+            }
+            break;
+        case ClientStart::NewGame:
+            directStart = true;
+            startLocal(true);
+            break;
+        case ClientStart::Continue:
+            directStart = true;
+            startLocal(false);
+            break;
+        case ClientStart::Join:
+            beginSession(playerName, options.password);
+            session->connect({options.joinAddress}, manifest.netPort);
+            if (!manifest.menuScript.empty()) loadUiScript(manifest.menuScript);
+            break;
+    }
+}
+
+void GameClient::Impl::beginSession(const std::string& name, const std::string& password) {
+    net::ClientSession::Options sessionOptions;
+    sessionOptions.name = name;
+    sessionOptions.game = manifest.contentNamespace;
+    sessionOptions.gameRoot = options.gameRoot;
+    sessionOptions.password = password;
+    session = std::make_unique<net::ClientSession>(std::move(sessionOptions));
+}
+
+void GameClient::Impl::startLocal(bool newGame) {
+    if (!options.hostFactory) {
+        std::cerr << "[client] this client can't host a game\n";
+        return;
+    }
+    HostRequest request;
+    request.newGame = newGame;
+    request.autoLaunch = true;
+    std::string error;
+    host = options.hostFactory(request, error);
+    if (!host) {
+        std::cerr << "[client] couldn't start a game: " << error << "\n";
+        return;
+    }
+    beginSession(playerName, "");
+    session->attach(host->connect());
+}
+
+void GameClient::Impl::enterWorld() {
+    inWorld = true;
+    worldInfo = session->worldInfo();
+    contentRoot = session->contentRoot();
+    finder->setRoot(contentRoot);
+    if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
+
+    World& world = session->world().world();
+    auto& window = engine->window();
+    auto& device = engine->device();
+    auto& renderer = engine->renderer();
+
+    // A game in this process has loaded all this, into registries that are global
+    content = host ? host->content() : nullptr;
+    if (!content) {
+        ResourceLocator::instance().setGameRoot(contentRoot);
+        ownContent = std::make_unique<ContentPackLoader>(manifest.contentNamespace);
+        ownContent->loadAll(contentRoot);
+        content = ownContent.get();
+    }
+    blueprints.loadDirectory(contentRoot / "blueprints");
+    particles = std::make_unique<ParticleSystem>(world);
+
+    render::WorldRendererConfig worldConfig;
+    worldConfig.viewDistance = worldInfo.viewDistance;
+    if (worldInfo.fog) {
+        fog = std::make_unique<RegionTint>(worldInfo.visionCellsX, worldInfo.visionCellsZ);
+        worldConfig.regionTintCells = fog->cells().size();
+    }
+    worldRenderer = std::make_unique<render::WorldRenderer>(&device, &renderer, world, worldConfig);
+    worldRenderer->setLODEnabled(worldInfo.lod);
+
+    std::string shaderDir = options.shaderDir.string() + "/";
+    worldRenderer->loadShaders(shaderDir + "chunk.vert.spv", shaderDir + "chunk.frag.spv");
+    worldRenderer->loadFluidShader(shaderDir + "fluid.frag.spv");
+
+    atlas = std::make_unique<render::BlockAtlas>();
+    atlas->buildFromTextures(&device, renderer.commandPool(), (contentRoot / "textures").string(),
+                             content->blockTextures());
+    worldRenderer->setBlockAtlas(atlas->texture());
+    worldRenderer->setTextureProvider(atlas->createProvider());
+    worldRenderer->setGeometryProvider(content->geometryProvider());
+    worldRenderer->setFaceOccludesProvider(content->faceOccludesProvider(world));
+    worldRenderer->setConnectsProvider(content->connectsProvider(world));
+    worldRenderer->initialize();
+
+    particleAtlas = std::make_unique<render::ParticleAtlas>();
+    fs::path particleDir = contentRoot / "textures" / "particles";
+    if (particleAtlas->loadFromDirectory(&device, renderer.commandPool(), particleDir.string()) == 0) {
+        particleAtlas->createPlaceholder(&device, renderer.commandPool());
+    }
+    particleAtlas->applyToRegistry(ParticleTypeRegistry::global(), nullptr);
+    particleRenderer = std::make_unique<render::ParticleRenderer>(&device, &renderer, *particles);
+    particleRenderer->loadShaders(shaderDir + "particle.vert.spv", shaderDir + "particle.frag.spv");
+    particleRenderer->setAtlas(particleAtlas.get());
+    particleRenderer->initialize();
+    worldRenderer->setParticleRenderer(particleRenderer.get());
+
+    sceneRenderer = std::make_unique<render::SceneRenderer>(&device, &renderer);
+    sceneRenderer->loadShaders(shaderDir + "scene.vert.spv", shaderDir + "scene.frag.spv");
+    sceneRenderer->initialize();
+    worldRenderer->setOpaquePassCallback(
+        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawOpaque(cmd); });
+    worldRenderer->setTranslucentPassCallback(
+        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawTranslucent(cmd); });
+
+    models.loadDirectory(contentRoot / "models");
+    EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
+        if (def.model == 0) return;
+        const EntityModel* model = models.find(StringInterner::global().lookup(def.model));
+        if (!model) return;
+        for (const auto& [state, slot] : def.animationStates) {
+            auto clip = model->clips.find(state);
+            if (clip != model->clips.end()) {
+                entityRenderer.registerAnimationClip(id, slot, clip->second.get());
+            }
+        }
+    });
+
+    net::ClientWorld& known = session->world();
+    worldRenderer->setLightProvider([&known](const BlockCoord& pos) -> uint8_t { return known.packedLight(pos); });
+    worldRenderer->setSmoothLighting(true);
+    world.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
+    world.setAlwaysDeferMeshRebuild(false);
+    glm::dvec3 start(0.0, double(worldInfo.seaLevel + 10), 0.0);
+    worldRenderer->rebuildAllMeshesNear(start);
+
+    int32_t radius = worldInfo.radius * 16;
+    tactical.setBounds(glm::vec2(float(-radius)), glm::vec2(float(radius)));
+    camera.setPerspective(FOV_DEGREES, float(window.width()) / float(window.height()), NEAR_PLANE, FAR_PLANE);
+    tactical.setPivot(start);
+
+    stewardShapes = createBlockShapeProvider(world);
+    stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
+    stewardBody = std::make_unique<SimplePhysicsBody>(
+        Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
+    stewardBody->setMaxStepHeight(worldInfo.stepHeight);
+    steward.setPhysics(stewardBody.get(), stewardPhysics.get());
+    steward.setFlyMode(false);
+
+    if (auto binding = session->binding()) {
+        stewardId = binding->body;
+        stewardBody->setPosition(Vec3(float(binding->spawn.x), float(binding->spawn.y), float(binding->spawn.z)));
+    }
+
+    if (worldInfo.resumed && !worldInfo.clientState.empty()) {
+        Value saved = net::decodeBody(worldInfo.clientState);
+        Value pivot = net::field(saved, "pivot");
+        Value view = net::field(saved, "camera");
+        if (pivot.isArray() && pivot.asArray().size() == 3) {
+            const auto& p = pivot.asArray();
+            tactical.setPivot(glm::dvec3(p[0].asNumber(), p[1].asNumber(), p[2].asNumber()));
+        }
+        if (view.isArray() && view.asArray().size() == 3) {
+            const auto& v = view.asArray();
+            tactical.orbit(float(v[0].asNumber()) - tactical.yaw(), float(v[1].asNumber()) - tactical.pitch());
+            tactical.setDistance(float(v[2].asNumber()));
+        }
+    }
+
+    // The menu's over. What it showed goes, and the game's own UI script starts afresh.
+    mapRenderer->hideAll();
+    pastContexts.push_back(std::move(uiCtx));
+    uiCtx = std::make_unique<ExecutionContext>(*uiEngine);
+    uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
+    uiCtx->set("resumed", Value::boolean(worldInfo.resumed));
+    uiCtx->set("my_player", Value::integer(session->playerId()));
+    auto binding = session->binding();
+    uiCtx->set("my_faction", Value::integer(binding ? binding->faction : 0));
+    loadUiScript(manifest.uiScript);
+
+    // Under the GUI, wherever it's added: layers go in order of their phase
+    engine->addRenderLayer(std::make_shared<render::WorldRenderLayer>(*worldRenderer));
     engine->setFenceWakeSignal(worldRenderer->wakeSignal());
+
+    // Counted from here, so that a script's idea of frames doesn't depend on how long this took
+    frameCount = 0;
+    session->sendLoaded();
+}
+
+void GameClient::Impl::fireNet(std::string_view phase, std::string_view failure) {
+    Value event = Value::map();
+    net::setField(event, "phase", net::symbol(phase));
+    if (!failure.empty()) net::setField(event, "failure", Value::string(std::string(failure)));
+    uiCtx->set("msg", std::move(event));
+    fireUi(symNet);
+}
+
+void GameClient::Impl::pumpSession() {
+    if (!session) return;
+
+    for (auto& event : session->takeEvents()) {
+        using Kind = net::SessionEvent::Kind;
+        switch (event.kind) {
+            case Kind::Phase:
+                fireNet(event.text, "");
+                break;
+            case Kind::Failed:
+                std::cerr << "[net] " << event.text << "\n";
+                fireNet("failed", event.text);
+                break;
+            case Kind::Lobby:
+            case Kind::Chat:
+            case Kind::Ui: {
+                Value message = finescript::cborDecode(event.body, interner);
+                uiCtx->set("msg", std::move(message));
+                fireUi(event.kind == Kind::Lobby ? symLobby : event.kind == Kind::Chat ? symChat : symState);
+                break;
+            }
+            case Kind::WorldReady:
+                if (inWorld) {
+                    session->sendLoaded();
+                } else {
+                    enterWorld();
+                }
+                break;
+        }
+    }
+}
+
+std::optional<fs::path> GameClient::Impl::contentPath(std::string_view relative) const {
+    if (!net::isSafeContentPath(relative)) return std::nullopt;
+    return contentRoot / std::string(relative);
+}
+
+fs::path GameClient::Impl::recentPath() const {
+    return net::defaultCacheDir() / ("recent_" + manifest.contentNamespace + ".txt");
+}
+
+std::vector<std::string> GameClient::Impl::recentServers() const {
+    std::vector<std::string> out;
+    std::ifstream in(recentPath());
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty()) out.push_back(std::move(line));
+    }
+    return out;
+}
+
+void GameClient::Impl::noteRecentServer(const std::string& address) {
+    constexpr size_t KEPT = 8;
+    auto recent = recentServers();
+    std::erase(recent, address);
+    recent.insert(recent.begin(), address);
+    if (recent.size() > KEPT) recent.resize(KEPT);
+
+    std::error_code ignored;
+    fs::create_directories(recentPath().parent_path(), ignored);
+    std::ofstream out(recentPath());
+    for (const std::string& line : recent) out << line << "\n";
+}
+
+void GameClient::Impl::shutdown() {
+    browser.reset();
+    if (session) {
+        if (inWorld && host) {
+            Value state = Value::map();
+            auto vector3 = [](const glm::dvec3& v) {
+                return Value::array(std::vector<Value>{Value::number(v.x), Value::number(v.y), Value::number(v.z)});
+            };
+            Vec3 body = stewardBody->position();
+            net::setField(state, "pivot", vector3(tactical.pivot()));
+            net::setField(state, "steward", vector3(glm::dvec3(body.x, body.y, body.z)));
+            net::setField(state, "camera", vector3(glm::dvec3(tactical.yaw(), tactical.pitch(), tactical.distance())));
+            session->sendClientState(net::encodeBody(state));
+        }
+        session->leave();
+    }
+    if (host) host->stop();
 }
 
 void GameClient::Impl::bindInput() {
@@ -679,7 +920,11 @@ void GameClient::Impl::updateStewardView(float dt) {
     state.onGround = stewardBody->isOnGround();
     state.yaw = glm::degrees(steward.yaw());
     state.pitch = glm::degrees(steward.pitch());
-    runtime.session().actions().sendPlayerState(stewardId, state);
+    playerStateTimer -= dt;
+    if (playerStateTimer <= 0.0f) {
+        playerStateTimer = 1.0f / static_cast<float>(worldInfo.tickRate);
+        session->sendPlayerState(state);
+    }
 }
 
 void GameClient::Impl::updateCamera(float dt) {
@@ -738,7 +983,7 @@ std::vector<int32_t> GameClient::Impl::groundHeightsAround(const glm::dvec3& cen
     int32_t centreX = static_cast<int32_t>(std::floor(centre.x));
     int32_t centreZ = static_cast<int32_t>(std::floor(centre.z));
 
-    const World& world = runtime.replica().world();
+    const World& world = session->world().world();
     const BlockRegistry& registry = BlockRegistry::global();
     std::vector<int32_t> heights;
     heights.reserve((REACH * 2 + 1) * (REACH * 2 + 1));
@@ -767,9 +1012,9 @@ std::vector<int32_t> GameClient::Impl::groundHeightsAround(const glm::dvec3& cen
 }
 
 void GameClient::Impl::buildScene() {
-    LightEngine& light = runtime.session().lightEngine();
+    const net::ClientWorld& known = session->world();
     glm::dvec3 cameraPos = camera.positionD();
-    float tickRate = static_cast<float>(runtime.manifest().tickRate);
+    float tickRate = static_cast<float>(worldInfo.entityRate);
     auto& opaque = sceneRenderer->opaque();
 
     for (const auto& [id, state] : entityRenderer.entities()) {
@@ -786,8 +1031,9 @@ void GameClient::Impl::buildScene() {
         BlockCoord cell(static_cast<int32_t>(std::floor(pos.x)),
                         static_cast<int32_t>(std::floor(pos.y)) + 1,
                         static_cast<int32_t>(std::floor(pos.z)));
-        float skyLight = light.getSkyLight(cell) / 15.0f * sky.skyBrightness;
-        float blockLight = light.getBlockLight(cell) / 15.0f;
+        uint8_t packed = known.packedLight(cell);
+        float skyLight = (packed >> 4) / 15.0f * sky.skyBrightness;
+        float blockLight = (packed & 0xF) / 15.0f;
         float brightness = std::max({skyLight, blockLight, 0.3f}) * 1.6f;
 
         glm::vec3 team = factionColor(state.faction);
@@ -809,15 +1055,15 @@ void GameClient::Impl::startDeathBursts() {
     // Middle of the body, where it's lying
     constexpr double BODY_HEIGHT = 0.35;
     for (const auto& burst : entityRenderer.takeDeathBursts()) {
-        runtime.session().actions().particleBurst(burst.emitter, burst.position + glm::dvec3(0.0, BODY_HEIGHT, 0.0),
-                                                  glm::vec4(factionColor(burst.faction), 1.0f));
+        particles->burst(burst.emitter, burst.position + glm::dvec3(0.0, BODY_HEIGHT, 0.0),
+                         glm::vec4(factionColor(burst.faction), 1.0f));
     }
 }
 
 void GameClient::Impl::buildProjectiles() {
     glm::dvec3 cameraPos = camera.positionD();
     auto& opaque = sceneRenderer->opaque();
-    for (const ProjectileView& p : runtime.projectiles().snapshot()) {
+    for (const ProjectileView& p : session->projectiles()) {
         glm::vec3 center(p.position - cameraPos);
         glm::vec3 dir = glm::length(p.velocity) > 0.01f ? glm::normalize(p.velocity) : glm::vec3(0, 1, 0);
         for (float along : {-0.3f, -0.1f, 0.1f, 0.3f}) {
@@ -843,8 +1089,8 @@ void GameClient::Impl::flushMarkers() {
 }
 
 void GameClient::Impl::buildGhosts(float dt) {
-    const World& world = runtime.replica().world();
-    ghostView.update(runtime.siteGhosts(), dt, [&world](BlockCoord pos) { return world.getBlock(pos); });
+    const World& world = session->world().world();
+    ghostView.update(session->ghosts(), dt, [&world](BlockCoord pos) { return world.getBlock(pos); });
 
     // A hair larger than a block, so that it doesn't fight the ground it stands on
     constexpr glm::vec3 HALF(0.505f);
@@ -860,32 +1106,24 @@ void GameClient::Impl::buildGhosts(float dt) {
 void GameClient::Impl::updateFog(float dt) {
     if (!fog) return;
 
-    const FactionVision& vision = runtime.vision();
     bool firstLook = !fogStarted;
     if (firstLook || frameCount % FOG_REFRESH_FRAMES == 0) {
-        fog->setFromVision(vision.snapshot(runtime.manifest().viewerFaction), FOG_EXPLORED);
-        fogStarted = true;
+        auto cells = session->vision();
+        if (!cells.empty()) {
+            fog->setFromVision(cells, FOG_EXPLORED);
+            fogStarted = true;
+        }
     }
-    if (firstLook) fog->snapToTargets();
+    if (firstLook && fogStarted) fog->snapToTargets();
     fog->advance(dt);
 
-    const VisionBounds& bounds = vision.bounds();
-    worldRenderer->setRegionTint(FOG_COLOR, glm::vec2(float(bounds.minX), float(bounds.minZ)),
-                                 float(FactionVision::CELL_SIZE), fog->columns(), fog->rows(),
-                                 fog->cells().data());
-}
-
-void GameClient::Impl::drainUiMessages() {
-    for (auto& bytes : runtime.uiOutbox().drainAll()) {
-        Value message = finescript::cborDecode(bytes, interner);
-        uiCtx->set("msg", std::move(message));
-        fireUi(symState);
-    }
+    worldRenderer->setRegionTint(FOG_COLOR, glm::vec2(float(worldInfo.visionMinX), float(worldInfo.visionMinZ)),
+                                 float(worldInfo.visionCell), fog->columns(), fog->rows(), fog->cells().data());
 }
 
 RaycastResult GameClient::Impl::pickBlock(glm::vec2 cursor, RaycastMode mode) const {
     WorldRay ray = screenRayToWorld(view, cursor, viewport);
-    BlockShapeProvider shapes = createBlockShapeProvider(runtime.replica().world());
+    BlockShapeProvider shapes = createBlockShapeProvider(session->world().world());
     Vec3 origin(static_cast<float>(ray.origin.x), static_cast<float>(ray.origin.y),
                 static_cast<float>(ray.origin.z));
     return raycastBlocks(origin, Vec3(ray.direction), PICK_RANGE, mode, shapes);
@@ -904,33 +1142,16 @@ Value GameClient::Impl::pickResult(const RaycastResult& hit) const {
     map.set(uiEngine->intern("nz"), Value::integer(normal[2]));
     map.set(uiEngine->intern("distance"), Value::number(hit.distance));
     map.set(uiEngine->intern("block"),
-            Value::string(std::string(runtime.replica().world().getBlock(hit.blockPos).name())));
+            Value::string(std::string(session->world().world().getBlock(hit.blockPos).name())));
     return result;
-}
-
-void GameClient::Impl::saveOnExit() {
-    game::ClientSave save;
-    save.pivot = tactical.pivot();
-    Vec3 body = stewardBody->position();
-    save.steward = glm::dvec3(body.x, body.y, body.z);
-    save.yaw = tactical.yaw();
-    save.pitch = tactical.pitch();
-    save.distance = tactical.distance();
-    runtime.setClientSave(save);
-
-    std::string error;
-    if (!runtime.saveGame(error)) std::cerr << "[save] couldn't save: " << error << "\n";
 }
 
 void GameClient::Impl::registerNatives() {
     auto& e = *uiEngine;
-    GameSession& session = runtime.session();
 
-    e.registerFunction("send_command", [this, &session](ExecutionContext&, const Args& args) -> Value {
-        if (args.empty()) return Value::nil();
-        // Through CBOR so the game thread gets its own copy and nothing is shared
-        auto bytes = finescript::cborEncode(args[0], interner);
-        session.actions().sendGameCommand(finescript::cborDecode(bytes, interner));
+    e.registerFunction("send_command", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty() || !session) return Value::nil();
+        session->sendCommand(args[0]);
         return Value::nil();
     });
 
@@ -953,7 +1174,9 @@ void GameClient::Impl::registerNatives() {
             return Value::boolean(true);
         }
         std::string error;
-        fs::path path = runtime.gameRoot() / std::string(args[0].asString());
+        auto found = contentPath(args[0].asString());
+        if (!found) return Value::boolean(false);
+        fs::path path = *found;
         auto skin = finegui::loadSkin(*gui, path, *uiEngine, *uiCtx, error);
         if (!skin) {
             std::cerr << "[ui script] skin " << path.string() << ": " << error << "\n";
@@ -967,7 +1190,9 @@ void GameClient::Impl::registerNatives() {
     // ui_texture name "ui/x.png" -> true if loaded, for ui.image to show by name
     e.registerFunction("ui_texture", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 2) return Value::boolean(false);
-        fs::path path = runtime.gameRoot() / args[1].toString();
+        auto found = contentPath(args[1].toString());
+        if (!found) return Value::boolean(false);
+        fs::path path = *found;
         finegui::TextureHandle handle = gui->loadSkinAtlas(path.string());
         if (!handle.valid()) {
             std::cerr << "[ui script] texture " << path.string() << " didn't load\n";
@@ -989,7 +1214,7 @@ void GameClient::Impl::registerNatives() {
         std::string name = args[0].isSymbol()
             ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
             : args[0].toString();
-        const auto* schematic = runtime.blueprints().find(name);
+        const auto* schematic = blueprints.find(name);
         if (!schematic) return Value::nil();
         return Value::array(std::vector<Value>{Value::integer(schematic->sizeX()),
                                                Value::integer(schematic->sizeY()),
@@ -1157,15 +1382,16 @@ void GameClient::Impl::registerNatives() {
         BlockCoord pos(static_cast<int32_t>(number(args[0])), static_cast<int32_t>(number(args[1])),
                        static_cast<int32_t>(number(args[2])));
         std::string name = args[3].toString();
-        runtime.replica().predictBlock(pos, name == "air" ? BlockTypeId() : BlockTypeId::fromName(name));
+        if (session) session->predictBlock(pos, name == "air" ? BlockTypeId() : BlockTypeId::fromName(name));
         return Value::nil();
     });
 
     e.registerFunction("expect_change", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 3) return Value::nil();
-        runtime.replica().expectChange(BlockCoord(static_cast<int32_t>(number(args[0])),
-                                                  static_cast<int32_t>(number(args[1])),
-                                                  static_cast<int32_t>(number(args[2]))));
+        if (session) {
+            session->expectChange(BlockCoord(static_cast<int32_t>(number(args[0])), static_cast<int32_t>(number(args[1])),
+                                             static_cast<int32_t>(number(args[2]))));
+        }
         return Value::nil();
     });
 
@@ -1266,8 +1492,18 @@ void GameClient::Impl::registerNatives() {
     });
 
     e.registerFunction("request_screenshot", [this](ExecutionContext&, const Args& args) -> Value {
-        screenshotPath = freshPath(args.empty() ? "screenshots/shot.png" : args[0].toString()).string();
+        // Only a game's own script gets to name a place outside the game: this one could be a server's
+        std::string path = args.empty() ? "screenshots/shot.png" : args[0].toString();
+        if (contentRoot != options.gameRoot && !net::isSafeContentPath(path)) return Value::nil();
+        screenshotPath = freshPath(path).string();
         screenshotRequested = true;
+        return Value::nil();
+    });
+
+    // to_menu: leave this game for the menu. The same goes as for new_game.
+    e.registerFunction("to_menu", [this](ExecutionContext&, const Args&) -> Value {
+        restartRequested = true;
+        engine->requestStop();
         return Value::nil();
     });
 
@@ -1285,8 +1521,207 @@ void GameClient::Impl::registerNatives() {
     });
 }
 
+void GameClient::Impl::registerNetNatives() {
+    auto& e = *uiEngine;
+
+    auto option = [](const Args& args, std::string_view name) -> Value {
+        if (args.empty() || !args.back().isMap()) return Value::nil();
+        return net::field(args.back(), name);
+    };
+
+    // has_save -> whether there's a game to continue
+    e.registerFunction("has_save", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(fs::is_directory(contentRoot / "saves" / "autosave"));
+    });
+
+    e.registerFunction("player_name", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::string(playerName);
+    });
+
+    e.registerFunction("set_player_name", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) playerName = args[0].toString();
+        return Value::nil();
+    });
+
+    // game_start [=new true]: a game for one, with no lobby
+    e.registerFunction("game_start", [this, option](ExecutionContext&, const Args& args) -> Value {
+        startLocal(option(args, "new").truthy());
+        return Value::nil();
+    });
+
+    // net_host [=listen true] [=title t] [=port p] [=password pw] [=new true]: a game in this
+    // process, with its pre-game. Returns nil, or what went wrong.
+    e.registerFunction("net_host", [this, option](ExecutionContext&, const Args& args) -> Value {
+        if (!options.hostFactory) return Value::string("this client can't host a game");
+        HostRequest request;
+        request.listen = option(args, "listen").truthy();
+        request.newGame = option(args, "new").truthy();
+        request.title = net::textField(args.empty() ? Value::nil() : args.back(), "title");
+        request.password = net::textField(args.empty() ? Value::nil() : args.back(), "password");
+        if (Value port = option(args, "port"); port.isNumeric()) {
+            request.port = static_cast<uint16_t>(port.asNumber());
+        } else {
+            request.port = manifest.netPort;
+        }
+
+        std::string error;
+        host = options.hostFactory(request, error);
+        if (!host) return Value::string(error);
+        beginSession(playerName, "");
+        session->attach(host->connect());
+        return Value::nil();
+    });
+
+    // net_join address [=password p]: an address as people type them, or a list of them for one
+    // server, as net_servers gives
+    e.registerFunction("net_join", [this, option](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        std::vector<std::string> addresses;
+        if (args[0].isArray()) {
+            for (const Value& address : args[0].asArray()) addresses.push_back(address.toString());
+        } else {
+            addresses.push_back(args[0].toString());
+        }
+        Value port = option(args, "port");
+        beginSession(playerName, net::textField(args.back(), "password"));
+        session->connect(addresses, port.isNumeric() ? static_cast<uint16_t>(port.asNumber()) : manifest.netPort);
+        if (args[0].isString()) noteRecentServer(addresses[0]);
+        return Value::nil();
+    });
+
+    e.registerFunction("net_leave", [this](ExecutionContext&, const Args&) -> Value {
+        if (session) session->leave();
+        session.reset();
+        if (host) host->stop();
+        host.reset();
+        return Value::nil();
+    });
+
+    e.registerFunction("net_phase", [this](ExecutionContext&, const Args&) -> Value {
+        return net::symbol(session ? net::phaseName(session->phase()) : "idle");
+    });
+
+    e.registerFunction("net_failure", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::string(session ? session->failure() : "");
+    });
+
+    e.registerFunction("net_content_progress", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::number(session ? session->contentProgress() : 0.0);
+    });
+
+    // net_browse on: start or stop looking for servers. Remembered ones are asked directly.
+    e.registerFunction("net_browse", [this](ExecutionContext&, const Args& args) -> Value {
+        bool on = args.empty() || args[0].truthy();
+        if (!on) {
+            browser.reset();
+            return Value::nil();
+        }
+        if (browser) {
+            browser->refresh();
+            return Value::nil();
+        }
+        finenet::DiscoveryBrowser::Config config;
+        config.app = manifest.contentNamespace;
+        browser = std::make_unique<finenet::DiscoveryBrowser>(config);
+        for (const std::string& address : recentServers()) {
+            if (auto endpoint = finenet::parseEndpoint(address)) browser->addProbe(endpoint->host);
+        }
+        return Value::nil();
+    });
+
+    // net_servers -> what's been found: each a listing, with =addresses =port =rtt added
+    e.registerFunction("net_servers", [this](ExecutionContext&, const Args&) -> Value {
+        std::vector<Value> found;
+        if (!browser) return Value::array(std::move(found));
+        for (const auto& server : browser->servers()) {
+            Value listing = net::decodeBody(server.listing);
+            if (!listing.isMap()) continue;
+            std::vector<Value> addresses;
+            for (const std::string& address : server.addresses) addresses.push_back(Value::string(address));
+            net::setField(listing, "addresses", Value::array(std::move(addresses)));
+            net::setField(listing, "port", Value::integer(server.port));
+            net::setField(listing, "rtt", Value::number(server.rttMs));
+            found.push_back(std::move(listing));
+        }
+        return Value::array(std::move(found));
+    });
+
+    // net_blocked -> the OS is refusing this process the local network
+    e.registerFunction("net_blocked", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(browser && browser->blocked());
+    });
+
+    e.registerFunction("net_recent", [this](ExecutionContext&, const Args&) -> Value {
+        std::vector<Value> out;
+        for (const std::string& address : recentServers()) out.push_back(Value::string(address));
+        return Value::array(std::move(out));
+    });
+
+    // net_addresses -> this machine's addresses, to read out to a friend
+    e.registerFunction("net_addresses", [](ExecutionContext&, const Args&) -> Value {
+        std::vector<Value> out;
+        for (const std::string& address : finenet::localAddresses()) out.push_back(Value::string(address));
+        return Value::array(std::move(out));
+    });
+
+    // net_open [port] -> nil, or what went wrong: this game, in its current state, is now on the
+    // network. Nothing stops for it.
+    e.registerFunction("net_open", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!host) return Value::string("only the host can open a game");
+        uint16_t port = !args.empty() && args[0].isNumeric() ? static_cast<uint16_t>(args[0].asNumber()) : manifest.netPort;
+        std::string error;
+        if (!host->openToNetwork(port, error)) return Value::string(error);
+        return Value::nil();
+    });
+
+    // net_port -> the port this game is open on, or nil
+    e.registerFunction("net_port", [this](ExecutionContext&, const Args&) -> Value {
+        if (!host || host->networkPort() == 0) return Value::nil();
+        return Value::integer(host->networkPort());
+    });
+
+    e.registerFunction("net_is_host", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(host != nullptr);
+    });
+
+    e.registerFunction("net_me", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::integer(session ? session->playerId() : 0);
+    });
+
+    // lobby_info -> the game's lobby declaration: what can be set, and how a game starts
+    e.registerFunction("lobby_info", [this](ExecutionContext&, const Args&) -> Value {
+        return session ? finescript::cborDecode(session->lobbyDeclaration(), interner) : Value::nil();
+    });
+
+    e.registerFunction("lobby_set", [this](ExecutionContext&, const Args& args) -> Value {
+        if (session && args.size() >= 2) session->setSetting(args[0].toString(), args[1]);
+        return Value::nil();
+    });
+
+    e.registerFunction("lobby_ready", [this](ExecutionContext&, const Args& args) -> Value {
+        if (session) session->setReady(args.empty() || args[0].truthy());
+        return Value::nil();
+    });
+
+    e.registerFunction("lobby_launch", [this](ExecutionContext&, const Args& args) -> Value {
+        if (session) session->launch(args.empty() || args[0].truthy());
+        return Value::nil();
+    });
+
+    e.registerFunction("lobby_kick", [this](ExecutionContext&, const Args& args) -> Value {
+        if (session && !args.empty()) session->kick(static_cast<int64_t>(number(args[0])));
+        return Value::nil();
+    });
+
+    // chat_send text [=team true]
+    e.registerFunction("chat_send", [this, option](ExecutionContext&, const Args& args) -> Value {
+        if (session && !args.empty()) session->chat(args[0].toString(), option(args, "team").truthy());
+        return Value::nil();
+    });
+}
+
 void GameClient::Impl::registerMcpTools() {
-    mcp = runtime.mcp();
+    mcp = options.mcp;
     if (!mcp) return;
     using nlohmann::json;
     using game::McpResult;
@@ -1302,11 +1737,19 @@ void GameClient::Impl::registerMcpTools() {
     state.side = McpSide::Frame;
     state.player = true;
     state.run = [this](const json&) {
+        if (!inWorld) {
+            return McpResult::value({{"in_game", false},
+                                     {"phase", session ? std::string(net::phaseName(session->phase())) : "menu"},
+                                     {"fps", fps},
+                                     {"frame", frameCount}});
+        }
         glm::dvec3 eye = camera.positionD();
         glm::dvec3 pivot = tactical.pivot();
         Vec3 body = stewardBody->position();
         return McpResult::value(
             {{"embodied", embodied},
+             {"in_game", true},
+             {"phase", std::string(net::phaseName(session->phase()))},
              {"camera", {eye.x, eye.y, eye.z}},
              {"pivot", {pivot.x, pivot.y, pivot.z}},
              {"yaw", tactical.yaw()},
@@ -1371,7 +1814,10 @@ void GameClient::Impl::registerMcpTools() {
     blocks.inputSchema = game::mcpBlocksSchema();
     blocks.side = McpSide::Frame;
     blocks.player = true;
-    blocks.run = [this](const json& args) { return game::mcpBlocks(args, runtime.replica().world()); };
+    blocks.run = [this](const json& args) {
+        if (!session) return McpResult::error("no game yet");
+        return game::mcpBlocks(args, session->world().world());
+    };
     mcp->addTool(std::move(blocks));
 
     McpTool command;
@@ -1383,9 +1829,8 @@ void GameClient::Impl::registerMcpTools() {
     command.side = McpSide::Frame;
     command.player = true;
     command.run = [this](const json& args) {
-        // Through CBOR so the game thread gets its own copy and nothing is shared
-        auto bytes = finescript::cborEncode(game::mcpCommandValue(args, *uiEngine), interner);
-        runtime.session().actions().sendGameCommand(finescript::cborDecode(bytes, interner));
+        if (!session) return McpResult::error("no game yet");
+        session->sendCommand(game::mcpCommandValue(args, *uiEngine));
         return McpResult::text("sent; the game thread takes it up between ticks");
     };
     mcp->addTool(std::move(command));
@@ -1434,8 +1879,8 @@ void GameClient::Impl::registerMcpTools() {
     mcp->addTool(std::move(screenshot));
 }
 
-void GameClient::Impl::loadUiScript() {
-    fs::path path = runtime.gameRoot() / runtime.manifest().uiScript;
+void GameClient::Impl::loadUiScript(const std::string& relative) {
+    fs::path path = contentRoot / relative;
     if (!fs::is_regular_file(path)) {
         std::cerr << "[ui script] not found: " << path << "\n";
         return;
@@ -1448,24 +1893,23 @@ void GameClient::Impl::loadUiScript() {
     }
 }
 
-GameClient::GameClient(game::GameRuntime& runtime, ClientOptions options)
-    : impl_(std::make_unique<Impl>(runtime, std::move(options))) {
-    impl_->setup();
+GameClient::GameClient(ClientOptions options) : impl_(std::make_unique<Impl>(std::move(options))) {
+    impl_->setupShell();
 }
 
-GameClient::~GameClient() {
-    impl_->runtime.stopThreads();
-}
+GameClient::~GameClient() = default;
 
 bool GameClient::newGameRequested() const {
     return impl_->newGameRequested;
 }
 
+bool GameClient::restartRequested() const {
+    return impl_->restartRequested;
+}
+
 int GameClient::run() {
-    impl_->runtime.startThreads();
     impl_->engine->run();
-    impl_->runtime.stopThreads();
-    impl_->saveOnExit();
+    impl_->shutdown();
     return 0;
 }
 

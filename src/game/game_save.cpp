@@ -179,14 +179,20 @@ bool GameRuntime::saveGame(std::string& error) {
 
         saveColumns(std::as_const(session_->world()), partial / "world");
         saveColumns(std::as_const(replica_->world()), partial / "replica");
+        for (const auto& [faction, replica] : replicas_) {
+            if (replica.get() == replica_) continue;
+            saveColumns(std::as_const(replica->world()), partial / ("replica_" + std::to_string(faction)));
+        }
 
         // Each entity by its own id, which is how scripts know it
         std::vector<Value> entities;
-        EntityId local = session_->entities().localPlayerId();
+        std::vector<Seat> everyone = seats();
         EntityId highest = 0;
         for (const auto& [id, entity] : session_->entities().entities()) {
             highest = std::max(highest, id);
-            if (id == local) continue;
+            // Bodies belong to whoever's playing, and come back when they do
+            bool isBody = std::any_of(everyone.begin(), everyone.end(), [id = id](const Seat& s) { return s.body == id; });
+            if (isBody) continue;
             auto bytes = EntitySerializer::entityToData(*entity)->toCBOR();
             std::string blob(bytes.begin(), bytes.end());
             entities.push_back(Value::array(std::vector<Value>{integer(static_cast<int64_t>(id)),
@@ -221,12 +227,21 @@ bool GameRuntime::saveGame(std::string& error) {
         set("entities", Value::array(std::move(entities)));
         set("vision", Value::array(std::move(factions)));
         set("lookouts", Value::array(std::move(lookouts)));
-        set("pivot", Value::array(std::vector<Value>{number(clientSave_.pivot.x), number(clientSave_.pivot.y),
-                                                     number(clientSave_.pivot.z)}));
-        set("steward", Value::array(std::vector<Value>{number(clientSave_.steward.x), number(clientSave_.steward.y),
-                                                       number(clientSave_.steward.z)}));
-        set("camera", Value::array(std::vector<Value>{number(clientSave_.yaw), number(clientSave_.pitch),
-                                                      number(clientSave_.distance)}));
+        ClientSave client = clientSaveCopy();
+        set("pivot", Value::array(std::vector<Value>{number(client.pivot.x), number(client.pivot.y),
+                                                     number(client.pivot.z)}));
+        set("steward", Value::array(std::vector<Value>{number(client.steward.x), number(client.steward.y),
+                                                       number(client.steward.z)}));
+        set("camera", Value::array(std::vector<Value>{number(client.yaw), number(client.pitch),
+                                                      number(client.distance)}));
+
+        std::vector<Value> savedSeats;
+        for (const Seat& seat : everyone) {
+            if (seat.faction == 0) continue;
+            savedSeats.push_back(Value::array(std::vector<Value>{Value::string(seat.name), integer(seat.faction),
+                                                                 Value::boolean(seat.local)}));
+        }
+        set("seats", Value::array(std::move(savedSeats)));
         // Written last: a save counts as there only if this is
         writeFile(partial / "game.cbor", finescript::cborEncode(game, interner));
 
@@ -262,6 +277,13 @@ void GameRuntime::loadSavedState() {
 
     savedScriptState_ = script::decodeValueGraph(readFile(path / "script.cbor"), interner);
     loadColumns(replica_->world(), path / "replica", manifest_.worldRadius);
+    for (const auto& entry : fs::directory_iterator(path)) {
+        std::string name = entry.path().filename().string();
+        if (name.rfind("replica_", 0) != 0) continue;
+        auto faction = static_cast<uint16_t>(std::stoi(name.substr(8)));
+        loadColumns(replicaFor(faction).world(), entry.path(), manifest_.worldRadius);
+    }
+    for (const auto& [faction, replica] : replicas_) replica->refreshLight();
     loadSites(get("sites"), get("next_site").asInt());
 
     EntityManager& entities = session_->entities();
@@ -295,6 +317,13 @@ void GameRuntime::loadSavedState() {
 
     gameScript_->setTickCount(static_cast<uint64_t>(get("tick").asInt()));
     session_->worldTime().setTime(get("world_time").asInt());
+
+    if (Value saved = get("seats"); saved.isArray()) {
+        for (const Value& entry : saved.asArray()) {
+            const auto& v = entry.asArray();
+            savedSeats_.push_back({std::string(v[0].asString()), static_cast<uint16_t>(v[1].asInt()), v[2].truthy()});
+        }
+    }
 
     const auto& pivot = get("pivot").asArray();
     const auto& steward = get("steward").asArray();

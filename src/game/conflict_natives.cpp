@@ -130,7 +130,7 @@ void registerConflictNatives(GameRuntime& runtime) {
     });
 
     e.registerFunction("reveal_all", [=](ExecutionContext&, const Args& args) -> Value {
-        rt->replica().setRevealAll(args.empty() ? true : args[0].truthy());
+        rt->setRevealAll(args.empty() ? true : args[0].truthy());
         return Value::nil();
     });
 

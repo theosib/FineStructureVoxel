@@ -8,6 +8,8 @@
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/world_time.hpp"
 #include "finevox/game/game_runtime.hpp"
+#include "finevox/game/replication_server.hpp"
+#include "finevox/net/protocol.hpp"
 
 #include <finescript/cbor.h>
 #include <finescript/map_data.h>
@@ -124,9 +126,17 @@ on :tick do
     ui_publish {=hello 7}
 end
 )");
-    game.runTicks(1);
-    auto messages = game.uiOutbox().drainAll();
-    ASSERT_EQ(messages.size(), 1u);
+    auto [client, server] = finenet::Connection::createLocalPair(net::connectionConfig());
+    game.replication()->addView(std::make_shared<game::ClientView>(1, std::shared_ptr<finenet::Connection>(std::move(server))));
+    game.runTicks(2);
+
+    std::vector<std::vector<uint8_t>> messages;
+    client->onMessage(net::msg::UiMessage, [&](const finenet::Message& message) {
+        auto payload = message.payload();
+        messages.emplace_back(payload.begin(), payload.end());
+    });
+    client->update();
+    ASSERT_FALSE(messages.empty());
     script::FineVoxInterner interner;
     auto decoded = finescript::cborDecode(messages[0], interner);
     EXPECT_EQ(decoded.asMap().get(StringInterner::global().intern("hello")).asInt(), 7);

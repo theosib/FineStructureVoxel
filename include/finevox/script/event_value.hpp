@@ -278,7 +278,10 @@ finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos
                                          glm::vec4 tint = glm::vec4(1.0f));
 
 /// Wrap a game-defined command for transport; read back with readGameCommandBody
-finescript::Value makeGameCommandValue(finescript::Value body);
+finescript::Value makeGameCommandValue(finescript::Value body, int64_t player = 0);
+
+/** Who sent a game command, or 0 if nobody in particular. */
+int64_t readGameCommandPlayer(const finescript::Value& event);
 finescript::Value readGameCommandBody(const finescript::Value& event);
 
 // ============================================================================

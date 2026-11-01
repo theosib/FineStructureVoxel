@@ -35,7 +35,12 @@ class GameScriptEngine;
 
 class ScriptGameSubsystem : public GameSubsystem {
 public:
-    using MessageSink = std::function<void(std::vector<uint8_t>)>;
+    /// Who a message is for: a player, a faction, or with both 0, everyone
+    struct Audience {
+        int64_t player = 0;
+        int64_t faction = 0;
+    };
+    using MessageSink = std::function<void(std::vector<uint8_t>, Audience)>;
 
     explicit ScriptGameSubsystem(GameScriptEngine& scripts);
     ~ScriptGameSubsystem() override;
@@ -53,11 +58,12 @@ public:
     void fire(std::string_view event);
 
     /// Deliver a client command to `on :command` handlers
-    void deliverCommand(const finescript::Value& command);
+    void deliverCommand(const finescript::Value& command, int64_t sender = 0);
 
     /// Where ui_publish goes. Payloads are CBOR, safe to hand across threads.
     void setMessageSink(MessageSink sink) { sink_ = std::move(sink); }
-    void publish(const finescript::Value& message);
+    void publish(const finescript::Value& message, Audience audience);
+    void publish(const finescript::Value& message) { publish(message, Audience{0, 0}); }
 
     /// Total ticks since this subsystem started
     [[nodiscard]] uint64_t tickCount() const { return tickCount_; }

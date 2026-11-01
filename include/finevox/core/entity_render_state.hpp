@@ -46,11 +46,10 @@ struct EntityRenderState {
 
     [[nodiscard]] bool isDying() const { return dying >= 0.0f; }
 
-    /// Alive and in view. The server stops sending what the viewer can't see, so silence
-    /// means hidden.
+    /// Alive and in view. The server says when something leaves view, and sends nothing about
+    /// what hasn't moved, so silence means it's still there.
     [[nodiscard]] bool isCurrent() const {
-        constexpr float STALE_SECONDS = 0.5f;
-        return visible && active && !isDying() && timeSinceSnapshot < STALE_SECONDS;
+        return visible && active && !isDying();
     }
 
     /// Interpolate position between prev and current

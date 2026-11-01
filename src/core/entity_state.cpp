@@ -15,6 +15,7 @@ EntityState::~EntityState() = default;
 EntityState::EntityState(const EntityState& other)
     : id(other.id)
     , entityType(other.entityType)
+    , faction(other.faction)
     , position(other.position)
     , velocity(other.velocity)
     , onGround(other.onGround)
@@ -30,6 +31,7 @@ EntityState& EntityState::operator=(const EntityState& other) {
     if (this != &other) {
         id = other.id;
         entityType = other.entityType;
+        faction = other.faction;
         position = other.position;
         velocity = other.velocity;
         onGround = other.onGround;

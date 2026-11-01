@@ -280,6 +280,30 @@ target_compile_options(finevox_worldgen PRIVATE
 target_link_libraries(finevox_worldgen PUBLIC finevox)
 
 # ============================================================================
+# Network Client (namespace: finevox::net) - the protocol, no GPU dependency
+# ============================================================================
+
+add_library(finevox_net SHARED
+    src/net/protocol.cpp
+    src/net/subchunk_codec.cpp
+    src/net/content.cpp
+    src/net/client_world.cpp
+    src/net/client_session.cpp
+)
+
+target_include_directories(finevox_net PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_compile_options(finevox_net PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
+
+target_link_libraries(finevox_net PUBLIC finevox finevox_worldgen)
+
+# ============================================================================
 # Game Runtime (namespace: finevox::game) - manifest-driven, no GPU dependency
 # ============================================================================
 
@@ -288,6 +312,8 @@ if(TARGET finevox_script)
         src/game/game_manifest.cpp
         src/game/game_runtime.cpp
         src/game/game_save.cpp
+        src/game/game_host.cpp
+        src/game/replication_server.cpp
         src/game/blueprint_natives.cpp
         src/game/conflict_natives.cpp
         src/game/mcp_server.cpp
@@ -304,11 +330,15 @@ if(TARGET finevox_script)
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
     )
 
-    target_link_libraries(finevox_game PUBLIC finevox finevox_worldgen finevox_script
+    target_link_libraries(finevox_game PUBLIC finevox finevox_worldgen finevox_script finevox_net
                           nlohmann_json::nlohmann_json)
 
     add_executable(finevox_headless apps/finevox_headless.cpp)
     target_link_libraries(finevox_headless PRIVATE finevox_game)
+
+    # A client with no window and no game code: tests, and the seed of a standalone client
+    add_executable(finevox_bot apps/finevox_bot.cpp)
+    target_link_libraries(finevox_bot PRIVATE finevox_net)
 endif()
 
 # ============================================================================
@@ -596,6 +626,7 @@ if(FINEVOX_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
 
     add_executable(finevox_tests
+        tests/test_net.cpp
         tests/test_position.cpp
         tests/test_string_interner.cpp
         tests/test_palette.cpp
@@ -696,6 +727,7 @@ if(FINEVOX_BUILD_TESTS)
     )
 
     target_link_libraries(finevox_tests PRIVATE
+        finevox_net
         finevox_worldgen
         GTest::gtest_main
     )

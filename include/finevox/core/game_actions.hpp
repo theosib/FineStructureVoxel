@@ -84,6 +84,10 @@ public:
     /// GameSession's game command handler on the game thread. The value must not
     /// be shared with the calling thread afterwards.
     virtual void sendGameCommand(finescript::Value command);
+
+    /// A game command from a particular player. The player is the host's word for who sent it,
+    /// and the game script sees it as `sender`.
+    virtual void sendPlayerCommand(int64_t player, finescript::Value command);
 };
 
 }  // namespace finevox

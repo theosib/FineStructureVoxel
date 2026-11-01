@@ -32,6 +32,9 @@ using GameCommandQueue = Queue<finescript::Value>;
 // Forward declaration
 class DataContainer;
 
+/// Takes a game command and who sent it. The player is 0 for a command from no one in particular.
+using GameCommandHandler = std::function<void(const finescript::Value&, int64_t player)>;
+
 /// Configuration for creating a GameSession.
 /// Fields can be set directly or loaded from a DataContainer / config file.
 struct GameSessionConfig {
@@ -108,7 +111,7 @@ public:
     // === Game Commands ===
     /// Handler for commands from GameActions::sendGameCommand (game thread).
     /// Set before startGameThread().
-    void setGameCommandHandler(std::function<void(const finescript::Value&)> handler);
+    void setGameCommandHandler(GameCommandHandler handler);
 
     // === Subsystem Management ===
     /// Add a game subsystem. Sorted by (phase, priority) at insertion time.

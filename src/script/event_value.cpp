@@ -459,13 +459,21 @@ finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos
     return v;
 }
 
-finescript::Value makeGameCommandValue(finescript::Value body) {
+finescript::Value makeGameCommandValue(finescript::Value body, int64_t player) {
     static const uint32_t bodyKey = StringInterner::global().intern("body");
+    static const uint32_t playerKey = StringInterner::global().intern("player");
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_GAME_COMMAND);
     m.set(bodyKey, std::move(body));
+    if (player != 0) m.set(playerKey, finescript::Value::integer(player));
     return v;
+}
+
+int64_t readGameCommandPlayer(const finescript::Value& event) {
+    static const uint32_t playerKey = StringInterner::global().intern("player");
+    finescript::Value player = const_cast<finescript::Value&>(event).asMap().get(playerKey);
+    return player.isNumeric() ? static_cast<int64_t>(player.asNumber()) : 0;
 }
 
 finescript::Value readGameCommandBody(const finescript::Value& event) {

@@ -2,9 +2,9 @@
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/subchunk.hpp"
-#include "finevox/core/mesh_rebuild_queue.hpp"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace finevox {
@@ -14,9 +14,9 @@ namespace {
 /// Columns examined per tick; a 32x32-column map cycles about once a second
 constexpr int32_t COLUMNS_PER_TICK = 40;
 
-/// Ticks a prediction stands before the server's word settles it. A command is run in the first
-/// tick after it's sent, and this subsystem runs late in the tick, so two would do.
-constexpr uint64_t PREDICTION_TICKS = 3;
+/// Ticks to wait before looking at a column a client said would change. A command is run in the
+/// first tick after it arrives, and this subsystem runs late in the tick, so two would do.
+constexpr uint64_t EXPECT_TICKS = 3;
 
 uint64_t subchunkKey(const ChunkPos& pos) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(pos.x) & 0xFFFFF) << 40) |
@@ -45,70 +45,59 @@ bool WorldReplica::columnVisible(ColumnPos pos) const {
     return false;
 }
 
+void WorldReplica::noteChanged(ChunkPos pos) {
+    if (changesNoted_.insert(subchunkKey(pos)).second) changes_.push_back(pos);
+}
+
 void WorldReplica::syncColumn(ColumnPos pos) {
     ChunkColumn* column = source_.getColumn(pos);
     if (!column) return;
 
-    std::vector<std::pair<BlockCoord, BlockTypeId>> changes;
-    std::vector<ChunkPos> touched;
-
     column->forEachSubChunk([&](int32_t chunkY, const SubChunk& subchunk) {
         ChunkPos chunk(pos.x, chunkY, pos.z);
         uint64_t key = subchunkKey(chunk);
-        uint64_t version = subchunk.blockVersion();
-        auto [it, inserted] = versions_.try_emplace(key, 0);
-        if (!inserted && it->second == version) return;
-        it->second = version;
+        uint64_t blocks = subchunk.blockVersion();
+        uint64_t light = subchunk.lightVersion();
+        uint64_t fluid = subchunk.fluidVersion();
+        auto [it, inserted] = versions_.try_emplace(key);
+        bool blocksChanged = inserted || it->second.blocks != blocks;
+        bool lightChanged = inserted || it->second.light != light;
+        bool fluidChanged = inserted || it->second.fluid != fluid;
+        if (!blocksChanged && !lightChanged && !fluidChanged) return;
+        it->second = {blocks, light, fluid};
 
-        // A prediction is ahead of the server for now, so this copy must leave it be
-        std::vector<BlockCoord> predicted;
-        {
-            std::lock_guard lock(predictionMutex_);
-            for (const Prediction& p : predictions_) predicted.push_back(p.pos);
-        }
-
-        for (int32_t lx = 0; lx < 16; ++lx) {
-            for (int32_t lz = 0; lz < 16; ++lz) {
-                for (int32_t ly = 0; ly < 16; ++ly) {
-                    BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
-                    BlockTypeId block = subchunk.getBlock(lx, ly, lz);
-                    if (replica_.getBlock(world) == block) continue;
-                    if (std::find(predicted.begin(), predicted.end(), world) != predicted.end()) continue;
-                    changes.emplace_back(world, block);
-                }
-            }
-        }
-
-        if (subchunk.fluidLayer()) {
-            for (int32_t lx = 0; lx < 16; ++lx) {
+        if (blocksChanged) {
+            std::vector<std::pair<BlockCoord, BlockTypeId>> changes;
+            for (int32_t ly = 0; ly < 16; ++ly) {
                 for (int32_t lz = 0; lz < 16; ++lz) {
-                    for (int32_t ly = 0; ly < 16; ++ly) {
+                    for (int32_t lx = 0; lx < 16; ++lx) {
                         BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
-                        FluidTypeId fluid = source_.getFluid(world);
-                        if (!fluid.isEmpty()) {
-                            replica_.setFluid(world, fluid, source_.getFluidLevel(world));
-                        }
+                        BlockTypeId block = subchunk.getBlock(lx, ly, lz);
+                        if (replica_.getBlock(world) != block) changes.emplace_back(world, block);
                     }
                 }
             }
+            if (!changes.empty()) replica_.setBlocks(changes);
         }
-        touched.push_back(chunk);
-    });
 
-    if (changes.empty()) return;
-    replica_.setBlocks(changes);
+        // Air has light too, so a subchunk with nothing in it still needs to exist here
+        SubChunk& copy = replica_.getOrCreateColumn(pos).getOrCreateSubChunk(chunkY);
+        if (lightChanged) copy.setLightData(subchunk.lightData());
 
-    if (auto* queue = replica_.meshRebuildQueue()) {
-        for (const ChunkPos& chunk : touched) {
-            queue->push(chunk, MeshRebuildRequest::immediate());
-            // Neighbours: their border faces were drawn against empty space
-            for (Face face : {Face::PosX, Face::NegX, Face::PosZ, Face::NegZ, Face::PosY, Face::NegY}) {
-                auto n = faceNormal(face);
-                queue->push(ChunkPos(chunk.x + n[0], chunk.y + n[1], chunk.z + n[2]),
-                            MeshRebuildRequest::normal());
+        if (fluidChanged && (subchunk.fluidLayer() || copy.fluidLayer())) {
+            for (int32_t i = 0; i < SubChunk::VOLUME; ++i) {
+                FluidTypeId fluid = subchunk.getFluid(i);
+                uint8_t level = subchunk.getFluidLevel(i);
+                if (copy.getFluid(i) == fluid && copy.getFluidLevel(i) == level) continue;
+                if (fluid.isEmpty()) {
+                    copy.removeFluid(i);
+                } else {
+                    copy.setFluid(i, fluid, level);
+                }
             }
         }
-    }
+        noteChanged(chunk);
+    });
 }
 
 void WorldReplica::syncAll() {
@@ -121,53 +110,49 @@ void WorldReplica::syncAll() {
     }
 }
 
-void WorldReplica::remesh(BlockCoord pos) {
-    if (auto* queue = replica_.meshRebuildQueue()) {
-        for (const ChunkPos& affected : replica_.getAffectedSubChunks(pos)) {
-            queue->push(affected, MeshRebuildRequest::immediate());
-        }
-    }
-}
-
-void WorldReplica::predictBlock(BlockCoord pos, BlockTypeId block) {
-    {
-        std::lock_guard lock(predictionMutex_);
-        predictions_.push_back({pos, tick_ + PREDICTION_TICKS});
-    }
-    replica_.setBlock(pos, block);
-    remesh(pos);
-}
-
 void WorldReplica::expectChange(BlockCoord pos) {
-    std::lock_guard lock(predictionMutex_);
-    predictions_.push_back({pos, tick_ + PREDICTION_TICKS});
+    std::lock_guard lock(expectedMutex_);
+    expected_.push_back({pos, tick_ + EXPECT_TICKS});
 }
 
-void WorldReplica::settlePredictions() {
+std::vector<ChunkPos> WorldReplica::takeChanges() {
+    changesNoted_.clear();
+    return std::exchange(changes_, {});
+}
+
+void WorldReplica::refreshLight() {
+    replica_.forEachColumn([this](ColumnPos pos, ChunkColumn& column) {
+        const ChunkColumn* source = source_.getColumn(pos);
+        if (!source) return;
+        column.forEachSubChunk([&](int32_t chunkY, SubChunk& copy) {
+            if (const SubChunk* subchunk = source->getSubChunk(chunkY)) {
+                copy.setLightData(subchunk->lightData());
+                noteChanged(ChunkPos(pos.x, chunkY, pos.z));
+            }
+        });
+    });
+}
+
+void WorldReplica::settleExpected() {
     std::vector<BlockCoord> due;
     {
-        std::lock_guard lock(predictionMutex_);
+        std::lock_guard lock(expectedMutex_);
         ++tick_;
-        auto settled = std::stable_partition(predictions_.begin(), predictions_.end(),
-                                             [this](const Prediction& p) { return p.dueTick > tick_; });
-        for (auto it = settled; it != predictions_.end(); ++it) due.push_back(it->pos);
-        predictions_.erase(settled, predictions_.end());
+        auto settled = std::stable_partition(expected_.begin(), expected_.end(),
+                                             [this](const Expected& e) { return e.dueTick > tick_; });
+        for (auto it = settled; it != expected_.end(); ++it) due.push_back(it->pos);
+        expected_.erase(settled, expected_.end());
     }
 
+    // A column it can't see, it can't look at: a client doesn't get to peek by asking
     for (const BlockCoord& pos : due) {
-        BlockTypeId actual = source_.getBlock(pos);
-        if (replica_.getBlock(pos) != actual) {
-            replica_.setBlock(pos, actual);
-            remesh(pos);
-        }
-        // What else the action did, such as a felled tree, needn't wait for the sweep
         ColumnPos column(pos.x >> 4, pos.z >> 4);
-        syncColumn(column);
+        if (columnVisible(column)) syncColumn(column);
     }
 }
 
 void WorldReplica::tick(float /*dt*/) {
-    settlePredictions();
+    settleExpected();
 
     const auto& bounds = vision_.bounds();
     int32_t minX = bounds.minX >> 4;

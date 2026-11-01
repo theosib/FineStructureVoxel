@@ -31,6 +31,7 @@ struct Engine::Impl {
     // Fence waiter for frame overlap
     FrameFenceWaiter fenceWaiter;
     WakeSignal* fenceWakeSignal = nullptr;
+    std::atomic<WakeSignal*> pendingFenceWakeSignal{nullptr};
 
     // Render layers (sorted by phase/priority)
     std::vector<std::shared_ptr<RenderLayer>> layers;
@@ -163,7 +164,8 @@ void Engine::setFrameCallbacks(FrameCallbacks callbacks) {
 }
 
 void Engine::setFenceWakeSignal(WakeSignal* signal) {
-    impl_->fenceWakeSignal = signal;
+    // A frame in progress has already decided how to wait, so the change waits for the next one
+    impl_->pendingFenceWakeSignal.store(signal, std::memory_order_release);
 }
 
 // ============================================================================
@@ -184,15 +186,17 @@ void Engine::run() {
     impl_->stopRequested.store(false, std::memory_order_release);
 
     // Start fence waiter thread
-    if (impl_->fenceWakeSignal) {
-        impl_->fenceWaiter.attach(impl_->fenceWakeSignal);
-    }
     impl_->fenceWaiter.start();
 
     impl_->lastFrameTime = std::chrono::high_resolution_clock::now();
 
     while (impl_->window->isOpen() &&
            !impl_->stopRequested.load(std::memory_order_acquire)) {
+
+        if (WakeSignal* signal = impl_->pendingFenceWakeSignal.exchange(nullptr, std::memory_order_acq_rel)) {
+            impl_->fenceWakeSignal = signal;
+            impl_->fenceWaiter.attach(signal);
+        }
 
         // ================================================================
         // Phase 1: Fence wait + preRender overlap

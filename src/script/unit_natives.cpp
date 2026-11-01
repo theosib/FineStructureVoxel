@@ -585,10 +585,20 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         return Value::integer(static_cast<int64_t>(ud->gameScript->tickCount()));
     });
 
-    // ui_publish value: hand a snapshot to the client (CBOR, so nothing is shared)
+    // ui_publish value [=to player] [=faction f]: hand a snapshot to clients (CBOR, so nothing is
+    // shared). Naming nobody means everyone.
     e.registerFunction("ui_publish", [](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
-        if (ud && ud->gameScript && !args.empty()) ud->gameScript->publish(args[0]);
+        if (!ud || !ud->gameScript || args.empty()) return Value::nil();
+        ScriptGameSubsystem::Audience audience;
+        if (args.size() > 1 && args.back().isMap()) {
+            auto& options = const_cast<Value&>(args.back()).asMap();
+            Value to = options.get(StringInterner::global().intern("to"));
+            Value faction = options.get(StringInterner::global().intern("faction"));
+            if (to.isNumeric()) audience.player = static_cast<int64_t>(to.asNumber());
+            if (faction.isNumeric()) audience.faction = static_cast<int64_t>(faction.asNumber());
+        }
+        ud->gameScript->publish(args[0], audience);
         return Value::nil();
     });
 

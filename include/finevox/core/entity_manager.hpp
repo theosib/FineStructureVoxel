@@ -93,6 +93,9 @@ public:
     using SnapshotFilter = std::function<bool(const Entity&)>;
     void setSnapshotFilter(SnapshotFilter filter) { snapshotFilter_ = std::move(filter); }
 
+    /// Stop publishing per-tick snapshots, for a server that replicates entities per client
+    void setSnapshotsEnabled(bool enabled) { snapshotsEnabled_ = enabled; }
+
     // Non-copyable, non-movable
     EntityManager(const EntityManager&) = delete;
     EntityManager& operator=(const EntityManager&) = delete;
@@ -367,6 +370,7 @@ private:
     // Entity storage
     EntitySpatialIndex spatialIndex_;
     SnapshotFilter snapshotFilter_;
+    bool snapshotsEnabled_ = true;
     std::unordered_map<EntityId, std::unique_ptr<Entity>> entities_;
     EntityId nextEntityId_ = 1;
     uint64_t currentTick_ = 0;

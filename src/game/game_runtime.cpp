@@ -284,6 +284,16 @@ void GameRuntime::registerNatives() {
             return finescript::Value::nil();
         });
 
+    // hold_time_of_day fraction: stop the clock here, for a game with no use for nights
+    scripts_->engine().registerFunction(
+        "hold_time_of_day", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (!args.empty() && args[0].isNumeric()) {
+                session_->worldTime().setTime(static_cast<int64_t>(args[0].asNumber() * WorldTime::TICKS_PER_DAY));
+                session_->worldTime().setFrozen(true);
+            }
+            return finescript::Value::nil();
+        });
+
     // light_at x y z -> {=sky =block}, each 0 to 15
     scripts_->engine().registerFunction(
         "light_at", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {

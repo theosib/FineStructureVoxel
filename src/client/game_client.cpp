@@ -114,12 +114,6 @@ double number(const Value& v, double fallback = 0.0) {
     return v.isNumeric() ? v.asNumber() : fallback;
 }
 
-/// The server stops sending entities the viewer can't see, so silence means hidden
-bool isCurrent(const EntityRenderState& state) {
-    constexpr float STALE_SECONDS = 0.5f;
-    return state.visible && state.active && state.timeSinceSnapshot < STALE_SECONDS;
-}
-
 glm::vec4 colorArg(const Args& args, size_t index) {
     glm::vec4 color(1.0f);
     for (int c = 0; c < 4 && index + c < args.size(); ++c) {
@@ -176,13 +170,7 @@ struct GameClient::Impl {
     bool embodied = false;
     bool jumpHeld = false;
 
-    struct GhostFace {
-        BlockCoord cell;
-        uint8_t faces;
-        float built;
-    };
-    std::shared_ptr<const std::vector<worldgen::SiteGhost>> ghostSource;
-    std::vector<GhostFace> ghostFaces;
+    worldgen::SiteGhostView ghostView;
     glm::vec3 ghostColor{0.35f, 0.75f, 1.0f};
     float ghostFaint = 0.15f;
     float ghostSolid = 0.45f;
@@ -229,7 +217,8 @@ struct GameClient::Impl {
     void saveOnExit();
     void setEmbodied(bool on);
     void updateStewardView(float dt);
-    void buildGhosts();
+    void buildGhosts(float dt);
+    void startDeathBursts();
     glm::vec3 factionColor(uint16_t faction) const;
     [[nodiscard]] RaycastResult pickBlock(glm::vec2 cursor, RaycastMode mode) const;
     [[nodiscard]] Value pickResult(const RaycastResult& hit) const;
@@ -441,6 +430,7 @@ void GameClient::Impl::setup() {
 
         entityRenderer.processEvents(s.graphicsEvents());
         entityRenderer.update(dt, camera.positionD());
+        startDeathBursts();
         drainUiMessages();
 
         updateCamera(dt);
@@ -450,7 +440,7 @@ void GameClient::Impl::setup() {
                               sky.skyBrightness, sky.ambientLevel);
         buildScene();
         buildProjectiles();
-        buildGhosts();
+        buildGhosts(dt);
         flushMarkers();
         updateFog(dt);
 
@@ -783,7 +773,7 @@ void GameClient::Impl::buildScene() {
     auto& opaque = sceneRenderer->opaque();
 
     for (const auto& [id, state] : entityRenderer.entities()) {
-        if (!isCurrent(state)) continue;
+        if (!state.isCurrent() && !state.isDying()) continue;
 
         // The camera is inside this one, or just past it: its drawn position trails the
         // live body by a tick, which on walking backward puts it in front of the eye
@@ -815,6 +805,15 @@ void GameClient::Impl::buildScene() {
     }
 }
 
+void GameClient::Impl::startDeathBursts() {
+    // Middle of the body, where it's lying
+    constexpr double BODY_HEIGHT = 0.35;
+    for (const auto& burst : entityRenderer.takeDeathBursts()) {
+        runtime.session().actions().particleBurst(burst.emitter, burst.position + glm::dvec3(0.0, BODY_HEIGHT, 0.0),
+                                                  glm::vec4(factionColor(burst.faction), 1.0f));
+    }
+}
+
 void GameClient::Impl::buildProjectiles() {
     glm::dvec3 cameraPos = camera.positionD();
     auto& opaque = sceneRenderer->opaque();
@@ -843,30 +842,15 @@ void GameClient::Impl::flushMarkers() {
     markerCamera = now;
 }
 
-void GameClient::Impl::buildGhosts() {
-    auto ghosts = runtime.siteGhosts();
-    if (ghosts != ghostSource) {
-        ghostSource = ghosts;
-        ghostFaces.clear();
-        for (size_t i = 0; ghosts && i < ghosts->size(); ++i) {
-            const worldgen::SiteGhost& ghost = (*ghosts)[i];
-            std::unordered_set<BlockCoord> cells(ghost.cells.begin(), ghost.cells.end());
-            // Only the outside of a ghost, or its layers pile up into something near opaque
-            for (const BlockCoord& cell : ghost.cells) {
-                uint8_t faces = 0;
-                for (size_t f = 0; f < FACE_COUNT; ++f) {
-                    if (!cells.count(cell.neighbor(static_cast<Face>(f)))) faces |= uint8_t(1 << f);
-                }
-                if (faces != 0) ghostFaces.push_back({cell, faces, ghost.built});
-            }
-        }
-    }
+void GameClient::Impl::buildGhosts(float dt) {
+    const World& world = runtime.replica().world();
+    ghostView.update(runtime.siteGhosts(), dt, [&world](BlockCoord pos) { return world.getBlock(pos); });
 
     // A hair larger than a block, so that it doesn't fight the ground it stands on
     constexpr glm::vec3 HALF(0.505f);
     glm::dvec3 cameraPos = camera.positionD();
     auto& out = sceneRenderer->translucent();
-    for (const GhostFace& ghost : ghostFaces) {
+    for (const auto& ghost : ghostView.faces()) {
         glm::vec3 center(glm::dvec3(ghost.cell.x + 0.5, ghost.cell.y + 0.5, ghost.cell.z + 0.5) - cameraPos);
         float opacity = ghostFaint + (ghostSolid - ghostFaint) * ghost.built;
         render::appendBox(out, center, HALF, glm::vec4(ghostColor, opacity), true, ghost.faces);
@@ -1206,7 +1190,7 @@ void GameClient::Impl::registerNatives() {
 
         std::vector<Value> found;
         for (const auto& [id, state] : entityRenderer.entities()) {
-            if (!isCurrent(state)) continue;
+            if (!state.isCurrent()) continue;
             // The player's own body takes no orders, wherever it was left standing
             if (id == stewardId) continue;
             if (bodyInScreenRect(view, state.currentPosition, BODY_HEIGHT, BODY_RADIUS, viewport,
@@ -1221,7 +1205,7 @@ void GameClient::Impl::registerNatives() {
     e.registerFunction("entity_pos", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty()) return Value::nil();
         const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
-        if (!state || !isCurrent(*state)) return Value::nil();
+        if (!state || !state->isCurrent()) return Value::nil();
         return Value::array(std::vector<Value>{Value::number(state->currentPosition.x),
                                                Value::number(state->currentPosition.y),
                                                Value::number(state->currentPosition.z)});
@@ -1364,7 +1348,7 @@ void GameClient::Impl::registerMcpTools() {
         json out = json::array();
         size_t matched = 0;
         for (const auto& [id, view] : entityRenderer.entities()) {
-            if (!isCurrent(view)) continue;
+            if (!view.isCurrent()) continue;
             const glm::dvec3& pos = view.currentPosition;
             std::string type(view.typeId.name());
             if (!game::mcpEntityMatches(args, type, view.faction, pos.x, pos.y, pos.z)) continue;

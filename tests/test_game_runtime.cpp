@@ -6,6 +6,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
+#include "finevox/core/world_time.hpp"
 #include "finevox/game/game_runtime.hpp"
 
 #include <finescript/cbor.h>
@@ -152,6 +153,18 @@ TEST_F(GameRuntimeTest, AMainScriptThatWontParseStopsTheGame) {
     options.gameRoot = root;
     GameRuntime game(options);
     EXPECT_THROW(game.load(), std::exception);
+}
+
+TEST_F(GameRuntimeTest, HoldingTheTimeOfDayStopsTheClock) {
+    auto& game = boot(R"(
+on :start do
+    hold_time_of_day 0.2
+end
+)");
+    float start = game.session().worldTime().timeOfDay();
+    EXPECT_NEAR(start, 0.2f, 0.001f);
+    game.runTicks(600);
+    EXPECT_FLOAT_EQ(game.session().worldTime().timeOfDay(), start);
 }
 
 TEST_F(GameRuntimeTest, ScriptsCanExitTheRun) {

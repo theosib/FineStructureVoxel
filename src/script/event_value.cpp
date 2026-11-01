@@ -54,6 +54,11 @@ const EventSymbols& EventSymbols::instance() {
         s.volume          = si.intern("volume");
         s.positional      = si.intern("positional");
         s.correction_reason = si.intern("correction_reason");
+        s.tint_r          = si.intern("tint_r");
+        s.tint_g          = si.intern("tint_g");
+        s.tint_b          = si.intern("tint_b");
+        s.tint_a          = si.intern("tint_a");
+        s.died            = si.intern("died");
         s.correct_block_type = si.intern("correct_block_type");
         s.expected_block_type = si.intern("expected_block_type");
         s.block_x         = si.intern("block_x");
@@ -361,12 +366,13 @@ finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
     return v;
 }
 
-finescript::Value makeEntityDespawnValue(EntityId id) {
+finescript::Value makeEntityDespawnValue(EntityId id, bool died) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_ENTITY_DESPAWN);
     setInt(m, s.entity_id, static_cast<int64_t>(id));
+    setBool(m, s.died, died);
     return v;
 }
 
@@ -437,7 +443,7 @@ finescript::Value makeParticleDespawnValue(uint32_t emitterId) {
     return v;
 }
 
-finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos) {
+finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos, glm::vec4 tint) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
@@ -446,6 +452,10 @@ finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos
     setFloat(m, s.pos_x, pos.x);
     setFloat(m, s.pos_y, pos.y);
     setFloat(m, s.pos_z, pos.z);
+    setFloat(m, s.tint_r, tint.r);
+    setFloat(m, s.tint_g, tint.g);
+    setFloat(m, s.tint_b, tint.b);
+    setFloat(m, s.tint_a, tint.a);
     return v;
 }
 

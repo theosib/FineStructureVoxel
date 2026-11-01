@@ -120,7 +120,9 @@ bool EntityManager::despawnEntity(EntityId id) {
     }
 
     // Publish despawn event to graphics
-    graphicsQueue_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id)));
+    const MobEntity* mob = getMob(id);
+    graphicsQueue_.push(GraphicsMessage::fromEvent(
+        script::makeEntityDespawnValue(id, mob && mob->isDead())));
 
     // Remove from spatial index
     spatialIndex_.remove(id);

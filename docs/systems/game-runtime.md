@@ -143,7 +143,12 @@ site_release id agent                    site_progress id -> {=done =total =comp
 site_remaining id -> {=block n}          site_remove id
 light_at x y z -> {=sky =block}
 site_show_ghosts [id ...]                 what's left of these sites, drawn for the viewer
+hold_time_of_day fraction                 stop the clock here, and it stays stopped
 ```
+
+Ghosts are drawn through `SiteGhostView`. The viewer's copy of the world lags the server's,
+so a ghost the server has finished with stays up until its block has arrived in that copy,
+plus a moment for the mesh, or for three seconds if it never does.
 
 Sites compare against the live world, so a destroyed block becomes work again. Cells come
 bottom-up. A position has one target; the first added wins, which lets foundations be
@@ -240,6 +245,15 @@ team: 1.0                 # 0..1 blend toward faction colour
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
 entity needs `model: name` and `anim:name: slot`. Naming `walk` gets server-side idle/walk
 switching for free.
+
+```
+death_seconds: 1.2                  # how long the body stays on view; 0 or none, gone at once
+death_emitter: game:unit_lost       # burst as it shrinks away, tinted with the faction's colour
+```
+
+A killed entity keeps drawing on the client: it topples, pales, then shrinks into the burst.
+It's gone from the server already, so it can't be selected or targeted. A death the viewer
+couldn't see shows nothing, and `despawnEntity` on a living one removes it at once.
 
 ### .model additions
 

@@ -40,6 +40,19 @@ struct EntityRenderState {
     bool visible = true;
     bool active = true;
 
+    /// How far through dying, 0 to 1, with no snapshots to come. Negative while alive.
+    float dying = -1.0f;
+    bool deathBurstDone = false;
+
+    [[nodiscard]] bool isDying() const { return dying >= 0.0f; }
+
+    /// Alive and in view. The server stops sending what the viewer can't see, so silence
+    /// means hidden.
+    [[nodiscard]] bool isCurrent() const {
+        constexpr float STALE_SECONDS = 0.5f;
+        return visible && active && !isDying() && timeSinceSnapshot < STALE_SECONDS;
+    }
+
     /// Interpolate position between prev and current
     [[nodiscard]] glm::dvec3 interpolatedPosition(float alpha) const;
 

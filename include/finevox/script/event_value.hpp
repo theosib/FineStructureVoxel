@@ -99,6 +99,10 @@ struct EventSymbols {
 
     // Particle fields
     uint32_t preset, emitter_id, duration, count;
+    uint32_t tint_r, tint_g, tint_b, tint_a;
+
+    // Entity removal
+    uint32_t died;
 
     /// Get the singleton instance (lazily initialized).
     static const EventSymbols& instance();
@@ -237,8 +241,8 @@ finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
                                        glm::dvec3 pos, float yaw, float pitch,
                                        std::string_view entityTypeName = "");
 
-/** Build an entity-despawn event. */
-finescript::Value makeEntityDespawnValue(EntityId id);
+/** Build an entity-despawn event. `died` tells a viewer it was killed, not just removed. */
+finescript::Value makeEntityDespawnValue(EntityId id, bool died = false);
 
 /** Build a player-correction event. */
 finescript::Value makePlayerCorrectionValue(EntityId id, glm::dvec3 pos, glm::dvec3 vel,
@@ -270,7 +274,8 @@ finescript::Value makeParticleSpawnValue(std::string_view preset,
 finescript::Value makeParticleDespawnValue(uint32_t emitterId);
 
 /** Build a one-shot particle burst command at a world position. */
-finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos);
+finescript::Value makeParticleBurstValue(std::string_view preset, glm::dvec3 pos,
+                                         glm::vec4 tint = glm::vec4(1.0f));
 
 /// Wrap a game-defined command for transport; read back with readGameCommandBody
 finescript::Value makeGameCommandValue(finescript::Value body);

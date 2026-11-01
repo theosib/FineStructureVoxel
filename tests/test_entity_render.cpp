@@ -403,6 +403,100 @@ TEST(EntityRenderStateTest, MultipleSnapshots) {
 // Phase R3: EntityRenderer Event Wiring Tests
 // ============================================================================
 
+namespace {
+
+/// A type that takes a second to die, with a burst, and a renderer showing one of them
+constexpr EntityId DYING_ID = 7;
+
+void registerDyingType() {
+    EntityTypeDef def;
+    def.name = "death_test_unit";
+    def.deathSeconds = 1.0f;
+    def.deathEmitter = "fx:lost";
+    EntityTypeRegistry::global().registerType("finevox:death_test_unit", std::move(def));
+}
+
+void spawnDying(render::EntityRenderer& renderer, GraphicsEventQueue& queue, std::string_view type) {
+    queue.push(GraphicsMessage::fromEvent(
+        script::makeEntitySpawnValue(DYING_ID, 1, glm::dvec3(1.0, 2.0, 3.0), 0.0f, 0.0f, type)));
+    renderer.processEvents(queue);
+}
+
+}  // namespace
+
+TEST(EntityRendererTest, DeathKeepsTheBodyThenBurstsThenClears) {
+    registerDyingType();
+    render::EntityRenderer renderer;
+    GraphicsEventQueue queue;
+    spawnDying(renderer, queue, "finevox:death_test_unit");
+
+    queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID, true)));
+    renderer.processEvents(queue);
+
+    const EntityRenderState* state = renderer.getEntity(DYING_ID);
+    ASSERT_NE(state, nullptr);
+    EXPECT_TRUE(state->isDying());
+    EXPECT_FALSE(state->isCurrent()) << "a body mustn't count as a unit you can select";
+    EXPECT_EQ(renderer.visibleCount(), 0u);
+
+    renderer.update(0.5f, glm::dvec3(0.0));
+    EXPECT_TRUE(renderer.takeDeathBursts().empty());
+
+    renderer.update(0.2f, glm::dvec3(0.0));
+    auto bursts = renderer.takeDeathBursts();
+    ASSERT_EQ(bursts.size(), 1u);
+    EXPECT_EQ(bursts[0].emitter, "fx:lost");
+    EXPECT_EQ(bursts[0].position, glm::dvec3(1.0, 2.0, 3.0));
+
+    renderer.update(0.2f, glm::dvec3(0.0));
+    ASSERT_NE(renderer.getEntity(DYING_ID), nullptr);
+    EXPECT_TRUE(renderer.takeDeathBursts().empty()) << "one burst to a death";
+
+    renderer.update(0.2f, glm::dvec3(0.0));
+    EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
+}
+
+TEST(EntityRendererTest, BeingRemovedIsNotDying) {
+    registerDyingType();
+    render::EntityRenderer renderer;
+    GraphicsEventQueue queue;
+    spawnDying(renderer, queue, "finevox:death_test_unit");
+
+    queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID)));
+    renderer.processEvents(queue);
+    EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
+}
+
+TEST(EntityRendererTest, DeathOutOfSightShowsNothing) {
+    registerDyingType();
+    render::EntityRenderer renderer;
+    GraphicsEventQueue queue;
+    spawnDying(renderer, queue, "finevox:death_test_unit");
+
+    // The server stopped sending it, as it does for whatever the viewer can't see
+    renderer.update(1.0f, glm::dvec3(0.0));
+    queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID, true)));
+    renderer.processEvents(queue);
+
+    EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
+    renderer.update(1.0f, glm::dvec3(0.0));
+    EXPECT_TRUE(renderer.takeDeathBursts().empty());
+}
+
+TEST(EntityRendererTest, TypeWithNoDeathGoesAtOnce) {
+    EntityTypeDef def;
+    def.name = "no_death_test_unit";
+    EntityTypeRegistry::global().registerType("finevox:no_death_test_unit", std::move(def));
+
+    render::EntityRenderer renderer;
+    GraphicsEventQueue queue;
+    spawnDying(renderer, queue, "finevox:no_death_test_unit");
+
+    queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID, true)));
+    renderer.processEvents(queue);
+    EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
+}
+
 TEST(EntityRendererTest, SpawnSetsEntityTypeIdAndAnimationPlaysAndCorrectionFiresCallback) {
     EntityTypeDef zombieDef;
     zombieDef.name = "r3_test_zombie";

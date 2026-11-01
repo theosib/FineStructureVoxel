@@ -19,6 +19,12 @@ void pushQuad(std::vector<SceneVertex>& out, const glm::vec3& a, const glm::vec3
     out.push_back({d, normal, color});
 }
 
+/// Lifted this far as it falls, or the body would lie half under the ground
+constexpr float DEATH_LIE_HEIGHT = 0.2f;
+/// Where a body shrinks to. Around its feet it would seem to be drawn away along the ground.
+constexpr glm::vec3 DEATH_BODY_CENTRE(0.0f, 0.9f, 0.0f);
+constexpr glm::vec3 DEATH_PALE_COLOR(0.92f, 0.92f, 0.88f);
+
 }  // namespace
 
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec3& h,
@@ -78,6 +84,22 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
     glm::vec3 viewPos(state.interpolatedPosition(alpha) - cameraPos);
     glm::mat4 root = glm::rotate(glm::translate(glm::mat4(1.0f), viewPos),
                                  state.interpolatedYawRadians(alpha), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    float pale = 0.0f;
+    if (state.isDying()) {
+        // Over sideways from the feet, gathering speed as it goes. Which way depends on who it
+        // is, so that a squad doesn't drop in step.
+        float fall = std::min(state.dying / DEATH_FALL_END, 1.0f);
+        float side = (state.id & 1) != 0 ? 1.0f : -1.0f;
+        root = glm::translate(root, glm::vec3(0.0f, DEATH_LIE_HEIGHT * fall, 0.0f));
+        root = glm::rotate(root, side * glm::half_pi<float>() * fall * fall, glm::vec3(0.0f, 0.0f, 1.0f));
+
+        float restEnd = DEATH_FALL_END + DEATH_REST;
+        pale = std::min(std::max(state.dying - DEATH_FALL_END, 0.0f) / DEATH_REST, 1.0f);
+        float shrink = 1.0f - std::max(state.dying - restEnd, 0.0f) / (1.0f - restEnd);
+        root = glm::scale(glm::translate(root, DEATH_BODY_CENTRE), glm::vec3(shrink));
+        root = glm::translate(root, -DEATH_BODY_CENTRE);
+    }
     for (auto& pose : scratch.world) pose = root * pose;
 
     model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor);
@@ -85,7 +107,8 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
     out.reserve(out.size() + scratch.indices.size());
     for (uint32_t index : scratch.indices) {
         const EntityVertex& v = scratch.vertices[index];
-        out.push_back({v.position, v.normal, glm::vec4(v.color * light, 1.0f)});
+        glm::vec3 color = glm::mix(v.color * light, DEATH_PALE_COLOR, pale);
+        out.push_back({v.position, v.normal, glm::vec4(color, 1.0f)});
     }
 }
 

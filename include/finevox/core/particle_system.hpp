@@ -53,7 +53,8 @@ public:
 
     /// Fire-and-forget single burst at the given position.
     /// Returns number of particles actually spawned.
-    size_t burst(std::string_view presetName, glm::dvec3 position);
+    size_t burst(std::string_view presetName, glm::dvec3 position,
+                 glm::vec4 tint = glm::vec4(1.0f));
 
     // ========================================================================
     // Tick + snapshot

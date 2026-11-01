@@ -1,5 +1,6 @@
 #include "finevox/render/entity_renderer.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/render/scene_geometry.hpp"
 #include "finevox/script/event_value.hpp"
 
 namespace finevox::render {
@@ -38,10 +39,28 @@ void EntityRenderer::processEvents(GraphicsEventQueue& queue) {
 }
 
 void EntityRenderer::update(float dt, const glm::dvec3& /*cameraPos*/) {
-    for (auto& [id, state] : entities_) {
-        if (!state.active) continue;
-        state.timeSinceSnapshot += dt;
-        state.animator.update(dt);
+    for (auto it = entities_.begin(); it != entities_.end();) {
+        EntityRenderState& state = it->second;
+        if (state.active) {
+            state.timeSinceSnapshot += dt;
+            if (state.isDying()) {
+                const auto* def = EntityTypeRegistry::global().getType(state.typeId);
+                state.dying += dt / def->deathSeconds;
+                if (state.dying >= render::DEATH_FALL_END + render::DEATH_REST && !state.deathBurstDone) {
+                    state.deathBurstDone = true;
+                    if (!def->deathEmitter.empty()) {
+                        deathBursts_.push_back({def->deathEmitter, state.currentPosition, state.faction});
+                    }
+                }
+                if (state.dying >= 1.0f) {
+                    it = entities_.erase(it);
+                    continue;
+                }
+            } else {
+                state.animator.update(dt);
+            }
+        }
+        ++it;
     }
 }
 
@@ -58,7 +77,7 @@ void EntityRenderer::buildEntityVertices(
 size_t EntityRenderer::visibleCount() const {
     size_t count = 0;
     for (const auto& [id, state] : entities_) {
-        if (state.visible && state.active) ++count;
+        if (state.visible && state.active && !state.isDying()) ++count;
     }
     return count;
 }
@@ -113,7 +132,16 @@ void EntityRenderer::handleEvent(const finescript::Value& event) {
         entities_[id] = std::move(state);
     }
     else if (type == EVT_ENTITY_DESPAWN) {
-        entities_.erase(readEntityId(event));
+        auto it = entities_.find(readEntityId(event));
+        if (it == entities_.end()) return;
+        const auto* def = EntityTypeRegistry::global().getType(it->second.typeId);
+        // A death out of sight stays out of sight: fog mustn't give away that it happened
+        if (readBool(event, EventSymbols::instance().died) && def && def->deathSeconds > 0.0f &&
+            it->second.isCurrent()) {
+            it->second.dying = 0.0f;
+        } else {
+            entities_.erase(it);
+        }
     }
     else if (type == EVT_ENTITY_ANIMATION) {
         EntityId id = readEntityId(event);

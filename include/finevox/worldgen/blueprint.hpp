@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -79,7 +80,46 @@ struct SiteProgress {
 /// What's left of a site, for showing where it will go
 struct SiteGhost {
     float built = 0.0f;  ///< Fraction of its blocks in place, 0 to 1
-    std::vector<BlockCoord> cells;
+    std::vector<SiteCell> cells;
+};
+
+/// The faces to draw for what's left of some sites, as a viewer sees them. A viewer's copy of
+/// the world lags the server's, so a ghost the server has finished with stays up until the
+/// block it stood for has arrived here. Otherwise there's a gap with nothing in that cell.
+class SiteGhostView {
+public:
+    using Ghosts = std::shared_ptr<const std::vector<SiteGhost>>;
+    /// What this viewer has at a cell
+    using BlockAt = std::function<BlockTypeId(BlockCoord)>;
+
+    struct Face {
+        BlockCoord cell;
+        uint8_t faces;   ///< A bit per finevox::Face
+        float built;
+    };
+
+    /// A little longer than the block's arrival, to give its mesh time to reach the screen
+    static constexpr float SETTLE_SECONDS = 0.2f;
+    /// For a block that never arrives: out of sight, say, or built and dug out again already
+    static constexpr float GIVE_UP_SECONDS = 3.0f;
+
+    void update(const Ghosts& ghosts, float dt, const BlockAt& blockAt);
+
+    [[nodiscard]] const std::vector<Face>& faces() const { return faces_; }
+
+private:
+    struct Leaving {
+        BlockTypeId block;
+        float built;
+        float age = 0.0f;
+        float settled = 0.0f;
+    };
+
+    void rebuildFaces();
+
+    Ghosts source_;
+    std::unordered_map<BlockCoord, Leaving> leaving_;
+    std::vector<Face> faces_;
 };
 
 class BlueprintSite {

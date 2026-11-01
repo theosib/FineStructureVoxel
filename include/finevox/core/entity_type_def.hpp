@@ -63,6 +63,8 @@ struct EntityTypeDef {
     // Visual
     InternedId model;              // Skeleton/mesh reference (interned)
     InternedId defaultAnimation;   // Default animation name (interned)
+    float deathSeconds = 0.0f;     // How long the body stays on view; 0 = gone at once
+    std::string deathEmitter;      // Burst as the body goes, in its faction's colour
 
     /// Named animation states: "idle" → 0, "walk" → 1, "attack" → 2, etc.
     /// Loaded from `animation_states` block in .entity files.

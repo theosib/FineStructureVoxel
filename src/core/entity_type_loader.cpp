@@ -61,6 +61,10 @@ std::optional<EntityTypeDef> EntityTypeLoader::loadFromString(std::string_view c
             def.attackCooldown = entry.value.asFloat(def.attackCooldown);
         } else if (entry.key == "model") {
             def.model = StringInterner::global().intern(entry.value.asString());
+        } else if (entry.key == "death_seconds") {
+            def.deathSeconds = entry.value.asFloat(def.deathSeconds);
+        } else if (entry.key == "death_emitter") {
+            def.deathEmitter = entry.value.asStringOwned();
         } else if (entry.key == "default_animation") {
             def.defaultAnimation = StringInterner::global().intern(entry.value.asString());
         } else if (entry.key == "anim" && entry.hasSuffix()) {

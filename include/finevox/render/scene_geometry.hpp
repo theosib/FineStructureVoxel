@@ -36,6 +36,11 @@ void appendRing(std::vector<SceneVertex>& out, const glm::vec3& center, float ra
 void appendBillboard(std::vector<SceneVertex>& out, const glm::vec3& center, const glm::vec3& right,
                      const glm::vec3& up, float halfWidth, float halfHeight, const glm::vec4& color);
 
+/// The stages of dying, as fractions of EntityRenderState::dying: the body falls, lies still
+/// a moment while it pales, then shrinks away as it turns to its burst of particles.
+inline constexpr float DEATH_FALL_END = 0.4f;
+inline constexpr float DEATH_REST = 0.25f;
+
 /// Pose an entity model at its interpolated position and append its triangles.
 /// `scratch*` keep allocations across calls.
 struct EntityPoseScratch {

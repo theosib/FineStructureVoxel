@@ -176,7 +176,7 @@ void registerBlueprintNatives(GameRuntime& runtime) {
                 if (!target) continue;
                 worldgen::SiteGhost ghost;
                 for (const auto& cell : target->remaining(rt->session().world())) {
-                    if (!cell.block.isAir()) ghost.cells.push_back(cell.pos);
+                    if (!cell.block.isAir()) ghost.cells.push_back(cell);
                 }
                 size_t total = 0;
                 for (const auto& cell : target->cells()) {

@@ -166,3 +166,109 @@ TEST(BlueprintLibraryTest, LooksUpByName) {
     EXPECT_EQ(library.find("palace"), nullptr);
     EXPECT_EQ(library.names(), std::vector<std::string>{"hut"});
 }
+
+namespace {
+
+/// One site's ghost, as the game thread would publish it
+SiteGhostView::Ghosts ghostOf(std::vector<BlockCoord> cells) {
+    SiteGhost ghost;
+    ghost.built = 0.5f;
+    for (const BlockCoord& pos : cells) ghost.cells.push_back({pos, planks()});
+    return std::make_shared<const std::vector<SiteGhost>>(std::vector<SiteGhost>{ghost});
+}
+
+bool shows(const SiteGhostView& view, BlockCoord pos) {
+    const auto& faces = view.faces();
+    return std::any_of(faces.begin(), faces.end(), [&](const auto& f) { return f.cell == pos; });
+}
+
+constexpr float FRAME = 1.0f / 60.0f;
+const BlockCoord CELL(1, 2, 3);
+const BlockCoord NEXT(2, 2, 3);
+
+}  // namespace
+
+TEST(SiteGhostView, ShowsTheOutsideOfEachCell) {
+    SiteGhostView view;
+    auto air = [](BlockCoord) { return BlockTypeId(); };
+    view.update(ghostOf({CELL, NEXT}), FRAME, air);
+
+    ASSERT_EQ(view.faces().size(), 2u);
+    for (const auto& face : view.faces()) {
+        Face hidden = face.cell == CELL ? Face::PosX : Face::NegX;
+        EXPECT_EQ((face.faces >> static_cast<uint8_t>(hidden)) & 1, 0) << "that side is another ghost";
+        EXPECT_FLOAT_EQ(face.built, 0.5f);
+    }
+}
+
+TEST(SiteGhostView, StaysUntilTheBlockHasArrivedHere) {
+    SiteGhostView view;
+    BlockTypeId here;
+    auto blockAt = [&here](BlockCoord) { return here; };
+
+    view.update(ghostOf({CELL}), FRAME, blockAt);
+
+    // The server's done with it, and this copy of the world hasn't heard
+    auto done = std::make_shared<const std::vector<SiteGhost>>();
+    for (int i = 0; i < 60; ++i) view.update(done, FRAME, blockAt);
+    EXPECT_TRUE(shows(view, CELL)) << "that would be a gap with nothing in the cell";
+
+    here = planks();
+    view.update(done, FRAME, blockAt);
+    EXPECT_TRUE(shows(view, CELL)) << "its mesh is still on the way";
+
+    for (int i = 0; i < 30; ++i) view.update(done, FRAME, blockAt);
+    EXPECT_FALSE(shows(view, CELL));
+}
+
+TEST(SiteGhostView, TheWrongBlockDoesNotCount) {
+    SiteGhostView view;
+    auto wrong = [](BlockCoord) { return thatch(); };
+    view.update(ghostOf({CELL}), FRAME, wrong);
+
+    auto done = std::make_shared<const std::vector<SiteGhost>>();
+    for (int i = 0; i < 60; ++i) view.update(done, FRAME, wrong);
+    EXPECT_TRUE(shows(view, CELL));
+}
+
+TEST(SiteGhostView, GivesUpOnABlockThatNeverComes) {
+    SiteGhostView view;
+    auto air = [](BlockCoord) { return BlockTypeId(); };
+    view.update(ghostOf({CELL}), FRAME, air);
+
+    auto done = std::make_shared<const std::vector<SiteGhost>>();
+    view.update(done, SiteGhostView::GIVE_UP_SECONDS - 0.5f, air);
+    EXPECT_TRUE(shows(view, CELL));
+    view.update(done, 1.0f, air);
+    EXPECT_FALSE(shows(view, CELL));
+}
+
+TEST(SiteGhostView, ACellLeavingStillHidesItsNeighbourSide) {
+    SiteGhostView view;
+    auto air = [](BlockCoord) { return BlockTypeId(); };
+    view.update(ghostOf({CELL, NEXT}), FRAME, air);
+
+    view.update(ghostOf({NEXT}), FRAME, air);
+    ASSERT_EQ(view.faces().size(), 2u);
+    for (const auto& face : view.faces()) {
+        if (face.cell == NEXT) {
+            EXPECT_EQ((face.faces >> static_cast<uint8_t>(Face::NegX)) & 1, 0);
+        }
+    }
+}
+
+TEST(SiteGhostView, ACellThatComesBackStaysUp) {
+    SiteGhostView view;
+    auto air = [](BlockCoord) { return BlockTypeId(); };
+    view.update(ghostOf({CELL}), FRAME, air);
+
+    auto done = std::make_shared<const std::vector<SiteGhost>>();
+    view.update(done, 1.0f, air);
+    view.update(ghostOf({CELL}), FRAME, air);
+
+    // Dug out and queued again: it's a live ghost now, however long it was leaving for
+    auto same = ghostOf({CELL});
+    view.update(same, FRAME, air);
+    view.update(same, SiteGhostView::GIVE_UP_SECONDS * 2.0f, air);
+    ASSERT_EQ(view.faces().size(), 1u);
+}

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <unordered_set>
 
 namespace finevox::worldgen {
 
@@ -235,6 +236,69 @@ std::vector<SiteCell> BlueprintSite::remaining(const World& world) const {
         if (!isDone(world, cell)) result.push_back(cell);
     }
     return result;
+}
+
+void SiteGhostView::update(const Ghosts& ghosts, float dt, const BlockAt& blockAt) {
+    bool changed = false;
+
+    if (ghosts != source_) {
+        std::unordered_set<BlockCoord> current;
+        if (ghosts) {
+            for (const SiteGhost& ghost : *ghosts) {
+                for (const SiteCell& cell : ghost.cells) current.insert(cell.pos);
+            }
+        }
+        if (source_) {
+            for (const SiteGhost& ghost : *source_) {
+                for (const SiteCell& cell : ghost.cells) {
+                    if (!current.count(cell.pos)) leaving_.try_emplace(cell.pos, Leaving{cell.block, ghost.built});
+                }
+            }
+        }
+        for (const BlockCoord& pos : current) leaving_.erase(pos);
+        source_ = ghosts;
+        changed = true;
+    }
+
+    for (auto it = leaving_.begin(); it != leaving_.end();) {
+        Leaving& ghost = it->second;
+        ghost.age += dt;
+        if (blockAt(it->first) == ghost.block) ghost.settled += dt;
+        if (ghost.settled >= SETTLE_SECONDS || ghost.age >= GIVE_UP_SECONDS) {
+            it = leaving_.erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+
+    if (changed) rebuildFaces();
+}
+
+void SiteGhostView::rebuildFaces() {
+    faces_.clear();
+    std::unordered_set<BlockCoord> cells;
+    for (const auto& [pos, ghost] : leaving_) cells.insert(pos);
+    if (source_) {
+        for (const SiteGhost& ghost : *source_) {
+            for (const SiteCell& cell : ghost.cells) cells.insert(cell.pos);
+        }
+    }
+
+    // Only the outside of a ghost, or its layers pile up into something near opaque
+    auto add = [&](const BlockCoord& cell, float built) {
+        uint8_t faces = 0;
+        for (size_t f = 0; f < FACE_COUNT; ++f) {
+            if (!cells.count(cell.neighbor(static_cast<finevox::Face>(f)))) faces |= uint8_t(1 << f);
+        }
+        if (faces != 0) faces_.push_back({cell, faces, built});
+    };
+    if (source_) {
+        for (const SiteGhost& ghost : *source_) {
+            for (const SiteCell& cell : ghost.cells) add(cell.pos, ghost.built);
+        }
+    }
+    for (const auto& [pos, ghost] : leaving_) add(pos, ghost.built);
 }
 
 }  // namespace finevox::worldgen

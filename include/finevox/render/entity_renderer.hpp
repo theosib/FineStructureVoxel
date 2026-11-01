@@ -14,8 +14,10 @@
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include <functional>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace finevox {
@@ -37,6 +39,16 @@ public:
 
     /// Advance animations, update interpolation state
     void update(float dt, const glm::dvec3& cameraPos);
+
+    /// A dying body turning to its burst of particles
+    struct DeathBurst {
+        std::string emitter;
+        glm::dvec3 position;
+        uint16_t faction;
+    };
+
+    /// Bursts due since last asked. The renderer has no way to start them itself.
+    [[nodiscard]] std::vector<DeathBurst> takeDeathBursts() { return std::exchange(deathBursts_, {}); }
 
     /// Set callback invoked when EVT_PLAYER_CORRECTION is received
     void setPlayerCorrectionCallback(PlayerCorrectionCallback callback) {
@@ -79,6 +91,7 @@ public:
 
 private:
     std::unordered_map<EntityId, EntityRenderState> entities_;
+    std::vector<DeathBurst> deathBursts_;
     std::unordered_map<uint64_t, const AnimationClip*> animationClips_;
     PlayerCorrectionCallback playerCorrectionCallback_;
 

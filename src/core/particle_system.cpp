@@ -72,7 +72,7 @@ bool ParticleSystem::isEmitterActive(EmitterId id) const {
     return it != emitters_.end() && it->second.active && !it->second.isExpired();
 }
 
-size_t ParticleSystem::burst(std::string_view presetName, glm::dvec3 position) {
+size_t ParticleSystem::burst(std::string_view presetName, glm::dvec3 position, glm::vec4 tint) {
     const EmitterPresetDef* preset = EmitterPresetRegistry::global().get(presetName);
     if (!preset) return 0;
     const ParticleTypeDef* type = ParticleTypeRegistry::global().get(preset->particleType);
@@ -93,6 +93,8 @@ size_t ParticleSystem::burst(std::string_view presetName, glm::dvec3 position) {
             if (particles_.size() >= maxParticles_) break;
         }
         spawnParticleUnlocked(*type, scratch, *preset);
+        particles_.back().startTint *= tint;
+        particles_.back().endTint *= tint;
         ++spawned;
     }
     return spawned;

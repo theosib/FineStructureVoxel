@@ -114,8 +114,8 @@ void GameActions::despawnParticleEmitter(uint32_t emitterId) {
     sendAction(makeParticleDespawnValue(emitterId));
 }
 
-void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos) {
-    sendAction(makeParticleBurstValue(preset, pos));
+void GameActions::particleBurst(std::string_view preset, glm::dvec3 pos, glm::vec4 tint) {
+    sendAction(makeParticleBurstValue(preset, pos, tint));
 }
 
 void GameActions::sendGameCommand(finescript::Value command) {
@@ -554,7 +554,9 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         std::string preset(readString(cmd, s.preset));
         if (preset.empty()) return;
         glm::dvec3 position = readDVec3(cmd, s.pos_x, s.pos_y, s.pos_z);
-        particles->burst(preset, position);
+        glm::vec4 tint(readFloat(cmd, s.tint_r, 1.0f), readFloat(cmd, s.tint_g, 1.0f),
+                       readFloat(cmd, s.tint_b, 1.0f), readFloat(cmd, s.tint_a, 1.0f));
+        particles->burst(preset, position, tint);
     }
     else if (typeStr == EVT_GAME_COMMAND) {
         if (gameCommandHandler) gameCommandHandler(readGameCommandBody(cmd));

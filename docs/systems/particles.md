@@ -96,6 +96,7 @@ ParticleSystem& sim = session->particles();
 
 // One-shot burst
 sim.burst("finevox:block_break", glm::dvec3(x, y, z));
+sim.burst("game:unit_lost", pos, glm::vec4(team, 1.0f));  // tint multiplies the preset's
 
 // Retained emitter with lifetime
 EmitterId id = sim.spawnEmitter("finevox:smoke_column", position, 5.0f);

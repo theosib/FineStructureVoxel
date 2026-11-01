@@ -193,6 +193,27 @@ TEST(ParticleSystem, BurstSpawnsExpectedCount) {
     EXPECT_EQ(sim.activeParticleCount(), 10u);
 }
 
+TEST(ParticleSystem, BurstTintMultipliesThePresetsTint) {
+    World world;
+    ParticleSystem sim(world);
+
+    auto type = uniq("tint_type");
+    registerSimpleType(type);
+    auto preset = uniq("tint_preset");
+    registerBurstPreset(preset, type, 3);
+
+    sim.burst(preset, glm::dvec3(0.0, 64.0, 0.0));
+    glm::vec4 plain = sim.snapshot().particles[0].startTint;
+
+    ParticleSystem tinted(world);
+    tinted.burst(preset, glm::dvec3(0.0, 64.0, 0.0), glm::vec4(0.5f, 0.25f, 1.0f, 1.0f));
+    auto snap = tinted.snapshot();
+    ASSERT_EQ(snap.particles.size(), 3u);
+    for (const Particle& p : snap.particles) {
+        EXPECT_EQ(p.startTint, plain * glm::vec4(0.5f, 0.25f, 1.0f, 1.0f));
+    }
+}
+
 TEST(ParticleSystem, VelocityDistributionFollowsInitialSpeed) {
     World world;
     ParticleSystem sim(world);
@@ -453,4 +474,9 @@ TEST(ParticleEventValue, BurstRoundTrip) {
     EXPECT_EQ(readEventType(v), "particle_burst");
     EXPECT_EQ(readString(v, EventSymbols::instance().preset), "fx:pop");
     EXPECT_DOUBLE_EQ(v.asMap().get(EventSymbols::instance().pos_y).asFloat(), 1.0);
+    EXPECT_FLOAT_EQ(readFloat(v, EventSymbols::instance().tint_g, 0.0f), 1.0f);
+
+    auto tinted = makeParticleBurstValue("fx:pop", glm::dvec3(0.0), glm::vec4(0.25f, 0.5f, 0.75f, 1.0f));
+    EXPECT_FLOAT_EQ(readFloat(tinted, EventSymbols::instance().tint_r, 0.0f), 0.25f);
+    EXPECT_FLOAT_EQ(readFloat(tinted, EventSymbols::instance().tint_b, 0.0f), 0.75f);
 }

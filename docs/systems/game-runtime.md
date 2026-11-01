@@ -29,7 +29,11 @@ sky.conf
 |---|---|---|
 | `name`, `namespace`, `window_title` | | Identity |
 | `main_script`, `ui_script` | `scripts/main.fsc`, `ui/main.fs` | Entry points |
+| `menu_script` | none | The client's first screen. With none, a client goes straight into a game |
+| `lobby_script` | none | Declares the pre-game. See [multiplayer.md](multiplayer.md) |
+| `client_content`, `net_port` | | What a client needs, and the game port. See [multiplayer.md](multiplayer.md) |
 | `world_seed`, `world_radius`, `sea_level`, `caves` | | World; radius is in columns |
+| `world_biomes` | all | Only these biomes, by file name, so that a lobby setting can pick a kind of land |
 | `fog_of_war`, `viewer_faction` | `true`, `1` | Whose eyes the client sees through |
 | `view_distance`, `default_locale`, `tick_rate`, `gravity` | | |
 | `lod` | `true` | Merge distant blocks. Turn off for an overhead camera, which keeps the map in the transition zone where meshes visibly swap |
@@ -55,16 +59,17 @@ UI  --send_command value-->  on :command  (`cmd` in scope)     CBOR over finenet
 UI  <----on :state--------  ui_publish value                   CBOR through a queue
 ```
 
-This is the boundary multiplayer needs, so single-player can't quietly depend on shared
-state.
+This is the multiplayer boundary, and it's real: even in single player, a client knows only what
+arrives over a connection. See [multiplayer.md](multiplayer.md).
 
 ### Game script events
 
 | Event | In scope |
 |---|---|
-| `on :start` | `WORLD_SEED`, `WORLD_RADIUS`, `SEA_LEVEL` (always) |
+| `on :start` | `WORLD_SEED`, `WORLD_RADIUS`, `SEA_LEVEL`, `SETTINGS`, `PLAYERS` (always) |
 | `on :tick` | `dt` |
-| `on :command` | `cmd` |
+| `on :command` | `cmd`, and `sender`, the player's id, or 0 if it's nobody in particular |
+| `on :player_join`, `on :player_leave` | `player`: `{=id =name =local}` |
 
 A handler that throws is logged once per distinct message and the game continues.
 `finevox_headless` exits nonzero if any occurred.
@@ -77,6 +82,9 @@ A handler that throws is logged once per distinct message and the game continues
 | `on :mouse` | `mouse_event`, `mouse_button`, `mouse_x`, `mouse_y`, `mouse_shift` |
 | `on :action` | `action`, `action_arg` (from `input/default.bindings`) |
 | `on :state` | `msg` |
+| `on :net` | `msg`: `{=phase}`, and `=failure` if it failed |
+| `on :lobby` | `msg`: LobbyState from the protocol |
+| `on :chat` | `msg`: `{=from =name =text}` |
 
 Camera actions (`begin_pan_*`, `begin_orbit_*`, `toggle_view`, `begin_jump`) are consumed
 by the client. Everything else reaches `on :action`.
@@ -182,10 +190,10 @@ finegui's `docs/SKIN_SYSTEM.md`.
 
 ```
 send_command value       ui_show tree [=immediate true] -> id        ui_hide id
-window_size   mouse_pos  gui_has_mouse   fps
+window_size   mouse_pos  gui_has_mouse   fps   sym_name :x -> "x"
 pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 y1 -> ids
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
-do_action name     gui_click x y   gui_hover x y   (for scripted UI tests)
+do_action name     gui_click x y   gui_hover x y   input_text "abc"   (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  set_faction_color id r g b
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
@@ -195,8 +203,36 @@ cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil
 pick_ground mx my -> the same, looking through what a body can walk through. Orders use it,
 so that foliage with a `hit:` shape can be inspected without catching clicks on the ground.
-request_screenshot path    quit_game
+request_screenshot path    quit_game    to_menu
 ```
+
+`ui_skin`, `ui_texture` and `source` take paths inside the content root and refuse anything else,
+and `request_screenshot` does too when the content came from a server. A UI script can be a
+server's, so natives must stay this way.
+
+### Networking (UI script)
+
+`menu_script` starts with these. `ui_script` takes over when the world has arrived, in a new
+context, and the windows the menu showed are gone.
+
+```
+game_start [=new true]                     a game for one, with no pre-game
+net_host [=listen true] [=title t] [=port p] [=password pw] [=new true] -> nil, or what went wrong
+net_join address [=password p]             as people type them, or a list of them for one server
+net_leave      net_phase -> :idle...       net_failure -> text
+net_browse on                              start or stop looking
+net_servers -> [listing...]                each with =addresses =port =rtt added
+net_blocked -> the OS is refusing this process the local network
+net_recent     net_addresses               remembered servers, and this machine's addresses
+net_open [port] -> nil, or what went wrong  a running game, on the network from now on
+net_port -> port, or nil                   net_is_host    net_me -> player id
+lobby_info -> declaration                  lobby_set key value    lobby_ready b
+lobby_launch [b]                           lobby_kick id
+chat_send text [=team true]
+has_save       player_name    set_player_name name
+```
+
+`my_player` and `my_faction` are set when `ui_script` starts.
 
 Markers are immediate: call them every `on :frame`. Use `ui_show`, not `ui.show`, which
 needs a `ScriptGui` behind the context.
@@ -299,7 +335,12 @@ units to choose new work. A save goes to one side and is renamed into place, so 
 the last good one alone, and the save it replaces stays as `autosave.bak`. Saves run between
 ticks, on the game thread during play.
 
-`new_game` from the UI script saves and restarts the process with `--new`.
+`new_game` from the UI script saves and restarts the process with `--new`, and `to_menu` restarts
+it without. Only a fresh process is sure of leaving nothing of the old game in the global registries.
+
+Each faction with a player has its own memory in the save, and seats go by name, so a host resuming
+a game gets everyone back on their own side. A hosted game keeps to `saves/hosted`, and a server
+that says `saves: true` keeps to `saves/server`, so neither costs you the game you were playing.
 
 ## MCP server
 
@@ -379,8 +420,8 @@ state. It ends the run with `game_exit code`.
 
 - Lifetime in `GameClient::Impl` is order-sensitive: atlases must outlive `WorldRenderer`,
   whose mesh workers read them until it stops.
-- `WorldRenderer` renders `WorldReplica::world()`, not the session's world. Light comes
-  from the session's `LightEngine`, which is keyed by position.
+- `WorldRenderer` renders `ClientSession::world()`, not the session's world, and light comes from
+  there too: the client never touches the server's `LightEngine`.
 - `LightEngine::processUpdates` doesn't drain the update queue. Only the lighting thread
   applies queued updates, so a test must run the thread to exercise them.
 - Per-frame geometry must not go through `RawMesh::update`, which blocks on a submit.

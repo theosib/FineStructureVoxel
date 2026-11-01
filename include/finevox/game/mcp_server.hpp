@@ -26,6 +26,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <deque>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -126,7 +128,10 @@ private:
 
     int port_;
     bool playerOnly_;
-    std::vector<McpTool> tools_;
+    /// A client's tools go in before a game exists, and the game's when it has loaded, with the
+    /// server already answering. A deque so that a tool stays where it is as more arrive.
+    mutable std::shared_mutex toolMutex_;
+    std::deque<McpTool> tools_;
     std::unordered_map<std::string, size_t> toolIndex_;
     Mailbox gameBox_;
     Mailbox frameBox_;

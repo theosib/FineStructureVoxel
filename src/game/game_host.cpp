@@ -197,7 +197,7 @@ int GameHost::maxPlayers() const {
 }
 
 bool GameHost::isLateJoinOpen() const {
-    return lateJoin_ == "open";
+    return lateJoin_ == "open" || openedLive_.load();
 }
 
 int GameHost::connectedPlayers() const {
@@ -391,6 +391,8 @@ bool GameHost::openToNetwork(uint16_t port, std::string& error) {
         beaconDirty_ = true;
     }
     networkPort_ = bound;
+    // Opening a game that's under way is an invitation: whoever comes, the game finds them a place
+    if (phase_.load() != Phase::Lobby) openedLive_ = true;
     std::cout << "[host] open on port " << bound << std::endl;
     return true;
 }
@@ -993,7 +995,12 @@ void GameHost::beginLoading() {
         std::string key = textField(schema, "key");
         const Value& chosen = settings_[key];
         std::string target = textField(schema, "manifest");
-        if (!target.empty()) options.manifestOverrides[target] = valueText(chosen);
+        if (target == "world_seed" && chosen.isNumeric() && chosen.asNumber() == 0.0) {
+            // A seed of 0 means surprise me
+            options.manifestOverrides[target] = std::to_string(std::random_device{}());
+        } else if (!target.empty()) {
+            options.manifestOverrides[target] = valueText(chosen);
+        }
 
         Value choices = field(schema, "choices");
         if (!choices.isArray()) continue;

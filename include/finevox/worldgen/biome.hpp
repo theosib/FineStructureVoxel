@@ -112,11 +112,16 @@ public:
     /// Find the biome whose climate range best matches given temperature/humidity
     [[nodiscard]] BiomeId selectBiome(float temperature, float humidity) const;
 
+    /// Have selectBiome pick only from these. Empty means all of them. A world of one kind of land
+    /// doesn't need its climate to agree: whatever's nearest wins.
+    void setAllowed(std::vector<BiomeId> biomes);
+
 private:
     BiomeRegistry() = default;
 
     mutable std::shared_mutex mutex_;
     std::unordered_map<BiomeId, BiomeProperties> biomes_;
+    std::vector<BiomeId> allowed_;
 };
 
 }  // namespace finevox::worldgen

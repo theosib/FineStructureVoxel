@@ -18,6 +18,7 @@
 
 #include "finevox/core/game_subsystem.hpp"
 
+#include <atomic>
 #include <finescript/execution_context.h>
 #include <finescript/value.h>
 
@@ -81,7 +82,7 @@ private:
     GameScriptEngine& scripts_;
     std::unique_ptr<finescript::ExecutionContext> ctx_;
     MessageSink sink_;
-    uint64_t tickCount_ = 0;
+    std::atomic<uint64_t> tickCount_{0};
     uint32_t tickEvent_ = 0;
     size_t errorCount_ = 0;
     std::vector<std::string> errors_;

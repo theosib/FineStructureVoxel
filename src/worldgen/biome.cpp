@@ -72,6 +72,11 @@ void BiomeRegistry::clear() {
     biomes_.clear();
 }
 
+void BiomeRegistry::setAllowed(std::vector<BiomeId> biomes) {
+    std::unique_lock lock(mutex_);
+    allowed_ = std::move(biomes);
+}
+
 BiomeId BiomeRegistry::selectBiome(float temperature, float humidity) const {
     std::shared_lock lock(mutex_);
 
@@ -79,6 +84,8 @@ BiomeId BiomeRegistry::selectBiome(float temperature, float humidity) const {
     float bestScore = std::numeric_limits<float>::max();
 
     for (const auto& [id, props] : biomes_) {
+        if (!allowed_.empty() && std::find(allowed_.begin(), allowed_.end(), id) == allowed_.end()) continue;
+
         // Score = distance from climate point to biome's climate range center
         float tempCenter = (props.temperatureMin + props.temperatureMax) * 0.5f;
         float humCenter = (props.humidityMin + props.humidityMax) * 0.5f;

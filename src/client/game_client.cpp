@@ -479,6 +479,10 @@ void GameClient::Impl::setupShell() {
     };
     engine->setFrameCallbacks(std::move(callbacks));
 
+    // A menu lays itself out as it loads, before any frame has said how big the window is
+    glm::ivec2 size = engine->window().windowSize();
+    viewport = glm::vec2(float(size.x), float(size.y));
+
     switch (options.start) {
         case ClientStart::Menu:
             if (manifest.menuScript.empty()) {
@@ -1364,6 +1368,18 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // input_text "abc": typing, for scripts that test a text field
+    e.registerFunction("input_text", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        for (char c : args[0].toString()) {
+            finevk::InputEvent event;
+            event.type = finevk::InputEventType::CharInput;
+            event.character = static_cast<uint32_t>(static_cast<unsigned char>(c));
+            engine->inputManager().injectEvent(event);
+        }
+        return Value::nil();
+    });
+
     e.registerFunction("input_move", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 2) return Value::nil();
         auto& input = engine->inputManager();
@@ -1528,6 +1544,13 @@ void GameClient::Impl::registerNetNatives() {
         if (args.empty() || !args.back().isMap()) return Value::nil();
         return net::field(args.back(), name);
     };
+
+    // sym_name :x -> "x"
+    e.registerFunction("sym_name", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        if (!args[0].isSymbol()) return Value::string(args[0].toString());
+        return Value::string(std::string(StringInterner::global().lookup(args[0].asSymbol())));
+    });
 
     // has_save -> whether there's a game to continue
     e.registerFunction("has_save", [this](ExecutionContext&, const Args&) -> Value {
@@ -1694,7 +1717,10 @@ void GameClient::Impl::registerNetNatives() {
     });
 
     e.registerFunction("lobby_set", [this](ExecutionContext&, const Args& args) -> Value {
-        if (session && args.size() >= 2) session->setSetting(args[0].toString(), args[1]);
+        if (!session || args.size() < 2) return Value::nil();
+        std::string name = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+                                              : args[0].toString();
+        session->setSetting(name, args[1]);
         return Value::nil();
     });
 

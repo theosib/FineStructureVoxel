@@ -456,6 +456,8 @@ TEST(EntityRendererTest, DeathKeepsTheBodyThenBurstsThenClears) {
     EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
 }
 
+// A death out of sight shows nothing because the server doesn't say `died` for one: see
+// ReplicationServerTest.
 TEST(EntityRendererTest, BeingRemovedIsNotDying) {
     registerDyingType();
     render::EntityRenderer renderer;
@@ -465,22 +467,6 @@ TEST(EntityRendererTest, BeingRemovedIsNotDying) {
     queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID)));
     renderer.processEvents(queue);
     EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
-}
-
-TEST(EntityRendererTest, DeathOutOfSightShowsNothing) {
-    registerDyingType();
-    render::EntityRenderer renderer;
-    GraphicsEventQueue queue;
-    spawnDying(renderer, queue, "finevox:death_test_unit");
-
-    // The server stopped sending it, as it does for whatever the viewer can't see
-    renderer.update(1.0f, glm::dvec3(0.0));
-    queue.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(DYING_ID, true)));
-    renderer.processEvents(queue);
-
-    EXPECT_EQ(renderer.getEntity(DYING_ID), nullptr);
-    renderer.update(1.0f, glm::dvec3(0.0));
-    EXPECT_TRUE(renderer.takeDeathBursts().empty());
 }
 
 TEST(EntityRendererTest, TypeWithNoDeathGoesAtOnce) {

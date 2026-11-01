@@ -2,8 +2,10 @@
  * @file finevox_bot.cpp
  * @brief A client with no window: for tests over real sockets
  *
- *   finevox_bot --game-root DIR --join ADDR --name N --script FILE [--password P]
- *               [--load-delay SECONDS] [--timeout SECONDS]
+ *   finevox_bot --game NAMESPACE [--game-root DIR] --join ADDR --name N --script FILE [--password P]
+ *               [--cache DIR] [--load-delay SECONDS] [--timeout SECONDS]
+ *
+ * ADDR `lan` finds a server the way a player's browser does, and joins whatever it finds first.
  *
  * Joins a game as any client would and runs a script, which hears what a UI script hears and asserts
  * on what this client knows. That includes what it must not know: it holds only what was sent.
@@ -17,6 +19,7 @@
 #include "finevox/net/client_session.hpp"
 #include "finevox/script/finevox_interner.hpp"
 
+#include <finenet/discovery.hpp>
 #include <finescript/cbor.h>
 #include <finescript/execution_context.h>
 #include <finescript/map_data.h>
@@ -65,7 +68,8 @@ struct Bot {
             std::string line;
             for (size_t i = 0; i < args.size(); ++i) {
                 if (i) line += ' ';
-                line += args[i].toString();
+                line += args[i].isSymbol() ? ":" + std::string(StringInterner::global().lookup(args[i].asSymbol()))
+                                           : args[i].toString();
             }
             std::cout << line << std::endl;
             return Value::nil();
@@ -76,6 +80,13 @@ struct Bot {
         engine.registerFunction("my_faction", [this](ExecutionContext&, const Args&) -> Value {
             auto bound = session->binding();
             return Value::integer(bound ? bound->faction : 0);
+        });
+        engine.registerFunction("now_ms", [](ExecutionContext&, const Args&) -> Value {
+            auto now = std::chrono::system_clock::now().time_since_epoch();
+            return Value::integer(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+        });
+        engine.registerFunction("content_root", [this](ExecutionContext&, const Args&) -> Value {
+            return Value::string(session->contentRoot().string());
         });
         engine.registerFunction("phase", [this](ExecutionContext&, const Args&) -> Value {
             return net::symbol(net::phaseName(session->phase()));
@@ -196,7 +207,8 @@ int main(int argc, char* argv[]) {
             return 2;
         }
     }
-    if (address.empty() || scriptPath.empty() || options.game.empty()) {
+    std::string game = options.game;
+    if (address.empty() || scriptPath.empty() || game.empty()) {
         std::cerr << "usage: finevox_bot --game NAMESPACE [--game-root DIR] --join ADDR --name N --script FILE\n";
         return 2;
     }
@@ -214,7 +226,34 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    bot.session->connect({address});
+    if (address == "lan") {
+        finenet::DiscoveryBrowser::Config config;
+        config.app = game;
+        finenet::DiscoveryBrowser browser(config);
+        auto deadline = Clock::now() + std::chrono::seconds(10);
+        std::vector<finenet::DiscoveredServer> found;
+        while (found.empty() && Clock::now() < deadline) {
+            // Anyone can see a game that's running, but only some can be joined
+            for (auto& server : browser.servers()) {
+                if (net::boolField(net::decodeBody(server.listing), "joinable")) found.push_back(std::move(server));
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (found.empty()) {
+            std::cerr << "[bot] no server found, blocked=" << browser.blocked() << "\n";
+            return 4;
+        }
+        std::vector<std::string> addresses;
+        for (const std::string& host : found[0].addresses) {
+            addresses.push_back(host.find(':') == std::string::npos
+                                    ? host + ":" + std::to_string(found[0].port)
+                                    : "[" + host + "]:" + std::to_string(found[0].port));
+        }
+        std::cout << "[bot] found " << addresses[0] << std::endl;
+        bot.session->connect(std::move(addresses));
+    } else {
+        bot.session->connect({address});
+    }
 
     auto started = Clock::now();
     auto limit = std::chrono::duration<double>(timeout);

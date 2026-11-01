@@ -125,7 +125,9 @@ on :start               PLAYERS: [{=id =name =local}...]   SETTINGS: {=key value
 on :player_join         player: {=id =name}
 on :player_leave        player
 on :command             cmd, and sender: the player's id
-player_bind id faction  this player sees and acts as this faction. Replicas appear on demand.
+player_bind id faction [=at [x y z]]   this player sees and acts as this faction, and their body
+                        starts here. A body sees for its faction, so where it stands matters.
+                        Replicas appear on demand.
 player_faction id -> faction
 ui_publish value [=to player_id] [=faction f]    nothing named means everyone
 site_show_ghosts [ids] [=faction f]
@@ -269,6 +271,40 @@ sizes and rates, and game scripts check ownership. The avatar's position is clie
 
 ## Testing
 
-`finevox_bot` is the client session with no window: it joins, plays by script, and asserts. It's
-also the first standalone client. Keystone's `tests/run_net.sh` runs a server and bots over real
-sockets. Assert on what the client holds, including what it must not hold.
+`finevox_bot` is the client session with no window: it joins, plays by script, and asserts. It links
+`finevox_net` and nothing of the game, so it's also the first standalone client. Assert on what the
+client holds, including what it must not hold.
+
+| Run | Covers |
+|---|---|
+| `finevox_tests`, `finevox_script_tests` | Codecs, fuzzed input, prediction, content safety, what each view is sent |
+| Keystone `tests/run_net.sh` | A server and bots over real sockets, and through a proxy that cuts, delays and throttles |
+| Keystone `tests/run_windows.sh` | Real windows driven over MCP: typing, opening a game live, saving |
+| `../fv-tsan` | The above again. It should report nothing |
+
+Things that took time to learn:
+
+- Nothing is ordered between channels, and that includes tests. A UI that waits for a chat line and
+  a lobby state has to look at both, whichever came last.
+- A cut on a timer is a race on a slow build. Cut when something has happened instead.
+- A body sees for its faction. Two bodies standing at the origin saw each other through the fog.
+- `EntityState`'s copies were written by hand, so a new field needs adding in two more places.
+- `auto_focus` in `MapRenderer` has to call `SetKeyboardFocusHere` before the item. Without it a
+  text field waits for a click.
+- `on_change` on `ui.input` fires when the field loses focus, not per key.
+
+---
+
+## Not Done Yet
+
+- **UDP.** TCP only, so packet loss on the internet stalls all channels for a moment.
+- **WebSocket, hub, generic client.** The seams are there: `Connection` over a transport, listings
+  from any source, content by hash. `finevox_client` still links `finevox_game` for `mcp_tools`.
+- **Encryption.** See [Trust](#trust).
+- **A server's second game.** A server plays one match, then needs restarting.
+- **Reconnecting from a lobby.** A dropped connection there just loses the seat. It's only held once
+  the game's begun.
+- **Team chat by default.** The protocol has it and nothing in Keystone's UI asks for it.
+- **Block rotation and particles from the server.** The wire has room for both; nothing uses them.
+- **Deltas.** One changed block resends its subchunk, about a kilobyte. That's fine for what
+  Keystone does and wouldn't be for a game that changes thousands a second.

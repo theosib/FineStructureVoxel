@@ -15,6 +15,7 @@
 #include "finevox/core/world.hpp"
 #include "finevox/net/subchunk_codec.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -50,7 +51,7 @@ public:
     /// shouldn't draw black.
     [[nodiscard]] uint8_t packedLight(BlockCoord pos) const;
 
-    [[nodiscard]] size_t subchunksReceived() const { return subchunksReceived_; }
+    [[nodiscard]] size_t subchunksReceived() const { return subchunksReceived_.load(); }
 
 private:
     struct Prediction {
@@ -66,7 +67,8 @@ private:
     // Sync thread only
     std::unordered_map<uint32_t, BlockTypeId> blockNames_;
     std::unordered_map<uint32_t, FluidTypeId> fluidNames_;
-    size_t subchunksReceived_ = 0;
+
+    std::atomic<size_t> subchunksReceived_{0};
 
     std::mutex predictionMutex_;
     std::unordered_map<BlockCoord, Prediction> predictions_;

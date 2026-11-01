@@ -203,6 +203,7 @@ private:
     std::atomic<bool> worldLoaded_{false};
     std::atomic<bool> loadFailed_{false};
     std::atomic<uint16_t> networkPort_{0};
+    std::atomic<bool> openedLive_{false};
 
     mutable std::mutex mutex_;   // Guards what other threads touch: arrivals, the network, failure
     std::vector<std::shared_ptr<finenet::Connection>> arrivals_;

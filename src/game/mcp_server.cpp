@@ -266,6 +266,7 @@ McpServer::~McpServer() {
 }
 
 void McpServer::addTool(McpTool tool) {
+    std::unique_lock lock(toolMutex_);
     toolIndex_[tool.name] = tools_.size();
     tools_.push_back(std::move(tool));
 }
@@ -469,6 +470,7 @@ json McpServer::callTool(const McpTool& tool, const json& args) {
 }
 
 const McpTool* McpServer::findTool(const std::string& name) const {
+    std::shared_lock lock(toolMutex_);
     auto found = toolIndex_.find(name);
     if (found == toolIndex_.end()) return nullptr;
     const McpTool& tool = tools_[found->second];
@@ -477,6 +479,7 @@ const McpTool* McpServer::findTool(const std::string& name) const {
 
 json McpServer::listTools() const {
     json tools = json::array();
+    std::shared_lock lock(toolMutex_);
     for (const McpTool& tool : tools_) {
         if (playerOnly_ && !tool.player) continue;
         tools.push_back({{"name", tool.name}, {"description", tool.description}, {"inputSchema", tool.inputSchema}});

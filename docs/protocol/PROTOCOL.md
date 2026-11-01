@@ -248,7 +248,7 @@ All on channel 3, in the order the server made them.
 | 0x31 | EntityGone | `u64 id`, `u8 died` |
 | 0x32 | EntityBatch | `u64 tick`, `var count`, then per entity below |
 | 0x33 | Projectiles | `var count`, then `f32 x, y, z, vx, vy, vz` |
-| 0x34 | Burst | `str emitter`, `f64 x, y, z`, `f32 r, g, b, a` |
+| 0x34 | Burst | Reserved: `str emitter`, `f64 x, y, z`, `f32 r, g, b, a` |
 
 ```
 u64 id

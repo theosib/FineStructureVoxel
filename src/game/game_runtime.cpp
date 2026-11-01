@@ -305,7 +305,7 @@ std::vector<Seat> GameRuntime::seats() const {
     return out;
 }
 
-void GameRuntime::bindPlayer(int64_t player, uint16_t faction) {
+void GameRuntime::bindPlayer(int64_t player, uint16_t faction, std::optional<glm::dvec3> spot) {
     Seat updated;
     {
         std::lock_guard lock(seatMutex_);
@@ -320,13 +320,10 @@ void GameRuntime::bindPlayer(int64_t player, uint16_t faction) {
     // A body the first time, and the same body if they change sides
     EntityManager& entities = session_->entities();
     if (updated.body == INVALID_ENTITY_ID) {
-        Vec3 spot(0.0f, float(manifest_.seaLevel + 16), 0.0f);
-        if (updated.local && resumed_) {
-            glm::dvec3 saved = clientSaveCopy().steward;
-            spot = Vec3(float(saved.x), float(saved.y), float(saved.z));
-        }
-        updated.body = entities.spawnPlayer(spot, manifest_.playerEntity);
-        updated.spawn = glm::dvec3(spot);
+        glm::dvec3 where = spot.value_or(glm::dvec3(0.0, double(manifest_.seaLevel + 16), 0.0));
+        if (updated.local && resumed_) where = clientSaveCopy().steward;
+        updated.body = entities.spawnPlayer(Vec3(where), manifest_.playerEntity);
+        updated.spawn = where;
         if (updated.local) entities.setLocalPlayerId(updated.body);
     }
     if (MobEntity* mob = entities.getMob(updated.body)) mob->setFaction(faction);
@@ -513,10 +510,20 @@ void GameRuntime::registerNatives() {
             return result;
         });
 
-    // player_bind id faction: this player sees and acts as this faction
+    // player_bind id faction [=at [x y z]]: this player sees and acts as this faction, and its body
+    // starts here. It sees for the faction, so leave it where it would be fair for it to stand.
     engine.registerFunction(
         "player_bind", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
-            if (args.size() >= 2) bindPlayer(static_cast<int64_t>(args[0].asNumber()), static_cast<uint16_t>(args[1].asNumber()));
+            if (args.size() < 2) return finescript::Value::nil();
+            std::optional<glm::dvec3> spot;
+            if (args.back().isMap()) {
+                auto at = const_cast<finescript::Value&>(args.back()).asMap().get(StringInterner::global().intern("at"));
+                if (at.isArray() && at.asArray().size() == 3) {
+                    const auto& v = at.asArray();
+                    spot = glm::dvec3(v[0].asNumber(), v[1].asNumber(), v[2].asNumber());
+                }
+            }
+            bindPlayer(static_cast<int64_t>(args[0].asNumber()), static_cast<uint16_t>(args[1].asNumber()), spot);
             return finescript::Value::nil();
         });
 
@@ -553,6 +560,14 @@ void GameRuntime::generateWorld() {
     pipeline.addPass(std::make_unique<worldgen::StructurePass>());
     pipeline.addPass(std::make_unique<worldgen::DecorationPass>());
     pipeline.addPass(std::make_unique<worldgen::FluidPass>(manifest_.seaLevel));
+
+    std::vector<worldgen::BiomeId> allowed;
+    for (const std::string& name : manifest_.worldBiomes) {
+        allowed.push_back(worldgen::BiomeId::fromName(name.find(':') == std::string::npos
+                                                          ? manifest_.contentNamespace + ":" + name
+                                                          : name));
+    }
+    worldgen::BiomeRegistry::global().setAllowed(std::move(allowed));
 
     worldgen::BiomeMap biomeMap(seed, worldgen::BiomeRegistry::global());
 

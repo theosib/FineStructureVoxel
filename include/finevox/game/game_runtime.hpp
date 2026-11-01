@@ -153,8 +153,9 @@ public:
     /// A player's seat, if they have one. Safe from any thread.
     [[nodiscard]] std::optional<Seat> seat(int64_t player) const;
     [[nodiscard]] std::vector<Seat> seats() const;
-    /// This player sees and acts as this faction. Game thread.
-    void bindPlayer(int64_t player, uint16_t faction);
+    /// This player sees and acts as this faction, with a body at `spot` if it hasn't one yet.
+    /// A body sees for its faction, so it matters where it stands. Game thread.
+    void bindPlayer(int64_t player, uint16_t faction, std::optional<glm::dvec3> spot = std::nullopt);
     /// Someone new is here, once the game has started. Game thread.
     void playerJoined(int64_t player, const std::string& name, bool local);
     /// They've gone, at the next chance. Safe from any thread.

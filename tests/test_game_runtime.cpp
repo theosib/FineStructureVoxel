@@ -10,12 +10,15 @@
 #include "finevox/game/game_runtime.hpp"
 #include "finevox/game/replication_server.hpp"
 #include "finevox/net/protocol.hpp"
+#include "finevox/net/subchunk_codec.hpp"
 
 #include <finescript/cbor.h>
 #include <finescript/map_data.h>
 
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 
 using namespace finevox;
 using namespace finevox::game;
@@ -425,4 +428,192 @@ TEST_F(SavedGameTest, NoSavesLeavesAnExistingGameAlone) {
     EXPECT_FALSE(runtime->resumed());
     EXPECT_TRUE(runtime->saveGame(error));
     EXPECT_EQ(fs::last_write_time(slot() / "game.cbor"), written);
+}
+
+namespace {
+
+/// What one client was actually sent: the test of a fog that's about bytes, not pixels
+class Watcher {
+public:
+    Watcher(GameRuntime& game, int64_t player) {
+        auto [client, server] = finenet::Connection::createLocalPair(net::connectionConfig());
+        client_ = std::move(client);
+        client_->onMessage(net::msg::EntitySpawn, [this](const finenet::Message& message) {
+            net::ByteReader r(message.payload());
+            spawned.insert(r.u64());
+        });
+        client_->onMessage(net::msg::EntityGone, [this](const finenet::Message& message) {
+            net::ByteReader r(message.payload());
+            EntityId id = r.u64();
+            gone[id] = r.u8() != 0;
+        });
+        client_->onMessage(net::msg::Subchunk, [this](const finenet::Message& message) {
+            net::SubchunkData data;
+            ASSERT_TRUE(net::decodeSubchunk(message.payload(), data));
+            columns.insert({data.pos.x, data.pos.z});
+        });
+        client_->onMessage(net::msg::UiMessage, [this](const finenet::Message&) { ++uiMessages; });
+        client_->onMessage(net::msg::SyncDone, [this](const finenet::Message&) { synced = true; });
+        game.replication()->addView(std::make_shared<ClientView>(player, std::shared_ptr<finenet::Connection>(std::move(server))));
+    }
+
+    void read() { client_->update(); }
+
+    [[nodiscard]] bool sawColumnAt(int blockX, int blockZ) const {
+        return columns.count({blockX >> 4, blockZ >> 4}) != 0;
+    }
+
+    std::set<EntityId> spawned;
+    std::map<EntityId, bool> gone;
+    std::set<std::pair<int32_t, int32_t>> columns;
+    int uiMessages = 0;
+    bool synced = false;
+
+private:
+    std::unique_ptr<finenet::Connection> client_;
+};
+
+}  // namespace
+
+class ReplicationServerTest : public GameRuntimeTest {
+protected:
+    /// Two players, one side each, seeing a corner of the map each
+    GameRuntime& bootTwo(const std::string& extra) {
+        write("scripts/main.fsc", R"(
+set near nil
+set far nil
+set ticks 0
+on :start do
+    player_bind 1 1 =at [-24 40 -24]
+    player_bind 2 2 =at [24 40 24]
+    vision_source 1 -24 40 -24 10
+    vision_source 2 24 40 24 10
+    set near {ent_spawn :walker -24 31 -24 =faction 3}
+    set far {ent_spawn :walker 24 31 24 =faction 3}
+end
+)" + extra);
+        RuntimeOptions options;
+        options.gameRoot = root;
+        options.players = {{1, "One", false}, {2, "Two", false}};
+        runtime = std::make_unique<GameRuntime>(options);
+        runtime->load();
+        return *runtime;
+    }
+
+    void settle(GameRuntime& game, std::initializer_list<Watcher*> watchers, int ticks = 4) {
+        game.runTicks(ticks);
+        for (Watcher* watcher : watchers) watcher->read();
+    }
+
+    EntityId script(const char* name) {
+        return static_cast<EntityId>(runtime->gameScript().context().get(name).asInt());
+    }
+};
+
+TEST_F(ReplicationServerTest, ACommandSaysWhoItCameFrom) {
+    auto& game = bootTwo(R"(
+set from nil
+on :command do
+    set from sender
+end
+)");
+    game.session().actions().sendPlayerCommand(2, finescript::Value::map());
+    game.runTicks(2);
+    EXPECT_EQ(game.gameScript().context().get("from").asInt(), 2);
+}
+
+TEST_F(ReplicationServerTest, AClientGetsItsFactionsMemoryAndNoMore) {
+    auto& game = bootTwo("");
+    Watcher one(game, 1);
+    settle(game, {&one}, 40);
+
+    EXPECT_TRUE(one.synced);
+    EXPECT_TRUE(one.sawColumnAt(-24, -24));
+    EXPECT_FALSE(one.sawColumnAt(24, 24)) << "that ground has never been seen by this side";
+}
+
+TEST_F(ReplicationServerTest, AnEntityInTheFogIsNeverMentioned) {
+    auto& game = bootTwo("");
+    Watcher one(game, 1);
+    settle(game, {&one}, 40);
+
+    EXPECT_EQ(one.spawned.count(script("near")), 1u);
+    EXPECT_EQ(one.spawned.count(script("far")), 0u);
+}
+
+TEST_F(ReplicationServerTest, ADeathInSightSaysSo) {
+    auto& game = bootTwo("");
+    Watcher one(game, 1);
+    settle(game, {&one}, 40);
+
+    game.session().entities().getMob(script("near"))->setHealth(0.0f);
+    game.session().entities().despawnEntity(script("near"));
+    settle(game, {&one});
+
+    ASSERT_EQ(one.gone.count(script("near")), 1u);
+    EXPECT_TRUE(one.gone[script("near")]);
+}
+
+TEST_F(ReplicationServerTest, ADeathOutOfSightIsNeverMentioned) {
+    auto& game = bootTwo("");
+    Watcher one(game, 1);
+    settle(game, {&one}, 40);
+
+    game.session().entities().getMob(script("far"))->setHealth(0.0f);
+    game.session().entities().despawnEntity(script("far"));
+    settle(game, {&one});
+
+    EXPECT_EQ(one.gone.count(script("far")), 0u) << "fog mustn't give away that it happened";
+}
+
+TEST_F(ReplicationServerTest, SomethingLeavingSightJustGoes) {
+    auto& game = bootTwo("");
+    Watcher one(game, 1);
+    settle(game, {&one}, 40);
+
+    game.session().entities().getEntity(script("near"))->setPosition(Vec3(24.0f, 31.0f, 24.0f));
+    settle(game, {&one}, 8);
+
+    ASSERT_EQ(one.gone.count(script("near")), 1u);
+    EXPECT_FALSE(one.gone[script("near")]) << "it's out of sight, not dead";
+}
+
+TEST_F(ReplicationServerTest, UiMessagesGoToWhoTheyreFor) {
+    auto& game = bootTwo(R"(
+on :tick do
+    set ticks (ticks + 1)
+    if (ticks == 30) { ui_publish {=a 1} =to 2 }
+    if (ticks == 31) { ui_publish {=b 1} =faction 1 }
+    if (ticks == 32) { ui_publish {=c 1} }
+end
+)");
+    Watcher one(game, 1), two(game, 2);
+    settle(game, {&one, &two}, 40);
+
+    EXPECT_EQ(one.uiMessages, 2) << "to its faction, and to everyone";
+    EXPECT_EQ(two.uiMessages, 2) << "to itself, and to everyone";
+}
+
+TEST_F(ReplicationServerTest, ALateJoinerGetsTheFactionsMemory) {
+    auto& game = bootTwo("");
+    settle(game, {}, 40);
+    Watcher late(game, 2);
+    settle(game, {&late}, 20);
+
+    EXPECT_TRUE(late.synced);
+    EXPECT_TRUE(late.sawColumnAt(24, 24));
+    EXPECT_FALSE(late.sawColumnAt(-24, -24));
+}
+
+TEST_F(ReplicationServerTest, AGameThatBindsNobodyStillShowsSomething) {
+    write("scripts/main.fsc", "");
+    RuntimeOptions options;
+    options.gameRoot = root;
+    options.players = {{1, "One", true}};
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+
+    auto seat = runtime->seat(1);
+    ASSERT_TRUE(seat.has_value());
+    EXPECT_EQ(seat->faction, runtime->manifest().viewerFaction);
 }

@@ -163,13 +163,9 @@ See [old_docs/PLAN-network-layer.md](../old_docs/PLAN-network-layer.md) and [old
 
 `finenet` provides `Queue<T>`, `KeyedQueue<K,D>`, `WakeSignal`, `MessageBuilder`/`MessageReader`, `Channel`, and `Connection::createLocalPair()` (with optional `debugSerialize = true` wire verification), wired into `GameSession` in Phase R3. `ContentPackLoader` (Phase R4) unifies content pack loading, `sky.conf`, and `GameScriptEngine` block/entity script binding.
 
-#### Multiplayer / Network Layer (UDP/TCP Transport)
-**Priority: Low (requires finenet)** | See [old_docs/26-network-protocol.md](../old_docs/26-network-protocol.md)
-
-- Thin client architecture — server authoritative, client predicts and corrects
-- Semantic quantization — types transmitted by interned name, not numeric ID
-- Asset streaming — textures/models from server if client lacks them
-- UI protocol — server sends finescript UI definitions, client renders with finegui
+#### Multiplayer / Network Layer
+Done over TCP: see [systems/multiplayer.md](systems/multiplayer.md), which ends with what's left.
+Next, in order: UDP, encryption, WebSocket, a hub, a generic client.
 
 #### LOD Boundary Stitching
 **Priority: Low** | See [old_docs/22-phase6-lod-design.md](../old_docs/22-phase6-lod-design.md)

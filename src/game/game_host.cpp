@@ -155,7 +155,7 @@ int serve(RuntimeOptions options, const fs::path& configPath, std::optional<int>
 
     config.runtime = std::move(options);
     if (config.server.saves) {
-        config.runtime.savePath = config.runtime.gameRoot / "saves" / "server";
+        config.runtime.savePath = config.runtime.saveRoot() / "server";
     } else {
         config.runtime.noSaves = true;
     }

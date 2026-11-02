@@ -1,6 +1,14 @@
 #include "finevox/core/resource_locator.hpp"
+#include <cstdint>
 #include <cstdlib>
 #include <mutex>
+#include <system_error>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace finevox {
 
@@ -312,6 +320,57 @@ std::filesystem::path ResourceLocator::defaultUserRoot() {
 
     // Fallback: current directory
     return std::filesystem::current_path() / "finevox_config";
+}
+
+std::filesystem::path ResourceLocator::userRootFor(const std::string& game) {
+#ifdef __APPLE__
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return std::filesystem::path(home) / "Library" / "Application Support" / game;
+    }
+#elif defined(_WIN32)
+    if (const char* appdata = std::getenv("APPDATA"); appdata && *appdata) {
+        return std::filesystem::path(appdata) / ("." + game);
+    }
+#else
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return std::filesystem::path(home) / ("." + game);
+    }
+#endif
+
+    // Fallback: current directory
+    return std::filesystem::current_path() / ("." + game);
+}
+
+std::filesystem::path ResourceLocator::executableDir() {
+    std::error_code error;
+    std::filesystem::path executable;
+#ifdef __APPLE__
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
+    executable = std::filesystem::canonical(buffer.c_str(), error);
+#elif defined(_WIN32)
+    std::wstring buffer(32768, L'\0');
+    DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0) return {};
+    buffer.resize(length);
+    executable = std::filesystem::canonical(buffer, error);
+#else
+    executable = std::filesystem::read_symlink("/proc/self/exe", error);
+#endif
+    return error ? std::filesystem::path{} : executable.parent_path();
+}
+
+std::filesystem::path ResourceLocator::findEngineRoot(const std::filesystem::path& executableDir) {
+    if (executableDir.empty()) return {};
+    const std::filesystem::path parent = executableDir.parent_path();
+    for (const auto& root : {executableDir, parent, parent / "Resources",
+                             parent / "share" / "finevox"}) {
+        std::error_code error;
+        if (std::filesystem::is_directory(root / "shaders", error)) return root;
+    }
+    return {};
 }
 
 }  // namespace finevox

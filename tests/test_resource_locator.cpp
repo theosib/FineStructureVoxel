@@ -249,6 +249,56 @@ TEST_F(ResourceLocatorTest, DefaultUserRoot) {
     EXPECT_NE(defaultRoot.string().find("finevox"), std::string::npos);
 }
 
+TEST_F(ResourceLocatorTest, UserRootForAGameIsWhereMinecraftsWouldBe) {
+    auto root = ResourceLocator::userRootFor("game").string();
+#ifdef __APPLE__
+    EXPECT_NE(root.find("/Library/Application Support/game"), std::string::npos);
+#elif defined(_WIN32)
+    EXPECT_NE(root.find("\\.game"), std::string::npos);
+#else
+    EXPECT_NE(root.find("/.game"), std::string::npos);
+    EXPECT_EQ(root.find("/.config"), std::string::npos);
+#endif
+}
+
+TEST_F(ResourceLocatorTest, ExecutableDirIsARealDirectory) {
+    auto dir = ResourceLocator::executableDir();
+    ASSERT_FALSE(dir.empty());
+    EXPECT_TRUE(std::filesystem::is_directory(dir));
+}
+
+TEST_F(ResourceLocatorTest, EngineRootIsFoundInEachInstalledLayout) {
+    namespace fs = std::filesystem;
+    auto exeDir = [&](const fs::path& where) {
+        fs::create_directories(tempDir / where);
+        return tempDir / where;
+    };
+
+    // A build tree, or a plain folder
+    fs::create_directories(tempDir / "plain" / "shaders");
+    EXPECT_EQ(ResourceLocator::findEngineRoot(exeDir("plain")), tempDir / "plain");
+
+    // A build tree with a directory per configuration
+    fs::create_directories(tempDir / "multi" / "shaders");
+    EXPECT_EQ(ResourceLocator::findEngineRoot(exeDir("multi/Release")), tempDir / "multi");
+
+    // A macOS bundle
+    fs::create_directories(tempDir / "Game.app" / "Contents" / "Resources" / "shaders");
+    EXPECT_EQ(ResourceLocator::findEngineRoot(exeDir("Game.app/Contents/MacOS")),
+              tempDir / "Game.app" / "Contents" / "Resources");
+
+    // An install prefix
+    fs::create_directories(tempDir / "usr" / "share" / "finevox" / "shaders");
+    EXPECT_EQ(ResourceLocator::findEngineRoot(exeDir("usr/bin")),
+              tempDir / "usr" / "share" / "finevox");
+}
+
+TEST_F(ResourceLocatorTest, EngineRootIsEmptyWithNoShaders) {
+    std::filesystem::create_directories(tempDir / "bare" / "bin");
+    EXPECT_TRUE(ResourceLocator::findEngineRoot(tempDir / "bare" / "bin").empty());
+    EXPECT_TRUE(ResourceLocator::findEngineRoot({}).empty());
+}
+
 TEST_F(ResourceLocatorTest, ExistsCheck) {
     auto userPath = tempDir / "user";
     std::filesystem::create_directories(userPath);

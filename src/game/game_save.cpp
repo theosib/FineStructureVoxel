@@ -109,7 +109,7 @@ void loadColumns(World& world, const fs::path& directory, int32_t radius) {
 fs::path GameRuntime::savePath() const {
     if (options_.noSaves) return {};
     if (!options_.savePath.empty()) return options_.savePath;
-    return manifest_.saves ? options_.gameRoot / "saves" / "autosave" : fs::path{};
+    return manifest_.saves ? options_.saveRoot() / "autosave" : fs::path{};
 }
 
 bool GameRuntime::saveExists() const {

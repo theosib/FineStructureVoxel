@@ -67,6 +67,7 @@ enum class ClientStart : uint8_t {
 
 struct ClientOptions {
     std::filesystem::path gameRoot;
+    std::filesystem::path userRoot;   ///< Where this player's files go. Empty means the game root.
     std::filesystem::path shaderDir;
     ClientStart start = ClientStart::Menu;
     std::string joinAddress;

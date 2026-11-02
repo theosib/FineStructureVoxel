@@ -488,6 +488,8 @@ if(FINEVOX_BUILD_RENDER)
             ${SHADER_DIR}/particle.frag
             ${SHADER_DIR}/scene.vert
             ${SHADER_DIR}/scene.frag
+            ${FINEGUI_DIR}/src/shaders/gui.vert
+            ${FINEGUI_DIR}/src/shaders/gui.frag
         )
 
         foreach(SHADER ${SHADER_SOURCES})
@@ -583,9 +585,9 @@ if(FINEVOX_BUILD_RENDER)
                 "${FINEGUI_SCRIPT_LIB}"
                 "${FINEGUI_RETAINED_LIB}"
             )
-            target_compile_definitions(finevox_run PRIVATE
-                FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders")
-            add_dependencies(finevox_run finevox_shaders)
+            if(TARGET finevox_shaders)
+                add_dependencies(finevox_run finevox_shaders)
+            endif()
 
             # For a release: no console window beside the game. It still prints when run from one.
             option(FINEVOX_WINDOWS_GUI "Build finevox_run as a windowed program on Windows" OFF)

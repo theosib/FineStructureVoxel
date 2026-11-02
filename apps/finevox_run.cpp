@@ -2,20 +2,26 @@
  * @file finevox_run.cpp
  * @brief Run a game from its content directory
  *
- *   finevox_run --game-root DIR [--seed S] [--radius R] [--script FILE]
+ *   finevox_run [--game-root DIR] [--user-dir DIR] [--seed S] [--radius R] [--script FILE]
  *               [--new | --continue | --join ADDR] [--name N] [--password P]
  *               [--screenshot PATH --screenshot-frame N] [--exit-after N]
  *               [--mcp] [--mcp-port N] [--mcp-player]
- *   finevox_run --game-root DIR --server [--config FILE] [--port N] [--new]
+ *   finevox_run [--game-root DIR] [--user-dir DIR] --server [--config FILE] [--port N] [--new]
  *
  * With none of --new, --continue or --join it opens on the game's menu, or goes straight into a
  * game if it hasn't one.
+ *
+ * With no --game-root this is an installed copy: the game is the one it shipped with, and saves,
+ * screenshots and the like go in the player's own folder. With one, they go in the game root,
+ * which is what suits a source tree. --user-dir chooses somewhere else for either.
  *
  * --server has no window and no GPU: the game runs until killed, for clients to join.
  */
 
 #include "finevox/client/game_client.hpp"
+#include "finevox/core/resource_locator.hpp"
 #include "finevox/game/game_host.hpp"
+#include "finevox/game/game_manifest.hpp"
 #include "finevox/game/game_runtime.hpp"
 #include "finevox/game/mcp_server.hpp"
 
@@ -74,14 +80,6 @@ void appendQuoted(std::wstring& line, const std::wstring& arg) {
         line += arg[i];
     }
     line += L'"';
-}
-
-/// The directory this program is in, or empty
-std::filesystem::path executableDir() {
-    wchar_t self[MAX_PATH * 4];
-    DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
-    if (length == 0 || length >= std::size(self)) return {};
-    return std::filesystem::path(self).parent_path();
 }
 
 /// A windowed build (FINEVOX_WINDOWS_GUI) has no console. Started from one, it prints there as
@@ -157,17 +155,16 @@ int main(int argc, char* argv[]) {
 #endif
     game::RuntimeOptions runtimeOptions;
     client::ClientOptions clientOptions;
-    clientOptions.shaderDir = FINEVOX_SHADER_DIR;
     clientOptions.playerName = defaultPlayerName();
     bool verbose = false;
     bool server = false;
     bool newGame = false;
     std::filesystem::path serverConfig;
     std::optional<int> serverPort;
-    [[maybe_unused]] bool shaderDirGiven = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        if (arg.rfind("-psn_", 0) == 0) continue;  // macOS can add this when opening an app
         auto value = [&]() -> std::string {
             if (i + 1 >= argc) {
                 std::cerr << "missing value for " << arg << "\n";
@@ -177,6 +174,8 @@ int main(int argc, char* argv[]) {
         };
         if (arg == "--game-root") {
             runtimeOptions.gameRoot = value();
+        } else if (arg == "--user-dir") {
+            runtimeOptions.userRoot = value();
         } else if (arg == "--server") {
             server = true;
         } else if (arg == "--config") {
@@ -200,7 +199,6 @@ int main(int argc, char* argv[]) {
             runtimeOptions.extraScripts.emplace_back(value());
         } else if (arg == "--shader-dir") {
             clientOptions.shaderDir = value();
-            shaderDirGiven = true;
         } else if (arg == "--size") {
             clientOptions.width = static_cast<uint32_t>(std::stoul(value()));
             clientOptions.height = static_cast<uint32_t>(std::stoul(value()));
@@ -241,23 +239,24 @@ int main(int argc, char* argv[]) {
     // A run that ends itself is automation, and leaves the player's game alone
     if (clientOptions.exitAfterFrames > 0) runtimeOptions.noSaves = true;
 
-#ifdef _WIN32
-    // An installed game: shaders beside the program and the game in game\ beside that, so that it
-    // runs from a shortcut. The shaders this was built with are on the machine it was built on.
-    if (std::filesystem::path here = executableDir(); !here.empty()) {
-        if (!shaderDirGiven && std::filesystem::exists(here / "shaders" / "chunk.vert.spv")) {
-            clientOptions.shaderDir = here / "shaders";
-        }
-        if (runtimeOptions.gameRoot.empty() && std::filesystem::exists(here / "game" / "game.conf")) {
-            runtimeOptions.gameRoot = here / "game";
-        }
-    }
-#endif
+    auto& locator = ResourceLocator::instance();
+    locator.setEngineRoot(ResourceLocator::findEngineRoot(ResourceLocator::executableDir()));
 
-    if (runtimeOptions.gameRoot.empty()) {
+    bool installed = runtimeOptions.gameRoot.empty();
+    if (installed) runtimeOptions.gameRoot = locator.resolve("engine/game");
+    auto manifest = game::GameManifest::load(runtimeOptions.gameRoot);
+    if (installed && !manifest) {
         std::cerr << "usage: finevox_run --game-root DIR [options]\n";
         return 2;
     }
+
+    if (runtimeOptions.userRoot.empty()) {
+        runtimeOptions.userRoot = installed ? ResourceLocator::userRootFor(manifest->contentNamespace)
+                                            : runtimeOptions.gameRoot;
+    }
+    std::error_code ignored;
+    std::filesystem::create_directories(runtimeOptions.userRoot, ignored);
+    locator.setUserRoot(runtimeOptions.userRoot);
 
     // Every mesh upload logs at Debug, which buries anything worth reading
     finevk::Logger::global().setMinLevel(verbose ? finevk::LogLevel::Debug : finevk::LogLevel::Info);
@@ -265,6 +264,12 @@ int main(int argc, char* argv[]) {
     if (server) {
         runtimeOptions.newGame = newGame;
         return game::serve(std::move(runtimeOptions), serverConfig, serverPort);
+    }
+
+    if (clientOptions.shaderDir.empty()) clientOptions.shaderDir = locator.resolve("engine/shaders");
+    if (clientOptions.shaderDir.empty()) {
+        std::cerr << "error: can't find the shaders: use --shader-dir\n";
+        return 1;
     }
 
     // This run's MCP server exists before any game does, so that a menu can be driven through it
@@ -277,6 +282,7 @@ int main(int argc, char* argv[]) {
     }
 
     clientOptions.gameRoot = runtimeOptions.gameRoot;
+    clientOptions.userRoot = runtimeOptions.userRoot;
     clientOptions.hostFactory = [runtimeOptions](const client::HostRequest& request, std::string& error)
         -> std::unique_ptr<client::LocalHost> {
         game::HostConfig config;
@@ -284,7 +290,7 @@ int main(int argc, char* argv[]) {
         config.runtime.newGame = request.newGame;
         // A hosted game has a slot of its own: it's no reason to lose the one you were playing
         if (!request.autoLaunch && !config.runtime.noSaves) {
-            config.runtime.savePath = config.runtime.gameRoot / "saves" / "hosted";
+            config.runtime.savePath = config.runtime.saveRoot() / "hosted";
         }
         config.autoLaunch = request.autoLaunch;
         config.listen = request.listen;

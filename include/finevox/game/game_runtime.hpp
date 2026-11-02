@@ -60,6 +60,8 @@ struct Seat {
 
 struct RuntimeOptions {
     std::filesystem::path gameRoot;
+    /// Where this player's files go. Empty means the game root, as in a source tree.
+    std::filesystem::path userRoot;
     std::optional<uint64_t> seedOverride;
     std::optional<int32_t> radiusOverride;
     /// Extra game-thread scripts run after the main script (test scenarios)
@@ -78,6 +80,11 @@ struct RuntimeOptions {
     bool mcpPlayerOnly = false;
     /// Use this MCP server, for a process that has one before it has a game
     McpServer* mcpServer = nullptr;
+
+    /// The directory that holds this player's save slots
+    [[nodiscard]] std::filesystem::path saveRoot() const {
+        return (userRoot.empty() ? gameRoot : userRoot) / "saves";
+    }
 
     /// Who's playing, for `PLAYERS` in `on :start`
     std::vector<PlayerSeed> players;

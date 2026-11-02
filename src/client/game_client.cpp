@@ -292,6 +292,7 @@ void GameClient::Impl::fireUi(uint32_t symbol) {
 
 void GameClient::Impl::setupShell() {
     contentRoot = options.gameRoot;
+    if (options.userRoot.empty()) options.userRoot = options.gameRoot;
     if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
     playerName = options.playerName;
 
@@ -312,6 +313,8 @@ void GameClient::Impl::setupShell() {
     guiConfig.fontSize = 16.0f;
     guiConfig.enableKeyboard = false;  // The keys are the game's, even after a panel is clicked
     guiConfig.msaaSamples = renderer.msaaSamples();
+    guiConfig.iniPath = (options.userRoot / "imgui.ini").string();
+    guiConfig.shaderDir = options.shaderDir.string();
     if (window.isHighDPI()) guiConfig.dpiScale = window.contentScale().x;
     gui = std::make_unique<finegui::GuiSystem>(&device, guiConfig);
     gui->initialize(&renderer);
@@ -1524,7 +1527,7 @@ void GameClient::Impl::registerNatives() {
         // Only a game's own script gets to name a place outside the game: this one could be a server's
         std::string path = args.empty() ? "screenshots/shot.png" : args[0].toString();
         if (contentRoot != options.gameRoot && !net::isSafeContentPath(path)) return Value::nil();
-        screenshotPath = freshPath(path).string();
+        screenshotPath = freshPath(options.userRoot / path).string();
         screenshotRequested = true;
         return Value::nil();
     });
@@ -1567,7 +1570,7 @@ void GameClient::Impl::registerNetNatives() {
 
     // has_save -> whether there's a game to continue
     e.registerFunction("has_save", [this](ExecutionContext&, const Args&) -> Value {
-        return Value::boolean(fs::is_directory(contentRoot / "saves" / "autosave"));
+        return Value::boolean(fs::is_directory(options.userRoot / "saves" / "autosave"));
     });
 
     e.registerFunction("player_name", [this](ExecutionContext&, const Args&) -> Value {

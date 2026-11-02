@@ -122,6 +122,23 @@ public:
     // Get platform-appropriate default user root
     [[nodiscard]] static std::filesystem::path defaultUserRoot();
 
+    // Get a game's own user root, where Minecraft would put it:
+    //   Linux:   ~/.<game>
+    //   macOS:   ~/Library/Application Support/<game>
+    //   Windows: %APPDATA%\.<game>
+    [[nodiscard]] static std::filesystem::path userRootFor(const std::string& game);
+
+    // Get the directory of the running executable, or empty if it can't be told
+    [[nodiscard]] static std::filesystem::path executableDir();
+
+    // Find what shipped with an executable in this directory: the first of these with a shaders/
+    // directory, or empty if there isn't one.
+    //   <dir>                   A build tree or a plain folder
+    //   <dir>/..                A build tree with a directory per configuration, as MSVC's has
+    //   <dir>/../Resources      A macOS app bundle
+    //   <dir>/../share/finevox  An install prefix, such as an AppImage's usr/
+    [[nodiscard]] static std::filesystem::path findEngineRoot(const std::filesystem::path& executableDir);
+
 private:
     ResourceLocator() = default;
     ~ResourceLocator() = default;

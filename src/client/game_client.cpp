@@ -841,6 +841,7 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
     }
     else if (action == "end_grab") grabHeld = std::max(grabHeld - 1, 0);
     else if (action == "toggle_view") setEmbodied(!embodied);
+    else if (action == "toggle_fullscreen") engine->window().toggleFullscreen();
     else if (action == "begin_jump" && embodied) {
         jumpHeld = true;
         steward.requestJump();

@@ -421,6 +421,9 @@ if(FINEVOX_BUILD_RENDER)
             "${FINEVK_DIR}/build/libfinevk-engine.a"
             "${FINEVK_DIR}/build/libfinevk-core.a"
         )
+        if(APPLE)
+            target_link_libraries(finevox_render PUBLIC objc)  # finevk's full screen
+        endif()
     elseif(EXISTS "${FINEVK_DIR}/build/finevk-core.lib")
         target_link_libraries(finevox_render PUBLIC
             "${FINEVK_DIR}/build/finevk-engine.lib"

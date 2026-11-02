@@ -11,7 +11,7 @@
  * Lifecycle:
  * 1. Subsystem created (by application or module)
  * 2. onAttach() called when added to GameSession
- * 3. tick() called every game tick in phase/priority order
+ * 3. tick() called every game tick in phase/priority order, or tickPaused() if paused
  * 4. onDetach() called during shutdown
  */
 
@@ -85,6 +85,17 @@ public:
      * @param dt Time since last tick in seconds (typically 1/30)
      */
     virtual void tick(float dt) = 0;
+
+    /**
+     * @brief Called in place of tick() while the session is paused
+     *
+     * Ticks keep their rate during a pause, so that commands, replication and tools carry on. The
+     * simulation stops because its subsystems do nothing here. Override only for what has to
+     * keep going with the game stopped.
+     *
+     * @param dt Time since last tick in seconds, as for tick()
+     */
+    virtual void tickPaused(float dt) { (void)dt; }
 };
 
 } // namespace finevox

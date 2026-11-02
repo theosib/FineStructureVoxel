@@ -249,6 +249,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
         auto& script = runtime.gameScript();
         return McpResult::value({{"game", runtime.manifest().name},
                                  {"tick", script.tickCount()},
+                                 {"paused", runtime.session().isPaused()},
                                  {"time_of_day", runtime.session().worldTime().timeOfDay()},
                                  {"entities", runtime.session().entities().entities().size()},
                                  {"sites", runtime.sites().size()},

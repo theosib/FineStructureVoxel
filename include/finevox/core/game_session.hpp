@@ -124,6 +124,12 @@ public:
     /// Get all registered subsystems (in tick order)
     [[nodiscard]] const std::vector<std::shared_ptr<GameSubsystem>>& subsystems() const;
 
+    // === Pause ===
+    /// Stop the simulation, or start it again. Subsystems get tickPaused() in place of tick(),
+    /// and commands are still carried out. Call on the game thread.
+    void setPaused(bool paused);
+    [[nodiscard]] bool isPaused() const;
+
     // === Game Thread Lifecycle ===
     /// Start the game thread (processes commands + ticks at configured rate)
     void startGameThread();

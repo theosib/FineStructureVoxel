@@ -175,7 +175,8 @@ void ReplicationServer::pump() {
             sendProjectiles(view);
         }
         if (pass_ % VISION_PASSES == 0 || view.lastVision_.empty()) sendVision(view);
-        if (pass_ % TIME_PASSES == 0) sendTime(view);
+        // A pause can't wait: the client has to stop when the game does
+        if (pass_ % TIME_PASSES == 0 || view.sentPaused_ != runtime_.session().isPaused()) sendTime(view);
         sendGhosts(view);
     }
 }
@@ -396,8 +397,9 @@ void ReplicationServer::sendTime(ClientView& view) {
     const WorldTime& time = runtime_.session().worldTime();
     std::vector<uint8_t> body;
     ByteWriter w(body);
+    view.sentPaused_ = runtime_.session().isPaused();
     w.u64(static_cast<uint64_t>(time.totalTicks()));
-    w.u8(time.isFrozen() ? 1 : 0);
+    w.u8((time.isFrozen() ? net::TIME_FROZEN : 0) | (view.sentPaused_ ? net::TIME_PAUSED : 0));
     send(view, net::CH_WORLD, net::msg::Time, std::move(body));
 }
 

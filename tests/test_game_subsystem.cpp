@@ -4,6 +4,7 @@
 #include "finevox/core/event_bus.hpp"
 #include "finevox/core/block_events.hpp"
 #include "finevox/core/world.hpp"
+#include "finevox/core/world_time.hpp"
 
 #include <vector>
 #include <string>
@@ -13,6 +14,65 @@ using namespace finevox;
 // ============================================================================
 // Test subsystem that records tick calls
 // ============================================================================
+
+class PauseAwareSubsystem : public GameSubsystem {
+public:
+    std::string_view name() const override { return "PauseAware"; }
+    TickPhase phase() const override { return TickPhase::LateTick; }
+    void tick(float) override { ++ticks; }
+    void tickPaused(float) override { ++pausedTicks; }
+
+    int ticks = 0;
+    int pausedTicks = 0;
+};
+
+class PauseUnawareSubsystem : public GameSubsystem {
+public:
+    std::string_view name() const override { return "PauseUnaware"; }
+    TickPhase phase() const override { return TickPhase::Tick; }
+    void tick(float) override { ++ticks; }
+
+    int ticks = 0;
+};
+
+TEST(GameSubsystemPauseTest, PausedSubsystemsGetTickPausedInstead) {
+    auto session = GameSession::createLocal(GameSessionConfig::defaults());
+    auto aware = std::make_shared<PauseAwareSubsystem>();
+    auto unaware = std::make_shared<PauseUnawareSubsystem>();
+    session->addSubsystem(aware);
+    session->addSubsystem(unaware);
+
+    session->tick(1.0f / 30.0f);
+    EXPECT_FALSE(session->isPaused());
+
+    session->setPaused(true);
+    EXPECT_TRUE(session->isPaused());
+    session->tick(1.0f / 30.0f);
+    session->tick(1.0f / 30.0f);
+    EXPECT_EQ(aware->ticks, 1);
+    EXPECT_EQ(aware->pausedTicks, 2);
+    EXPECT_EQ(unaware->ticks, 1);
+
+    session->setPaused(false);
+    session->tick(1.0f / 30.0f);
+    EXPECT_EQ(aware->ticks, 2);
+    EXPECT_EQ(aware->pausedTicks, 2);
+    EXPECT_EQ(unaware->ticks, 2);
+}
+
+TEST(GameSubsystemPauseTest, TheClockStopsWithTheGame) {
+    auto session = GameSession::createLocal(GameSessionConfig::defaults());
+    session->tick(1.0f / 30.0f);
+    auto before = session->worldTime().totalTicks();
+
+    session->setPaused(true);
+    for (int i = 0; i < 30; ++i) session->tick(1.0f / 30.0f);
+    EXPECT_EQ(session->worldTime().totalTicks(), before);
+
+    session->setPaused(false);
+    for (int i = 0; i < 30; ++i) session->tick(1.0f / 30.0f);
+    EXPECT_GT(session->worldTime().totalTicks(), before);
+}
 
 class RecordingSubsystem : public GameSubsystem {
 public:

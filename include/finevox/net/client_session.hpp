@@ -130,6 +130,8 @@ public:
 
     // ── Who we are ──
     [[nodiscard]] int64_t playerId() const { return playerId_.load(); }
+    /// The server has stopped the simulation, so nothing should be seen to move
+    [[nodiscard]] bool paused() const { return paused_.load(); }
     [[nodiscard]] std::string token() const;
     [[nodiscard]] std::string serverTitle() const;
     [[nodiscard]] float rttMs() const;
@@ -210,6 +212,7 @@ private:
     std::atomic<bool> stopping_{false};
     std::atomic<ClientPhase> phase_{ClientPhase::Idle};
     std::atomic<int64_t> playerId_{0};
+    std::atomic<bool> paused_{false};
     std::atomic<bool> worldReady_{false};
     std::atomic<bool> local_{false};
     std::atomic<bool> leaving_{false};

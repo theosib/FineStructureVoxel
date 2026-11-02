@@ -85,6 +85,7 @@ private:
     std::vector<uint8_t> lastVision_;
     const void* lastGhosts_ = nullptr;
     bool hadProjectiles_ = false;
+    bool sentPaused_ = false;
 };
 
 class ReplicationServer : public GameSubsystem {
@@ -95,6 +96,7 @@ public:
     [[nodiscard]] TickPhase phase() const override { return TickPhase::LateTick; }
     [[nodiscard]] int32_t priority() const override { return 100000; }
     void tick(float dt) override;
+    void tickPaused(float dt) override { tick(dt); }
 
     /// One pass over every client, for when the game thread isn't running yet
     void pump();

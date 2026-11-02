@@ -628,6 +628,7 @@ public:
         columnManager_.tick();
         columnManager_.processSaveQueue();
     }
+    void tickPaused(float dt) override { tick(dt); }
 private:
     ColumnManager& columnManager_;
 };
@@ -672,6 +673,7 @@ struct GameSession::Impl {
     // Game thread
     std::thread gameThread;
     std::atomic<bool> gameThreadRunning{false};
+    std::atomic<bool> paused{false};
 
     // Config
     GameSessionConfig config;
@@ -709,8 +711,13 @@ struct GameSession::Impl {
 
     // Tick all subsystems in order
     void tickSubsystems(float dt) {
+        bool stopped = paused.load();
         for (auto& sub : subsystems) {
-            sub->tick(dt);
+            if (stopped) {
+                sub->tickPaused(dt);
+            } else {
+                sub->tick(dt);
+            }
         }
     }
 
@@ -1068,6 +1075,9 @@ void GameSession::stopGameThread() {
 bool GameSession::isGameThreadRunning() const {
     return impl_->gameThreadRunning.load(std::memory_order_acquire);
 }
+
+void GameSession::setPaused(bool paused) { impl_->paused = paused; }
+bool GameSession::isPaused() const { return impl_->paused.load(); }
 
 // ============================================================================
 // Synchronous Tick (for tests)

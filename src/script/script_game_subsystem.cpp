@@ -50,6 +50,11 @@ void ScriptGameSubsystem::tick(float dt) {
     }
 }
 
+void ScriptGameSubsystem::tickPaused(float dt) {
+    ctx_->set("dt", finescript::Value::number(dt));
+    fire("paused_tick");
+}
+
 void ScriptGameSubsystem::fire(std::string_view event) {
     uint32_t symbol = scripts_.engine().intern(event);
     auto& handlers = ctx_->eventHandlers();

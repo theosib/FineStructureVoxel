@@ -68,6 +68,7 @@ arrives over a connection. See [multiplayer.md](multiplayer.md).
 |---|---|
 | `on :start` | `WORLD_SEED`, `WORLD_RADIUS`, `SEA_LEVEL`, `SETTINGS`, `PLAYERS` (always) |
 | `on :tick` | `dt` |
+| `on :paused_tick` | `dt`. In place of `on :tick` while the game is paused |
 | `on :command` | `cmd`, and `sender`, the player's id, or 0 if it's nobody in particular |
 | `on :player_join`, `on :player_leave` | `player`: `{=id =name =local}` |
 
@@ -86,8 +87,30 @@ A handler that throws is logged once per distinct message and the game continues
 | `on :lobby` | `msg`: LobbyState from the protocol |
 | `on :chat` | `msg`: `{=from =name =text}` |
 
-Camera actions (`begin_pan_*`, `begin_orbit_*`, `toggle_view`, `begin_jump`) are consumed
-by the client. Everything else reaches `on :action`.
+Camera actions (`begin_pan_*`, `begin_orbit_*`, `toggle_view`) are consumed by the client, and so
+is `begin_jump` for a player on foot. Everything else reaches `on :action`, `begin_jump` overhead
+included, so the same key can do something else from there.
+
+---
+
+## Pausing
+
+```
+game_pause [paused]     game_paused -> bool     (game thread)
+game_paused -> bool                             (UI script, as the server last said)
+```
+
+A pause stops the simulation and nothing else. Ticks keep their rate: subsystems get `tickPaused`
+in place of `tick`, which does nothing unless they say so, and only replication, the MCP hooks,
+column housekeeping and the game script do. `game_tick` stands still.
+
+So commands are still carried out, and a game can take orders while stopped. `on :command` runs as
+ever, which means it's the game that has to refuse what shouldn't happen with the clock stopped,
+and `on :paused_tick` that has to keep telling clients what's changed. Who may pause is also the
+game's business: the engine has no opinion, and a pause isn't kept in a save.
+
+`Time` carries the flag, and goes at once when it changes. Without it a client would go on playing
+walk cycles and effects by itself, and its body's physics are its own.
 
 ---
 

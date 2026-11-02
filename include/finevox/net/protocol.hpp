@@ -30,6 +30,10 @@ inline constexpr int MAX_CHATS_PER_SECOND = 5;
 inline constexpr size_t MAX_NAME_BYTES = 32;
 inline constexpr size_t MAX_CONTENT_CHUNK = 256 * 1024;
 
+/// Flags in a Time message
+inline constexpr uint8_t TIME_FROZEN = 1;  // The clock is held
+inline constexpr uint8_t TIME_PAUSED = 2;  // The whole game is
+
 // §2.4
 inline constexpr finenet::ChannelId CH_CONTROL = 0;
 inline constexpr finenet::ChannelId CH_INPUT = 1;

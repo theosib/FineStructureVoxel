@@ -397,9 +397,11 @@ void GameClient::Impl::setupShell() {
         if (worldRenderer->fogDynamicColor()) worldRenderer->setFogColor(sky.fogColor);
 
         entityRenderer.processEvents(session->graphics());
-        entityRenderer.update(dt, camera.positionD());
+        // The world holds still in a pause, whatever's looking at it
+        float worldDt = session->paused() ? 0.0f : dt;
+        entityRenderer.update(worldDt, camera.positionD());
         startDeathBursts();
-        particles->tick(dt);
+        particles->tick(worldDt);
 
         updateCamera(dt);
         worldRenderer->updateCamera(camera.state(), camera.positionD());
@@ -839,9 +841,9 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
     }
     else if (action == "end_grab") grabHeld = std::max(grabHeld - 1, 0);
     else if (action == "toggle_view") setEmbodied(!embodied);
-    else if (action == "begin_jump") {
+    else if (action == "begin_jump" && embodied) {
         jumpHeld = true;
-        if (embodied) steward.requestJump();
+        steward.requestJump();
     }
     else if (action == "end_jump") jumpHeld = false;
     else if (action == "begin_orbit_left") orbitLeft = true;
@@ -896,7 +898,7 @@ void GameClient::Impl::updateStewardView(float dt) {
     glm::vec2 delta = input.mouseDelta();
     if (delta.x != 0.0f || delta.y != 0.0f) steward.look(delta.x, delta.y);
     float footing = stewardBody->position().y;
-    steward.update(dt);
+    if (!session->paused()) steward.update(dt);
 
     Vec3 pos = stewardBody->position();
 
@@ -1711,6 +1713,11 @@ void GameClient::Impl::registerNetNatives() {
     e.registerFunction("net_port", [this](ExecutionContext&, const Args&) -> Value {
         if (!host || host->networkPort() == 0) return Value::nil();
         return Value::integer(host->networkPort());
+    });
+
+    // game_paused -> the server has stopped the simulation
+    e.registerFunction("game_paused", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(session && session->paused());
     });
 
     e.registerFunction("net_is_host", [this](ExecutionContext&, const Args&) -> Value {

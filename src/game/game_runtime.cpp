@@ -85,6 +85,7 @@ public:
     [[nodiscard]] TickPhase phase() const override { return TickPhase::PreTick; }
     [[nodiscard]] int32_t priority() const override { return std::numeric_limits<int32_t>::min(); }
     void tick(float) override { server_.noteTickStart(); }
+    void tickPaused(float dt) override { tick(dt); }
 
 private:
     McpServer& server_;
@@ -101,6 +102,7 @@ public:
         server_.noteTickEnd();
         server_.pump(McpSide::Game);
     }
+    void tickPaused(float dt) override { tick(dt); }
 
 private:
     McpServer& server_;
@@ -475,6 +477,19 @@ void GameRuntime::registerNatives() {
         "game_exit", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
             requestExit(args.empty() ? 0 : static_cast<int>(args[0].asNumber()));
             return finescript::Value::nil();
+        });
+
+    // game_pause [paused]: stop the simulation, or start it again. Commands are still carried out,
+    // and `on :paused_tick` fires in place of `on :tick`. Who may is up to the game.
+    scripts_->engine().registerFunction(
+        "game_pause", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            session_->setPaused(args.empty() || args[0].truthy());
+            return finescript::Value::nil();
+        });
+
+    scripts_->engine().registerFunction(
+        "game_paused", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&) {
+            return finescript::Value::boolean(session_->isPaused());
         });
 
     // set_time_of_day fraction: 0 dawn, 0.25 noon, 0.5 dusk, 0.75 midnight

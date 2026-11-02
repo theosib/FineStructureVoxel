@@ -10,6 +10,7 @@
  *
  *     on :start do ... end
  *     on :tick do ... end            # `dt` in scope
+ *     on :paused_tick do ... end     # in place of :tick while the session is paused
  *     on :command do ... end         # `cmd` in scope, from GameActions::sendGameCommand
  *
  * A broken handler reports once and the game keeps running. Tests that want
@@ -51,6 +52,8 @@ public:
     /// After entities, so scripts see this tick's positions and deaths
     [[nodiscard]] int32_t priority() const override { return 100; }
     void tick(float dt) override;
+    /// `on :paused_tick`, for what a game has to keep doing with the clock stopped
+    void tickPaused(float dt) override;
 
     /// Run a script file in the game context. Its `on` handlers stay registered.
     bool loadScript(const std::string& path);

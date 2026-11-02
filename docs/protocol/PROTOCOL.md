@@ -231,10 +231,14 @@ sky, so that terrain at the edge of what's known isn't drawn black.
 | Type | Name | Channel | Body |
 |---|---|---|---|
 | 0x24 | Vision | 5 | `bytes`, LZ4-compressed: one byte per vision cell, row by row, 0 unknown, 1 explored, 2 visible |
-| 0x25 | Time | 5 | `u64 totalTicks`, `u8 frozen`, sent about once a second |
+| 0x25 | Time | 5 | `u64 totalTicks`, `u8 flags`, sent about once a second, and at once when a pause starts or ends. Flags: 1 the clock is held, 2 the game is paused |
 | 0x26 | Ghosts | 5 | `var groups`, then per group `f32 built`, `var cells`, `{svar x, y, z, var blockId}[cells]` |
 
 Vision cells are `vision_cell` blocks square. `vision_min` is the corner of cell 0.
+
+While paused nothing changes on the server, and no updates mean nothing moves. A client MUST also
+stop what it runs by itself: animation, effects, and a body whose physics it owns. It stays free to
+move its camera, and a server still carries out commands.
 
 ---
 

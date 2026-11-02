@@ -783,11 +783,12 @@ void ClientSession::onVision(const Message& message) {
 void ClientSession::onTime(const Message& message) {
     ByteReader r(message.payload());
     uint64_t ticks = r.u64();
-    bool frozen = r.u8() != 0;
+    uint8_t flags = r.u8();
     if (!r.ok()) return;
+    paused_ = (flags & TIME_PAUSED) != 0;
     std::lock_guard lock(mutex_);
     time_.setTime(static_cast<int64_t>(ticks));
-    time_.setFrozen(frozen);
+    time_.setFrozen(flags != 0);
     timeStamp_ = Clock::now();
 }
 

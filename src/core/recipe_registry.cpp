@@ -1,4 +1,5 @@
 #include "finevox/core/recipe_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

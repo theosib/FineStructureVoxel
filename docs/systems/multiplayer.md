@@ -320,7 +320,7 @@ Things that took time to learn:
 
 ## Not Tested
 
-- **Two machines, Linux, Windows.** Only ever one Mac. See Keystone's `docs/PLATFORMS.md`.
+- **Windows.** See Keystone's `docs/PLATFORMS.md`, which has what's been run on two machines and Linux.
 - **Hours of play, and long games.** Runs so far are about a minute. Nothing has measured a client
   that's been connected for an hour, or a game with hundreds of units per client.
 - **Eight sides.** Up to four, and the large map not at all with players on it.

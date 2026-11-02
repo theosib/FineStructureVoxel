@@ -13,6 +13,7 @@
  */
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <new>
 #include <type_traits>

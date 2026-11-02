@@ -1,4 +1,5 @@
 #include "finevox/core/loot_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

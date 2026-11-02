@@ -1,4 +1,5 @@
 #include "finevox/core/fluid_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

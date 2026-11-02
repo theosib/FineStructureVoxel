@@ -2,6 +2,7 @@
 #include "finevox/core/config_file.hpp"
 #include "finevox/core/resource_locator.hpp"
 #include <chrono>
+#include <mutex>
 
 namespace finevox {
 

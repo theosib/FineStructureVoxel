@@ -9,6 +9,7 @@
 
 #include "finevox/core/data_container.hpp"
 #include <filesystem>
+#include <mutex>
 #include <shared_mutex>
 #include <optional>
 #include <string>

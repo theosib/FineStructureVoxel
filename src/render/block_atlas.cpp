@@ -66,8 +66,10 @@ void BlockAtlas::createPlaceholderAtlas(
     // Generate placeholder texture with different colors per cell
     std::vector<uint8_t> pixels(atlasWidth_ * atlasHeight_ * 4);
 
-    std::mt19937 rng(42);  // Fixed seed for reproducibility
-    std::uniform_int_distribution<int> colorDist(64, 255);
+    // Fixed seed for reproducibility. No std::uniform_int_distribution: it gives different numbers
+    // on different standard libraries, and goldens are compared across platforms.
+    std::mt19937 rng(42);
+    auto colorDist = [](std::mt19937& gen) { return 64 + static_cast<int>(gen() % 192); };
 
     for (uint32_t gy = 0; gy < gridHeight; ++gy) {
         for (uint32_t gx = 0; gx < gridWidth; ++gx) {

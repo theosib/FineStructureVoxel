@@ -1,4 +1,5 @@
 #include "finevox/core/item_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

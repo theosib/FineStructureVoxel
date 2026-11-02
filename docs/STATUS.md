@@ -13,8 +13,8 @@
 | Test count | Run the binaries serially: `finevox_tests`, `finevox_script_tests`, `finevox_render_tests`. `ctest -j` gives false failures because fixtures share temp paths |
 | In-progress | — |
 | Libraries | 7 shared libraries (see Architecture), plus the `finevox_run`, `finevox_headless` and `finevox_bot` executables |
-| Multiplayer | Works over TCP on one Mac. What's missing and what's never been tried is at the end of [systems/multiplayer.md](systems/multiplayer.md) |
-| Platforms | Only macOS has ever built this. Keystone's `docs/PLATFORMS.md` has what's known of Linux and Windows |
+| Multiplayer | Works over TCP, between machines on a LAN. What's missing and what's never been tried is at the end of [systems/multiplayer.md](systems/multiplayer.md) |
+| Platforms | macOS and Linux. Windows has never been tried. Keystone's `docs/PLATFORMS.md` has the details |
 
 ---
 

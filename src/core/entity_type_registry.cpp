@@ -1,4 +1,5 @@
 #include "finevox/core/entity_type_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

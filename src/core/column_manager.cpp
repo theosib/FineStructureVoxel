@@ -1,6 +1,7 @@
 #include "finevox/core/column_manager.hpp"
 #include "finevox/core/io_manager.hpp"
 #include "finevox/core/event_queue.hpp"  // ScheduledTick
+#include <mutex>
 
 namespace finevox {
 

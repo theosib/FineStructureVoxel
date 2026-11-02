@@ -3,6 +3,7 @@
 #include "finevox/core/world.hpp"
 
 #include <algorithm>
+#include <mutex>
 
 namespace finevox {
 

@@ -94,6 +94,12 @@ enum class EmitterShape : uint8_t {
 // Range — inclusive [min, max] uniform sample
 // ============================================================================
 
+/// A float in [0, 1). Not std::uniform_real_distribution: that gives different numbers on different
+/// standard libraries, and visual tests seed the generator and compare with committed goldens.
+[[nodiscard]] inline float randomUnitFloat(std::mt19937& rng) {
+    return static_cast<float>(rng() >> 8) / 16777216.0f;
+}
+
 struct Range {
     float min = 0.0f;
     float max = 0.0f;
@@ -104,8 +110,7 @@ struct Range {
 
     [[nodiscard]] float sample(std::mt19937& rng) const {
         if (min >= max) return min;
-        std::uniform_real_distribution<float> dist(min, max);
-        return dist(rng);
+        return min + randomUnitFloat(rng) * (max - min);
     }
 
     /// Parse "a" or "a-b" — same syntax as loot-table ranges.

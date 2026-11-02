@@ -386,7 +386,7 @@ std::string findResourcesDirForSkyTest() {
         "resources",
         "../resources",
         "../../resources",
-        "/Users/theosib/projects/FineStructure/FineStructureVoxel/resources"
+        FINEVOX_SOURCE_DIR "/resources"
     };
     for (const auto& c : candidates) {
         if (std::filesystem::exists(c + "/sky.conf")) {

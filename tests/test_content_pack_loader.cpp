@@ -27,7 +27,7 @@ std::filesystem::path findResourcesDir() {
         "resources",
         "../resources",
         "../../resources",
-        "/Users/theosib/projects/FineStructure/FineStructureVoxel/resources"
+        FINEVOX_SOURCE_DIR "/resources"
     };
     for (const auto& c : candidates) {
         if (std::filesystem::exists(c / "blocks" / "stone.model") &&

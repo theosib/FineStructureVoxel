@@ -1,4 +1,5 @@
 #include "finevox/core/data_container.hpp"
+#include <cstring>
 
 namespace finevox {
 

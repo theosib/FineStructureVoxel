@@ -1,5 +1,6 @@
 #include "finevox/core/name_registry.hpp"
 #include "finevox/core/data_container.hpp"
+#include <mutex>
 
 namespace finevox {
 

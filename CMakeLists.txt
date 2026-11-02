@@ -32,11 +32,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(glm)
 
 # JSON for the MCP server. Header-only.
+# The policy, not DOWNLOAD_EXTRACT_TIMESTAMP: before CMake 3.24 that keyword ends up in URL_HASH.
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 FetchContent_Declare(
     nlohmann_json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
     URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -731,6 +734,7 @@ if(FINEVOX_BUILD_TESTS)
         finevox_worldgen
         GTest::gtest_main
     )
+    target_compile_definitions(finevox_tests PRIVATE FINEVOX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
     include(GoogleTest)
     gtest_discover_tests(finevox_tests)
@@ -756,6 +760,7 @@ if(FINEVOX_BUILD_TESTS)
             finevox_worldgen
             GTest::gtest_main
         )
+        target_compile_definitions(finevox_script_tests PRIVATE FINEVOX_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
         gtest_discover_tests(finevox_script_tests)
     endif()

@@ -9,8 +9,13 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/constants.hpp>
+#include <mutex>
 
 namespace finevox {
+
+namespace {
+float signedUnitFloat(std::mt19937& rng) { return randomUnitFloat(rng) * 2.0f - 1.0f; }
+}  // namespace
 
 ParticleSystem::ParticleSystem(World& world)
     : world_(world),
@@ -332,10 +337,13 @@ void ParticleSystem::enforceCapUnlocked() {
 }
 
 glm::vec3 ParticleSystem::sampleUnitSphereUnlocked() {
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     // Rejection sample inside unit sphere to avoid biasing corners.
     for (int i = 0; i < 8; ++i) {
-        glm::vec3 v(dist(rng_), dist(rng_), dist(rng_));
+        // One at a time: the order arguments are evaluated in isn't fixed, and GCC and Clang differ
+        float x = signedUnitFloat(rng_);
+        float y = signedUnitFloat(rng_);
+        float z = signedUnitFloat(rng_);
+        glm::vec3 v(x, y, z);
         float l2 = glm::dot(v, v);
         if (l2 > 0.0001f && l2 <= 1.0f) {
             return v / std::sqrt(l2);
@@ -347,9 +355,6 @@ glm::vec3 ParticleSystem::sampleUnitSphereUnlocked() {
 glm::dvec3 ParticleSystem::sampleEmitterPositionUnlocked(const EmitterPresetDef& preset,
                                                            const glm::dvec3& origin)
 {
-    std::uniform_real_distribution<float> u01(0.0f, 1.0f);
-    std::uniform_real_distribution<float> um11(-1.0f, 1.0f);
-
     switch (preset.shape) {
         case EmitterShape::Point:
             return origin;
@@ -357,28 +362,28 @@ glm::dvec3 ParticleSystem::sampleEmitterPositionUnlocked(const EmitterPresetDef&
         case EmitterShape::Sphere: {
             float r = preset.shapeSize.x;
             glm::vec3 d = sampleUnitSphereUnlocked();
-            float frac = std::cbrt(u01(rng_));
+            float frac = std::cbrt(randomUnitFloat(rng_));
             return origin + glm::dvec3(d) * static_cast<double>(r * frac);
         }
 
         case EmitterShape::Box: {
-            return origin + glm::dvec3(
-                um11(rng_) * preset.shapeSize.x,
-                um11(rng_) * preset.shapeSize.y,
-                um11(rng_) * preset.shapeSize.z);
+            float x = signedUnitFloat(rng_) * preset.shapeSize.x;
+            float y = signedUnitFloat(rng_) * preset.shapeSize.y;
+            float z = signedUnitFloat(rng_) * preset.shapeSize.z;
+            return origin + glm::dvec3(x, y, z);
         }
 
         case EmitterShape::Cone: {
             // Cone axis = +Y, radius = shapeSize.x, height = shapeSize.y
-            float h = u01(rng_) * preset.shapeSize.y;
+            float h = randomUnitFloat(rng_) * preset.shapeSize.y;
             float radiusAtH = preset.shapeSize.x * (h / std::max(0.0001f, preset.shapeSize.y));
-            float theta = u01(rng_) * glm::two_pi<float>();
-            float r = radiusAtH * std::sqrt(u01(rng_));
+            float theta = randomUnitFloat(rng_) * glm::two_pi<float>();
+            float r = radiusAtH * std::sqrt(randomUnitFloat(rng_));
             return origin + glm::dvec3(r * std::cos(theta), h, r * std::sin(theta));
         }
 
         case EmitterShape::Line: {
-            float t = u01(rng_);
+            float t = randomUnitFloat(rng_);
             return origin + glm::dvec3(preset.shapeSize.x * t, 0.0, 0.0);
         }
     }

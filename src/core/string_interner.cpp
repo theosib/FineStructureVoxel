@@ -1,4 +1,5 @@
 #include "finevox/core/string_interner.hpp"
+#include <mutex>
 
 namespace finevox {
 

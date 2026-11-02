@@ -1,4 +1,5 @@
 #include "finevox/core/fluid_interaction.hpp"
+#include <mutex>
 
 namespace finevox {
 

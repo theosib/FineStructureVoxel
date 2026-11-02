@@ -1,6 +1,7 @@
 #include "finevox/core/label_registry.hpp"
 
 #include <fstream>
+#include <mutex>
 #include <sstream>
 
 namespace finevox {

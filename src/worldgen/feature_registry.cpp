@@ -6,6 +6,7 @@
  */
 
 #include "finevox/worldgen/feature_registry.hpp"
+#include <mutex>
 
 namespace finevox::worldgen {
 

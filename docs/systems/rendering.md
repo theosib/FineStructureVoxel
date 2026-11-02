@@ -294,6 +294,11 @@ This writes the current output as the new golden and passes.  Commit the
 updated PNG.  Failing tests also dump the last actual result to
 `tests/golden/<name>.actual.png` (gitignored) for side-by-side inspection.
 
+Goldens hold across platforms: Apple's and Intel's drivers land within 1/255 of each other.  That
+depends on everything random in a test giving the same numbers everywhere, so no
+`std::uniform_int_distribution`, and no two random draws in the arguments of one call, since GCC
+and Clang evaluate those in opposite orders.  See `randomUnitFloat` in `particle_type.hpp`.
+
 **Renderer generality.**  Both `ParticleRenderer` and `WorldRenderer` accept
 any `finevk::RenderSurface*` — either a `SimpleRenderer` (on-screen / window)
 or an `OffscreenSurface` (headless capture / tests).  `SimpleRenderer` and

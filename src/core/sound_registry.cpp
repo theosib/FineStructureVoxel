@@ -1,4 +1,5 @@
 #include "finevox/core/sound_registry.hpp"
+#include <mutex>
 
 namespace finevox {
 

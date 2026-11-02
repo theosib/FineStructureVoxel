@@ -1,5 +1,6 @@
 #include "finevox/core/resource_locator.hpp"
 #include <cstdlib>
+#include <mutex>
 
 namespace finevox {
 

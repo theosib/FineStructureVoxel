@@ -438,7 +438,7 @@ TEST_F(ScriptIntegrationTest, ContentPackLoaderBindsBlockScriptsAndRoutesUseBloc
         "resources",
         "../resources",
         "../../resources",
-        "/Users/theosib/projects/FineStructure/FineStructureVoxel/resources"
+        FINEVOX_SOURCE_DIR "/resources"
     };
     std::filesystem::path resDir;
     for (const auto& c : candidates) {

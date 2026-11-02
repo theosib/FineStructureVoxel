@@ -75,4 +75,4 @@ Original design documents are archived in [old_docs/](old_docs/).
 
 ## License
 
-TBD
+Apache License 2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).

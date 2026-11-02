@@ -21,7 +21,9 @@
 
 #include <finevk/core/logging.hpp>
 
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -74,6 +76,27 @@ void appendQuoted(std::wstring& line, const std::wstring& arg) {
     line += L'"';
 }
 
+/// The directory this program is in, or empty
+std::filesystem::path executableDir() {
+    wchar_t self[MAX_PATH * 4];
+    DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+    if (length == 0 || length >= std::size(self)) return {};
+    return std::filesystem::path(self).parent_path();
+}
+
+/// A windowed build (FINEVOX_WINDOWS_GUI) has no console. Started from one, it prints there as
+/// a console program would; started from a shortcut, there's nowhere to print and nothing to do.
+void attachParentConsole() {
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out && out != INVALID_HANDLE_VALUE && GetFileType(out) != FILE_TYPE_UNKNOWN) return;
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
+    FILE* reopened = nullptr;
+    freopen_s(&reopened, "CONOUT$", "w", stdout);
+    freopen_s(&reopened, "CONOUT$", "w", stderr);
+    std::cout.clear();
+    std::cerr.clear();
+}
+
 /// Windows has no exec: start a new process and leave this one to end
 bool restartAs(const std::vector<std::string>& args) {
     wchar_t self[MAX_PATH * 4];
@@ -118,13 +141,20 @@ private:
 };
 
 std::string defaultPlayerName() {
+#ifdef _WIN32
+    const char* user = std::getenv("USERNAME");
+#else
     const char* user = std::getenv("USER");
+#endif
     return user && *user ? user : "Player";
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    attachParentConsole();
+#endif
     game::RuntimeOptions runtimeOptions;
     client::ClientOptions clientOptions;
     clientOptions.shaderDir = FINEVOX_SHADER_DIR;
@@ -134,6 +164,7 @@ int main(int argc, char* argv[]) {
     bool newGame = false;
     std::filesystem::path serverConfig;
     std::optional<int> serverPort;
+    [[maybe_unused]] bool shaderDirGiven = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -169,6 +200,7 @@ int main(int argc, char* argv[]) {
             runtimeOptions.extraScripts.emplace_back(value());
         } else if (arg == "--shader-dir") {
             clientOptions.shaderDir = value();
+            shaderDirGiven = true;
         } else if (arg == "--size") {
             clientOptions.width = static_cast<uint32_t>(std::stoul(value()));
             clientOptions.height = static_cast<uint32_t>(std::stoul(value()));
@@ -208,6 +240,19 @@ int main(int argc, char* argv[]) {
 
     // A run that ends itself is automation, and leaves the player's game alone
     if (clientOptions.exitAfterFrames > 0) runtimeOptions.noSaves = true;
+
+#ifdef _WIN32
+    // An installed game: shaders beside the program and the game in game\ beside that, so that it
+    // runs from a shortcut. The shaders this was built with are on the machine it was built on.
+    if (std::filesystem::path here = executableDir(); !here.empty()) {
+        if (!shaderDirGiven && std::filesystem::exists(here / "shaders" / "chunk.vert.spv")) {
+            clientOptions.shaderDir = here / "shaders";
+        }
+        if (runtimeOptions.gameRoot.empty() && std::filesystem::exists(here / "game" / "game.conf")) {
+            runtimeOptions.gameRoot = here / "game";
+        }
+    }
+#endif
 
     if (runtimeOptions.gameRoot.empty()) {
         std::cerr << "usage: finevox_run --game-root DIR [options]\n";

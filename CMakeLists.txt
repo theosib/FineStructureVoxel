@@ -586,6 +586,15 @@ if(FINEVOX_BUILD_RENDER)
             target_compile_definitions(finevox_run PRIVATE
                 FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders")
             add_dependencies(finevox_run finevox_shaders)
+
+            # For a release: no console window beside the game. It still prints when run from one.
+            option(FINEVOX_WINDOWS_GUI "Build finevox_run as a windowed program on Windows" OFF)
+            if(WIN32 AND FINEVOX_WINDOWS_GUI)
+                set_target_properties(finevox_run PROPERTIES WIN32_EXECUTABLE ON)
+                if(MSVC)
+                    target_link_options(finevox_run PRIVATE /ENTRY:mainCRTStartup)
+                endif()
+            endif()
         elseif(TARGET finevox_game)
             message(WARNING "finegui isn't fully built in ${FINEGUI_DIR}/build, so finevox_run is left out")
         endif()

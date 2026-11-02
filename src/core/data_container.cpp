@@ -83,7 +83,9 @@ std::unique_ptr<DataContainer> DataContainer::clone() const {
 // CBOR Serialization
 // ============================================================================
 
-// CBOR major types
+// CBOR major types. Private to this file: core/cbor.hpp has inline functions of these names,
+// and a static link takes either.
+namespace {
 namespace cbor {
     constexpr uint8_t UNSIGNED_INT = 0;
     constexpr uint8_t NEGATIVE_INT = 1;
@@ -255,6 +257,7 @@ namespace cbor {
     };
 
 }  // namespace cbor
+}  // namespace
 
 // Forward declaration for recursive encoding
 static void encodeValue(std::vector<uint8_t>& out, const DataValue& value);

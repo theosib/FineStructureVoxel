@@ -4,7 +4,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
 namespace finevox::net {
 
@@ -208,6 +214,11 @@ bool isSafeContentPath(std::string_view path) {
 }
 
 fs::path defaultCacheDir() {
+#ifdef _WIN32
+    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local) {
+        return fs::path(local) / "finevox" / "cache";
+    }
+#endif
     if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg) return fs::path(xdg) / "finevox";
     if (const char* home = std::getenv("HOME"); home && *home) return fs::path(home) / ".cache" / "finevox";
     return fs::temp_directory_path() / "finevox";

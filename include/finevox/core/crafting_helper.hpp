@@ -18,6 +18,7 @@
 #include "finevox/core/recipe.hpp"
 #include "finevox/core/inventory.hpp"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 

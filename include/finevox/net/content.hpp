@@ -45,7 +45,7 @@ struct ContentFile {
 /// component, `.`, `..`, or a backslash. The path came from a server.
 [[nodiscard]] bool isSafeContentPath(std::string_view path);
 
-/// `~/.cache/finevox`, or wherever $XDG_CACHE_HOME says
+/// `~/.cache/finevox`, or wherever $XDG_CACHE_HOME says. `%LOCALAPPDATA%\finevox\cache` on Windows
 [[nodiscard]] std::filesystem::path defaultCacheDir();
 
 /**

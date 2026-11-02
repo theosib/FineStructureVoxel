@@ -5,11 +5,20 @@
 #include <finescript/map_data.h>
 #include <finescript/script_engine.h>
 
-#include <arpa/inet.h>
 #include <gtest/gtest.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#undef near  // windows.h leaves these behind, empty
+#undef far
+using ssize_t = std::ptrdiff_t;
+#else
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -21,6 +30,16 @@ using json = nlohmann::json;
 using finescript::Value;
 
 namespace {
+
+#ifdef _WIN32
+void closeSocket(SOCKET fd) {
+    closesocket(fd);
+}
+#else
+void closeSocket(int fd) {
+    ::close(fd);
+}
+#endif
 
 McpTool echoTool(std::string name, McpSide side, bool player = false) {
     McpTool tool;
@@ -59,18 +78,18 @@ std::vector<std::string> toolNames(McpServer& server) {
 
 /// A raw HTTP exchange on 127.0.0.1, as a client makes
 std::string httpExchange(int port, const std::string& request) {
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    auto fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(static_cast<uint16_t>(port));
     EXPECT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
-    EXPECT_EQ(::send(fd, request.data(), request.size(), 0), static_cast<ssize_t>(request.size()));
+    EXPECT_EQ(::send(fd, request.data(), static_cast<int>(request.size()), 0), static_cast<ssize_t>(request.size()));
     std::string reply;
     char buffer[4096];
     ssize_t got;
     while ((got = ::recv(fd, buffer, sizeof(buffer), 0)) > 0) reply.append(buffer, static_cast<size_t>(got));
-    ::close(fd);
+    closeSocket(fd);
     return reply;
 }
 
@@ -338,7 +357,7 @@ TEST(McpServerTest, ACallerThatHangsUpDoesNoHarm) {
     std::string error;
     ASSERT_TRUE(server.start(error)) << error;
 
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    auto fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -347,8 +366,8 @@ TEST(McpServerTest, ACallerThatHangsUpDoesNoHarm) {
     json request = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
                     {"params", {{"name", "big"}, {"arguments", {{"text", "x"}}}}}};
     std::string text = postRequest(request.dump());
-    ASSERT_EQ(::send(fd, text.data(), text.size(), 0), static_cast<ssize_t>(text.size()));
-    ::close(fd);
+    ASSERT_EQ(::send(fd, text.data(), static_cast<int>(text.size()), 0), static_cast<ssize_t>(text.size()));
+    closeSocket(fd);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     std::string reply = httpExchange(server.port(), postRequest(R"({"jsonrpc":"2.0","id":2,"method":"ping"})"));

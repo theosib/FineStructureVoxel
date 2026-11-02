@@ -25,12 +25,76 @@
 #include <iostream>
 #include <optional>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace finevox;
 
 namespace {
+
+#ifdef _WIN32
+std::wstring widen(const std::string& text) {
+    if (text.empty()) return {};
+    int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    std::wstring out(static_cast<size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
+    return out;
+}
+
+/// One argument as CommandLineToArgvW will read it back
+void appendQuoted(std::wstring& line, const std::wstring& arg) {
+    if (!line.empty()) line += L' ';
+    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
+        line += arg;
+        return;
+    }
+    line += L'"';
+    for (size_t i = 0;; ++i) {
+        size_t slashes = 0;
+        while (i < arg.size() && arg[i] == L'\\') {
+            ++i;
+            ++slashes;
+        }
+        if (i == arg.size()) {
+            line.append(slashes * 2, L'\\');
+            break;
+        }
+        if (arg[i] == L'"') {
+            line.append(slashes * 2 + 1, L'\\');
+        } else {
+            line.append(slashes, L'\\');
+        }
+        line += arg[i];
+    }
+    line += L'"';
+}
+
+/// Windows has no exec: start a new process and leave this one to end
+bool restartAs(const std::vector<std::string>& args) {
+    wchar_t self[MAX_PATH * 4];
+    DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+    if (length == 0 || length >= std::size(self)) return false;
+
+    std::wstring line;
+    appendQuoted(line, self);
+    for (const std::string& arg : args) appendQuoted(line, widen(arg));
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(self, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
+        return false;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return true;
+}
+#endif
 
 /// What a client sees of a game in this process
 class HostHandle : public client::LocalHost {
@@ -224,11 +288,15 @@ int main(int argc, char* argv[]) {
     }
     if (startOver) kept.emplace_back("--new");
 
+#ifdef _WIN32
+    if (restartAs(kept)) return 0;
+#else
     std::vector<char*> arguments;
     arguments.push_back(argv[0]);
     for (std::string& arg : kept) arguments.push_back(arg.data());
     arguments.push_back(nullptr);
     execv(argv[0], arguments.data());
+#endif
     std::cerr << "error: couldn't restart\n";
     return 1;
 }

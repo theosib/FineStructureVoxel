@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <vector>
 #include <array>
+#include <bit>
 #include <atomic>
 #include <memory>
 #include <unordered_map>
@@ -125,8 +126,7 @@ private:
     if (n <= 1) return 0;
     // Count leading zeros, subtract from 32, but need ceil not floor
     // For n=2: need 1 bit. For n=3: need 2 bits. For n=4: need 2 bits.
-    int bits = 32 - __builtin_clz(n - 1);
-    return bits;
+    return static_cast<int>(std::bit_width(n - 1));
 }
 
 }  // namespace finevox

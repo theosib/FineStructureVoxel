@@ -11,6 +11,34 @@ option(FINEVOX_BUILD_TESTS "Build unit tests" ON)
 option(FINEVOX_BUILD_RENDER "Build Vulkan render module (requires FineStructureVK)" OFF)
 option(FINEVOX_BUILD_AUDIO "Build audio module (miniaudio)" OFF)
 
+# Windows links the engine's own libraries statically. Nothing is marked dllexport, so an MSVC
+# DLL would export nothing, and a static in a header would get a copy in each DLL.
+if(WIN32)
+    set(FINEVOX_LIB_TYPE STATIC)
+else()
+    set(FINEVOX_LIB_TYPE SHARED)
+endif()
+
+if(MSVC)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8;/bigobj;/permissive-;/Zc:__cplusplus;/Zc:preprocessor>")
+    # NOGDI: wingdi.h has macros such as DeviceCapabilities, which renames finevk's class
+    add_compile_definitions(NOMINMAX NOGDI WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS)
+    # gtest on the same C runtime as everything else
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+endif()
+
+# A dependency's library in its build/: the first that exists of macOS's, Linux's and MSVC's
+function(finevox_find_lib out dir name)
+    foreach(candidate lib${name}.dylib lib${name}.so lib${name}.a ${name}.lib)
+        if(EXISTS "${dir}/build/${candidate}")
+            set(${out} "${dir}/build/${candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${out} "" PARENT_SCOPE)
+endfunction()
+
 # Dependencies
 include(FetchContent)
 
@@ -47,7 +75,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 # Core library (namespace: finevox)
 # ============================================================================
 
-add_library(finevox SHARED
+add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/position.cpp
     src/core/string_interner.cpp
     src/core/palette.cpp
@@ -181,24 +209,27 @@ target_link_libraries(finevox PUBLIC lz4_static glm::glm)
 
 if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
     target_include_directories(finevox PUBLIC ${FINESCRIPT_DIR}/include)
-    if(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.dylib")
-        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.dylib")
-    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.so")
-        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.so")
-    elseif(EXISTS "${FINESCRIPT_DIR}/build/libfinescript.a")
-        target_link_libraries(finevox PUBLIC "${FINESCRIPT_DIR}/build/libfinescript.a")
+    finevox_find_lib(FINESCRIPT_LIB "${FINESCRIPT_DIR}" finescript)
+    if(FINESCRIPT_LIB)
+        target_link_libraries(finevox PUBLIC "${FINESCRIPT_LIB}")
+    else()
+        message(WARNING "finescript isn't built in ${FINESCRIPT_DIR}/build")
     endif()
 endif()
 
 if(EXISTS "${FINENET_DIR}/include/finenet/finenet.hpp")
     target_include_directories(finevox PUBLIC ${FINENET_DIR}/include)
-    if(EXISTS "${FINENET_DIR}/build/libfinenet.dylib")
-        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.dylib")
-    elseif(EXISTS "${FINENET_DIR}/build/libfinenet.so")
-        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.so")
-    elseif(EXISTS "${FINENET_DIR}/build/libfinenet.a")
-        target_link_libraries(finevox PUBLIC "${FINENET_DIR}/build/libfinenet.a")
+    finevox_find_lib(FINENET_LIB "${FINENET_DIR}" finenet)
+    if(FINENET_LIB)
+        target_link_libraries(finevox PUBLIC "${FINENET_LIB}")
+    else()
+        message(WARNING "finenet isn't built in ${FINENET_DIR}/build")
     endif()
+endif()
+
+if(WIN32)
+    # Sockets, for finenet and the MCP server
+    target_link_libraries(finevox PUBLIC ws2_32 iphlpapi)
 endif()
 
 # ============================================================================
@@ -206,7 +237,7 @@ endif()
 # ============================================================================
 
 if(EXISTS "${FINESCRIPT_DIR}/include/finescript/script_engine.h")
-    add_library(finevox_script SHARED
+    add_library(finevox_script ${FINEVOX_LIB_TYPE}
         src/script/script_cache.cpp
         src/script/block_context_proxy.cpp
         src/script/data_container_proxy.cpp
@@ -248,7 +279,7 @@ endif()
 # World Generation Module (namespace: finevox::worldgen)
 # ============================================================================
 
-add_library(finevox_worldgen SHARED
+add_library(finevox_worldgen ${FINEVOX_LIB_TYPE}
     src/worldgen/noise_perlin.cpp
     src/worldgen/noise_simplex.cpp
     src/worldgen/noise_voronoi.cpp
@@ -286,7 +317,7 @@ target_link_libraries(finevox_worldgen PUBLIC finevox)
 # Network Client (namespace: finevox::net) - the protocol, no GPU dependency
 # ============================================================================
 
-add_library(finevox_net SHARED
+add_library(finevox_net ${FINEVOX_LIB_TYPE}
     src/net/protocol.cpp
     src/net/subchunk_codec.cpp
     src/net/content.cpp
@@ -311,7 +342,7 @@ target_link_libraries(finevox_net PUBLIC finevox finevox_worldgen)
 # ============================================================================
 
 if(TARGET finevox_script)
-    add_library(finevox_game SHARED
+    add_library(finevox_game ${FINEVOX_LIB_TYPE}
         src/game/game_manifest.cpp
         src/game/game_runtime.cpp
         src/game/game_save.cpp
@@ -366,9 +397,12 @@ if(FINEVOX_BUILD_RENDER)
     if(NOT DEFINED FINEGUI_DIR)
         set(FINEGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../finegui" CACHE PATH "Path to finegui")
     endif()
+    finevox_find_lib(FINEGUI_LIB "${FINEGUI_DIR}" finegui)
+    finevox_find_lib(FINEGUI_SCRIPT_LIB "${FINEGUI_DIR}" finegui-script)
+    finevox_find_lib(FINEGUI_RETAINED_LIB "${FINEGUI_DIR}" finegui-retained)
 
     # Add the render module library
-    add_library(finevox_render SHARED
+    add_library(finevox_render ${FINEVOX_LIB_TYPE}
         src/render/subchunk_view.cpp
         src/render/world_renderer.cpp
         src/render/block_atlas.cpp
@@ -499,25 +533,19 @@ if(FINEVOX_BUILD_RENDER)
                 ${FINEGUI_DIR}/include
                 ${FINEGUI_DIR}/third_party/imgui
             )
-            if(EXISTS "${FINEGUI_DIR}/build/libfinegui.a")
-                target_link_libraries(finevox_render_demo PRIVATE
-                    "${FINEGUI_DIR}/build/libfinegui.a"
-                )
+            if(FINEGUI_LIB)
+                target_link_libraries(finevox_render_demo PRIVATE "${FINEGUI_LIB}")
             endif()
             target_compile_definitions(finevox_render_demo PRIVATE FINEVOX_HAS_GUI=1)
             message(STATUS "FineStructureVoxel: finegui found at ${FINEGUI_DIR}")
 
             # Script-driven GUI: requires both finegui and finevox_script
             if(TARGET finevox_script)
-                if(EXISTS "${FINEGUI_DIR}/build/libfinegui-script.a")
-                    target_link_libraries(finevox_render_demo PRIVATE
-                        "${FINEGUI_DIR}/build/libfinegui-script.a"
-                    )
+                if(FINEGUI_SCRIPT_LIB)
+                    target_link_libraries(finevox_render_demo PRIVATE "${FINEGUI_SCRIPT_LIB}")
                 endif()
-                if(EXISTS "${FINEGUI_DIR}/build/libfinegui-retained.a")
-                    target_link_libraries(finevox_render_demo PRIVATE
-                        "${FINEGUI_DIR}/build/libfinegui-retained.a"
-                    )
+                if(FINEGUI_RETAINED_LIB)
+                    target_link_libraries(finevox_render_demo PRIVATE "${FINEGUI_RETAINED_LIB}")
                 endif()
                 target_compile_definitions(finevox_render_demo PRIVATE FINEVOX_HAS_SCRIPT_GUI=1)
                 message(STATUS "FineStructureVoxel: Script-driven GUI enabled (finegui + finescript)")
@@ -539,7 +567,7 @@ if(FINEVOX_BUILD_RENDER)
         message(STATUS "FineStructureVoxel: Building render demo")
 
         # Game client: runs a game from its content directory
-        if(TARGET finevox_game AND EXISTS "${FINEGUI_DIR}/build/libfinegui-script.a")
+        if(TARGET finevox_game AND FINEGUI_LIB AND FINEGUI_SCRIPT_LIB AND FINEGUI_RETAINED_LIB)
             add_executable(finevox_run
                 apps/finevox_run.cpp
                 src/client/game_client.cpp
@@ -551,13 +579,15 @@ if(FINEVOX_BUILD_RENDER)
             target_link_libraries(finevox_run PRIVATE
                 finevox_render
                 finevox_game
-                "${FINEGUI_DIR}/build/libfinegui.a"
-                "${FINEGUI_DIR}/build/libfinegui-script.a"
-                "${FINEGUI_DIR}/build/libfinegui-retained.a"
+                "${FINEGUI_LIB}"
+                "${FINEGUI_SCRIPT_LIB}"
+                "${FINEGUI_RETAINED_LIB}"
             )
             target_compile_definitions(finevox_run PRIVATE
                 FINEVOX_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders")
             add_dependencies(finevox_run finevox_shaders)
+        elseif(TARGET finevox_game)
+            message(WARNING "finegui isn't fully built in ${FINEGUI_DIR}/build, so finevox_run is left out")
         endif()
     endif()
 endif()
@@ -575,7 +605,7 @@ if(FINEVOX_BUILD_AUDIO)
     )
     FetchContent_MakeAvailable(miniaudio)
 
-    add_library(finevox_audio SHARED
+    add_library(finevox_audio ${FINEVOX_LIB_TYPE}
         src/audio/audio_engine.cpp
         src/audio/footstep_tracker.cpp
     )

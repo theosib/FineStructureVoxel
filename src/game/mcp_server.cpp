@@ -1,18 +1,25 @@
 #include "finevox/game/mcp_server.hpp"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <streambuf>
 
 using json = nlohmann::json;
@@ -94,14 +101,90 @@ std::string base64(const std::vector<uint8_t>& data) {
 }
 
 #ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0  // macOS: see SO_NOSIGPIPE in serve()
+#define MSG_NOSIGNAL 0  // macOS: see SO_NOSIGPIPE in serve(). Windows has no SIGPIPE
+#endif
+
+// Sockets are ints here. Windows' SOCKET handles fit in 32 bits, and INVALID_SOCKET becomes -1.
+#ifdef _WIN32
+using ssize_t = std::ptrdiff_t;
+
+SOCKET handle(int socket) {
+    return static_cast<SOCKET>(socket);
+}
+
+int openSocket() {
+    static std::once_flag started;
+    std::call_once(started, [] {
+        WSADATA data;
+        WSAStartup(MAKEWORD(2, 2), &data);
+    });
+    // Not inherited, or a game this one restarts into would hold the port
+    SOCKET s = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    return s == INVALID_SOCKET ? -1 : static_cast<int>(s);
+}
+
+int acceptSocket(int listening) {
+    SOCKET s = ::accept(handle(listening), nullptr, nullptr);
+    if (s == INVALID_SOCKET) return -1;
+    SetHandleInformation(reinterpret_cast<HANDLE>(s), HANDLE_FLAG_INHERIT, 0);
+    return static_cast<int>(s);
+}
+
+void closeSocket(int socket) {
+    closesocket(handle(socket));
+}
+
+int pollSockets(pollfd* fds, unsigned long count, int timeoutMs) {
+    return WSAPoll(fds, count, timeoutMs);
+}
+
+std::string socketErrorText() {
+    int error = WSAGetLastError();
+    char* text = nullptr;
+    DWORD size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                                    FORMAT_MESSAGE_IGNORE_INSERTS,
+                                nullptr, static_cast<DWORD>(error), 0, reinterpret_cast<char*>(&text), 0, nullptr);
+    std::string out = size && text ? std::string(text, size) : "error " + std::to_string(error);
+    if (text) LocalFree(text);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == '.')) out.pop_back();
+    return out;
+}
+
+/// SO_REUSEADDR on Windows would let a second game take a port in use. This keeps it to one.
+constexpr int EXCLUSIVE_PORT_OPTION = SO_EXCLUSIVEADDRUSE;
+#else
+int handle(int socket) {
+    return socket;
+}
+
+int openSocket() {
+    return ::socket(AF_INET, SOCK_STREAM, 0);
+}
+
+int acceptSocket(int listening) {
+    return ::accept(listening, nullptr, nullptr);
+}
+
+void closeSocket(int socket) {
+    ::close(socket);
+}
+
+int pollSockets(pollfd* fds, nfds_t count, int timeoutMs) {
+    return ::poll(fds, count, timeoutMs);
+}
+
+std::string socketErrorText() {
+    return std::strerror(errno);
+}
+
+constexpr int EXCLUSIVE_PORT_OPTION = SO_REUSEADDR;
 #endif
 
 /// A socket write that goes all the way. A caller that's gone must not take the game with it,
 /// which is what the default SIGPIPE would do.
 bool sendAll(int socket, std::string_view data) {
     while (!data.empty()) {
-        ssize_t sent = ::send(socket, data.data(), data.size(), MSG_NOSIGNAL);
+        ssize_t sent = ::send(handle(socket), data.data(), static_cast<int>(data.size()), MSG_NOSIGNAL);
         if (sent <= 0) return false;
         data.remove_prefix(static_cast<size_t>(sent));
     }
@@ -528,25 +611,26 @@ std::string McpServer::handleMessage(std::string_view body) {
 }
 
 bool McpServer::start(std::string& error) {
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    int fd = openSocket();
     if (fd < 0) {
         error = "can't open a socket";
         return false;
     }
     int on = 1;
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    ::setsockopt(handle(fd), SOL_SOCKET, EXCLUSIVE_PORT_OPTION, reinterpret_cast<const char*>(&on), sizeof(on));
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(static_cast<uint16_t>(port_));
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(fd, 16) != 0) {
-        error = "can't listen on 127.0.0.1:" + std::to_string(port_) + ": " + std::strerror(errno);
-        ::close(fd);
+    if (::bind(handle(fd), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(handle(fd), 16) != 0) {
+        error = "can't listen on 127.0.0.1:" + std::to_string(port_) + ": " + socketErrorText();
+        closeSocket(fd);
         return false;
     }
     socklen_t length = sizeof(address);
-    ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &length);
+    ::getsockname(handle(fd), reinterpret_cast<sockaddr*>(&address), &length);
     port_ = ntohs(address.sin_port);
 
     listenSocket_ = fd;
@@ -559,16 +643,18 @@ void McpServer::stop() {
     if (listenSocket_ < 0) return;
     stopping_.store(true);
     listener_.join();
-    ::close(listenSocket_);
+    closeSocket(listenSocket_);
     listenSocket_ = -1;
     while (connections_.load() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
 void McpServer::listen() {
     while (!stopping_.load()) {
-        pollfd waiting{listenSocket_, POLLIN, 0};
-        if (::poll(&waiting, 1, 100) <= 0) continue;
-        int socket = ::accept(listenSocket_, nullptr, nullptr);
+        pollfd waiting{};
+        waiting.fd = handle(listenSocket_);
+        waiting.events = POLLIN;
+        if (pollSockets(&waiting, 1, 100) <= 0) continue;
+        int socket = acceptSocket(listenSocket_);
         if (socket < 0) continue;
 
         // A request of its own for each caller: a tool waiting on the game mustn't hold up
@@ -576,15 +662,19 @@ void McpServer::listen() {
         connections_.fetch_add(1);
         std::thread([this, socket] {
             serve(socket);
-            ::close(socket);
+            closeSocket(socket);
             connections_.fetch_sub(1);
         }).detach();
     }
 }
 
 void McpServer::serve(int socket) {
+#ifdef _WIN32
+    DWORD timeout = RECEIVE_TIMEOUT_SECONDS * 1000;
+#else
     timeval timeout{RECEIVE_TIMEOUT_SECONDS, 0};
-    ::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#endif
+    ::setsockopt(handle(socket), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 #ifdef SO_NOSIGPIPE
     int on = 1;
     ::setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
@@ -594,7 +684,7 @@ void McpServer::serve(int socket) {
     char buffer[8192];
     size_t bodyStart = std::string::npos;
     while (bodyStart == std::string::npos) {
-        ssize_t got = ::recv(socket, buffer, sizeof(buffer), 0);
+        ssize_t got = ::recv(handle(socket), buffer, sizeof(buffer), 0);
         if (got <= 0 || request.size() > MAX_REQUEST_BYTES) return;
         request.append(buffer, static_cast<size_t>(got));
         bodyStart = request.find("\r\n\r\n");
@@ -619,7 +709,7 @@ void McpServer::serve(int socket) {
         return;
     }
     while (request.size() < bodyStart + length) {
-        ssize_t got = ::recv(socket, buffer, sizeof(buffer), 0);
+        ssize_t got = ::recv(handle(socket), buffer, sizeof(buffer), 0);
         if (got <= 0) return;
         request.append(buffer, static_cast<size_t>(got));
     }

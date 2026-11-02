@@ -14,6 +14,10 @@
 #include <algorithm>
 #include <cmath>
 #include <csignal>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -114,10 +118,24 @@ std::optional<ServerConfig> ServerConfig::load(const fs::path& path) {
 namespace {
 
 std::atomic<bool> stopSignalled{false};
+std::atomic<bool> stoppedCleanly{false};
 
 void onStopSignal(int) {
     stopSignalled = true;
 }
+
+#ifdef _WIN32
+/// Windows has no SIGTERM to send. A console's Ctrl+C or Ctrl+Break, its window closing, logging
+/// off and shutting down all come here instead.
+BOOL WINAPI onConsoleEvent(DWORD event) {
+    stopSignalled = true;
+    if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT) return TRUE;
+    // For the rest the process ends when this returns, and Windows allows about five seconds, so
+    // wait here for the save
+    for (int i = 0; i < 90 && !stoppedCleanly.load(); ++i) Sleep(50);
+    return TRUE;
+}
+#endif
 
 }  // namespace
 
@@ -153,11 +171,16 @@ int serve(RuntimeOptions options, const fs::path& configPath, std::optional<int>
     // A clean stop saves the game, so a server that's killed politely loses nothing
     std::signal(SIGINT, onStopSignal);
     std::signal(SIGTERM, onStopSignal);
+#ifdef _WIN32
+    SetConsoleCtrlHandler(onConsoleEvent, TRUE);
+#endif
     while (!stopSignalled.load() && host.phase() != GameHost::Phase::Ended) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     host.stop();
-    return host.exitCode();
+    int code = host.exitCode();
+    stoppedCleanly = true;
+    return code;
 }
 
 GameHost::GameHost(HostConfig config) : config_(std::move(config)) {}

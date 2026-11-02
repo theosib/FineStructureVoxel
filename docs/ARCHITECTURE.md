@@ -1,5 +1,9 @@
 # FineStructureVoxel — Architecture
 
+> A game is now normally a directory of content and scripts, not a loaded module, and there are two
+> more libraries than this shows: `finevox_game` (runtime, host) and `finevox_net` (protocol). See
+> [systems/game-runtime.md](systems/game-runtime.md) and [systems/multiplayer.md](systems/multiplayer.md).
+
 ---
 
 ## Layer Diagram

@@ -557,7 +557,9 @@ if(FINEVOX_BUILD_RENDER)
         endif()
 
         # Copy shaders to build directory
-        add_dependencies(finevox_render_demo finevox_shaders)
+        if(TARGET finevox_shaders)
+            add_dependencies(finevox_render_demo finevox_shaders)
+        endif()
 
         # Set working directory for IDE
         set_target_properties(finevox_render_demo PROPERTIES

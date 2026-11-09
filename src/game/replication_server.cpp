@@ -10,7 +10,7 @@
 #include "finevox/core/world_replica.hpp"
 #include "finevox/core/world_time.hpp"
 #include "finevox/game/game_runtime.hpp"
-#include "finevox/net/entity_wire.hpp"
+#include "finevox/net/messages.hpp"
 #include "finevox/net/protocol.hpp"
 #include "finevox/net/subchunk_codec.hpp"
 #include "finevox/script/event_value.hpp"
@@ -26,7 +26,6 @@ namespace finevox::game {
 
 namespace net = finevox::net;
 using finenet::Message;
-using net::ByteWriter;
 using finescript::Value;
 
 namespace {
@@ -225,24 +224,15 @@ void ReplicationServer::sendSubchunk(ClientView& view, ChunkPos pos) {
 
     for (uint32_t id : data.palette) {
         if (id == 0 || !view.blockNames_.insert(id).second) continue;
-        std::vector<uint8_t> body;
-        ByteWriter w(body);
-        w.var(id);
-        w.str(BlockTypeId(id).name());
-        send(view, net::CH_WORLD, net::msg::BlockName, std::move(body));
+        send(view, net::CH_WORLD, net::msg::BlockName, net::encodeName({id, std::string(BlockTypeId(id).name())}));
     }
     for (const auto& fluid : data.fluids) {
         if (!view.fluidNames_.insert(fluid.id).second) continue;
-        std::vector<uint8_t> body;
-        ByteWriter w(body);
-        w.var(fluid.id);
-        w.str(StringInterner::global().lookup(fluid.id));
-        send(view, net::CH_WORLD, net::msg::FluidName, std::move(body));
+        send(view, net::CH_WORLD, net::msg::FluidName,
+             net::encodeName({fluid.id, std::string(StringInterner::global().lookup(fluid.id))}));
     }
 
-    std::vector<uint8_t> body;
-    net::encodeSubchunk(data, body, !view.connection_->isLocal());
-    send(view, net::CH_WORLD, net::msg::Subchunk, std::move(body));
+    send(view, net::CH_WORLD, net::msg::Subchunk, net::encodeSubchunk(data, !view.connection_->isLocal()));
 }
 
 void ReplicationServer::sendWorld(ClientView& view) {
@@ -325,11 +315,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
             std::string type(entity->typeName());
             uint32_t wireType = type.empty() ? 0 : StringInterner::global().intern(type);
             if (wireType != 0 && view.typeNames_.insert(wireType).second) {
-                std::vector<uint8_t> body;
-                ByteWriter w(body);
-                w.var(wireType);
-                w.str(type);
-                send(view, net::CH_ENTITIES, net::msg::EntityTypeName, std::move(body));
+                send(view, net::CH_ENTITIES, net::msg::EntityTypeName, net::encodeName({wireType, type}));
             }
 
             net::EntitySpawnWire spawn;
@@ -364,11 +350,8 @@ void ReplicationServer::sendEntities(ClientView& view) {
             ++it;
             continue;
         }
-        std::vector<uint8_t> body;
-        ByteWriter w(body);
-        w.u64(it->first);
-        w.u8(died_.count(it->first) ? 1 : 0);
-        send(view, net::CH_ENTITIES, net::msg::EntityGone, std::move(body));
+        send(view, net::CH_ENTITIES, net::msg::EntityGone,
+             net::encodeEntityGone({it->first, died_.count(it->first) > 0}));
         it = view.known_.erase(it);
     }
 
@@ -397,23 +380,20 @@ void ReplicationServer::sendVision(ClientView& view) {
     auto cells = runtime_.vision().snapshot(view.faction_);
     if (cells.empty() || cells == view.lastVision_) return;
 
-    std::vector<uint8_t> compressed;
-    net::encodeCompressed(cells, compressed);
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.bytes(compressed);
-    send(view, net::CH_WORLD, net::msg::Vision, std::move(body));
-    view.lastVision_ = std::move(cells);
+    net::VisionWire vision;
+    vision.cells = std::move(cells);
+    send(view, net::CH_WORLD, net::msg::Vision, net::encodeVision(vision));
+    view.lastVision_ = std::move(vision.cells);
 }
 
 void ReplicationServer::sendTime(ClientView& view) {
     const WorldTime& time = runtime_.session().worldTime();
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
     view.sentPaused_ = runtime_.session().isPaused();
-    w.u64(static_cast<uint64_t>(time.totalTicks()));
-    w.u8((time.isFrozen() ? net::TIME_FROZEN : 0) | (view.sentPaused_ ? net::TIME_PAUSED : 0));
-    send(view, net::CH_WORLD, net::msg::Time, std::move(body));
+    net::TimeWire wire;
+    wire.ticks = static_cast<uint64_t>(time.totalTicks());
+    wire.held = time.isFrozen();
+    wire.paused = view.sentPaused_;
+    send(view, net::CH_WORLD, net::msg::Time, net::encodeTime(wire));
 }
 
 void ReplicationServer::sendProjectiles(ClientView& view) {
@@ -437,31 +417,24 @@ void ReplicationServer::sendGhosts(ClientView& view) {
     if (ghosts.get() == view.lastGhosts_) return;
     view.lastGhosts_ = ghosts.get();
 
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.var(ghosts ? ghosts->size() : 0);
+    std::vector<net::GhostWire> wire;
     if (ghosts) {
+        wire.reserve(ghosts->size());
         for (const auto& ghost : *ghosts) {
+            net::GhostWire group;
+            group.built = ghost.built;
+            group.cells.reserve(ghost.cells.size());
             for (const auto& cell : ghost.cells) {
                 uint32_t id = cell.block.id;
-                if (id == 0 || !view.blockNames_.insert(id).second) continue;
-                std::vector<uint8_t> name;
-                ByteWriter nameWriter(name);
-                nameWriter.var(id);
-                nameWriter.str(cell.block.name());
-                send(view, net::CH_WORLD, net::msg::BlockName, std::move(name));
+                if (id != 0 && view.blockNames_.insert(id).second) {
+                    send(view, net::CH_WORLD, net::msg::BlockName, net::encodeName({id, std::string(cell.block.name())}));
+                }
+                group.cells.push_back({cell.pos.x, cell.pos.y, cell.pos.z, id});
             }
-            w.f32(ghost.built);
-            w.var(ghost.cells.size());
-            for (const auto& cell : ghost.cells) {
-                w.svar(cell.pos.x);
-                w.svar(cell.pos.y);
-                w.svar(cell.pos.z);
-                w.var(cell.block.id);
-            }
+            wire.push_back(std::move(group));
         }
     }
-    send(view, net::CH_WORLD, net::msg::Ghosts, std::move(body));
+    send(view, net::CH_WORLD, net::msg::Ghosts, net::encodeGhosts(wire));
 }
 
 }  // namespace finevox::game

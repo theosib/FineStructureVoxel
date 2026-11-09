@@ -23,7 +23,7 @@ namespace finevox::net {
 /// version. One it can safely ignore (a field at the end of a record, a map key, a message type)
 /// bumps only the revision, which each side tells the other, so a newer one knows what an older
 /// one lacks. See PROTOCOL.md §10.
-inline constexpr int PROTOCOL_VERSION = 2;
+inline constexpr int PROTOCOL_VERSION = 3;
 inline constexpr int PROTOCOL_REVISION = 0;
 
 /// An entity's health on the wire: a fraction in 255ths. Only an entity with nothing missing reads
@@ -38,10 +38,6 @@ inline constexpr size_t MAX_CHAT_BYTES = 512;
 inline constexpr int MAX_CHATS_PER_SECOND = 5;
 inline constexpr size_t MAX_NAME_BYTES = 32;
 inline constexpr size_t MAX_CONTENT_CHUNK = 256 * 1024;
-
-/// Flags in a Time message
-inline constexpr uint8_t TIME_FROZEN = 1;  // The clock is held
-inline constexpr uint8_t TIME_PAUSED = 2;  // The whole game is
 
 // §2.4
 inline constexpr finenet::ChannelId CH_CONTROL = 0;
@@ -107,127 +103,6 @@ inline constexpr uint32_t ContentReady = 0x4033;
 
 /// The channels of §2.4, for both ends of a connection
 [[nodiscard]] finenet::ConnectionConfig connectionConfig();
-
-/// Appends the binary field types of §3
-class ByteWriter {
-public:
-    explicit ByteWriter(std::vector<uint8_t>& out) : out_(out) {}
-
-    void u8(uint8_t v) { out_.push_back(v); }
-    void u16(uint16_t v) { little(v); }
-    void u32(uint32_t v) { little(v); }
-    void u64(uint64_t v) { little(v); }
-    void f32(float v) {
-        uint32_t bits;
-        std::memcpy(&bits, &v, 4);
-        little(bits);
-    }
-    void f64(double v) {
-        uint64_t bits;
-        std::memcpy(&bits, &v, 8);
-        little(bits);
-    }
-    void var(uint64_t v) {
-        while (v >= 0x80) {
-            out_.push_back(static_cast<uint8_t>(v) | 0x80);
-            v >>= 7;
-        }
-        out_.push_back(static_cast<uint8_t>(v));
-    }
-    void svar(int64_t v) {
-        var((static_cast<uint64_t>(v) << 1) ^ static_cast<uint64_t>(v >> 63));
-    }
-    void str(std::string_view v) {
-        var(v.size());
-        out_.insert(out_.end(), v.begin(), v.end());
-    }
-    void bytes(std::span<const uint8_t> v) {
-        var(v.size());
-        out_.insert(out_.end(), v.begin(), v.end());
-    }
-    void raw(std::span<const uint8_t> v) { out_.insert(out_.end(), v.begin(), v.end()); }
-
-private:
-    template <typename T>
-    void little(T v) {
-        for (size_t i = 0; i < sizeof(T); ++i) out_.push_back(static_cast<uint8_t>(v >> (i * 8)));
-    }
-
-    std::vector<uint8_t>& out_;
-};
-
-/// Reads the binary field types of §3. Past the end, or on a bad value, ok() goes false and stays
-/// false, and reads give zeroes: the input comes from the network, so nothing may assume it's sane.
-class ByteReader {
-public:
-    explicit ByteReader(std::span<const uint8_t> data) : data_(data) {}
-
-    [[nodiscard]] bool ok() const { return ok_; }
-    [[nodiscard]] size_t remaining() const { return data_.size() - offset_; }
-
-    uint8_t u8() { return little<uint8_t>(); }
-    uint16_t u16() { return little<uint16_t>(); }
-    uint32_t u32() { return little<uint32_t>(); }
-    uint64_t u64() { return little<uint64_t>(); }
-    float f32() {
-        uint32_t bits = little<uint32_t>();
-        float v;
-        std::memcpy(&v, &bits, 4);
-        return v;
-    }
-    double f64() {
-        uint64_t bits = little<uint64_t>();
-        double v;
-        std::memcpy(&v, &bits, 8);
-        return v;
-    }
-    uint64_t var() {
-        uint64_t value = 0;
-        for (int shift = 0; shift < 64; shift += 7) {
-            uint8_t byte = u8();
-            if (!ok_) return 0;
-            value |= static_cast<uint64_t>(byte & 0x7F) << shift;
-            if (!(byte & 0x80)) return value;
-        }
-        ok_ = false;
-        return 0;
-    }
-    int64_t svar() {
-        uint64_t v = var();
-        return static_cast<int64_t>(v >> 1) ^ -static_cast<int64_t>(v & 1);
-    }
-    std::string_view str() {
-        auto view = bytes();
-        return {reinterpret_cast<const char*>(view.data()), view.size()};
-    }
-    std::span<const uint8_t> bytes() { return take(var()); }
-    std::span<const uint8_t> take(uint64_t size) {
-        if (!ok_ || size > remaining()) {
-            ok_ = false;
-            return {};
-        }
-        auto view = data_.subspan(offset_, size);
-        offset_ += size;
-        return view;
-    }
-
-private:
-    template <typename T>
-    T little() {
-        if (!ok_ || remaining() < sizeof(T)) {
-            ok_ = false;
-            return 0;
-        }
-        T v = 0;
-        for (size_t i = 0; i < sizeof(T); ++i) v = static_cast<T>(v | (static_cast<T>(data_[offset_ + i]) << (i * 8)));
-        offset_ += sizeof(T);
-        return v;
-    }
-
-    std::span<const uint8_t> data_;
-    size_t offset_ = 0;
-    bool ok_ = true;
-};
 
 /// A Value as a CBOR message body
 [[nodiscard]] std::vector<uint8_t> encodeBody(const finescript::Value& value);

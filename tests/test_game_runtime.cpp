@@ -9,6 +9,7 @@
 #include "finevox/core/world_time.hpp"
 #include "finevox/game/game_runtime.hpp"
 #include "finevox/game/replication_server.hpp"
+#include "finevox/net/messages.hpp"
 #include "finevox/net/protocol.hpp"
 #include "finevox/net/subchunk_codec.hpp"
 
@@ -439,13 +440,14 @@ public:
         auto [client, server] = finenet::Connection::createLocalPair(net::connectionConfig());
         client_ = std::move(client);
         client_->onMessage(net::msg::EntitySpawn, [this](const finenet::Message& message) {
-            net::ByteReader r(message.payload());
-            spawned.insert(r.u64());
+            auto spawn = net::decodeEntitySpawn(message.payload());
+            ASSERT_TRUE(spawn.has_value());
+            spawned.insert(spawn->id);
         });
         client_->onMessage(net::msg::EntityGone, [this](const finenet::Message& message) {
-            net::ByteReader r(message.payload());
-            EntityId id = r.u64();
-            gone[id] = r.u8() != 0;
+            auto left = net::decodeEntityGone(message.payload());
+            ASSERT_TRUE(left.has_value());
+            gone[left->id] = left->died;
         });
         client_->onMessage(net::msg::Subchunk, [this](const finenet::Message& message) {
             net::SubchunkData data;

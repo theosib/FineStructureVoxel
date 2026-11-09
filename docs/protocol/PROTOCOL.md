@@ -1,6 +1,6 @@
 # FineVox Network Protocol
 
-**Protocol version: 2.** This is the normative description of what a client and a server say to
+**Protocol version: 3.** This is the normative description of what a client and a server say to
 each other. A client written from this document, in any language, should be able to join a game
 without reading the engine. Where the engine and this document disagree, one of them has a bug.
 
@@ -93,23 +93,32 @@ A sender SHOULD favour lower-numbered channels when the link is busy, with Asset
 
 ## 3. Encoding
 
-Control messages have a **CBOR** body (RFC 8949): a single map with text keys, in this document
-written `{key: type}`. A decoder MUST ignore keys it doesn't know. An optional key is marked `?`.
+Every message body is one **CBOR** map (RFC 8949). Unknown message types MUST be ignored, and a
+decoder MUST ignore keys it doesn't know.
 
-A finescript symbol is a text string under CBOR tag 39 (`:name` means the tagged string `name`).
-Decoders that have no symbols MAY read it as a string.
+**Control messages** (session, lobby, content lists) have text keys, in this document written
+`{key: type}`. An optional key is marked `?`. A finescript symbol is a text string under CBOR tag 39
+(`:name` means the tagged string `name`). Decoders that have no symbols MAY read it as a string.
 
-High-rate messages are **binary**, fields in order, using:
+**World messages** (§5 to §8, the ones with a table of keys) have small unsigned integer keys,
+which cost a byte each, as this document lists them per message: `0 id: uint` is key 0, holding an
+unsigned integer. Types are CBOR's:
 
-| Name | Meaning |
+| Written | CBOR |
 |---|---|
-| `u8 u16 u32 u64 i32 f32 f64` | Little-endian |
-| `var` | Unsigned LEB128 |
-| `svar` | ZigZag then `var` |
-| `str` | `var` length then UTF-8 |
-| `bytes` | `var` length then bytes |
+| `uint`, `int` | Major type 0, or 0 and 1 |
+| `float` | Any number: a reader MUST take a half, single or double float, or an integer |
+| `bool` | Simple values 20 and 21 |
+| `text`, `bytes` | Major types 3 and 2 |
+| `[T]` | An array of T |
 
-Unknown message types MUST be ignored.
+A key marked `?` has a default, given beside it, and a sender SHOULD leave it out when that's its
+value. A key that isn't marked is required, and a message or array entry without one MUST be
+dropped. Within a message, a reader MAY drop an array entry that's malformed and keep the rest.
+Indefinite lengths aren't used.
+
+A reader is reading bytes off the network, so it MUST check every length against what's left, MAY
+refuse nesting deeper than 16, and MUST NOT allocate for a count that the bytes left can't hold.
 
 ---
 
@@ -189,9 +198,9 @@ its number on the same channel.
 
 | Type | Name | Channel | Body |
 |---|---|---|---|
-| 0x20 | BlockName | 5 | `var id`, `str name` |
-| 0x21 | FluidName | 5 | `var id`, `str name` |
-| 0x22 | EntityTypeName | 3 | `var id`, `str name` |
+| 0x20 | BlockName | 5 | `0 id: uint`, `1 name: text` |
+| 0x21 | FluidName | 5 | The same |
+| 0x22 | EntityTypeName | 3 | The same |
 
 Id 0 is always air, and the empty fluid or type.
 
@@ -205,22 +214,23 @@ The world is cells of 16×16×16 blocks. A cell's index is `x + z*16 + y*256`. T
 everything the client holds for that subchunk, and describes it whole.
 
 ```
-svar cx, cy, cz          Subchunk coordinates: block coordinates >> 4
-u8   flags               bit 0: the rest is LZ4 block-compressed, preceded by var rawSize
-                         bit 1: has fluids     bit 2: has rotations
-var  paletteCount
-var  palette[count]      BlockName ids
-if paletteCount > 1:
-    u8  indexWidth       1 or 2
-    indices[4096]        Into the palette
-u8   lightMode           0: light[4096] follows   1: one u8 follows, for every cell
-light                    Each byte: sky << 4 | block, 0 to 15 each
-if fluids:
-    var count
-    {u16 index, var fluidId, u8 level}[count]
-if rotations:
-    u8 rotation[4096]
+0 cx: int, 1 cy: int, 2 cz: int   Subchunk coordinates: block coordinates >> 4
+3 cells: bytes                    The Cells map below, as CBOR, LZ4 block-compressed if raw_size is there
+4 raw_size?: uint                 How long cells is once decompressed. Absent: it isn't compressed.
+
+Cells:
+0 palette: [uint]                 BlockName ids. At least one.
+1 index_width?: uint = 1          1 or 2 bytes an index
+2 indices?: bytes                 4096 indices into the palette, little-endian. Required with
+                                  more than one palette entry.
+3 light?: bytes                   4096 bytes, each sky << 4 | block, 0 to 15 each
+4 light_all?: uint                Or one value for every cell. One of the two is required.
+5 fluids?: [uint]                 Three to a cell: index, FluidName id, level
+6 rotations?: bytes               Reserved: 4096, one a cell
 ```
+
+A client MUST refuse a subchunk whose indices aren't all inside its palette, or whose cells come to
+more than 64 KiB.
 
 A client MUST ignore a server's change to a cell it's predicting (§7.3) until that prediction ends.
 A subchunk a client hasn't been sent is unknown, not empty. A client SHOULD treat its light as full
@@ -230,9 +240,9 @@ sky, so that terrain at the edge of what's known isn't drawn black.
 
 | Type | Name | Channel | Body |
 |---|---|---|---|
-| 0x24 | Vision | 5 | `bytes`, LZ4-compressed: one byte per vision cell, row by row, 0 unknown, 1 explored, 2 visible |
-| 0x25 | Time | 5 | `u64 totalTicks`, `u8 flags`, sent about once a second, and at once when a pause starts or ends. Flags: 1 the clock is held, 2 the game is paused |
-| 0x26 | Ghosts | 5 | `var groups`, then per group `f32 built`, `var cells`, `{svar x, y, z, var blockId}[cells]` |
+| 0x24 | Vision | 5 | `0 cells: bytes`, LZ4-compressed: one byte per vision cell, row by row, 0 unknown, 1 explored, 2 visible. `1 raw_size: uint`, its size undone. |
+| 0x25 | Time | 5 | `0 ticks: uint`, `1 held?: bool = false` the clock is held, `2 paused?: bool = false` the game is paused. Sent about once a second, and at once when a pause starts or ends. |
+| 0x26 | Ghosts | 5 | `0 groups: [Group]`. Group: `0 built?: float = 0`, `1 cells?: [int] = []`, four to a cell: x, y, z, BlockName id |
 
 Vision cells are `vision_cell` blocks square. `vision_min` is the corner of cell 0.
 
@@ -248,27 +258,24 @@ All on channel 3, in the order the server made them.
 
 | Type | Name | Body |
 |---|---|---|
-| 0x30 | EntitySpawn | `u64 id`, `var typeId`, `u16 faction`, `f64 x, y, z`, `f32 yaw, pitch`, `u8 health` |
-| 0x31 | EntityGone | `u64 id`, `u8 died` |
-| 0x32 | EntityBatch | `u64 tick`, `var count`, then `count` records of an entity each, below |
-| 0x33 | Projectiles | `var count`, then `count` records of `f32 x, y, z, vx, vy, vz` |
-| 0x34 | Burst | Reserved: `str emitter`, `f64 x, y, z`, `f32 r, g, b, a` |
-
-A record is `var length` and then that many bytes, so that a reader can skip fields it doesn't
-know (§10). EntitySpawn is one record already: it ends where the message does. An entity's:
+| 0x30 | EntitySpawn | `0 id: uint`, `1 type: uint` (EntityTypeName id), `2 faction?: uint = 0`, `3 x, 4 y, 5 z: float` (double, for precision far out), `6 yaw?, 7 pitch?: float = 0`, `8 health?: uint = 255` |
+| 0x31 | EntityGone | `0 id: uint`, `1 died?: bool = false` |
+| 0x32 | EntityBatch | `0 tick: uint`, `1 entities: [Entity]` |
+| 0x33 | Projectiles | `0 shots: [Shot]`. Shot: `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?: float = 0` |
+| 0x34 | Burst | Reserved: `0 emitter: text`, `1 x, 2 y, 3 z: float`, `4 color: [float]` |
 
 ```
-u64 id
-f32 x, y, z         Position
-f32 vx, vy, vz      Velocity, for extrapolation
-f32 yaw, pitch      As the server's entity holds them
-u8  animation       Slot, as the entity's `.entity` file lists them
-u8  flags           bit 0: on the ground
-u8  health          In 255ths of its most. 255 only when nothing's missing, so a scratch shows
+Entity:
+0 id: uint
+1 x, 2 y, 3 z: float            Position
+4 vx?, 5 vy?, 6 vz?: float = 0   Velocity, for extrapolation
+7 yaw?, 8 pitch?: float = 0      As the server's entity holds them
+9 animation?: uint = 0          Slot, as the entity's `.entity` file lists them
+10 on_ground?: bool = false
+11 health?: uint = 255          In 255ths of its most. 255 only when nothing's missing, so a scratch shows
 ```
 
-A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255,
-and so does a record without it. Version 2 added the health byte, and the records.
+A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255.
 
 An entity the client has been told about stays exactly where it is until told otherwise. Silence
 means it hasn't moved, and an entity that leaves the player's sight is `EntityGone` with `died` 0. A
@@ -280,10 +287,10 @@ means it hasn't moved, and an entity that leaves the player's sight is `EntityGo
 
 | Type | Name | Channel | Direction | Body |
 |---|---|---|---|---|
-| 0x40 | PlayerState | 1 | C→S | `f32 x, y, z, vx, vy, vz, yaw, pitch`, `u8 onGround` |
+| 0x40 | PlayerState | 1 | C→S | `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?, 6 yaw?, 7 pitch?: float = 0`, `8 on_ground?: bool = false`. A server MUST drop one whose position isn't finite. |
 | 0x4020 | Command | 2 | C→S | CBOR. Any value: the game defines it. |
-| 0x41 | ExpectChange | 2 | C→S | `svar x, y, z`: look at this column soon |
-| 0x42 | ViewHint | 1 | C→S | `f32 x, z`: send what's near here first |
+| 0x41 | ExpectChange | 2 | C→S | `0 x, 1 y, 2 z: int`: look at this column soon |
+| 0x42 | ViewHint | 1 | C→S | `0 x, 1 z: float`: send what's near here first |
 | 0x4021 | UiMessage | 6 | S→C | CBOR. Any value: the game defines it. |
 | 0x4022 | ClientState | 2 | C→S | CBOR. Any value: handed back in `WorldInfo` on resuming. Only a server's own local client's is kept. |
 
@@ -318,7 +325,7 @@ prediction for at least a round trip, and then take the server's word.
 |---|---|---|---|---|
 | 0x4030 | ContentManifest | 7 | S→C | `{files: [{path: text, size: int, sha256: text}]}`, hashes in lower-case hex |
 | 0x4031 | ContentRequest | 7 | C→S | `{files: [text]}`, by hash. Send it only if something's missing. |
-| 0x4032 | ContentChunk | 7 | S→C | Binary: `bytes sha256` (32 raw bytes), `var offset`, `var total`, `bytes data` |
+| 0x4032 | ContentChunk | 7 | S→C | `0 sha256: bytes` (32 raw bytes), `1 offset: uint`, `2 total: uint`, `3 data: bytes` |
 | 0x4033 | ContentReady | 7 | C→S | `{}`: every file on the list is here. Sent even if none were requested. |
 
 Paths are relative, separated by `/`, and a client MUST refuse any with an empty, `.` or `..`
@@ -391,21 +398,21 @@ The engine's code is `PROTOCOL_VERSION` and `PROTOCOL_REVISION` in `net/protocol
 While nothing's been released, any change can just bump `protocol`. After a release, a patch to it
 should still talk to it, so prefer a change that only bumps `revision`:
 
-- **A map body** (control messages, CBOR): add keys as you like. A reader takes a missing key as its
-  default and ignores one it doesn't know. Never change what an existing key means or holds.
-- **A binary record** (§6): add a field only at the end of a record. Readers skip what's past the
-  fields they know, and give one that isn't there its default, so choose the default to mean what an
-  older peer meant by leaving it out (health: unhurt). The fields first sent are the record's core,
-  and a record without all of them is dropped. Write and read a record's fields in one place, as
-  `net/entity_wire.cpp` does, and test both ways: an older sender's bytes and a newer one's, written
-  by hand rather than with the encoder.
+- **A key**: add one to any map, at the next unused number, with a default that means what an older
+  peer meant by leaving it out (health: unhurt). Readers ignore keys they don't know. A key can also
+  stop being sent, if a reader's default for it is right. Never reuse a key's number for something
+  else, or change what it holds, and never make an optional key required.
 - **A message type**: add one freely, since unknown types are ignored. If the sender has to know
   the other side will act on it, look at the peer's `revision` first, or at `caps`.
+- In the engine, every world message is written and read in `net/messages.cpp` (Subchunk in
+  `net/subchunk_codec.cpp`), on the CBOR of `net/wire.hpp`, and `tests/test_wire.cpp` checks
+  messages from an older sender and a newer one, built with a different encoder from the one under
+  test.
 - **A new revision** each time one of those reaches a release, with a line in the table below.
 
-Bump `protocol` for anything an older peer would get wrong without knowing: removing or reordering
-fields, changing a field's meaning, units or size, or changing what a message type means. And for a
-format that isn't built of records, until it is: `SubchunkData` (§5) and `Vision` are.
+Bump `protocol` for anything an older peer would get wrong without knowing: changing what a key or
+a message type means, its units, or a required key. Inside a `bytes` field (indices, light, vision
+cells, file data) nothing is self-describing, so changing a layout there means a new key for it.
 
 A game's own data needs none of this. Commands and `ui_publish` are maps, and the client runs the
 server's own UI scripts and content (§8), so a game's scripts and the UI that reads them always
@@ -413,4 +420,4 @@ match. Saved games keep their own format: see `docs/systems/persistence.md`.
 
 | Protocol | Revision | Added |
 |---|---|---|
-| 2 | 0 | Health in entity records; every entity and projectile record sized |
+| 3 | 0 | Every message a CBOR map; world messages with integer keys and defaults left out |

@@ -5,6 +5,7 @@
 #include "finevox/core/position.hpp"
 #include "finevox/core/world_replica.hpp"
 #include "finevox/game/replication_server.hpp"
+#include "finevox/net/messages.hpp"
 #include "finevox/script/finevox_interner.hpp"
 
 #include <finescript/execution_context.h>
@@ -641,13 +642,12 @@ void GameHost::pumpContent(Peer& peer) {
         std::vector<uint8_t> chunk(std::min<uint64_t>(MAX_CONTENT_CHUNK, current.file.size - current.offset));
         in.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
 
-        std::vector<uint8_t> body;
-        ByteWriter w(body);
-        w.bytes(current.file.hash);
-        w.var(current.offset);
-        w.var(current.file.size);
-        w.bytes(chunk);
-        peer.connection->send(CH_ASSETS, Message(msg::ContentChunk, std::move(body)));
+        ContentChunkWire wire;
+        std::copy(current.file.hash.begin(), current.file.hash.end(), wire.sha256.begin());
+        wire.offset = current.offset;
+        wire.total = current.file.size;
+        wire.data = chunk;
+        peer.connection->send(CH_ASSETS, Message(msg::ContentChunk, encodeContentChunk(wire)));
 
         current.offset += chunk.size();
         if (current.offset >= current.file.size) peer.sending.pop_front();
@@ -800,30 +800,23 @@ void GameHost::onPlayerState(Peer& peer, const Message& message) {
     auto seat = game->seat(peer.player);
     if (!seat || seat->body == INVALID_ENTITY_ID) return;
 
-    ByteReader r(message.payload());
+    auto wire = decodePlayerState(message.payload());
+    if (!wire) return;
     EntityState state;
-    state.position.x = r.f32();
-    state.position.y = r.f32();
-    state.position.z = r.f32();
-    state.velocity.x = r.f32();
-    state.velocity.y = r.f32();
-    state.velocity.z = r.f32();
-    state.yaw = r.f32();
-    state.pitch = r.f32();
-    state.onGround = r.u8() != 0;
-    if (!r.ok() || !std::isfinite(state.position.x) || !std::isfinite(state.position.y) ||
-        !std::isfinite(state.position.z)) {
-        return;
-    }
+    state.position = glm::dvec3(wire->position);
+    state.velocity = glm::dvec3(wire->velocity);
+    state.yaw = wire->yaw;
+    state.pitch = wire->pitch;
+    state.onGround = wire->onGround;
     game->session().actions().sendPlayerState(seat->body, state);
 }
 
 void GameHost::onExpectChange(Peer& peer, const Message& message) {
     GameRuntime* game = runtime();
     if (!game || !replication_ || peer.player == 0) return;
-    ByteReader r(message.payload());
-    BlockCoord pos(static_cast<int32_t>(r.svar()), static_cast<int32_t>(r.svar()), static_cast<int32_t>(r.svar()));
-    if (!r.ok()) return;
+    auto change = decodeExpectChange(message.payload());
+    if (!change) return;
+    BlockCoord pos(change->x, change->y, change->z);
     auto seat = game->seat(peer.player);
     if (!seat || seat->faction == 0) return;
     uint16_t faction = seat->faction;
@@ -831,9 +824,8 @@ void GameHost::onExpectChange(Peer& peer, const Message& message) {
 }
 
 void GameHost::onViewHint(Peer& peer, const Message& message) {
-    ByteReader r(message.payload());
-    float x = r.f32(), z = r.f32();
-    if (r.ok() && peer.view && std::isfinite(x) && std::isfinite(z)) peer.view->setViewHint(x, z);
+    auto hint = decodeViewHint(message.payload());
+    if (hint && peer.view) peer.view->setViewHint(hint->x, hint->z);
 }
 
 void GameHost::onClientState(Peer& peer, const Message& message) {

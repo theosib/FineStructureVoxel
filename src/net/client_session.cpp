@@ -1,5 +1,5 @@
 #include "finevox/net/client_session.hpp"
-#include "finevox/net/entity_wire.hpp"
+#include "finevox/net/messages.hpp"
 
 #include "finevox/script/event_value.hpp"
 
@@ -255,26 +255,17 @@ void ClientSession::sendCommand(const Value& command) {
 }
 
 void ClientSession::sendPlayerState(const EntityState& state) {
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.f32(static_cast<float>(state.position.x));
-    w.f32(static_cast<float>(state.position.y));
-    w.f32(static_cast<float>(state.position.z));
-    w.f32(static_cast<float>(state.velocity.x));
-    w.f32(static_cast<float>(state.velocity.y));
-    w.f32(static_cast<float>(state.velocity.z));
-    w.f32(state.yaw);
-    w.f32(state.pitch);
-    w.u8(state.onGround ? 1 : 0);
-    send(CH_INPUT, msg::PlayerState, std::move(body));
+    PlayerStateWire wire;
+    wire.position = glm::vec3(state.position);
+    wire.velocity = glm::vec3(state.velocity);
+    wire.yaw = state.yaw;
+    wire.pitch = state.pitch;
+    wire.onGround = state.onGround;
+    send(CH_INPUT, msg::PlayerState, encodePlayerState(wire));
 }
 
 void ClientSession::sendViewHint(double x, double z) {
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.f32(static_cast<float>(x));
-    w.f32(static_cast<float>(z));
-    send(CH_INPUT, msg::ViewHint, std::move(body));
+    send(CH_INPUT, msg::ViewHint, encodeViewHint({static_cast<float>(x), static_cast<float>(z)}));
 }
 
 void ClientSession::sendClientState(std::span<const uint8_t> state) {
@@ -288,12 +279,7 @@ void ClientSession::predictBlock(BlockCoord pos, BlockTypeId block) {
 }
 
 void ClientSession::expectChange(BlockCoord pos) {
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.svar(pos.x);
-    w.svar(pos.y);
-    w.svar(pos.z);
-    send(CH_ACTIONS, msg::ExpectChange, std::move(body));
+    send(CH_ACTIONS, msg::ExpectChange, encodeExpectChange({pos.x, pos.y, pos.z}));
 }
 
 void ClientSession::setPhase(ClientPhase phase) {
@@ -353,23 +339,16 @@ void ClientSession::registerHandlers() {
     });
     c.onMessage(msg::Bound, [this](const Message& m) { onBound(m); });
     c.onMessage(msg::BlockName, [this](const Message& m) {
-        ByteReader r(m.payload());
-        uint32_t id = static_cast<uint32_t>(r.var());
-        std::string_view name = r.str();
-        if (r.ok()) world_.nameBlock(id, name);
-        if (r.ok()) ghostBlocks_[id] = BlockTypeId::fromName(name);
+        auto name = decodeName(m.payload());
+        if (!name) return;
+        world_.nameBlock(name->id, name->name);
+        ghostBlocks_[name->id] = BlockTypeId::fromName(name->name);
     });
     c.onMessage(msg::FluidName, [this](const Message& m) {
-        ByteReader r(m.payload());
-        uint32_t id = static_cast<uint32_t>(r.var());
-        std::string_view name = r.str();
-        if (r.ok()) world_.nameFluid(id, name);
+        if (auto name = decodeName(m.payload())) world_.nameFluid(name->id, name->name);
     });
     c.onMessage(msg::EntityTypeName, [this](const Message& m) {
-        ByteReader r(m.payload());
-        uint32_t id = static_cast<uint32_t>(r.var());
-        std::string name(r.str());
-        if (r.ok()) entityTypeNames_[id] = std::move(name);
+        if (auto name = decodeName(m.payload())) entityTypeNames_[name->id] = std::move(name->name);
     });
     c.onMessage(msg::Subchunk, [this](const Message& m) {
         SubchunkData data;
@@ -607,18 +586,14 @@ void ClientSession::onContentChunk(const Message& message) {
     if (!contentSync_) return;
 
     if (!contentSync_->done()) {
-        ByteReader r(message.payload());
-        auto hashBytes = r.bytes();
-        uint64_t offset = r.var();
-        uint64_t total = r.var();
-        auto data = r.bytes();
-        Sha256 hash{};
-        if (!r.ok() || hashBytes.size() != hash.size()) {
+        auto chunk = decodeContentChunk(message.payload());
+        if (!chunk) {
             fail("the server sent bad content");
             return;
         }
-        std::copy(hashBytes.begin(), hashBytes.end(), hash.begin());
-        if (!contentSync_->receive(hash, offset, total, data)) {
+        Sha256 hash{};
+        std::copy(chunk->sha256.begin(), chunk->sha256.end(), hash.begin());
+        if (!contentSync_->receive(hash, chunk->offset, chunk->total, chunk->data)) {
             fail("the server sent content that doesn't match its list");
             return;
         }
@@ -720,10 +695,10 @@ void ClientSession::onEntitySpawn(const Message& message) {
 }
 
 void ClientSession::onEntityGone(const Message& message) {
-    ByteReader r(message.payload());
-    EntityId id = r.u64();
-    bool died = r.u8() != 0;
-    if (!r.ok()) return;
+    auto gone = decodeEntityGone(message.payload());
+    if (!gone) return;
+    EntityId id = gone->id;
+    bool died = gone->died;
     graphics_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id, died)));
     std::lock_guard lock(mutex_);
     entities_.erase(id);
@@ -775,47 +750,42 @@ void ClientSession::onProjectiles(const Message& message) {
 }
 
 void ClientSession::onVision(const Message& message) {
-    ByteReader r(message.payload());
-    std::vector<uint8_t> cells;
     constexpr size_t LIMIT = 16 * 1024 * 1024;
-    if (!decodeCompressed(r.bytes(), cells, LIMIT)) return;
+    auto vision = decodeVision(message.payload(), LIMIT);
+    if (!vision) return;
     std::lock_guard lock(mutex_);
-    vision_ = std::move(cells);
+    vision_ = std::move(vision->cells);
 }
 
 void ClientSession::onTime(const Message& message) {
-    ByteReader r(message.payload());
-    uint64_t ticks = r.u64();
-    uint8_t flags = r.u8();
-    if (!r.ok()) return;
-    paused_ = (flags & TIME_PAUSED) != 0;
+    auto time = decodeTime(message.payload());
+    if (!time) return;
+    paused_ = time->paused;
     std::lock_guard lock(mutex_);
-    time_.setTime(static_cast<int64_t>(ticks));
-    time_.setFrozen(flags != 0);
+    time_.setTime(static_cast<int64_t>(time->ticks));
+    time_.setFrozen(time->held || time->paused);
     timeStamp_ = Clock::now();
 }
 
 void ClientSession::onGhosts(const Message& message) {
-    ByteReader r(message.payload());
-    uint64_t groups = r.var();
-    if (!r.ok() || groups > r.remaining()) return;
+    auto wire = decodeGhosts(message.payload());
+    if (!wire) return;
 
     auto ghosts = std::make_shared<std::vector<worldgen::SiteGhost>>();
-    ghosts->resize(groups);
-    for (auto& ghost : *ghosts) {
-        ghost.built = r.f32();
-        uint64_t cells = r.var();
-        if (!r.ok() || cells > r.remaining()) return;
-        ghost.cells.resize(cells);
-        for (auto& cell : ghost.cells) {
-            cell.pos.x = static_cast<int32_t>(r.svar());
-            cell.pos.y = static_cast<int32_t>(r.svar());
-            cell.pos.z = static_cast<int32_t>(r.svar());
-            auto name = ghostBlocks_.find(static_cast<uint32_t>(r.var()));
+    ghosts->resize(wire->size());
+    for (size_t i = 0; i < wire->size(); ++i) {
+        const GhostWire& group = (*wire)[i];
+        auto& ghost = (*ghosts)[i];
+        ghost.built = group.built;
+        ghost.cells.resize(group.cells.size());
+        for (size_t c = 0; c < group.cells.size(); ++c) {
+            const GhostCellWire& from = group.cells[c];
+            auto& cell = ghost.cells[c];
+            cell.pos = BlockCoord(from.x, from.y, from.z);
+            auto name = ghostBlocks_.find(from.block);
             cell.block = name == ghostBlocks_.end() ? BlockTypeId() : name->second;
         }
     }
-    if (!r.ok()) return;
     std::lock_guard lock(mutex_);
     ghosts_ = std::move(ghosts);
 }

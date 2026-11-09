@@ -31,14 +31,16 @@ struct SubchunkData {
     std::vector<Fluid> fluids;
 };
 
-/// Append the message body. Compression is for networks: a local connection has no use for it.
-void encodeSubchunk(const SubchunkData& data, std::vector<uint8_t>& out, bool compress);
+/// The message body. Compression is for networks: a local connection has no use for it.
+[[nodiscard]] std::vector<uint8_t> encodeSubchunk(const SubchunkData& data, bool compress);
 
 /// False if it's malformed, in which case `data` means nothing
 [[nodiscard]] bool decodeSubchunk(std::span<const uint8_t> body, SubchunkData& data);
 
-/// LZ4, as the Vision message uses it: `var rawSize` then the block
-void encodeCompressed(std::span<const uint8_t> raw, std::vector<uint8_t>& out);
-[[nodiscard]] bool decodeCompressed(std::span<const uint8_t> body, std::vector<uint8_t>& raw, size_t limit);
+/// An LZ4 block. Its raw size travels beside it, in the message.
+[[nodiscard]] std::vector<uint8_t> lz4Compress(std::span<const uint8_t> raw);
+/// False if it isn't `rawSize` bytes once undone, or `rawSize` is over `limit`
+[[nodiscard]] bool lz4Decompress(std::span<const uint8_t> block, uint64_t rawSize, size_t limit,
+                                 std::vector<uint8_t>& raw);
 
 }  // namespace finevox::net

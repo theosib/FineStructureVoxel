@@ -19,7 +19,12 @@
 
 namespace finevox::net {
 
+/// Two peers talk if their versions match. A change that an older peer would misread bumps the
+/// version. One it can safely ignore (a field at the end of a record, a map key, a message type)
+/// bumps only the revision, which each side tells the other, so a newer one knows what an older
+/// one lacks. See PROTOCOL.md §10.
 inline constexpr int PROTOCOL_VERSION = 2;
+inline constexpr int PROTOCOL_REVISION = 0;
 
 /// An entity's health on the wire: a fraction in 255ths. Only an entity with nothing missing reads
 /// FULL_HEALTH, so a scratch still shows.

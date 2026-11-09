@@ -144,8 +144,8 @@ All of these are on channel 0 unless the table says otherwise.
 
 | Type | Name | Direction | Body |
 |---|---|---|---|
-| 0x4001 | Hello | C→S | `{protocol: int, game: text, name: text, token?: text, password?: text, caps?: [text]}` |
-| 0x4002 | Welcome | S→C | `{player: int, token: text, game: text, title: text, phase: :lobby/:loading/:running/:ended, lobby: Lobby, host: bool, content: bool}`. `content` false means no manifest is coming. |
+| 0x4001 | Hello | C→S | `{protocol: int, revision: int, game: text, name: text, token?: text, password?: text, caps?: [text]}` |
+| 0x4002 | Welcome | S→C | `{player: int, revision: int, token: text, game: text, title: text, phase: :lobby/:loading/:running/:ended, lobby: Lobby, host: bool, content: bool}`. `content` false means no manifest is coming. |
 | 0x4003 | Reject | S→C | `{reason: :protocol/:game/:password/:full/:started/:banned/:other, text?: text}` |
 | 0x4004 | SetSetting | C→S | `{key: text, value: any}` |
 | 0x4005 | SetReady | C→S | `{ready: bool}` |
@@ -250,9 +250,12 @@ All on channel 3, in the order the server made them.
 |---|---|---|
 | 0x30 | EntitySpawn | `u64 id`, `var typeId`, `u16 faction`, `f64 x, y, z`, `f32 yaw, pitch`, `u8 health` |
 | 0x31 | EntityGone | `u64 id`, `u8 died` |
-| 0x32 | EntityBatch | `u64 tick`, `var count`, then per entity below |
-| 0x33 | Projectiles | `var count`, then `f32 x, y, z, vx, vy, vz` |
+| 0x32 | EntityBatch | `u64 tick`, `var count`, then `count` records of an entity each, below |
+| 0x33 | Projectiles | `var count`, then `count` records of `f32 x, y, z, vx, vy, vz` |
 | 0x34 | Burst | Reserved: `str emitter`, `f64 x, y, z`, `f32 r, g, b, a` |
+
+A record is `var length` and then that many bytes, so that a reader can skip fields it doesn't
+know (§10). EntitySpawn is one record already: it ends where the message does. An entity's:
 
 ```
 u64 id
@@ -264,8 +267,8 @@ u8  flags           bit 0: on the ground
 u8  health          In 255ths of its most. 255 only when nothing's missing, so a scratch shows
 ```
 
-A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255.
-Version 2 added the health byte, in both messages.
+A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255,
+and so does a record without it. Version 2 added the health byte, and the records.
 
 An entity the client has been told about stays exactly where it is until told otherwise. Silence
 means it hasn't moved, and an entity that leaves the player's sight is `EntityGone` with `died` 0. A
@@ -376,6 +379,38 @@ Listing = {title: text, game: text, game_name: text, players: int, max_players: 
 
 ## 10. Versioning
 
-`protocol` in `Hello` is this document's version. A server rejects a version it can't speak.
-Additive changes (a new map key, a new message type) don't bump it, since unknown things are
-ignored. `caps` in `Hello` lists optional features the client has.
+`protocol` in `Hello` is this document's version, and a server rejects any other. `revision`, in
+`Hello` and `Welcome` both, counts the changes since that a peer can safely not know about, so the
+two can differ, and each side knows which the other has. `caps` in `Hello` lists optional features
+the client has.
+
+The engine's code is `PROTOCOL_VERSION` and `PROTOCOL_REVISION` in `net/protocol.hpp`.
+
+### Changing the protocol
+
+While nothing's been released, any change can just bump `protocol`. After a release, a patch to it
+should still talk to it, so prefer a change that only bumps `revision`:
+
+- **A map body** (control messages, CBOR): add keys as you like. A reader takes a missing key as its
+  default and ignores one it doesn't know. Never change what an existing key means or holds.
+- **A binary record** (§6): add a field only at the end of a record. Readers skip what's past the
+  fields they know, and give one that isn't there its default, so choose the default to mean what an
+  older peer meant by leaving it out (health: unhurt). The fields first sent are the record's core,
+  and a record without all of them is dropped. Write and read a record's fields in one place, as
+  `net/entity_wire.cpp` does, and test both ways: an older sender's bytes and a newer one's, written
+  by hand rather than with the encoder.
+- **A message type**: add one freely, since unknown types are ignored. If the sender has to know
+  the other side will act on it, look at the peer's `revision` first, or at `caps`.
+- **A new revision** each time one of those reaches a release, with a line in the table below.
+
+Bump `protocol` for anything an older peer would get wrong without knowing: removing or reordering
+fields, changing a field's meaning, units or size, or changing what a message type means. And for a
+format that isn't built of records, until it is: `SubchunkData` (§5) and `Vision` are.
+
+A game's own data needs none of this. Commands and `ui_publish` are maps, and the client runs the
+server's own UI scripts and content (§8), so a game's scripts and the UI that reads them always
+match. Saved games keep their own format: see `docs/systems/persistence.md`.
+
+| Protocol | Revision | Added |
+|---|---|---|
+| 2 | 0 | Health in entity records; every entity and projectile record sized |

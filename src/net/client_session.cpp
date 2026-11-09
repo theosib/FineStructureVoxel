@@ -1,4 +1,5 @@
 #include "finevox/net/client_session.hpp"
+#include "finevox/net/entity_wire.hpp"
 
 #include "finevox/script/event_value.hpp"
 
@@ -113,6 +114,11 @@ std::string ClientSession::token() const {
 std::string ClientSession::serverTitle() const {
     std::lock_guard lock(mutex_);
     return title_;
+}
+
+int ClientSession::serverRevision() const {
+    std::lock_guard lock(mutex_);
+    return serverRevision_;
 }
 
 float ClientSession::rttMs() const {
@@ -385,6 +391,7 @@ void ClientSession::registerHandlers() {
 void ClientSession::sayHello() {
     Value body = Value::map();
     setField(body, "protocol", Value::integer(PROTOCOL_VERSION));
+    setField(body, "revision", Value::integer(PROTOCOL_REVISION));
     setField(body, "game", Value::string(options_.game));
     setField(body, "name", Value::string(options_.name));
     std::string token;
@@ -517,6 +524,7 @@ void ClientSession::onWelcome(const Message& message) {
         std::lock_guard lock(mutex_);
         token_ = textField(body, "token");
         title_ = textField(body, "title");
+        serverRevision_ = static_cast<int>(intField(body, "revision"));
         lobbyDeclaration_ = encodeBody(field(body, "lobby"));
         hadWelcome_ = true;
     }
@@ -686,18 +694,16 @@ void ClientSession::onBound(const Message& message) {
 }
 
 void ClientSession::onEntitySpawn(const Message& message) {
-    ByteReader r(message.payload());
+    auto spawn = decodeEntitySpawn(message.payload());
+    if (!spawn) return;
     EntityState state;
-    state.id = r.u64();
-    uint32_t type = static_cast<uint32_t>(r.var());
-    state.faction = r.u16();
-    state.position.x = r.f64();
-    state.position.y = r.f64();
-    state.position.z = r.f64();
-    state.yaw = r.f32();
-    state.pitch = r.f32();
-    uint8_t health = r.u8();
-    if (!r.ok()) return;
+    state.id = spawn->id;
+    uint32_t type = spawn->type;
+    state.faction = spawn->faction;
+    state.position = spawn->position;
+    state.yaw = spawn->yaw;
+    state.pitch = spawn->pitch;
+    uint8_t health = spawn->health;
 
     auto name = entityTypeNames_.find(type);
     graphics_.push(GraphicsMessage::fromEvent(script::makeEntitySpawnValue(
@@ -725,33 +731,26 @@ void ClientSession::onEntityGone(const Message& message) {
 }
 
 void ClientSession::onEntityBatch(const Message& message) {
-    ByteReader r(message.payload());
-    uint64_t tick = r.u64();
-    uint64_t count = r.var();
-    constexpr uint64_t ENTRY_BYTES = 8 + 8 * 4 + 3;
-    if (!r.ok() || count > r.remaining() / ENTRY_BYTES) return;
+    auto decoded = decodeEntityBatch(message.payload());
+    if (!decoded) return;
+    uint64_t tick = decoded->tick;
 
     std::vector<GraphicsMessage> batch;
-    batch.reserve(count);
+    batch.reserve(decoded->entities.size());
     std::lock_guard lock(mutex_);
-    for (uint64_t i = 0; i < count; ++i) {
-        EntityId id = r.u64();
+    for (const EntityMoveWire& move : decoded->entities) {
+        EntityId id = move.id;
         auto known = entities_.find(id);
         EntityState parsed;
         parsed.id = id;
-        parsed.position.x = r.f32();
-        parsed.position.y = r.f32();
-        parsed.position.z = r.f32();
-        parsed.velocity.x = r.f32();
-        parsed.velocity.y = r.f32();
-        parsed.velocity.z = r.f32();
-        parsed.yaw = r.f32();
-        parsed.pitch = r.f32();
-        parsed.animationId = r.u8();
-        parsed.onGround = (r.u8() & 1) != 0;
-        uint8_t health = r.u8();
+        parsed.position = glm::dvec3(move.position);
+        parsed.velocity = glm::dvec3(move.velocity);
+        parsed.yaw = move.yaw;
+        parsed.pitch = move.pitch;
+        parsed.animationId = move.animation;
+        parsed.onGround = move.onGround;
         if (known == entities_.end()) continue;  // It's since gone
-        health_[id] = health;
+        health_[id] = move.health;
         parsed.faction = known->second.faction;
         known->second = parsed;
 
@@ -764,20 +763,12 @@ void ClientSession::onEntityBatch(const Message& message) {
 }
 
 void ClientSession::onProjectiles(const Message& message) {
-    ByteReader r(message.payload());
-    uint64_t count = r.var();
-    constexpr uint64_t ENTRY_BYTES = 4 * 6;
-    if (!r.ok() || count > r.remaining() / ENTRY_BYTES) return;
-
-    std::vector<ProjectileView> views(count);
-    for (auto& view : views) {
-        view.position.x = r.f32();
-        view.position.y = r.f32();
-        view.position.z = r.f32();
-        view.velocity.x = r.f32();
-        view.velocity.y = r.f32();
-        view.velocity.z = r.f32();
-        view.faction = 0;
+    auto shots = decodeProjectiles(message.payload());
+    if (!shots) return;
+    std::vector<ProjectileView> views;
+    views.reserve(shots->size());
+    for (const ProjectileWire& shot : *shots) {
+        views.push_back({glm::dvec3(shot.position), shot.velocity, 0});
     }
     std::lock_guard lock(mutex_);
     projectiles_ = std::move(views);

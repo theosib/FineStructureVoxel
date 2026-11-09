@@ -10,6 +10,7 @@
 #include "finevox/core/world_replica.hpp"
 #include "finevox/core/world_time.hpp"
 #include "finevox/game/game_runtime.hpp"
+#include "finevox/net/entity_wire.hpp"
 #include "finevox/net/protocol.hpp"
 #include "finevox/net/subchunk_codec.hpp"
 #include "finevox/script/event_value.hpp"
@@ -331,18 +332,15 @@ void ReplicationServer::sendEntities(ClientView& view) {
                 send(view, net::CH_ENTITIES, net::msg::EntityTypeName, std::move(body));
             }
 
-            std::vector<uint8_t> body;
-            ByteWriter w(body);
-            w.u64(id);
-            w.var(wireType);
-            w.u16(state.faction);
-            w.f64(state.position.x);
-            w.f64(state.position.y);
-            w.f64(state.position.z);
-            w.f32(state.yaw);
-            w.f32(state.pitch);
-            w.u8(now.health);
-            send(view, net::CH_ENTITIES, net::msg::EntitySpawn, std::move(body));
+            net::EntitySpawnWire spawn;
+            spawn.id = id;
+            spawn.type = wireType;
+            spawn.faction = state.faction;
+            spawn.position = state.position;
+            spawn.yaw = state.yaw;
+            spawn.pitch = state.pitch;
+            spawn.health = now.health;
+            send(view, net::CH_ENTITIES, net::msg::EntitySpawn, net::encodeEntitySpawn(spawn));
             view.known_.emplace(id, now);
             continue;
         }
@@ -375,26 +373,23 @@ void ReplicationServer::sendEntities(ClientView& view) {
     }
 
     if (moved.empty()) return;
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.u64(runtime_.gameScript().tickCount());
-    w.var(moved.size());
+    net::EntityBatchWire batch;
+    batch.tick = runtime_.gameScript().tickCount();
+    batch.entities.reserve(moved.size());
     for (size_t i = 0; i < moved.size(); ++i) {
         const auto& [id, state] = moved[i];
-        w.u64(id);
-        w.f32(static_cast<float>(state.position.x));
-        w.f32(static_cast<float>(state.position.y));
-        w.f32(static_cast<float>(state.position.z));
-        w.f32(static_cast<float>(state.velocity.x));
-        w.f32(static_cast<float>(state.velocity.y));
-        w.f32(static_cast<float>(state.velocity.z));
-        w.f32(state.yaw);
-        w.f32(state.pitch);
-        w.u8(state.animationId);
-        w.u8(state.onGround ? 1 : 0);
-        w.u8(movedHealth[i]);
+        net::EntityMoveWire move;
+        move.id = id;
+        move.position = glm::vec3(state.position);
+        move.velocity = glm::vec3(state.velocity);
+        move.yaw = state.yaw;
+        move.pitch = state.pitch;
+        move.animation = state.animationId;
+        move.onGround = state.onGround;
+        move.health = movedHealth[i];
+        batch.entities.push_back(move);
     }
-    send(view, net::CH_ENTITIES, net::msg::EntityBatch, std::move(body));
+    send(view, net::CH_ENTITIES, net::msg::EntityBatch, net::encodeEntityBatch(batch));
 }
 
 void ReplicationServer::sendVision(ClientView& view) {
@@ -429,18 +424,12 @@ void ReplicationServer::sendProjectiles(ClientView& view) {
     if (visible.empty() && !view.hadProjectiles_) return;
     view.hadProjectiles_ = !visible.empty();
 
-    std::vector<uint8_t> body;
-    ByteWriter w(body);
-    w.var(visible.size());
+    std::vector<net::ProjectileWire> shots;
+    shots.reserve(visible.size());
     for (const ProjectileView& shot : visible) {
-        w.f32(static_cast<float>(shot.position.x));
-        w.f32(static_cast<float>(shot.position.y));
-        w.f32(static_cast<float>(shot.position.z));
-        w.f32(shot.velocity.x);
-        w.f32(shot.velocity.y);
-        w.f32(shot.velocity.z);
+        shots.push_back({glm::vec3(shot.position), shot.velocity});
     }
-    send(view, net::CH_ENTITIES, net::msg::Projectiles, std::move(body));
+    send(view, net::CH_ENTITIES, net::msg::Projectiles, net::encodeProjectiles(shots));
 }
 
 void ReplicationServer::sendGhosts(ClientView& view) {

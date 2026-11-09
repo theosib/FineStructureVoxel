@@ -319,6 +319,7 @@ target_link_libraries(finevox_worldgen PUBLIC finevox)
 
 add_library(finevox_net ${FINEVOX_LIB_TYPE}
     src/net/protocol.cpp
+    src/net/entity_wire.cpp
     src/net/subchunk_codec.cpp
     src/net/content.cpp
     src/net/client_world.cpp
@@ -676,6 +677,7 @@ if(FINEVOX_BUILD_TESTS)
 
     add_executable(finevox_tests
         tests/test_net.cpp
+        tests/test_entity_wire.cpp
         tests/test_position.cpp
         tests/test_string_interner.cpp
         tests/test_palette.cpp

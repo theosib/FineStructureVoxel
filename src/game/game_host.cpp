@@ -507,6 +507,7 @@ void GameHost::onHello(Peer& peer, const Message& message) {
         reject(peer, "protocol", "this server speaks a different version");
         return;
     }
+    peer.revision = static_cast<int>(intField(body, "revision"));
     if (textField(body, "game") != manifest_.contentNamespace) {
         reject(peer, "game", "this server is running " + manifest_.name);
         return;
@@ -574,6 +575,7 @@ void GameHost::sendWelcome(Peer& peer, const Player& player) {
     setField(body, "token", Value::string(player.token));
     setField(body, "game", Value::string(manifest_.contentNamespace));
     setField(body, "title", Value::string(title()));
+    setField(body, "revision", Value::integer(PROTOCOL_REVISION));
     setField(body, "phase", symbol(phase == Phase::Lobby     ? "lobby"
                                    : phase == Phase::Loading ? "loading"
                                    : phase == Phase::Running ? "running"

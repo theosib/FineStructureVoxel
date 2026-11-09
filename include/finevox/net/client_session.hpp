@@ -134,6 +134,8 @@ public:
     [[nodiscard]] bool paused() const { return paused_.load(); }
     [[nodiscard]] std::string token() const;
     [[nodiscard]] std::string serverTitle() const;
+    /// The server's PROTOCOL_REVISION, once welcomed: what it can send and will understand
+    [[nodiscard]] int serverRevision() const;
     [[nodiscard]] float rttMs() const;
     /// Where to find content for this game: the game root, or a session directory. Set once
     /// content is done.
@@ -232,6 +234,7 @@ private:
     std::string failure_;
     std::string token_;
     std::string title_;
+    int serverRevision_ = 0;
     std::vector<uint8_t> lobbyDeclaration_;
     std::filesystem::path contentRoot_;
     std::optional<WorldInfo> worldInfo_;

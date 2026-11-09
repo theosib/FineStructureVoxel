@@ -127,6 +127,7 @@ private:
     struct Peer {
         std::shared_ptr<finenet::Connection> connection;
         int64_t player = 0;
+        int revision = 0;  ///< The client's PROTOCOL_REVISION, from its Hello
         bool loaded = false;
         bool gameStartSent = false;
         std::shared_ptr<ClientView> view;

@@ -101,3 +101,20 @@ TEST_F(PersonalSpaceTest, FarApartAreLeftAlone) {
     for (int i = 0; i < 20; ++i) em.tick(0.05f);
     EXPECT_NEAR(apart(em, a, b), 2.0f, 1e-4f);
 }
+
+TEST_F(PersonalSpaceTest, OneOnTheMoveIsNeverPushed) {
+    EntityManager em(world, queue);
+    EntityId walker = spawn(em, "test_spaced", Vec3(0.5f, 1.0f, 0.5f));
+    EntityId stander = spawn(em, "test_spaced", Vec3(0.6f, 1.0f, 0.5f));
+    float startStander = em.getEntity(stander)->position().x;
+    for (int i = 0; i < 10; ++i) {
+        em.getEntity(walker)->setVelocity(Vec3(0.0f, 0.0f, 2.0f));
+        em.tick(0.05f);
+    }
+    // Straight along its way, with nothing sideways. How far depends on friction, not on this.
+    Vec3 p = em.getEntity(walker)->position();
+    EXPECT_NEAR(p.x, 0.5f, 1e-4f);
+    EXPECT_GT(p.z, 1.0f);
+    // While the one standing was eased off towards +x at first, before the walker left it behind
+    EXPECT_GT(em.getEntity(stander)->position().x, startStander);
+}

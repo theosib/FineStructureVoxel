@@ -267,13 +267,17 @@ float personalSpaceOf(const Entity& entity) {
 }  // namespace
 
 Vec3 EntityManager::personalSpacePush(const Entity& entity) const {
-    // A gentle shove, well under a walk, so that it never wins against where a unit is going
+    // A gentle shove, and only for one standing still. One on the move is never pushed, so units
+    // can't jam each other in a doorway: they walk through, and those standing ease out of the way.
     constexpr float PUSH_SPEED = 1.2f;   // blocks/sec, when standing right on top of another
     constexpr float MOST_SPACE = 1.0f;   // the most any one type is expected to want
     constexpr float SAME_LEVEL = 1.0f;   // further apart than this in height, they don't meet
+    constexpr float WALKING = 0.3f;      // blocks/sec of its own; faster than this, it's going somewhere
 
     float space = personalSpaceOf(entity);
     if (space <= 0.0f || !entity.isOnGround()) return Vec3(0.0f);
+    Vec3 own = entity.velocity();
+    if (own.x * own.x + own.z * own.z > WALKING * WALKING) return Vec3(0.0f);
 
     Vec3 here = entity.position();
     Vec3 push(0.0f);

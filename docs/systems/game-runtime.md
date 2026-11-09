@@ -315,9 +315,10 @@ hidden_in: shoot          # never while one of these does: the same tool put awa
 
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
 entity needs `model: name` and `anim:name: slot`. `only_in` and `hidden_in` go by those names.
-An entity can also have `personal_space: 0.4`: two with some, standing closer than the sum of
-theirs, are eased apart at up to 1.2 blocks a second, never enough to beat a walk. Units of a type
-without it neither push nor get pushed. Naming `walk` gets server-side idle/walk
+An entity can also have `personal_space: 0.4`: one standing still closer to another than the sum
+of theirs is eased away at up to 1.2 blocks a second. One that's walking isn't pushed at all, so
+units never jam each other, and those standing step out of its way. Units of a type without it
+neither push nor get pushed. Naming `walk` gets server-side idle/walk
 switching for free.
 
 ```

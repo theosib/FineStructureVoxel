@@ -48,8 +48,9 @@ struct EntityTypeDef {
     float jumpStrength = 0.5f;
     bool hasGravity = true;
     bool swims = false;
-    /// How far from others of its kind, or any type that has some, it likes to stand: two of them
-    /// closer than the sum of theirs are eased apart. 0 lets them stand in one another.
+    /// How far from others of its kind, or any type that has some, it likes to stand: one standing
+    /// closer than the sum of theirs is eased away. One walking isn't, so nothing jams. 0 lets them
+    /// stand in one another.
     float personalSpace = 0.0f;
 
     // Health

@@ -1,4 +1,5 @@
 #include "finevox/core/mesh.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/world.hpp"
 
@@ -188,6 +189,20 @@ SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
     return result;
 }
 
+namespace {
+
+// What shades its neighbours and hides their faces, when there's no face-by-face provider: a block
+// that fills its cell, opaque or a plain cube (leaves). A partial shape doesn't. Counting one would
+// darken the ground beside it while the ground in its own open part stays lit, leaving a hard edge.
+bool fillsCell(const World& world, const BlockCoord& pos) {
+    BlockTypeId type = world.getBlock(pos);
+    if (type == AIR_BLOCK_TYPE) return false;
+    const BlockType& block = BlockRegistry::global().getType(type);
+    return block.isOpaque() || !block.hasCustomMesh();
+}
+
+}  // namespace
+
 SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
     const SubChunk& subChunk,
     ChunkPos chunkPos,
@@ -195,11 +210,7 @@ SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
     const BlockTransparentProvider& transparentProvider,
     const BlockTextureProvider& textureProvider
 ) {
-    // Create opaque provider that checks the world
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
-        BlockTypeId type = world.getBlock(pos);
-        return type != AIR_BLOCK_TYPE;
-    };
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) { return fillsCell(world, pos); };
 
     return buildSubChunkMeshSplit(subChunk, chunkPos, opaqueProvider, transparentProvider, textureProvider);
 }
@@ -818,13 +829,7 @@ MeshData MeshBuilder::buildSubChunkMesh(
     const World& world,
     const BlockTextureProvider& textureProvider
 ) {
-    // Create opaque provider that checks the world
-    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) -> bool {
-        BlockTypeId type = world.getBlock(pos);
-        // For now, any non-air block is considered opaque
-        // TODO: Add transparency support via block type registry
-        return type != AIR_BLOCK_TYPE;
-    };
+    BlockOpaqueProvider opaqueProvider = [&world](const BlockCoord& pos) { return fillsCell(world, pos); };
 
     return buildSubChunkMesh(subChunk, chunkPos, opaqueProvider, textureProvider);
 }

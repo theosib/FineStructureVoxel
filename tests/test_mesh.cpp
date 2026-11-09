@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "finevox/core/mesh.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/world.hpp"
 #include "finevox/core/block_model.hpp"
@@ -1593,4 +1594,61 @@ TEST_F(CustomGeometryMeshTest, GreedyMeshingSkipsCustomBlocks) {
     }
 
     EXPECT_TRUE(foundSlabTop) << "Custom geometry slab should still render correctly with greedy meshing";
+}
+
+// ============================================================================
+// Shading from what's beside a face, with the world's own blocks
+// ============================================================================
+
+// The ground's top face beside a block, in the cell at x = 9, as the world meshes it
+static float groundAOBeside(BlockTypeId neighbour) {
+    World world;
+    BlockTypeId ground = BlockTypeId::fromName("test_ao_ground");
+    for (int x = 7; x <= 11; ++x) {
+        for (int z = 7; z <= 11; ++z) world.setBlock({x, 4, z}, ground);
+    }
+    world.setBlock({8, 5, 9}, neighbour);
+
+    MeshBuilder builder;
+    builder.setGreedyMeshing(false);
+    const SubChunk* subChunk = world.getSubChunk(ChunkPos(0, 0, 0));
+    BlockTextureProvider tiles = [](BlockTypeId, Face) { return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f); };
+    MeshData mesh = builder.buildSubChunkMesh(*subChunk, ChunkPos(0, 0, 0), world, tiles);
+
+    float darkest = 1.0f;
+    for (const auto& vertex : mesh.vertices) {
+        bool groundTop = std::abs(vertex.position.y - 5.0f) < 1e-4f && vertex.normal.y > 0.5f;
+        if (groundTop && vertex.position.x >= 9.0f - 1e-4f && vertex.position.x <= 10.0f + 1e-4f &&
+            vertex.position.z >= 9.0f - 1e-4f && vertex.position.z <= 10.0f + 1e-4f) {
+            darkest = std::min(darkest, vertex.ao);
+        }
+    }
+    return darkest;
+}
+
+TEST(MeshWorldAO, AFullBlockShadesTheGroundBesideIt) {
+    BlockType ground;
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_ground"), ground);
+    BlockType cube;
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_cube"), cube);
+    EXPECT_LT(groundAOBeside(BlockTypeId::fromName("test_ao_cube")), 0.99f);
+}
+
+TEST(MeshWorldAO, ASeeThroughCubeStillShades) {
+    BlockType ground;
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_ground"), ground);
+    BlockType leaves;
+    leaves.setOpaque(false);
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_leaves"), leaves);
+    EXPECT_LT(groundAOBeside(BlockTypeId::fromName("test_ao_leaves")), 0.99f);
+}
+
+// Its own cell's open ground would stay lit beside ground it darkened: a hard edge
+TEST(MeshWorldAO, APartialShapeDoesNot) {
+    BlockType ground;
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_ground"), ground);
+    BlockType stack;
+    stack.setOpaque(false).setHasCustomMesh(true);
+    BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_stack"), stack);
+    EXPECT_FLOAT_EQ(groundAOBeside(BlockTypeId::fromName("test_ao_stack")), 1.0f);
 }

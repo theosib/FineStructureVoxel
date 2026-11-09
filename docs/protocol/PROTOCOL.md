@@ -1,6 +1,6 @@
 # FineVox Network Protocol
 
-**Protocol version: 1.** This is the normative description of what a client and a server say to
+**Protocol version: 2.** This is the normative description of what a client and a server say to
 each other. A client written from this document, in any language, should be able to join a game
 without reading the engine. Where the engine and this document disagree, one of them has a bug.
 
@@ -248,7 +248,7 @@ All on channel 3, in the order the server made them.
 
 | Type | Name | Body |
 |---|---|---|
-| 0x30 | EntitySpawn | `u64 id`, `var typeId`, `u16 faction`, `f64 x, y, z`, `f32 yaw, pitch` |
+| 0x30 | EntitySpawn | `u64 id`, `var typeId`, `u16 faction`, `f64 x, y, z`, `f32 yaw, pitch`, `u8 health` |
 | 0x31 | EntityGone | `u64 id`, `u8 died` |
 | 0x32 | EntityBatch | `u64 tick`, `var count`, then per entity below |
 | 0x33 | Projectiles | `var count`, then `f32 x, y, z, vx, vy, vz` |
@@ -261,7 +261,11 @@ f32 vx, vy, vz      Velocity, for extrapolation
 f32 yaw, pitch      As the server's entity holds them
 u8  animation       Slot, as the entity's `.entity` file lists them
 u8  flags           bit 0: on the ground
+u8  health          In 255ths of its most. 255 only when nothing's missing, so a scratch shows
 ```
+
+A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255.
+Version 2 added the health byte, in both messages.
 
 An entity the client has been told about stays exactly where it is until told otherwise. Silence
 means it hasn't moved, and an entity that leaves the player's sight is `EntityGone` with `died` 0. A

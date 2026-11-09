@@ -19,7 +19,11 @@
 
 namespace finevox::net {
 
-inline constexpr int PROTOCOL_VERSION = 1;
+inline constexpr int PROTOCOL_VERSION = 2;
+
+/// An entity's health on the wire: a fraction in 255ths. Only an entity with nothing missing reads
+/// FULL_HEALTH, so a scratch still shows.
+inline constexpr uint8_t FULL_HEALTH = 255;
 inline constexpr uint16_t DEFAULT_PORT = 7810;
 
 // §7.2

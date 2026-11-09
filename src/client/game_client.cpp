@@ -64,6 +64,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <map>
 #include <iostream>
 #include <unordered_set>
 
@@ -216,6 +217,9 @@ struct GameClient::Impl {
     float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
     float stepLag = 0.0f;           ///< How far the eye is still to rise after a step up
     std::vector<render::SceneVertex> markers;  ///< From the UI, relative to markerCamera
+    std::map<std::string, Value> prefs;  ///< The player's own settings, kept in prefs.txt
+    std::unordered_map<EntityId, glm::vec4> xrayNext;  ///< marker_xray, for the next frame
+    std::unordered_map<EntityId, glm::vec4> xray;      ///< And for this one
     glm::dvec3 markerCamera{0.0};
     bool newGameRequested = false;
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
@@ -247,6 +251,8 @@ struct GameClient::Impl {
     [[nodiscard]] fs::path recentPath() const;
     [[nodiscard]] std::vector<std::string> recentServers() const;
     void noteRecentServer(const std::string& address);
+    void loadPrefs();
+    void savePrefs() const;
     void registerNatives();
     void registerNetNatives();
     void registerMcpTools();
@@ -255,6 +261,7 @@ struct GameClient::Impl {
     void bindInput();
     void updateCamera(float dt);
     void buildScene();
+    [[nodiscard]] bool hiddenByWorld(const glm::dvec3& feet, const BlockShapeProvider& shapes) const;
     void flushMarkers();
     void buildProjectiles();
     void updateFog(float dt);
@@ -295,6 +302,7 @@ void GameClient::Impl::setupShell() {
     if (options.userRoot.empty()) options.userRoot = options.gameRoot;
     if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
     playerName = options.playerName;
+    loadPrefs();
 
     EngineConfig engineConfig;
     engineConfig.windowTitle = manifest.windowTitle;
@@ -604,7 +612,10 @@ void GameClient::Impl::enterWorld() {
     worldRenderer->setOpaquePassCallback(
         [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawOpaque(cmd); });
     worldRenderer->setTranslucentPassCallback(
-        [this](finevk::CommandBuffer& cmd) { sceneRenderer->drawTranslucent(cmd); });
+        [this](finevk::CommandBuffer& cmd) {
+            sceneRenderer->drawTranslucent(cmd);
+            sceneRenderer->drawXray(cmd);
+        });
 
     models.loadDirectory(contentRoot / "models");
     EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
@@ -749,6 +760,49 @@ void GameClient::Impl::noteRecentServer(const std::string& address) {
     fs::create_directories(recentPath().parent_path(), ignored);
     std::ofstream out(recentPath());
     for (const std::string& line : recent) out << line << "\n";
+}
+
+// One setting a line, "name: kind value", kind being b(ool), n(umber), y (symbol) or s(tring). The UI
+// keeps what it likes there, and nothing in a game depends on it.
+void GameClient::Impl::loadPrefs() {
+    std::ifstream in(options.userRoot / "prefs.txt");
+    for (std::string line; std::getline(in, line);) {
+        auto colon = line.find(": ");
+        if (colon == std::string::npos || line.size() < colon + 4) continue;
+        std::string key = line.substr(0, colon);
+        char kind = line[colon + 2];
+        std::string text = line.substr(colon + 4);
+        try {
+            switch (kind) {
+                case 'b': prefs[key] = Value::boolean(text == "true"); break;
+                case 'n': prefs[key] = Value::number(std::stod(text)); break;
+                case 'y': prefs[key] = Value::symbol(StringInterner::global().intern(text)); break;
+                case 's': prefs[key] = Value::string(text); break;
+                default: break;
+            }
+        } catch (const std::exception&) {
+            // A number that isn't one is a setting lost, not a reason to stop
+        }
+    }
+}
+
+void GameClient::Impl::savePrefs() const {
+    std::error_code ignored;
+    fs::create_directories(options.userRoot, ignored);
+    std::ofstream out(options.userRoot / "prefs.txt");
+    for (const auto& [key, value] : prefs) {
+        if (value.isBool()) {
+            out << key << ": b " << (value.truthy() ? "true" : "false") << "\n";
+        } else if (value.isNumeric()) {
+            out << key << ": n " << value.asNumber() << "\n";
+        } else if (value.isSymbol()) {
+            out << key << ": y " << StringInterner::global().lookup(value.asSymbol()) << "\n";
+        } else if (value.isString()) {
+            std::string text(value.asString());
+            std::erase(text, '\n');
+            out << key << ": s " << text << "\n";
+        }
+    }
 }
 
 void GameClient::Impl::shutdown() {
@@ -1026,6 +1080,10 @@ void GameClient::Impl::buildScene() {
     glm::dvec3 cameraPos = camera.positionD();
     float tickRate = static_cast<float>(worldInfo.entityRate);
     auto& opaque = sceneRenderer->opaque();
+    // What the UI asked for last frame, which is as late as any marker
+    xray.swap(xrayNext);
+    xrayNext.clear();
+    BlockShapeProvider shapes = createBlockShapeProvider(session->world().world());
 
     for (const auto& [id, state] : entityRenderer.entities()) {
         if (!state.isCurrent() && !state.isDying()) continue;
@@ -1049,6 +1107,7 @@ void GameClient::Impl::buildScene() {
         glm::vec3 team = factionColor(state.faction);
         const EntityModel* model =
             def && def->model != 0 ? models.find(StringInterner::global().lookup(def->model)) : nullptr;
+        size_t first = opaque.size();
         if (model) {
             render::appendEntity(opaque, *model, state, cameraPos, team, brightness, tickRate,
                                  poseScratch);
@@ -1058,7 +1117,36 @@ void GameClient::Impl::buildScene() {
             center.y += half.y;
             render::appendBox(opaque, center, half, glm::vec4(team * brightness, 1.0f));
         }
+
+        // The same shape again, in one colour, for the pass that draws only what's hidden. Only
+        // for a body the world stands in front of: in plain view, a far arm behind the near one
+        // would show through it.
+        if (auto shown = xray.find(id); shown != xray.end() && state.isCurrent() && hiddenByWorld(pos, shapes)) {
+            auto& hidden = sceneRenderer->xray();
+            for (size_t i = first; i < opaque.size(); ++i) {
+                render::SceneVertex vertex = opaque[i];
+                vertex.color = shown->second;
+                hidden.push_back(vertex);
+            }
+        }
     }
+}
+
+// Is any of a body, standing at `feet`, out of sight behind blocks? Looks at its feet, middle and head.
+bool GameClient::Impl::hiddenByWorld(const glm::dvec3& feet, const BlockShapeProvider& shapes) const {
+    constexpr double HEIGHTS[] = {0.3, 1.0, 1.7};
+    constexpr float SHORT_OF = 0.4f;  // The ray stops before the body, which isn't a block
+    glm::dvec3 eye = camera.positionD();
+    for (double height : HEIGHTS) {
+        glm::dvec3 to = feet + glm::dvec3(0.0, height, 0.0) - eye;
+        double length = glm::length(to);
+        if (length < 1e-3) continue;
+        glm::dvec3 dir = to / length;
+        RaycastResult hit = raycastBlocks(Vec3(glm::vec3(eye)), Vec3(glm::vec3(dir)),
+                                          static_cast<float>(length) - SHORT_OF, RaycastMode::Interaction, shapes);
+        if (hit) return true;
+    }
+    return false;
 }
 
 void GameClient::Impl::startDeathBursts() {
@@ -1475,6 +1563,20 @@ void GameClient::Impl::registerNatives() {
         return state ? Value::integer(state->faction) : Value::nil();
     });
 
+    // entity_health id -> 0 to 1, as last received. 1 for anything unhurt, or not known.
+    e.registerFunction("entity_health", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty() || !session) return Value::number(1.0);
+        return Value::number(session->entityHealth(static_cast<EntityId>(number(args[0]))));
+    });
+
+    // marker_xray id r g b [a]: where the world hides this entity, its shape shows through in
+    // that colour. Like every marker it lasts a frame, so it's asked for again each frame.
+    e.registerFunction("marker_xray", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 4) return Value::nil();
+        xrayNext[static_cast<EntityId>(number(args[0]))] = colorArg(args, 1);
+        return Value::nil();
+    });
+
     // marker_ring x y z radius r g b [a]
     e.registerFunction("marker_ring", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 7) return Value::nil();
@@ -1566,6 +1668,31 @@ void GameClient::Impl::registerNetNatives() {
         if (args.empty()) return Value::nil();
         if (!args[0].isSymbol()) return Value::string(args[0].toString());
         return Value::string(std::string(StringInterner::global().lookup(args[0].asSymbol())));
+    });
+
+    // pref name [default] -> the player's own setting, kept between runs
+    e.registerFunction("pref", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        std::string key = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+                                             : args[0].toString();
+        auto it = prefs.find(key);
+        if (it != prefs.end()) return it->second;
+        return args.size() > 1 ? args[1] : Value::nil();
+    });
+
+    // set_pref name value: a bool, number, symbol or string, saved at once. nil forgets it.
+    e.registerFunction("set_pref", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        std::string key = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+                                             : args[0].toString();
+        if (key.empty() || key.find(':') != std::string::npos || key.find('\n') != std::string::npos) return Value::nil();
+        if (args.size() < 2 || args[1].isNil()) {
+            prefs.erase(key);
+        } else {
+            prefs[key] = args[1];
+        }
+        savePrefs();
+        return Value::nil();
     });
 
     // has_save -> whether there's a game to continue

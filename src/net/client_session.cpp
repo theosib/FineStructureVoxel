@@ -184,6 +184,12 @@ std::vector<EntityState> ClientSession::entities() const {
     return out;
 }
 
+float ClientSession::entityHealth(EntityId id) const {
+    std::lock_guard lock(mutex_);
+    auto it = health_.find(id);
+    return it == health_.end() ? 1.0f : static_cast<float>(it->second) / FULL_HEALTH;
+}
+
 void ClientSession::send(finenet::ChannelId channel, uint32_t type, std::vector<uint8_t> body) {
     std::shared_ptr<finenet::Connection> connection;
     {
@@ -535,6 +541,7 @@ void ClientSession::forgetEntities() {
         std::lock_guard lock(mutex_);
         for (const auto& [id, state] : entities_) ids.push_back(id);
         entities_.clear();
+        health_.clear();
     }
     for (EntityId id : ids) graphics_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id, false)));
 }
@@ -689,6 +696,7 @@ void ClientSession::onEntitySpawn(const Message& message) {
     state.position.z = r.f64();
     state.yaw = r.f32();
     state.pitch = r.f32();
+    uint8_t health = r.u8();
     if (!r.ok()) return;
 
     auto name = entityTypeNames_.find(type);
@@ -701,6 +709,7 @@ void ClientSession::onEntitySpawn(const Message& message) {
     graphics_.push(GraphicsMessage::fromSnapshot(std::move(snapshot)));
 
     std::lock_guard lock(mutex_);
+    health_[state.id] = health;
     entities_[state.id] = std::move(state);
 }
 
@@ -712,13 +721,14 @@ void ClientSession::onEntityGone(const Message& message) {
     graphics_.push(GraphicsMessage::fromEvent(script::makeEntityDespawnValue(id, died)));
     std::lock_guard lock(mutex_);
     entities_.erase(id);
+    health_.erase(id);
 }
 
 void ClientSession::onEntityBatch(const Message& message) {
     ByteReader r(message.payload());
     uint64_t tick = r.u64();
     uint64_t count = r.var();
-    constexpr uint64_t ENTRY_BYTES = 8 + 8 * 4 + 2;
+    constexpr uint64_t ENTRY_BYTES = 8 + 8 * 4 + 3;
     if (!r.ok() || count > r.remaining() / ENTRY_BYTES) return;
 
     std::vector<GraphicsMessage> batch;
@@ -739,7 +749,9 @@ void ClientSession::onEntityBatch(const Message& message) {
         parsed.pitch = r.f32();
         parsed.animationId = r.u8();
         parsed.onGround = (r.u8() & 1) != 0;
+        uint8_t health = r.u8();
         if (known == entities_.end()) continue;  // It's since gone
+        health_[id] = health;
         parsed.faction = known->second.faction;
         known->second = parsed;
 

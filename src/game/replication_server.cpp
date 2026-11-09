@@ -3,6 +3,7 @@
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/mob_entity.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/projectile_system.hpp"
 #include "finevox/core/subchunk.hpp"
@@ -285,11 +286,22 @@ bool ReplicationServer::factionSees(const ClientView& view, const Vec3& position
                                        static_cast<int32_t>(std::floor(position.z)));
 }
 
+namespace {
+
+uint8_t healthByte(const MobEntity* mob) {
+    if (!mob || mob->maxHealth() <= 0.0f || mob->health() >= mob->maxHealth()) return net::FULL_HEALTH;
+    float fraction = std::clamp(mob->health() / mob->maxHealth(), 0.0f, 1.0f);
+    return static_cast<uint8_t>(std::min(fraction * net::FULL_HEALTH, net::FULL_HEALTH - 1.0f));
+}
+
+}  // namespace
+
 void ReplicationServer::sendEntities(ClientView& view) {
     if (view.connection_->pendingBytes(net::CH_ENTITIES) >= ENTITY_BACKLOG) return;
 
     std::unordered_set<EntityId> present;
     std::vector<std::pair<EntityId, EntityState>> moved;
+    std::vector<uint8_t> movedHealth;
     auto& entities = runtime_.session().entities();
 
     for (const auto& [id, entity] : entities.entities()) {
@@ -305,6 +317,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
         now.pitch = state.pitch;
         now.animation = state.animationId;
         now.onGround = state.onGround;
+        now.health = healthByte(entities.getMob(id));
 
         auto known = view.known_.find(id);
         if (known == view.known_.end()) {
@@ -328,6 +341,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
             w.f64(state.position.z);
             w.f32(state.yaw);
             w.f32(state.pitch);
+            w.u8(now.health);
             send(view, net::CH_ENTITIES, net::msg::EntitySpawn, std::move(body));
             view.known_.emplace(id, now);
             continue;
@@ -339,10 +353,12 @@ void ReplicationServer::sendEntities(ClientView& view) {
                     std::abs(sent.position.y - now.position.y) < EPSILON &&
                     std::abs(sent.position.z - now.position.z) < EPSILON &&
                     std::abs(sent.yaw - now.yaw) < EPSILON && std::abs(sent.pitch - now.pitch) < EPSILON &&
-                    sent.animation == now.animation && sent.onGround == now.onGround;
+                    sent.animation == now.animation && sent.onGround == now.onGround &&
+                    sent.health == now.health;
         if (same) continue;
         known->second = now;
         moved.emplace_back(id, std::move(state));
+        movedHealth.push_back(now.health);
     }
 
     for (auto it = view.known_.begin(); it != view.known_.end();) {
@@ -363,7 +379,8 @@ void ReplicationServer::sendEntities(ClientView& view) {
     ByteWriter w(body);
     w.u64(runtime_.gameScript().tickCount());
     w.var(moved.size());
-    for (const auto& [id, state] : moved) {
+    for (size_t i = 0; i < moved.size(); ++i) {
+        const auto& [id, state] = moved[i];
         w.u64(id);
         w.f32(static_cast<float>(state.position.x));
         w.f32(static_cast<float>(state.position.y));
@@ -375,6 +392,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
         w.f32(state.pitch);
         w.u8(state.animationId);
         w.u8(state.onGround ? 1 : 0);
+        w.u8(movedHealth[i]);
     }
     send(view, net::CH_ENTITIES, net::msg::EntityBatch, std::move(body));
 }

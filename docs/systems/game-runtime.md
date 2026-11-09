@@ -218,9 +218,11 @@ pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
 do_action name     gui_click x y   gui_hover x y   input_text "abc"   (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
-entity_pos id   entity_faction id  set_faction_color id r g b
+entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a
+marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour
+pref name [default]    set_pref name value   the player's own settings, in prefs.txt
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil
@@ -228,6 +230,14 @@ pick_ground mx my -> the same, looking through what a body can walk through. Ord
 so that foliage with a `hit:` shape can be inspected without catching clicks on the ground.
 request_screenshot path    quit_game    to_menu
 ```
+
+Markers last one frame, so a script that wants one asks again every frame. `marker_xray` copies the
+body into a pass drawn only where something nearer has already been drawn, front faces only, and
+only for a body a ray from the camera to its feet, middle or head finds a block in front of.
+
+`pref` and `set_pref` keep bools, numbers, symbols and strings in `prefs.txt` in the player's
+folder (the game root, with `--game-root`), written at once. `set_pref name nil` forgets one.
+Nothing in a game should depend on them: they're the player's, not the game's.
 
 `ui_skin`, `ui_texture` and `source` take paths inside the content root and refuse anything else,
 and `request_screenshot` does too when the content came from a server. A UI script can be a
@@ -299,10 +309,15 @@ offset: 0 0.3 0
 size: 0.5 0.6 0.3
 color: 0.5 0.4 0.3
 team: 1.0                 # 0..1 blend toward faction colour
+only_in: chop quarry      # drawn only while one of these animations plays: a tool in hand
+hidden_in: shoot          # never while one of these does: the same tool put away
 ```
 
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
-entity needs `model: name` and `anim:name: slot`. Naming `walk` gets server-side idle/walk
+entity needs `model: name` and `anim:name: slot`. `only_in` and `hidden_in` go by those names.
+An entity can also have `personal_space: 0.4`: two with some, standing closer than the sum of
+theirs, are eased apart at up to 1.2 blocks a second, never enough to beat a walk. Units of a type
+without it neither push nor get pushed. Naming `walk` gets server-side idle/walk
 switching for free.
 
 ```

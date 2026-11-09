@@ -95,6 +95,20 @@ void SceneRenderer::initialize() {
         .dynamicViewportAndScissor()
         .build();
 
+    // A body behind a wall fails the usual test, and that's the part this draws. Where it's in
+    // plain view its own depth is already there, which isn't greater, so nothing doubles up. Its
+    // back faces are behind its front ones, so they'd pass: only the faces towards the eye are drawn.
+    xrayPipeline_ = makeBuilder()
+        .depthTest(true)
+        .depthWrite(false)
+        .depthCompareOp(VK_COMPARE_OP_GREATER)
+        .alphaBlending()
+        .cullBack()
+        .frontFace(VK_FRONT_FACE_CLOCKWISE)
+        .samples(surface_->msaaSamples())
+        .dynamicViewportAndScissor()
+        .build();
+
     initialized_ = true;
 }
 
@@ -169,6 +183,10 @@ void SceneRenderer::drawOpaque(finevk::CommandBuffer& cmd) {
 
 void SceneRenderer::drawTranslucent(finevk::CommandBuffer& cmd) {
     draw(cmd, *translucentPipeline_, translucentMesh_, translucent_);
+}
+
+void SceneRenderer::drawXray(finevk::CommandBuffer& cmd) {
+    draw(cmd, *xrayPipeline_, xrayMesh_, xray_);
 }
 
 }  // namespace finevox::render

@@ -19,6 +19,7 @@
 #include "finevox/core/game_subsystem.hpp"
 #include "finevox/core/physics.hpp"
 #include "finevox/core/position.hpp"
+#include "finevox/net/protocol.hpp"
 
 #include <finenet/connection.hpp>
 
@@ -64,6 +65,7 @@ private:
         float pitch = 0.0f;
         uint8_t animation = 0;
         bool onGround = false;
+        uint8_t health = net::FULL_HEALTH;
     };
 
     int64_t player_;

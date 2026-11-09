@@ -159,6 +159,8 @@ public:
     [[nodiscard]] size_t entitiesKnown() const;
     /// Every entity this client has been told about, as last told
     [[nodiscard]] std::vector<EntityState> entities() const;
+    /// How much of its health an entity has, 0 to 1. 1 for anything unhurt or unknown.
+    [[nodiscard]] float entityHealth(EntityId id) const;
 
     // ── What the player does ──
     void setSetting(std::string_view key, const finescript::Value& value);
@@ -241,6 +243,7 @@ private:
     WorldTime time_;
     std::chrono::steady_clock::time_point timeStamp_{};
     std::unordered_map<EntityId, EntityState> entities_;
+    std::unordered_map<EntityId, uint8_t> health_;  ///< In 255ths, as sent
     bool helloSent_ = false;
 
     // Sync thread only

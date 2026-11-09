@@ -6,7 +6,8 @@
  *
  * Callers rebuild the opaque and translucent vertex lists each frame, then
  * WorldRenderer's pass callbacks draw them at the right point: opaque after
- * chunks (so entities depth-test against the world), translucent after fluids.
+ * chunks (so entities depth-test against the world), translucent after fluids, and x-ray last,
+ * where only what's behind something shows.
  */
 
 #include "finevox/render/scene_geometry.hpp"
@@ -42,9 +43,12 @@ public:
     /// Geometry for this frame. Cleared after drawing.
     [[nodiscard]] std::vector<SceneVertex>& opaque() { return opaque_; }
     [[nodiscard]] std::vector<SceneVertex>& translucent() { return translucent_; }
+    /// Drawn only where something nearer already has been: a shape seen through what hides it
+    [[nodiscard]] std::vector<SceneVertex>& xray() { return xray_; }
 
     void drawOpaque(finevk::CommandBuffer& cmd);
     void drawTranslucent(finevk::CommandBuffer& cmd);
+    void drawXray(finevk::CommandBuffer& cmd);
 
 private:
     /// Host-visible vertex storage, one buffer per frame in flight. Geometry changes
@@ -65,13 +69,16 @@ private:
     finevk::PipelineLayoutPtr pipelineLayout_;
     finevk::GraphicsPipelinePtr opaquePipeline_;
     finevk::GraphicsPipelinePtr translucentPipeline_;
+    finevk::GraphicsPipelinePtr xrayPipeline_;
     std::unique_ptr<finevk::UniformBuffer<finevk::CameraUniform>> cameraUniform_;
     std::vector<VkDescriptorSet> descriptorSets_;
 
     DynamicMesh opaqueMesh_;
     DynamicMesh translucentMesh_;
+    DynamicMesh xrayMesh_;
     std::vector<SceneVertex> opaque_;
     std::vector<SceneVertex> translucent_;
+    std::vector<SceneVertex> xray_;
 
     glm::vec3 sunDirection_{0.0f, 1.0f, 0.0f};
     glm::vec3 fogColor_{0.6f, 0.7f, 0.8f};

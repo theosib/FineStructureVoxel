@@ -401,6 +401,10 @@ private:
     /// Away from whoever stands too close, in blocks/sec (EntityTypeDef::personalSpace)
     [[nodiscard]] Vec3 personalSpacePush(const Entity& entity) const;
     void physicsPass(float tickDt);
+    /// Whether this box is inside a block's collision, more than touching it
+    [[nodiscard]] bool overlapsBlocks(const AABB& box) const;
+    /// Out of any block a body's been caught inside, up onto it or into the next cell
+    void freeFromBlocks(Entity& entity);
 
     /**
      * @brief Process entity chunk transfers

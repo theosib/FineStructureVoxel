@@ -118,3 +118,39 @@ TEST_F(PersonalSpaceTest, OneOnTheMoveIsNeverPushed) {
     // While the one standing was eased off towards +x at first, before the walker left it behind
     EXPECT_GT(em.getEntity(stander)->position().x, startStander);
 }
+
+// A block put where a body stands. These use the same floor, and units with no personal space.
+
+TEST_F(PersonalSpaceTest, OneCaughtInABlockStepsUpOntoIt) {
+    EntityManager em(world, queue);
+    EntityId id = spawn(em, "test_crowded", Vec3(0.5f, 1.0f, 0.5f));
+    world.setBlock({0, 1, 0}, BlockTypeId::fromName("test_space_stone"));
+    em.tick(0.05f);
+    Vec3 p = em.getEntity(id)->position();
+    EXPECT_GE(p.y, 2.0f - 1e-3f);
+    EXPECT_NEAR(p.x, 0.5f, 1e-4f);
+}
+
+TEST_F(PersonalSpaceTest, WithNoRoomAboveItsPutAside) {
+    EntityManager em(world, queue);
+    EntityId id = spawn(em, "test_crowded", Vec3(0.5f, 1.0f, 0.5f));
+    auto stone = BlockTypeId::fromName("test_space_stone");
+    for (int y = 1; y <= 4; ++y) world.setBlock({0, y, 0}, stone);
+    em.tick(0.05f);
+    Vec3 p = em.getEntity(id)->position();
+    // Into a neighbouring cell, at the middle of it, on the floor
+    bool aside = std::abs(p.x - 0.5f) > 0.9f || std::abs(p.z - 0.5f) > 0.9f;
+    EXPECT_TRUE(aside) << p.x << " " << p.z;
+    EXPECT_LT(p.y, 1.5f);
+}
+
+TEST_F(PersonalSpaceTest, StandingOnTheFloorAndAgainstAWallIsntCaught) {
+    EntityManager em(world, queue);
+    // Its side touching the block's face, its feet on the floor
+    EntityId id = spawn(em, "test_crowded", Vec3(1.3f, 1.0f, 0.5f));
+    world.setBlock({0, 1, 0}, BlockTypeId::fromName("test_space_stone"));
+    for (int i = 0; i < 10; ++i) em.tick(0.05f);
+    Vec3 p = em.getEntity(id)->position();
+    EXPECT_NEAR(p.x, 1.3f, 1e-3f);
+    EXPECT_NEAR(p.y, 1.0f, 1e-2f);
+}

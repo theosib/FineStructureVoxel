@@ -14,6 +14,7 @@
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/navigation.hpp"
+#include "finevox/core/physics.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/work_claims.hpp"
 #include "finevox/core/world.hpp"
@@ -131,6 +132,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     const uint32_t keyEnemyOf = si.intern("enemy_of");
     const uint32_t keyType = si.intern("type");
     const uint32_t keyMax = si.intern("max");
+    const uint32_t keyExcept = si.intern("except");
     const uint32_t keyRange = si.intern("range");
     const uint32_t keyPlace = si.intern("place");
     const uint32_t keyDig = si.intern("dig");
@@ -312,6 +314,27 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             result.push_back(Value::integer(static_cast<int64_t>(found[i].second)));
         }
         return Value::array(std::move(result));
+    });
+
+    // cell_occupied x y z [=except id] -> the id of an entity whose body is in that cell, or nil.
+    // A block put there would trap it.
+    e.registerFunction("cell_occupied", [=](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        double x, y, z;
+        if (!ud || !ud->entityManager || !positionArg(args, 0, x, y, z)) return Value::nil();
+        Value except = option(optionsArg(args, args[0].isArray() ? 1 : 3), keyExcept);
+        EntityId skip = except.isNumeric() ? static_cast<EntityId>(except.asNumber()) : INVALID_ENTITY_ID;
+        BlockCoord cell(static_cast<int32_t>(std::floor(x)), static_cast<int32_t>(std::floor(y)),
+                        static_cast<int32_t>(std::floor(z)));
+        Vec3 center(cell.x + 0.5f, cell.y + 0.5f, cell.z + 0.5f);
+        constexpr float REACH = 2.5f;  // Further than any body's middle from a cell it's in
+        for (EntityId id : ud->entityManager->spatialIndex().queryRadius(center, REACH)) {
+            if (id == skip) continue;
+            const Entity* entity = ud->entityManager->getEntity(id);
+            if (!entity || !entity->isAlive()) continue;
+            if (wouldBlockIntersectEntity(cell, entity->boundingBox())) return Value::integer(static_cast<int64_t>(id));
+        }
+        return Value::nil();
     });
 
     // ------------------------------------------------------------------------

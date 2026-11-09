@@ -312,6 +312,44 @@ Vec3 EntityManager::personalSpacePush(const Entity& entity) const {
     return push * PUSH_SPEED;
 }
 
+bool EntityManager::overlapsBlocks(const AABB& box) const {
+    // A hair inside the body, so that standing on a floor or against a wall isn't overlapping it
+    constexpr float INSET = 0.02f;
+    AABB inner(box.min + Vec3(INSET), box.max - Vec3(INSET));
+    for (const AABB& collider : physics_.collectColliders(inner)) {
+        if (collider.intersects(inner)) return true;
+    }
+    return false;
+}
+
+void EntityManager::freeFromBlocks(Entity& entity) {
+    // A block put where a body stands would trap it: collision keeps a body out, and has nothing to
+    // say about one already in. Up onto it if there's room, as anyone would step up, or else aside.
+    AABB box = entity.boundingBox();
+    if (!overlapsBlocks(box)) return;
+    Vec3 at = entity.position();
+    auto shifted = [&](const Vec3& by) { return AABB(box.min + by, box.max + by); };
+
+    for (float lift : {0.25f, 0.5f, 0.75f, 1.0f, 1.25f}) {
+        Vec3 by(0.0f, lift, 0.0f);
+        if (!overlapsBlocks(shifted(by))) {
+            entity.setPosition(at + by);
+            return;
+        }
+    }
+    // The middle of the next cell over, at its feet or a step up
+    Vec3 inCell(std::floor(at.x) + 0.5f - at.x, 0.0f, std::floor(at.z) + 0.5f - at.z);
+    for (float up : {0.0f, 1.0f}) {
+        for (auto [dx, dz] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}}) {
+            Vec3 by = inCell + Vec3(static_cast<float>(dx), up, static_cast<float>(dz));
+            if (!overlapsBlocks(shifted(by))) {
+                entity.setPosition(at + by);
+                return;
+            }
+        }
+    }
+}
+
 void EntityManager::physicsPass(float tickDt) {
     // Create fluid query provider from world
     FluidQueryProvider fluidQuery = [this](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
@@ -391,7 +429,8 @@ void EntityManager::physicsPass(float tickDt) {
             entity->setVelocity(vel);
         }
 
-        // 4. Move with collision
+        // 4. Move with collision, from somewhere it fits
+        freeFromBlocks(*entity);
         bool wasOnGround = entity->isOnGround();
         Vec3 velocity = entity->velocity();
         Vec3 movement = velocity * tickDt + personalSpacePush(*entity) * tickDt;

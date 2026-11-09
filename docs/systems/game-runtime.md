@@ -127,7 +127,13 @@ ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id
 ent_speed id mult    ent_anim id :state     ent_look_at id x y z
 ent_find x y z radius [=faction f] [=enemy_of f] [=type t] [=max n] -> ids, nearest first
+cell_occupied x y z [=except id] -> an entity whose body is in that cell, or nil
 ```
+
+A solid block set where a body stands would trap it, so the engine doesn't leave it there: next
+tick it's lifted onto the block, if there's room within a block and a quarter, or else put in the
+middle of a free cell beside it. Policy that can wait should still check `cell_occupied` first, as a
+builder placing a wall would, since being shoved out of the way isn't pretty.
 
 ### Navigation
 
@@ -140,7 +146,7 @@ ent_nav_resume id     ent_nav_ack id     ent_stop id
 
 With `=place` or `=dig`, a path may route through cells needing a block changed. The agent
 stops at each and reports `:blocked`. Policy decides what to do, then calls
-`ent_nav_resume`. `:arrived` and `:failed` persist until `ent_nav_ack`.
+`ent_nav_resume`. The search knows only blocks: the cell it wants filled can have someone in it. `:arrived` and `:failed` persist until `ent_nav_ack`.
 
 Budget the searches: an unreachable goal costs the full `max_nodes` every attempt, so
 agents should back off after `:failed`. Chasing a moving target should re-search only once

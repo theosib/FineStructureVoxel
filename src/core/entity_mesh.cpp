@@ -1,11 +1,22 @@
 #include "finevox/core/entity_mesh.hpp"
 
+#include <algorithm>
+
 namespace finevox {
+
+bool EntityMeshPart::shownDuring(std::string_view animation) const {
+    auto names = [animation](const std::vector<std::string>& list) {
+        return std::find(list.begin(), list.end(), animation) != list.end();
+    };
+    if (!onlyIn.empty() && !names(onlyIn)) return false;
+    return !names(hiddenIn);
+}
 
 void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                                 std::vector<EntityVertex>& vertices,
                                 std::vector<uint32_t>& indices,
-                                const glm::vec3& teamColor) const
+                                const glm::vec3& teamColor,
+                                std::string_view animation) const
 {
     vertices.clear();
     indices.clear();
@@ -47,6 +58,8 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
     };
 
     for (const auto& part : parts) {
+        if (!part.shownDuring(animation)) continue;
+
         // Get bone transform (or identity if out of range)
         glm::mat4 boneTransform(1.0f);
         if (part.boneIndex >= 0 &&

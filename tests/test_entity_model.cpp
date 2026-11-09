@@ -89,3 +89,43 @@ TEST(EntityMesh, TeamColourBlendsByPart) {
     EXPECT_FLOAT_EQ(vertices[0].color.r, 0.5f);
     EXPECT_FLOAT_EQ(vertices[0].color.b, 0.5f);
 }
+
+TEST(EntityModel, PartsCanBeShownOnlyDuringAnAnimation) {
+    const char* model = R"(
+skeleton: rig
+part: arm
+bone: body
+size: 0.1 0.5 0.1
+part: axe
+bone: body
+size: 0.05 0.6 0.05
+only_in: chop quarry
+part: axe_on_belt
+bone: body
+size: 0.05 0.3 0.05
+hidden_in: chop quarry
+)";
+    EntityModelRegistry registry;
+    auto parsed = registry.parse("tooled", model, reader);
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(parsed->mesh.parts.size(), 3u);
+
+    std::vector<glm::mat4> poses(parsed->skeleton->boneCount(), glm::mat4(1.0f));
+    std::vector<EntityVertex> vertices;
+    std::vector<uint32_t> indices;
+    auto partsShown = [&](std::string_view animation) {
+        parsed->mesh.buildVertices(poses, vertices, indices, glm::vec3(1.0f), animation);
+        return vertices.size() / 24;
+    };
+    EXPECT_EQ(partsShown("walk"), 2u);   // arm, and the axe at the belt
+    EXPECT_EQ(partsShown(""), 2u);
+    EXPECT_EQ(partsShown("chop"), 2u);   // arm, and the axe in hand
+    EXPECT_EQ(partsShown("quarry"), 2u);
+
+    const auto& axe = parsed->mesh.parts[1];
+    const auto& belt = parsed->mesh.parts[2];
+    EXPECT_TRUE(axe.shownDuring("chop"));
+    EXPECT_FALSE(axe.shownDuring("walk"));
+    EXPECT_FALSE(belt.shownDuring("chop"));
+    EXPECT_TRUE(belt.shownDuring("walk"));
+}

@@ -1,4 +1,5 @@
 #include "finevox/render/scene_geometry.hpp"
+#include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/position.hpp"
 
 #include <glm/gtc/constants.hpp>
@@ -102,7 +103,14 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
     }
     for (auto& pose : scratch.world) pose = root * pose;
 
-    model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor);
+    // Which clip is playing, by the name the model's parts know it by
+    std::string_view animation;
+    if (const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId)) {
+        for (const auto& [name, slot] : def->animationStates) {
+            if (slot == state.currentAnimationId) animation = name;
+        }
+    }
+    model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor, animation);
 
     out.reserve(out.size() + scratch.indices.size());
     for (uint32_t index : scratch.indices) {

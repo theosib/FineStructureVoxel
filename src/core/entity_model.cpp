@@ -17,6 +17,13 @@ glm::vec3 parseVec3(std::string_view text, glm::vec3 fallback) {
     return v;
 }
 
+std::vector<std::string> words(std::string_view text) {
+    std::istringstream stream{std::string(text)};
+    std::vector<std::string> out;
+    for (std::string word; stream >> word;) out.push_back(word);
+    return out;
+}
+
 }  // namespace
 
 std::shared_ptr<const Skeleton> EntityModelRegistry::skeletonFor(const std::string& name,
@@ -71,6 +78,10 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
                 part->color = parseVec3(entry.value.asString(), part->color);
             } else if (entry.key == "team") {
                 part->teamTint = entry.value.asFloat(0.0f);
+            } else if (entry.key == "only_in") {
+                part->onlyIn = words(entry.value.asString());
+            } else if (entry.key == "hidden_in") {
+                part->hiddenIn = words(entry.value.asString());
             }
         }
     }

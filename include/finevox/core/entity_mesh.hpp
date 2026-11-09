@@ -10,6 +10,8 @@
  */
 
 #include <glm/glm.hpp>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <cstdint>
 
@@ -38,6 +40,12 @@ struct EntityMeshPart {
     glm::vec2 uvSize{1.0f};     // UV dimensions for one face
     glm::vec3 color{1.0f};      // Flat colour, for models that aren't textured
     float teamTint = 0.0f;      // 0..1 blend from color toward the faction colour
+    /// Shown only while one of these animations plays (a tool in hand), or never during one of
+    /// these (the same tool put away). Empty means always, and never.
+    std::vector<std::string> onlyIn;
+    std::vector<std::string> hiddenIn;
+
+    [[nodiscard]] bool shownDuring(std::string_view animation) const;
 };
 
 // ============================================================================
@@ -53,7 +61,8 @@ public:
     void buildVertices(const std::vector<glm::mat4>& worldPoses,
                        std::vector<EntityVertex>& vertices,
                        std::vector<uint32_t>& indices,
-                       const glm::vec3& teamColor = glm::vec3(1.0f)) const;
+                       const glm::vec3& teamColor = glm::vec3(1.0f),
+                       std::string_view animation = {}) const;
 
     [[nodiscard]] size_t partCount() const { return parts.size(); }
     [[nodiscard]] bool isEmpty() const { return parts.empty(); }

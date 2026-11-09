@@ -1563,6 +1563,13 @@ void GameClient::Impl::registerNatives() {
         return state ? Value::integer(state->faction) : Value::nil();
     });
 
+    // entity_type id -> what it is, as a symbol (:militia), or nil if it isn't known here
+    e.registerFunction("entity_type", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
+        return state ? Value::symbol(state->typeId.id) : Value::nil();
+    });
+
     // entity_health id -> 0 to 1, as last received. 1 for anything unhurt, or not known.
     e.registerFunction("entity_health", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty() || !session) return Value::number(1.0);

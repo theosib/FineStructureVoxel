@@ -225,6 +225,7 @@ avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
 do_action name     gui_click x y   gui_hover x y   input_text "abc"   (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
+entity_type id -> :militia, or nil if not known
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a
 marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour

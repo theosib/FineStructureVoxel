@@ -17,6 +17,7 @@
 #include "finevox/core/particle_registry.hpp"
 #include "finevox/script/event_value.hpp"
 
+#include <cmath>
 #include <string>
 
 namespace finevox {
@@ -255,6 +256,58 @@ void EntityManager::tick(float tickDt) {
     processPendingRemovals();
 }
 
+namespace {
+
+float personalSpaceOf(const Entity& entity) {
+    const auto* mob = dynamic_cast<const MobEntity*>(&entity);
+    const EntityTypeDef* def = mob ? mob->typeDef() : nullptr;
+    return def ? def->personalSpace : 0.0f;
+}
+
+}  // namespace
+
+Vec3 EntityManager::personalSpacePush(const Entity& entity) const {
+    // A gentle shove, well under a walk, so that it never wins against where a unit is going
+    constexpr float PUSH_SPEED = 1.2f;   // blocks/sec, when standing right on top of another
+    constexpr float MOST_SPACE = 1.0f;   // the most any one type is expected to want
+    constexpr float SAME_LEVEL = 1.0f;   // further apart than this in height, they don't meet
+
+    float space = personalSpaceOf(entity);
+    if (space <= 0.0f || !entity.isOnGround()) return Vec3(0.0f);
+
+    Vec3 here = entity.position();
+    Vec3 push(0.0f);
+    for (EntityId otherId : spatialIndex_.queryRadius(here, space + MOST_SPACE)) {
+        if (otherId == entity.id()) continue;
+        const Entity* other = getEntity(otherId);
+        if (!other || !other->isAlive() || other->isPlayerEntity()) continue;
+        float want = space + personalSpaceOf(*other);
+        if (want <= space) continue;
+        Vec3 there = other->position();
+        if (std::abs(there.y - here.y) > SAME_LEVEL) continue;
+        float dx = here.x - there.x;
+        float dz = here.z - there.z;
+        float apart = std::sqrt(dx * dx + dz * dz);
+        if (apart >= want) continue;
+        if (apart < 1e-3f) {
+            // Exactly on top of each other: the ids pick opposite ways, so they don't both go one way
+            float angle = static_cast<float>((entity.id() * 2654435761u) % 6283) / 1000.0f;
+            dx = std::cos(angle);
+            dz = std::sin(angle);
+            apart = 1.0f;
+        } else {
+            dx /= apart;
+            dz /= apart;
+        }
+        float overlap = 1.0f - apart / want;
+        push.x += dx * overlap;
+        push.z += dz * overlap;
+    }
+    float length = std::sqrt(push.x * push.x + push.z * push.z);
+    if (length > 1.0f) push /= length;
+    return push * PUSH_SPEED;
+}
+
 void EntityManager::physicsPass(float tickDt) {
     // Create fluid query provider from world
     FluidQueryProvider fluidQuery = [this](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
@@ -337,7 +390,7 @@ void EntityManager::physicsPass(float tickDt) {
         // 4. Move with collision
         bool wasOnGround = entity->isOnGround();
         Vec3 velocity = entity->velocity();
-        Vec3 movement = velocity * tickDt;
+        Vec3 movement = velocity * tickDt + personalSpacePush(*entity) * tickDt;
         physics_.moveBody(*entity, movement);
 
         // 5. Update ground state and zero downward velocity when grounded

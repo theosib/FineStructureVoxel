@@ -45,6 +45,8 @@ std::optional<EntityTypeDef> EntityTypeLoader::loadFromString(std::string_view c
             def.hasGravity = entry.value.asBool(def.hasGravity);
         } else if (entry.key == "swims") {
             def.swims = entry.value.asBool(def.swims);
+        } else if (entry.key == "personal_space") {
+            def.personalSpace = entry.value.asFloat(def.personalSpace);
         } else if (entry.key == "max_health") {
             def.maxHealth = entry.value.asFloat(def.maxHealth);
         } else if (entry.key == "armor") {

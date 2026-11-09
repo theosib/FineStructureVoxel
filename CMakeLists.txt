@@ -766,6 +766,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_entity_model.cpp
         tests/test_navigation.cpp
         tests/test_ai_driver.cpp
+        tests/test_personal_space.cpp
         tests/test_entity_spatial_index.cpp
         tests/test_combat_bridge.cpp
         tests/test_block_drop_pipeline.cpp

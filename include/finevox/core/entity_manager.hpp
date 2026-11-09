@@ -398,6 +398,8 @@ private:
     /**
      * @brief Run physics for all entities
      */
+    /// Away from whoever stands too close, in blocks/sec (EntityTypeDef::personalSpace)
+    [[nodiscard]] Vec3 personalSpacePush(const Entity& entity) const;
     void physicsPass(float tickDt);
 
     /**

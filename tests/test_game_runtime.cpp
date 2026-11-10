@@ -231,6 +231,54 @@ end
     EXPECT_EQ(game.session().entities().getMob(id)->faction(), 3);
 }
 
+// An enemy is anyone not on your team: faction_team makes allies of the ones that share one
+TEST_F(GameRuntimeTest, AnAllyIsNoEnemy) {
+    auto& game = boot(R"(
+set near []
+set friends 0
+on :start do
+    faction_team 1 7
+    faction_team 2 7
+    ent_spawn :walker 8.5 32 8.5 =faction 1
+    ent_spawn :walker 9.5 32 8.5 =faction 2
+    ent_spawn :walker 10.5 32 8.5 =faction 3
+    ent_spawn :walker 11.5 32 8.5 =faction 0
+    set near {ent_find 8.5 32 8.5 6 =enemy_of 1}
+    if {faction_hostile 1 2} { set friends -1 }
+    if {faction_hostile 1 3} { set friends (friends + 1) }
+end
+)");
+    auto& ctx = game.gameScript().context();
+    ASSERT_TRUE(ctx.get("near").isArray());
+    ASSERT_EQ(ctx.get("near").asArray().size(), 1u) << "only faction 3: 2 is an ally, 0 nobody's";
+    EntityId id = static_cast<EntityId>(ctx.get("near").asArray()[0].asInt());
+    EXPECT_EQ(game.session().entities().getMob(id)->faction(), 3);
+    EXPECT_EQ(ctx.get("friends").asInt(), 1);
+}
+
+// What a player chose for themselves in the lobby comes with them
+TEST_F(GameRuntimeTest, PlayersBringTheirOwnSettings) {
+    write("scripts/main.fsc", R"(
+set team nil
+set none nil
+on :start do
+    set team PLAYERS[0].settings.team
+    set none PLAYERS[1].settings.team
+end
+)");
+    finescript::Value mine = finescript::Value::map();
+    mine.asMap().set(StringInterner::global().intern("team"), finescript::Value::integer(4));
+    RuntimeOptions options;
+    options.gameRoot = root;
+    options.players.push_back({1, "Ann", true, net::encodeBody(mine)});
+    options.players.push_back({2, "Bo", false, {}});
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+    auto& ctx = runtime->gameScript().context();
+    EXPECT_EQ(ctx.get("team").asInt(), 4);
+    EXPECT_TRUE(ctx.get("none").isNil()) << "and one who chose nothing has an empty map";
+}
+
 TEST_F(GameRuntimeTest, BlueprintSitesWorkFromScript) {
     auto& game = boot(R"(
 set site nil

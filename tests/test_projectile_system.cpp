@@ -144,6 +144,19 @@ TEST_F(ProjectileTest, DoesNotHitItsOwnSide) {
     EXPECT_LT(entities->getMob(enemy)->health(), 20.0f);
 }
 
+// One team's shots fly past its allies, and still hit whoever isn't on it
+TEST_F(ProjectileTest, DoesNotHitAnAlly) {
+    entities->alliances().setTeam(1, 5);
+    entities->alliances().setTeam(3, 5);
+    EntityId ally = spawnTarget(10.0f, 0.0f, 3);
+    EntityId enemy = spawnTarget(20.0f, 0.0f, 2);
+    system->fire(shot(glm::dvec3(0.0, GROUND_Y + 1.2, 0.0), glm::dvec3(20.0, GROUND_Y + 1.0, 0.0)));
+    run(2.0f);
+
+    EXPECT_FLOAT_EQ(entities->getMob(ally)->health(), 20.0f);
+    EXPECT_LT(entities->getMob(enemy)->health(), 20.0f);
+}
+
 TEST_F(ProjectileTest, FastShotsDoNotTunnelThroughThinWalls) {
     for (int z = -4; z < 4; ++z) world.setBlock(30, GROUND_Y + 1, z, stone);
     ProjectileSpec spec;

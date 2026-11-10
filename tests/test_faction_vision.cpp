@@ -90,6 +90,22 @@ TEST_F(FactionVisionTest, FactionsDoNotShareSight) {
     EXPECT_EQ(vision->stateAt(RED, 44, 30), VisionState::Unknown);
 }
 
+TEST_F(FactionVisionTest, AlliesShareSight) {
+    entities->alliances().setTeam(BLUE, 1);
+    entities->alliances().setTeam(RED, 1);
+    spawn(BLUE, 40, 30);
+    vision->addSource(RED, glm::dvec3(100.5, GROUND_Y + 2.0, 30.5), 8.0f);
+    vision->refresh(RED);
+    vision->refresh(BLUE);
+    EXPECT_EQ(vision->stateAt(RED, 44, 30), VisionState::Visible) << "the ally's unit";
+    EXPECT_EQ(vision->stateAt(BLUE, 102, 30), VisionState::Visible) << "the ally's tower";
+
+    // And on different teams again, they don't
+    entities->alliances().setTeam(RED, 2);
+    vision->refresh(RED);
+    EXPECT_NE(vision->stateAt(RED, 44, 30), VisionState::Visible);
+}
+
 TEST_F(FactionVisionTest, ExploredStaysAfterTheScoutLeaves) {
     EntityId id = spawn(BLUE, 20, 30);
     vision->refresh(BLUE);

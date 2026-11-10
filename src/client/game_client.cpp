@@ -1910,7 +1910,13 @@ void GameClient::Impl::registerNetNatives() {
         if (!session || args.size() < 2) return Value::nil();
         std::string name = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
                                               : args[0].toString();
-        session->setSetting(name, args[1]);
+        // =player id: one of that player's own settings
+        int64_t player = 0;
+        if (args.size() > 2 && args.back().isMap()) {
+            Value who = args.back().asMap().get(StringInterner::global().intern("player"));
+            if (who.isNumeric()) player = static_cast<int64_t>(who.asNumber());
+        }
+        session->setSetting(name, args[1], player);
         return Value::nil();
     });
 

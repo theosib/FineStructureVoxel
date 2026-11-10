@@ -269,7 +269,8 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         return Value::nil();
     });
 
-    // ent_find x y z radius [=faction f] [=enemy_of f] [=type t] [=max n] -> ids, nearest first
+    // ent_find x y z radius [=faction f] [=enemy_of f] [=type t] [=max n] -> ids, nearest first.
+    // An enemy is anyone of another faction that isn't an ally (faction_team).
     e.registerFunction("ent_find", [=](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         double x, y, z;
@@ -299,7 +300,10 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             MobEntity* mob = ud->entityManager->getMob(id);
             if (!mob || !mob->isAlive() || mob->isDead()) continue;
             if (wantFaction >= 0 && mob->faction() != wantFaction) continue;
-            if (notFaction >= 0 && (mob->faction() == notFaction || mob->faction() == 0)) continue;
+            if (notFaction >= 0 &&
+                !ud->entityManager->alliances().hostile(static_cast<uint16_t>(notFaction), mob->faction())) {
+                continue;
+            }
             if (wantType != 0 && mob->typeId().id != wantType) continue;
             Vec3 d = mob->position() - center;
             found.emplace_back(d.x * d.x + d.y * d.y + d.z * d.z, id);

@@ -7,6 +7,7 @@
  * Design: [25-entity-system.md] §25.6 Entity Manager
  */
 
+#include "finevox/core/alliances.hpp"
 #include "finevox/core/entity.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/physics.hpp"
@@ -328,6 +329,10 @@ public:
     EntitySpatialIndex& spatialIndex() { return spatialIndex_; }
     const EntitySpatialIndex& spatialIndex() const { return spatialIndex_; }
 
+    /// Who fights whom, by entity faction
+    Alliances& alliances() { return alliances_; }
+    const Alliances& alliances() const { return alliances_; }
+
     /// Set sound queue for fluid/entity sound events (optional)
     void setSoundQueue(SoundEventQueue* queue) { soundQueue_ = queue; }
 
@@ -369,6 +374,7 @@ private:
 
     // Entity storage
     EntitySpatialIndex spatialIndex_;
+    Alliances alliances_;
     SnapshotFilter snapshotFilter_;
     bool snapshotsEnabled_ = true;
     std::unordered_map<EntityId, std::unique_ptr<Entity>> entities_;

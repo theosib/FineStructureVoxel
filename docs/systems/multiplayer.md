@@ -101,6 +101,11 @@ settings with a schema, who may launch. The game supplies the policy and all of 
 draw the form. The host validates every change against it. A server's config file can set values
 and lock them.
 
+**Player settings.** `player_settings` is a second schema, for what each player chooses for
+themselves, such as a team. A player sets their own with `lobby_set key value =player id`, and the
+host can set anyone's. Each player's values are in their `settings` in the lobby state, and in
+`PLAYERS` when the game starts.
+
 **Launching.** `launch` picks who can start it: `host` (the first player, or anyone listed in the
 server's `admins`), `vote` (everyone connected must press it), or `auto` (as soon as `min_players`
 are ready). `start: immediate` has no lobby at all: the world exists from boot and players walk in.
@@ -121,7 +126,7 @@ A player is a seat: id, name, token, faction. Game scripts bind seats to faction
 no opinion on how.
 
 ```
-on :start               PLAYERS: [{=id =name =local}...]   SETTINGS: {=key value}
+on :start               PLAYERS: [{=id =name =local =settings}...]   SETTINGS: {=key value}
 on :player_join         player: {=id =name}
 on :player_leave        player
 on :command             cmd, and sender: the player's id

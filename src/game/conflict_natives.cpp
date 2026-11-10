@@ -51,6 +51,23 @@ void registerConflictNatives(GameRuntime& runtime) {
     const uint32_t keyZ = si.intern("z");
     const uint32_t keyEntity = si.intern("entity");
 
+    // faction_team faction team: factions on one team are allies, who don't fight and who see what
+    // each other sees. 0 puts a faction on its own. Not saved: set it again on resuming.
+    e.registerFunction("faction_team", [=](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() >= 2) {
+            rt->session().entities().alliances().setTeam(static_cast<uint16_t>(number(args[0])),
+                                                         static_cast<uint16_t>(number(args[1])));
+        }
+        return Value::nil();
+    });
+
+    // faction_hostile a b -> whether they're enemies
+    e.registerFunction("faction_hostile", [=](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::boolean(false);
+        return Value::boolean(rt->session().entities().alliances().hostile(static_cast<uint16_t>(number(args[0])),
+                                                                           static_cast<uint16_t>(number(args[1]))));
+    });
+
     e.registerFunction("vision_add_faction", [=](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty()) rt->vision().addFaction(static_cast<uint16_t>(number(args[0])));
         return Value::nil();
@@ -109,7 +126,7 @@ void registerConflictNatives(GameRuntime& runtime) {
         MobEntity* mob = rt->session().entities().getMob(static_cast<EntityId>(number(args[1])));
         if (!mob) return Value::boolean(false);
         uint16_t faction = static_cast<uint16_t>(number(args[0]));
-        if (mob->faction() == faction) return Value::boolean(true);
+        if (rt->session().entities().alliances().allied(mob->faction(), faction)) return Value::boolean(true);
         Vec3 pos = mob->position();
         return Value::boolean(rt->vision().isVisible(faction, static_cast<int32_t>(std::floor(pos.x)),
                                                      static_cast<int32_t>(std::floor(pos.z))));

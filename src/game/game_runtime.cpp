@@ -234,6 +234,7 @@ void GameRuntime::load() {
             seat.id = seed.id;
             seat.name = seed.name;
             seat.local = seed.local;
+            seat.settings = seed.settings;
             players.push_back(playerValue(seat));
             seats_.emplace(seat.id, std::move(seat));
         }
@@ -343,6 +344,8 @@ finescript::Value GameRuntime::playerValue(const Seat& seat) const {
     map.set(interner.intern("id"), Value::integer(seat.id));
     map.set(interner.intern("name"), Value::string(seat.name));
     map.set(interner.intern("local"), Value::boolean(seat.local));
+    map.set(interner.intern("settings"),
+            seat.settings.empty() ? Value::map() : finescript::cborDecode(seat.settings, scripts_->engine().interner()));
     return out;
 }
 

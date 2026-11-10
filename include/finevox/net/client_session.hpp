@@ -165,7 +165,8 @@ public:
     [[nodiscard]] float entityHealth(EntityId id) const;
 
     // ── What the player does ──
-    void setSetting(std::string_view key, const finescript::Value& value);
+    /// A lobby setting, or with a player, one of that player's own (see player_settings)
+    void setSetting(std::string_view key, const finescript::Value& value, int64_t player = 0);
     void setReady(bool ready);
     void launch(bool launch);
     void chat(std::string_view text, bool teamOnly = false);

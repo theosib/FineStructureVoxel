@@ -296,11 +296,16 @@ void GameHost::loadDeclaration() {
             settings_[textField(entry, "key")] = field(entry, "default");
         }
     }
+    Value perPlayer = field(declaration_, "player_settings");
+    if (perPlayer.isArray()) {
+        for (const Value& entry : perPlayer.asArray()) playerSchema_.push_back(entry);
+    }
 }
 
-bool GameHost::settingAllowed(const std::string& key, const Value& value, Value& normalised) const {
+bool GameHost::settingAllowed(const std::vector<Value>& schemas, const std::string& key, const Value& value,
+                              Value& normalised) {
     const Value* schema = nullptr;
-    for (const Value& entry : settingSchema_) {
+    for (const Value& entry : schemas) {
         if (textField(entry, "key") == key) schema = &entry;
     }
     if (!schema) return false;
@@ -558,6 +563,9 @@ void GameHost::onHello(Peer& peer, const Message& message) {
     player.admin = local || (firstHere && config_.server.admins.empty()) ||
                    std::find(config_.server.admins.begin(), config_.server.admins.end(), player.name) !=
                        config_.server.admins.end();
+    for (const Value& entry : playerSchema_) {
+        setField(player.settings, textField(entry, "key"), field(entry, "default"));
+    }
 
     peer.player = player.id;
     auto [it, inserted] = players_.emplace(player.id, std::move(player));
@@ -663,10 +671,25 @@ void GameHost::onContentReady(Peer& peer) {
 
 void GameHost::onSetSetting(Peer& peer, const Message& message) {
     Player* player = findPlayer(peer.player);
-    if (!player || !player->admin || phase_.load() != Phase::Lobby) return;
+    if (!player || phase_.load() != Phase::Lobby) return;
 
     Value body = decodeBody(message.payload());
     std::string key = textField(body, "key");
+
+    // One player's own: theirs to set, or the host's
+    Value whose = field(body, "player");
+    if (whose.isNumeric()) {
+        Player* target = findPlayer(static_cast<int64_t>(whose.asNumber()));
+        if (!target || (target != player && !player->admin)) return;
+        Value normalised;
+        if (!settingAllowed(playerSchema_, key, field(body, "value"), normalised)) return;
+        setField(target->settings, key, std::move(normalised));
+        target->ready = false;
+        lobbyDirty_ = true;
+        return;
+    }
+
+    if (!player->admin) return;
     const auto& locked = config_.server.locked;
     if (std::find(locked.begin(), locked.end(), key) != locked.end()) return;
 
@@ -849,6 +872,7 @@ Value GameHost::lobbyStateValue() const {
         setField(entry, "local", Value::boolean(player.local));
         setField(entry, "content", Value::boolean(player.contentReady));
         setField(entry, "voted", Value::boolean(player.voted));
+        setField(entry, "settings", player.settings);
         if (game) {
             if (auto seat = game->seat(id); seat && seat->faction != 0) {
                 setField(entry, "faction", Value::integer(seat->faction));
@@ -1000,7 +1024,7 @@ void GameHost::beginLoading() {
 
     RuntimeOptions options = config_.runtime;
     for (const auto& [id, player] : players_) {
-        if (player.connected) options.players.push_back({id, player.name, player.local});
+        if (player.connected) options.players.push_back({id, player.name, player.local, encodeBody(player.settings)});
     }
 
     Value settings = Value::map();

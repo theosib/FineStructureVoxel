@@ -204,6 +204,11 @@ projectile_hits -> [{=x =y =z =entity =owner =faction =damage}...]
 
 For a fair AI, `vision_can_see_ent` is the gate: filter everything through it.
 
+`faction_team f team` puts factions on a team: allies don't hit each other with projectiles, aren't
+each other's `=enemy_of` in `ent_find`, and each sees what the others' units and sources see. 0 puts
+a faction back on its own, and `faction_hostile a b` asks. Teams aren't saved: set them again on
+`:resume`.
+
 ### Camera bindings
 
 The client handles these actions from `input/default.bindings` itself: `begin_pan_*`/`end_pan_*`

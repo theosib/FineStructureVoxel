@@ -117,6 +117,7 @@ private:
         bool admin = false;
         bool local = false;
         bool contentReady = false;
+        finescript::Value settings = finescript::Value::map();  ///< Against the player_settings schema
     };
 
     struct ContentSending {
@@ -170,7 +171,11 @@ private:
 
     void loadDeclaration();
     [[nodiscard]] bool settingAllowed(const std::string& key, const finescript::Value& value,
-                                      finescript::Value& normalised) const;
+                                      finescript::Value& normalised) const {
+        return settingAllowed(settingSchema_, key, value, normalised);
+    }
+    [[nodiscard]] static bool settingAllowed(const std::vector<finescript::Value>& schema, const std::string& key,
+                                             const finescript::Value& value, finescript::Value& normalised);
     void applyPresets();
     [[nodiscard]] bool launchAllowed() const;
     void launchIfDue();
@@ -221,6 +226,7 @@ private:
     int declaredMaxPlayers_ = 16;
     finescript::Value declaration_;
     std::vector<finescript::Value> settingSchema_;
+    std::vector<finescript::Value> playerSchema_;  ///< What each player sets for themselves
 
     // Host thread only, but for runtime_, which is published when the game has loaded
     std::vector<std::unique_ptr<Peer>> peers_;

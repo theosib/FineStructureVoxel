@@ -46,6 +46,7 @@ struct PlayerSeed {
     int64_t id = 0;
     std::string name;
     bool local = false;
+    std::vector<uint8_t> settings;  ///< CBOR: what they chose for themselves in the lobby
 };
 
 /// A player's place in the game, which outlasts their connection
@@ -54,6 +55,7 @@ struct Seat {
     std::string name;
     bool local = false;
     uint16_t faction = 0;           ///< 0 until a script binds them
+    std::vector<uint8_t> settings;  ///< CBOR, from PlayerSeed
     EntityId body = INVALID_ENTITY_ID;
     glm::dvec3 spawn{0.0};
 };

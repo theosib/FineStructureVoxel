@@ -83,7 +83,7 @@ bool ProjectileSystem::step(Projectile& p, float dt) {
             MobEntity* mob = entities_.getMob(id);
             if (!mob || !mob->isAlive() || mob->isDead()) continue;
             if (id == p.spec.owner) continue;
-            if (p.spec.faction != 0 && mob->faction() == p.spec.faction) continue;
+            if (entities_.alliances().allied(p.spec.faction, mob->faction())) continue;
 
             Vec3 pos = mob->position();
             Vec3 half = mob->halfExtents();

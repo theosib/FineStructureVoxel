@@ -209,10 +209,11 @@ void ClientSession::sendMap(finenet::ChannelId channel, uint32_t type, const Val
     send(channel, type, encodeBody(map));
 }
 
-void ClientSession::setSetting(std::string_view name, const Value& value) {
+void ClientSession::setSetting(std::string_view name, const Value& value, int64_t player) {
     Value body = Value::map();
     setField(body, "key", Value::string(std::string(name)));
     setField(body, "value", value);
+    if (player != 0) setField(body, "player", Value::integer(player));
     sendMap(CH_CONTROL, msg::SetSetting, body);
 }
 

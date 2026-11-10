@@ -298,7 +298,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
     for (const auto& [id, entity] : entities.entities()) {
         if (!entity->isAlive()) continue;
         Vec3 position = entity->position();
-        if (entity->faction() != view.faction_ && !factionSees(view, position)) continue;
+        if (!entities.alliances().allied(entity->faction(), view.faction_) && !factionSees(view, position)) continue;
         present.insert(id);
 
         EntityState state = EntityState::fromEntity(*entity);

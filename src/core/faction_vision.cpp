@@ -312,7 +312,8 @@ void FactionVision::updateFaction(uint16_t faction, std::vector<uint8_t>& cells,
     {
         auto lock = entities_.lock();
         for (const auto& [id, entity] : entities_.entities()) {
-            if (entity->faction() != faction || !entity->isAlive()) continue;
+            // Allies see for each other
+            if (!entities_.alliances().allied(entity->faction(), faction) || !entity->isAlive()) continue;
             Vec3 pos = entity->position();
             float radius = defaultRadius_;
             if (const auto* mob = dynamic_cast<const MobEntity*>(entity.get())) {
@@ -329,7 +330,7 @@ void FactionVision::updateFaction(uint16_t faction, std::vector<uint8_t>& cells,
     {
         std::shared_lock lock(mutex_);
         for (const auto& [handle, source] : sources_) {
-            if (source.faction == faction) castFrom(source.eye, source.radius, next);
+            if (entities_.alliances().allied(source.faction, faction)) castFrom(source.eye, source.radius, next);
         }
     }
 

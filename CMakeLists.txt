@@ -760,6 +760,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_navigation.cpp
         tests/test_blueprint.cpp
         tests/test_faction_vision.cpp
+        tests/test_alliances.cpp
         tests/test_world_replica.cpp
         tests/test_projectile_system.cpp
         tests/test_work_claims.cpp

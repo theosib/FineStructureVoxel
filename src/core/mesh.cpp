@@ -282,14 +282,15 @@ void MeshBuilder::buildSimpleMesh(
                         baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
-                    const uint8_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+                    const uint16_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
 
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
                         if (!faceGeom.isValid()) {
                             continue;
                         }
-                        if (faceGeom.connection >= 0 && !(joined & (1 << faceGeom.connection))) {
+                        if (faceGeom.connection >= 0 &&
+                            faceGeom.whenOpen == bool(joined & (1 << faceGeom.connection))) {
                             continue;
                         }
 
@@ -455,14 +456,15 @@ void MeshBuilder::buildGreedyMesh(
                         baseBlockLight = static_cast<float>(packed & 0x0F) / 15.0f;
                     }
 
-                    const uint8_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+                    const uint16_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
 
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
                         if (!faceGeom.isValid()) {
                             continue;
                         }
-                        if (faceGeom.connection >= 0 && !(joined & (1 << faceGeom.connection))) {
+                        if (faceGeom.connection >= 0 &&
+                            faceGeom.whenOpen == bool(joined & (1 << faceGeom.connection))) {
                             continue;
                         }
 
@@ -886,7 +888,7 @@ void MeshBuilder::addFace(
 
 // A diagonal only joins where neither straight neighbour beside it does: three blocks in an L
 // make a corner, not a triangle.
-uint8_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) const {
+uint16_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) const {
     if (!connectsProvider_) return 0;
 
     static constexpr int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
@@ -906,7 +908,11 @@ uint8_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) con
             joined |= static_cast<uint8_t>(1 << i);
         }
     }
-    return joined;
+
+    uint16_t mask = joined;
+    if (connectsProvider_(BlockCoord(pos.x, pos.y + 1, pos.z), type)) mask |= 1 << 8;
+    if (connectsProvider_(BlockCoord(pos.x, pos.y - 1, pos.z), type)) mask |= 1 << 9;
+    return mask;
 }
 
 namespace {

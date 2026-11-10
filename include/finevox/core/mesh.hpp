@@ -332,7 +332,7 @@ private:
     );
 
     // Which directions a block joins up in: bit N for FaceGeometry::connection N
-    [[nodiscard]] uint8_t connectionMask(const BlockCoord& pos, BlockTypeId type) const;
+    [[nodiscard]] uint16_t connectionMask(const BlockCoord& pos, BlockTypeId type) const;
 
     // Add a custom face from BlockGeometry (for non-cube blocks)
     // Handles arbitrary vertex counts (3-6 vertices per face)

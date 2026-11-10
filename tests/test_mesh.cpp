@@ -1498,9 +1498,9 @@ TEST_F(CustomGeometryMeshTest, ConnectionsFollowEveryNeighbourArrangement) {
             }
             return false;
         };
+        // Nothing above or below: those are their own directions
         builder.setConnectsProvider([&present](const BlockCoord& at, BlockTypeId) {
-            EXPECT_EQ(at.y, 8);
-            return present(at.x - 8, at.z - 8);
+            return at.y == 8 && present(at.x - 8, at.z - 8);
         });
 
         MeshData mesh = builder.buildSubChunkMesh(subChunk, pos, nothingOpaque, simpleTextureProvider);
@@ -1516,6 +1516,49 @@ TEST_F(CustomGeometryMeshTest, ConnectionsFollowEveryNeighbourArrangement) {
                                   (straight || (!present(DX[i], 0) && !present(0, DZ[i])));
             EXPECT_EQ(shown[i], expected) << "neighbours " << neighbours << " direction " << i;
         }
+    }
+}
+
+// A rock with another on top has a flat top to carry it, and a rounded one with nothing there:
+// connect_up_* shows with one of its group above, open_up_* without, and the same going down
+TEST_F(CustomGeometryMeshTest, FacesFollowWhatsAboveAndBelow) {
+    BlockGeometry geom;
+    const std::vector<std::pair<std::string, int>> faces = {
+        {"connect_up_flat", 8}, {"open_up_round", 8}, {"connect_down_foot", 9}, {"open_down_base", 9}};
+    for (size_t i = 0; i < faces.size(); ++i) {
+        FaceGeometry face;
+        face.name = faces[i].first;
+        face.connection = faces[i].second;
+        face.whenOpen = faces[i].first.rfind("open_", 0) == 0;
+        const float y = 0.1f * static_cast<float>(i + 1);
+        face.vertices = {ModelVertex(glm::vec3(0, y, 0), glm::vec2(0)), ModelVertex(glm::vec3(1, y, 0), glm::vec2(0)),
+                         ModelVertex(glm::vec3(1, y, 1), glm::vec2(0))};
+        geom.addFace(face);
+    }
+    ASSERT_TRUE(geom.hasConnections());
+    builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
+
+    BlockTypeId block = BlockTypeId::fromName("test:rock");
+    SubChunk subChunk;
+    subChunk.setBlock(8, 8, 8, block);
+
+    for (int stacked = 0; stacked < 4; ++stacked) {
+        const bool above = stacked & 1, below = stacked & 2;
+        builder.setConnectsProvider([above, below](const BlockCoord& at, BlockTypeId) {
+            if (at.x != 8 || at.z != 8) return false;
+            return (at.y == 9 && above) || (at.y == 7 && below);
+        });
+        MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+
+        bool shown[4] = {};
+        for (const auto& vertex : mesh.vertices) {
+            const int face = static_cast<int>(std::lround((vertex.position.y - 8.0f) * 10.0f)) - 1;
+            if (face >= 0 && face < 4) shown[face] = true;
+        }
+        EXPECT_EQ(shown[0], above) << stacked;
+        EXPECT_EQ(shown[1], !above) << stacked;
+        EXPECT_EQ(shown[2], below) << stacked;
+        EXPECT_EQ(shown[3], !below) << stacked;
     }
 }
 

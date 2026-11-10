@@ -1393,8 +1393,10 @@ TEST_F(CustomGeometryMeshTest, APartialFaceTakesEachKindOfLightSeparately) {
     }
 }
 
-// A leaning face looks at no one cell, so it has only its own
-TEST_F(CustomGeometryMeshTest, ALeaningFaceLightsFromItsOwnCell) {
+// A leaning face looks at every cell it leans toward, as a rock's sloped top looks both up and out.
+// Its own cell can read dark for the same reason as a stack's, and in a newly made world it does.
+// It doesn't look behind itself, though.
+TEST_F(CustomGeometryMeshTest, ALeaningFaceLightsFromTheCellsItLeansToward) {
     BlockTypeId block = BlockTypeId::fromName("test:ramp");
     SubChunk subChunk;
     subChunk.setBlock(8, 8, 8, block);
@@ -1407,13 +1409,17 @@ TEST_F(CustomGeometryMeshTest, ALeaningFaceLightsFromItsOwnCell) {
     geom.addFace(std::move(face));
     builder.setGeometryProvider([&geom](BlockTypeId) { return &geom; });
     builder.setSmoothLighting(true);
+    // It looks up and toward -x
     builder.setLightProvider([](const BlockCoord& pos) -> uint8_t {
-        return pos == BlockCoord(8, 8, 8) ? 0x50 : 0xF0;
+        if (pos == BlockCoord(8, 8, 8)) return 0x50;
+        if (pos == BlockCoord(7, 8, 8)) return 0x90;
+        if (pos == BlockCoord(8, 9, 8)) return 0x70;
+        return 0xF0;
     });
 
     MeshData mesh = builder.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
     ASSERT_EQ(mesh.vertexCount(), 4);
-    for (const ChunkVertex& vertex : mesh.vertices) EXPECT_FLOAT_EQ(vertex.skyLight, 5.0f / 15.0f);
+    for (const ChunkVertex& vertex : mesh.vertices) EXPECT_FLOAT_EQ(vertex.skyLight, 9.0f / 15.0f);
 }
 
 // Every shipped shape, as a game would load it. By the divergence theorem a closed shape's

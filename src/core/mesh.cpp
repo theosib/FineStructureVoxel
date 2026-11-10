@@ -911,22 +911,33 @@ uint8_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) con
 
 namespace {
 
-/// The cube face a custom face looks out through, if it looks straight along an axis
-std::optional<Face> axisOf(const FaceGeometry& face) {
+/// The cube faces a custom face looks out through: one if it looks straight along an axis, and up
+/// to three if it slopes, like a roof that looks both up and out
+struct Facing {
+    std::array<Face, 3> faces;
+    size_t count = 0;
+    void add(Face face) { faces[count++] = face; }
+    const Face* begin() const { return faces.data(); }
+    const Face* end() const { return faces.data() + count; }
+};
+
+Facing facingOf(const FaceGeometry& face) {
+    Facing facing;
     const glm::vec3& v0 = face.vertices[0].position;
     glm::vec3 normal = glm::cross(face.vertices[2].position - v0, face.vertices[1].position - v0);
     float length = glm::length(normal);
-    if (length < 1e-6f) return std::nullopt;
+    if (length < 1e-6f) return facing;
     normal /= length;
 
-    constexpr float STRAIGHT = 0.999f;
-    if (normal.x > STRAIGHT) return Face::PosX;
-    if (normal.x < -STRAIGHT) return Face::NegX;
-    if (normal.y > STRAIGHT) return Face::PosY;
-    if (normal.y < -STRAIGHT) return Face::NegY;
-    if (normal.z > STRAIGHT) return Face::PosZ;
-    if (normal.z < -STRAIGHT) return Face::NegZ;
-    return std::nullopt;
+    // One at most for each axis, so three in all
+    constexpr float LEANS = 0.3f;
+    if (normal.x > LEANS) facing.add(Face::PosX);
+    if (normal.x < -LEANS) facing.add(Face::NegX);
+    if (normal.y > LEANS) facing.add(Face::PosY);
+    if (normal.y < -LEANS) facing.add(Face::NegY);
+    if (normal.z > LEANS) facing.add(Face::PosZ);
+    if (normal.z < -LEANS) facing.add(Face::NegZ);
+    return facing;
 }
 
 }  // namespace
@@ -946,9 +957,10 @@ void MeshBuilder::customFaceLight(const FaceGeometry& face, BlockCoord pos, floa
     // that cell may read dark: the client's blocks lag the server's and its light doesn't, so a
     // block the server has made solid has already lost its light here while it still draws as
     // the partial one it was. What the face looks out at doesn't have that problem. It can't take
-    // that alone, though, as a slab under a roof gets its light from the side.
-    if (std::optional<Face> axis = axisOf(face)) {
-        uint8_t packed = lightProvider_(pos.neighbor(*axis));
+    // that alone, though, as a slab under a roof gets its light from the side. A sloping face
+    // looks out at every cell it leans toward.
+    for (Face facing : facingOf(face)) {
+        uint8_t packed = lightProvider_(pos.neighbor(facing));
         sky = std::max(sky, static_cast<float>(packed >> 4) / 15.0f);
         block = std::max(block, static_cast<float>(packed & 0x0F) / 15.0f);
     }

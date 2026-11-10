@@ -37,6 +37,7 @@ sky.conf
 | `fog_of_war`, `viewer_faction` | `true`, `1` | Whose eyes the client sees through |
 | `view_distance`, `default_locale`, `tick_rate`, `gravity` | | |
 | `lod` | `true` | Merge distant blocks. Turn off for an overhead camera, which keeps the map in the transition zone where meshes visibly swap |
+| `detail_pixels` | `0` | Draw a block in its `far-geometry` once it's under this many pixels tall on screen. 0 draws everything in full |
 | `saves` | `false` | Keep the game in `saves/autosave`, resume it on launch, and save on exit |
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
@@ -340,7 +341,7 @@ couldn't see shows nothing, and `despawnEntity` on a living one removes it at on
 ### .model additions
 
 `texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`,
-`blocks-sky-light`. With `opaque: false` a block lets light through, its `light-attenuation`
+`blocks-sky-light`, `far-geometry`. With `opaque: false` a block lets light through, its `light-attenuation`
 defaulting to 1, and sky light falls past it. `blocks-sky-light: true` stops the sky light while
 letting the rest through, for leaves that shade the ground under them.
 
@@ -350,6 +351,12 @@ neighbour of the same group at the same height. A diagonal joins only where neit
 neighbour beside it does, so three blocks in an L make a corner, not a triangle. `up` and `down`
 are directions too, and `open_<dir>_<anything>` shows only where nothing of the group is: a rock
 under another can have a flat top to carry it, and a rounded one with nothing on it.
+
+`far-geometry: <shape>` is a cheaper shape for where a block's detail is too small to see, as set
+by `detail_pixels`. A subchunk switches as a whole, once all of it is past the distance where a
+block is that many pixels tall, and switches back only once it's well inside it again
+(`DetailRange`). A taller or sharper window reaches further. A UI script can change it while a
+game runs: `detail_pixels n` sets it and gives back the distance, in blocks.
 
 ### .feature additions
 

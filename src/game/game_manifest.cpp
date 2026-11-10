@@ -42,6 +42,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.gravity = doc->getFloat("gravity", m.gravity);
     m.viewDistance = doc->getFloat("view_distance", m.viewDistance);
     m.lod = doc->getBool("lod", m.lod);
+    m.detailPixels = doc->getFloat("detail_pixels", m.detailPixels);
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
     m.playerEntity = std::string(doc->getString("player_entity", m.playerEntity));

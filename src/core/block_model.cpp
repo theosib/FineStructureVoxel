@@ -227,6 +227,11 @@ RotationSet parseRotationSet(const std::string& str) {
 // BlockModel implementation
 // ============================================================================
 
+BlockModel& BlockModel::setFarGeometry(BlockGeometry geometry) {
+    farGeometry_ = std::move(geometry);
+    return *this;
+}
+
 BlockModel& BlockModel::setGeometry(BlockGeometry geometry) {
     geometry_ = std::move(geometry);
     collisionResolved_ = false;

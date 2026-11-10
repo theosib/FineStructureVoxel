@@ -507,6 +507,18 @@ public:
     void setGeometryProvider(BlockGeometryProvider provider);
 
     /**
+     * @brief Set the provider of far forms: what a block is drawn as beyond the detail distance
+     */
+    void setFarGeometryProvider(BlockGeometryProvider provider);
+
+    /**
+     * @brief How near a subchunk has to be to draw its blocks in full (see DetailRange).
+     * Zero or less draws everything in full.
+     */
+    void setDetailDistance(float blocks) { detail_.nearDistance = blocks; }
+    [[nodiscard]] float detailDistance() const { return detail_.nearDistance; }
+
+    /**
      * @brief Set the face occludes provider for directional face culling
      * @param provider Function that checks if a specific face of a block occludes neighbors
      *
@@ -758,6 +770,8 @@ private:
     // LOD system
     LODConfig lodConfig_;
     bool lodEnabled_ = true;
+    DetailRange detail_;
+    BlockGeometryProvider farGeometryProvider_;
     LODDebugMode lodDebugMode_ = LODDebugMode::None;
     LODMergeMode lodMergeMode_ = LODMergeMode::FullHeight;
 

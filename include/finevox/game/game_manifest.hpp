@@ -40,6 +40,9 @@ struct GameManifest {
     /// horizon. An overhead camera keeps most of the map in the transition zone, where
     /// meshes visibly swap as it moves, so such games turn this off.
     bool lod = true;
+    /// Draw a block's far form, where it has one, once it's under this many pixels tall on screen.
+    /// 0 draws everything in full.
+    float detailPixels = 0.0f;
     int navMaxFall = 3;           ///< Largest drop path-following units will take
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
     std::string playerEntity = "finevox:player";  ///< Entity type of the player's body

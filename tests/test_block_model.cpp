@@ -496,6 +496,23 @@ face:connect_se_arm:
     EXPECT_EQ(model->connects(), "fence");
 }
 
+TEST(BlockModelLoaderTest, AModelCanNameAFarForm) {
+    BlockModelLoader loader;
+    loader.setFileResolver([](const std::string& path) -> std::string {
+        const char* face = "face:a:\n    0 0 0  0 0\n    1 0 0  1 0\n    1 1 0  1 1\n";
+        if (path == "shapes/near.geom" || path == "shapes/far.geom") return std::string(face) + face + "\n";
+        return "";
+    });
+    auto model = loader.parseModelFromString("geometry: shapes/near\nfar-geometry: shapes/far\n");
+    ASSERT_TRUE(model.has_value());
+    EXPECT_TRUE(model->hasCustomGeometry());
+    EXPECT_TRUE(model->hasFarGeometry());
+
+    auto plain = loader.parseModelFromString("geometry: shapes/near\n");
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_FALSE(plain->hasFarGeometry());
+}
+
 TEST(BlockModelLoaderTest, SeeThroughLeavesCanStillShade) {
     BlockModelLoader loader;
     auto leaves = loader.parseModelFromString("opaque: false\nblocks-sky-light: true\n");

@@ -14,6 +14,7 @@
  * No caching or staleness detection - all rebuilds are event-driven.
  */
 
+#include "finevox/core/detail_range.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/mesh.hpp"
 #include "finevox/core/position.hpp"
@@ -39,6 +40,8 @@ struct MeshUploadData {
     MeshData mesh;                          // The generated mesh data (opaque blocks)
     MeshData fluidMesh;                     // Fluid mesh data (translucent, separate pass)
     LODLevel lodLevel = LODLevel::LOD0;     // LOD level of the mesh
+    bool detailed = true;                   // Built in full, not in far forms
+    bool hasFarForms = false;               // Something in it would draw differently the other way
 
     MeshUploadData() = default;
     MeshUploadData(ChunkPos p, MeshData m, LODLevel lod)
@@ -166,6 +169,21 @@ public:
         faceOccludesProvider_ = std::move(provider);
     }
 
+    void setFarGeometryProvider(BlockGeometryProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        farGeometryProvider_ = std::move(provider);
+    }
+
+    /// Where the camera is and how far detail reaches, for the builds that start from now on. The
+    /// renderer calls this every frame. Tearing between the coordinates is harmless: each is a
+    /// position the camera was at a moment ago.
+    void setDetailView(const glm::dvec3& camera, float nearDistance) {
+        detailCameraX_.store(camera.x, std::memory_order_relaxed);
+        detailCameraY_.store(camera.y, std::memory_order_relaxed);
+        detailCameraZ_.store(camera.z, std::memory_order_relaxed);
+        detailNear_.store(nearDistance, std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Alarm-based Wake Support
     // ========================================================================
@@ -217,6 +235,10 @@ private:
     BlockGeometryProvider geometryProvider_;
     BlockFaceOccludesProvider faceOccludesProvider_;
     BlockConnectsProvider connectsProvider_;
+    BlockGeometryProvider farGeometryProvider_;
+
+    std::atomic<double> detailCameraX_{0.0}, detailCameraY_{0.0}, detailCameraZ_{0.0};
+    std::atomic<float> detailNear_{0.0f};
 
     // Statistics
     Stats stats_;

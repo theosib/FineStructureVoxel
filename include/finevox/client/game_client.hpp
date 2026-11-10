@@ -79,6 +79,7 @@ struct ClientOptions {
     uint32_t width = 1600;
     uint32_t height = 900;
     bool validation = false;
+    bool vsync = true;
 
     /// Save a screenshot after this many frames (for automated visual checks)
     std::string screenshotPath;

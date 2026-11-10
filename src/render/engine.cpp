@@ -76,6 +76,7 @@ Engine::Engine(const EngineConfig& config) : impl_(std::make_unique<Impl>()) {
         .title(config.windowTitle)
         .size(config.windowWidth, config.windowHeight)
         .resizable(true)
+        .vsync(config.vsync)
         .build();
 
     // Select GPU and create device (stored in Impl — LogicalDevice holds raw PhysicalDevice*)

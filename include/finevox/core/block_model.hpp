@@ -183,6 +183,9 @@ public:
     /// Set the render geometry
     BlockModel& setGeometry(BlockGeometry geometry);
 
+    /// What the block is drawn as where its detail is too small to see (see DetailRange)
+    BlockModel& setFarGeometry(BlockGeometry geometry);
+
     /// Set explicit collision shape
     BlockModel& setCollision(CollisionShape shape);
 
@@ -244,6 +247,8 @@ public:
 
     /// Get render geometry
     [[nodiscard]] const BlockGeometry& geometry() const { return geometry_; }
+    [[nodiscard]] const BlockGeometry& farGeometry() const { return farGeometry_; }
+    [[nodiscard]] bool hasFarGeometry() const { return !farGeometry_.isEmpty(); }
 
     /// Get resolved collision shape (with fallback chain)
     [[nodiscard]] const CollisionShape& resolvedCollision() const;
@@ -315,6 +320,7 @@ public:
 
 private:
     BlockGeometry geometry_;
+    BlockGeometry farGeometry_;
     CollisionShape collision_;
     CollisionShape hit_;
     bool hasExplicitCollision_ = false;

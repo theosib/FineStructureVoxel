@@ -170,6 +170,11 @@ public:
     /// Callback suitable for WorldRenderer::setGeometryProvider(...)
     [[nodiscard]] std::function<const BlockGeometry*(BlockTypeId)> geometryProvider() const;
 
+    /// A block's far form, or nullptr if it has none, and a callback for
+    /// WorldRenderer::setFarGeometryProvider(...)
+    [[nodiscard]] const BlockGeometry* getFarGeometry(BlockTypeId type) const;
+    [[nodiscard]] std::function<const BlockGeometry*(BlockTypeId)> farGeometryProvider() const;
+
     /// Callback suitable for WorldRenderer::setConnectsProvider(...). Holds `world` by reference.
     [[nodiscard]] std::function<bool(const BlockCoord&, BlockTypeId)> connectsProvider(
         const World& world) const;
@@ -223,6 +228,7 @@ private:
 
     std::string defaultNamespace_;
     std::unordered_map<uint32_t, BlockGeometry> blockGeometries_;
+    std::unordered_map<uint32_t, BlockGeometry> blockFarGeometries_;
     std::unordered_map<uint32_t, uint32_t> blockConnects_;  ///< Block id to its group's interned name
     std::unordered_map<uint32_t, BlockTextureSet> blockTextures_;
     size_t customGeometryModelCount_ = 0;

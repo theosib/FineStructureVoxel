@@ -5,7 +5,9 @@
 #include "finevox/core/world.hpp"
 #include "finevox/core/block_model.hpp"
 #include "finevox/core/block_model_loader.hpp"
+#include "finevox/core/detail_range.hpp"
 #include <cmath>
+#include <set>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1521,6 +1523,90 @@ TEST_F(CustomGeometryMeshTest, ConnectionsFollowEveryNeighbourArrangement) {
 
 // A rock with another on top has a flat top to carry it, and a rounded one with nothing there:
 // connect_up_* shows with one of its group above, open_up_* without, and the same going down
+namespace {
+
+/// One triangle across the cell at height `y`, so a mesh says which geometry drew it
+BlockGeometry triangleAt(float y) {
+    FaceGeometry face;
+    face.name = "marker";
+    face.vertices = {ModelVertex(glm::vec3(0, y, 0), glm::vec2(0)), ModelVertex(glm::vec3(1, y, 0), glm::vec2(0)),
+                     ModelVertex(glm::vec3(1, y, 1), glm::vec2(0))};
+    BlockGeometry geom;
+    geom.addFace(std::move(face));
+    return geom;
+}
+
+}  // namespace
+
+// Out of detail range a block with a far form is drawn as that, and one without as it always is
+TEST_F(CustomGeometryMeshTest, FarFormsAreDrawnOutOfDetailRange) {
+    BlockTypeId leaves = BlockTypeId::fromName("test:far_leaves");
+    BlockTypeId rock = BlockTypeId::fromName("test:far_rock");
+    BlockGeometry nearLeaves = triangleAt(0.25f), farLeaves = triangleAt(0.75f), rockShape = triangleAt(0.5f);
+    builder.setGeometryProvider([&](BlockTypeId type) -> const BlockGeometry* {
+        return type == leaves ? &nearLeaves : type == rock ? &rockShape : nullptr;
+    });
+    builder.setFarGeometryProvider([&](BlockTypeId type) -> const BlockGeometry* {
+        return type == leaves ? &farLeaves : nullptr;
+    });
+
+    auto heights = [&](BlockTypeId type, bool detailed, bool* sawFar) {
+        SubChunk subChunk;
+        subChunk.setBlock(8, 8, 8, type);
+        MeshBuilder local = builder;
+        local.setDetailed(detailed);
+        MeshData mesh = local.buildSubChunkMesh(subChunk, ChunkPos{0, 0, 0}, nothingOpaque, simpleTextureProvider);
+        *sawFar = local.sawFarForms();
+        std::set<float> ys;
+        for (const auto& vertex : mesh.vertices) ys.insert(vertex.position.y - 8.0f);
+        return ys;
+    };
+
+    bool sawFar = false;
+    EXPECT_EQ(heights(leaves, true, &sawFar), std::set<float>{0.25f});
+    EXPECT_TRUE(sawFar) << "so a change of detail would change it";
+    EXPECT_EQ(heights(leaves, false, &sawFar), std::set<float>{0.75f});
+    EXPECT_TRUE(sawFar);
+    EXPECT_EQ(heights(rock, false, &sawFar), std::set<float>{0.5f});
+    EXPECT_FALSE(sawFar) << "and nothing here would change";
+}
+
+TEST(DetailRangeTest, MeasuresToTheNearestPointOfASubchunk) {
+    EXPECT_FLOAT_EQ(DetailRange::distance({8, 8, 8}, ChunkPos{0, 0, 0}), 0.0f) << "inside it";
+    EXPECT_FLOAT_EQ(DetailRange::distance({-3, 8, 8}, ChunkPos{0, 0, 0}), 3.0f);
+    EXPECT_FLOAT_EQ(DetailRange::distance({19, 20, 8}, ChunkPos{0, 0, 0}), 5.0f) << "3 out and 4 up";
+    EXPECT_FLOAT_EQ(DetailRange::distance({8, 8, -40}, ChunkPos{0, 0, -2}), 8.0f);
+}
+
+TEST(DetailRangeTest, ReachesAsFarAsABlockIsSoManyPixelsTall) {
+    // With a 90 degree view a block d away fills 1/(2d) of the height
+    EXPECT_NEAR(DetailRange::forPixels(10.0f, 1000.0f, 90.0f), 50.0f, 1e-3f);
+    EXPECT_NEAR(DetailRange::forPixels(20.0f, 1000.0f, 90.0f), 25.0f, 1e-3f) << "wanting more pixels";
+    EXPECT_NEAR(DetailRange::forPixels(10.0f, 2000.0f, 90.0f), 100.0f, 1e-3f) << "on a sharper screen";
+    EXPECT_EQ(DetailRange::forPixels(0.0f, 1000.0f, 90.0f), 0.0f) << "or everywhere";
+}
+
+// Swept along the whole way out and back: a build goes by the distance alone, and a rebuild for
+// detail comes only past the margin, so nothing near the edge switches back and forth
+TEST(DetailRangeTest, SwitchesOnlyPastTheMargin) {
+    DetailRange range{40.0f};
+    const float out = 40.0f * (1.0f + DetailRange::MARGIN), in = 40.0f * (1.0f - DetailRange::MARGIN);
+    for (float d = 0.0f; d <= 100.0f; d += 0.25f) {
+        EXPECT_EQ(range.detailed(d), d <= 40.0f) << d;
+        EXPECT_EQ(range.wantsRebuild(d, true), d > out) << d;
+        EXPECT_EQ(range.wantsRebuild(d, false), d < in) << d;
+        // Whatever a build at this distance made, it isn't rebuilt straight away
+        EXPECT_FALSE(range.wantsRebuild(d, range.detailed(d))) << d;
+    }
+
+    DetailRange everywhere{0.0f};
+    for (float d = 0.0f; d <= 1000.0f; d += 10.0f) {
+        EXPECT_TRUE(everywhere.detailed(d));
+        EXPECT_FALSE(everywhere.wantsRebuild(d, true));
+        EXPECT_TRUE(everywhere.wantsRebuild(d, false)) << "anything built far comes back";
+    }
+}
+
 TEST_F(CustomGeometryMeshTest, FacesFollowWhatsAboveAndBelow) {
     BlockGeometry geom;
     const std::vector<std::pair<std::string, int>> faces = {

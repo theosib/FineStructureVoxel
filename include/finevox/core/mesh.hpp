@@ -254,6 +254,17 @@ public:
     void setGeometryProvider(BlockGeometryProvider provider) { geometryProvider_ = std::move(provider); }
     void clearGeometryProvider() { geometryProvider_ = nullptr; }
 
+    // A block's far form, or nullptr for one without: what it's drawn as where detail can't be seen
+    void setFarGeometryProvider(BlockGeometryProvider provider) { farGeometryProvider_ = std::move(provider); }
+
+    // Whether to draw blocks in full, or in their far forms (see DetailRange)
+    void setDetailed(bool detailed) { detailed_ = detailed; }
+    [[nodiscard]] bool detailed() const { return detailed_; }
+
+    // Whether anything built since this builder was made has a far form, so whether a change in
+    // detail would change the mesh at all
+    [[nodiscard]] bool sawFarForms() const { return sawFarForms_; }
+
     // Set face occludes provider for directional face culling (used with custom geometry blocks)
     // When set, this replaces the simple opaqueProvider check with per-face occlusion testing
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) { faceOccludesProvider_ = std::move(provider); }
@@ -314,6 +325,12 @@ private:
     bool flatLighting_ = false;   // Single light sample per face (shows raw L1 ball)
     BlockLightProvider lightProvider_;  // Optional provider for smooth/flat lighting
     BlockGeometryProvider geometryProvider_;  // Optional provider for custom block geometry
+    BlockGeometryProvider farGeometryProvider_;
+    bool detailed_ = true;
+    mutable bool sawFarForms_ = false;
+
+    // The geometry to draw a block with at this builder's detail, or nullptr for a plain cube
+    [[nodiscard]] const BlockGeometry* geometryFor(BlockTypeId type) const;
     BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
     BlockConnectsProvider connectsProvider_;
 

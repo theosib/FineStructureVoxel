@@ -265,10 +265,7 @@ void MeshBuilder::buildSimpleMesh(
                 );
 
                 // Check if this block has custom geometry
-                const BlockGeometry* customGeom = nullptr;
-                if (geometryProvider_) {
-                    customGeom = geometryProvider_(blockType);
-                }
+                const BlockGeometry* customGeom = geometryFor(blockType);
 
                 if (customGeom && !customGeom->isEmpty()) {
                     // Render custom geometry faces
@@ -428,7 +425,7 @@ void MeshBuilder::buildGreedyMesh(
                     }
 
                     // Check if this block has custom geometry
-                    const BlockGeometry* customGeom = geometryProvider_(blockType);
+                    const BlockGeometry* customGeom = geometryFor(blockType);
                     if (!customGeom || customGeom->isEmpty()) {
                         continue;  // Standard cube, already handled by greedy mesh
                     }
@@ -567,7 +564,7 @@ void MeshBuilder::greedyMeshFace(
 
                 // Skip blocks with custom geometry (they can't be greedy-merged)
                 if (geometryProvider_) {
-                    const BlockGeometry* customGeom = geometryProvider_(blockType);
+                    const BlockGeometry* customGeom = geometryFor(blockType);
                     if (customGeom && !customGeom->isEmpty()) {
                         continue;  // Custom geometry handled in separate pass
                     }
@@ -888,6 +885,17 @@ void MeshBuilder::addFace(
 
 // A diagonal only joins where neither straight neighbour beside it does: three blocks in an L
 // make a corner, not a triangle.
+const BlockGeometry* MeshBuilder::geometryFor(BlockTypeId type) const {
+    if (!geometryProvider_) return nullptr;
+    if (farGeometryProvider_) {
+        if (const BlockGeometry* far = farGeometryProvider_(type)) {
+            sawFarForms_ = true;
+            if (!detailed_) return far;
+        }
+    }
+    return geometryProvider_(type);
+}
+
 uint16_t MeshBuilder::connectionMask(const BlockCoord& pos, BlockTypeId type) const {
     if (!connectsProvider_) return 0;
 

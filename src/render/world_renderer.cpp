@@ -187,6 +187,10 @@ void WorldRenderer::initialize() {
         meshWorkerPool_->setConnectsProvider(connectsProvider_);
     }
 
+    if (farGeometryProvider_) {
+        meshWorkerPool_->setFarGeometryProvider(farGeometryProvider_);
+    }
+
     // Copy face occludes provider for directional face culling
     if (faceOccludesProvider_) {
         meshWorkerPool_->setFaceOccludesProvider(faceOccludesProvider_);
@@ -270,6 +274,7 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
 
     // Store high-precision position for view-relative calculations
     highPrecisionCameraPos_ = highPrecisionPos;
+    if (meshWorkerPool_) meshWorkerPool_->setDetailView(highPrecisionPos, detail_.nearDistance);
 
     // Cache cull camera position in chunk coordinates (double precision for accuracy)
     cameraChunkPos_ = glm::vec3(highPrecisionPos / 16.0);
@@ -353,6 +358,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             retire(view->takeFluidMesh());
             view->release();
             view->setLastBuiltLOD(uploadData->lodLevel);
+            view->setBuiltDetail(uploadData->detailed, uploadData->hasFarForms);
             ++uploads;
             continue;
         }
@@ -379,6 +385,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         }
 
         view->setLastBuiltLOD(uploadData->lodLevel);
+        view->setBuiltDetail(uploadData->detailed, uploadData->hasFarForms);
         ++uploads;
     }
 }
@@ -482,6 +489,16 @@ void WorldRenderer::render(finevk::CommandBuffer& cmd) {
             if (!lodRequest.accepts(view->lastBuiltLOD())) {
                 uint32_t priority = (distBlocks < 32.0f) ? 0 : 100;
                 meshRebuildQueue_->push(pos, MeshRebuildRequest(priority, lodRequest));
+            }
+        }
+
+        // Too near or too far for what it was built with. Only a subchunk with a far form in it
+        // would look any different.
+        if (view->hasFarForms() && meshRebuildQueue_) {
+            float distBlocks = DetailRange::distance(highPrecisionCameraPos_, pos);
+            if (detail_.wantsRebuild(distBlocks, view->builtDetailed())) {
+                uint32_t priority = 200 + static_cast<uint32_t>(distBlocks);
+                meshRebuildQueue_->push(pos, MeshRebuildRequest(priority, LODRequest::exact(view->lastBuiltLOD())));
             }
         }
 
@@ -878,6 +895,12 @@ void WorldRenderer::setLightProvider(BlockLightProvider provider) {
     if (meshWorkerPool_) {
         meshWorkerPool_->setLightProvider(provider);
     }
+}
+
+void WorldRenderer::setFarGeometryProvider(BlockGeometryProvider provider) {
+    farGeometryProvider_ = provider;
+    meshBuilder_.setFarGeometryProvider(provider);
+    if (meshWorkerPool_) meshWorkerPool_->setFarGeometryProvider(std::move(provider));
 }
 
 void WorldRenderer::setGeometryProvider(BlockGeometryProvider provider) {

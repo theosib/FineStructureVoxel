@@ -266,6 +266,10 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             }
             ++customGeometryModelCount_;
         }
+        if (model->hasFarGeometry()) {
+            blockFarGeometries_[bareId.id] = model->farGeometry();
+            blockFarGeometries_[qualifiedId.id] = model->farGeometry();
+        }
 
         if (model->hasScript()) {
             std::string resolvedScript = resolveScriptPath(rootDir, model->script());
@@ -431,6 +435,17 @@ const BlockGeometry* ContentPackLoader::getGeometry(BlockTypeId type) const {
         return &it->second;
     }
     return nullptr;
+}
+
+const BlockGeometry* ContentPackLoader::getFarGeometry(BlockTypeId type) const {
+    auto it = blockFarGeometries_.find(type.id);
+    return it != blockFarGeometries_.end() ? &it->second : nullptr;
+}
+
+std::function<const BlockGeometry*(BlockTypeId)> ContentPackLoader::farGeometryProvider() const {
+    // Nothing has one in most games, and then every block skips the lookup
+    if (blockFarGeometries_.empty()) return nullptr;
+    return [this](BlockTypeId type) -> const BlockGeometry* { return getFarGeometry(type); };
 }
 
 std::function<const BlockGeometry*(BlockTypeId)> ContentPackLoader::geometryProvider() const {

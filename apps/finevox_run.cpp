@@ -206,6 +206,8 @@ int main(int argc, char* argv[]) {
             clientOptions.printStats = true;
         } else if (arg == "--validation") {
             clientOptions.validation = true;
+        } else if (arg == "--no-vsync") {
+            clientOptions.vsync = false;
         } else if (arg == "--verbose") {
             verbose = true;
         } else if (arg == "--new") {

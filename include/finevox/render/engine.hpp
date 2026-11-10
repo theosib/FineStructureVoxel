@@ -51,6 +51,7 @@ struct EngineConfig {
     uint32_t windowWidth = 1280;
     uint32_t windowHeight = 720;
     bool enableValidation = false;
+    bool vsync = true;  ///< Off, frames run as fast as they can: for measuring what they cost
 };
 
 // ============================================================================

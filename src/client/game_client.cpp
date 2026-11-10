@@ -238,6 +238,7 @@ struct GameClient::Impl {
     std::string playerName;
     int fps = 0;
     int framesThisSecond = 0;
+    uint64_t meshesBuiltBefore = 0;  ///< For --stats: how many were built in the last second
     float fpsTimer = 0.0f;
 
     void setupShell();
@@ -266,6 +267,8 @@ struct GameClient::Impl {
     void buildProjectiles();
     void updateFog(float dt);
     void setEmbodied(bool on);
+    void applyDetail();
+    std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
     void buildGhosts(float dt);
     void startDeathBursts();
@@ -309,6 +312,7 @@ void GameClient::Impl::setupShell() {
     engineConfig.windowWidth = options.width;
     engineConfig.windowHeight = options.height;
     engineConfig.enableValidation = options.validation;
+    engineConfig.vsync = options.vsync;
     engine = std::make_unique<Engine>(engineConfig);
 
     auto& window = engine->window();
@@ -389,10 +393,15 @@ void GameClient::Impl::setupShell() {
             framesThisSecond = 0;
             fpsTimer -= 1.0f;
             if (options.printStats && inWorld) {
+                uint64_t built = 0;
+                if (MeshWorkerPool* pool = worldRenderer->meshWorkerPool()) {
+                    built = pool->stats().meshesBuilt.load(std::memory_order_relaxed);
+                }
                 std::cout << "[client] fps=" << fps << " chunks=" << worldRenderer->renderedChunkCount()
                           << "/" << worldRenderer->loadedChunkCount()
                           << " culled=" << worldRenderer->culledChunkCount()
                           << " tris=" << worldRenderer->renderedTriangleCount()
+                          << " built=" << (built - std::exchange(meshesBuiltBefore, built))
                           << " entities=" << entityRenderer.entityCount()
                           << " cam=" << camera.positionD().x << "," << camera.positionD().y << ","
                           << camera.positionD().z << std::endl;
@@ -443,6 +452,7 @@ void GameClient::Impl::setupShell() {
     callbacks.onResize = [this](uint32_t width, uint32_t height) {
         if (height > 0) {
             camera.setPerspective(FOV_DEGREES, float(width) / float(height), NEAR_PLANE, FAR_PLANE);
+            applyDetail();
         }
     };
     callbacks.getClearColor = [this]() -> glm::vec4 {
@@ -595,6 +605,7 @@ void GameClient::Impl::enterWorld() {
     worldRenderer->setBlockAtlas(atlas->texture());
     worldRenderer->setTextureProvider(atlas->createProvider());
     worldRenderer->setGeometryProvider(content->geometryProvider());
+    worldRenderer->setFarGeometryProvider(content->farGeometryProvider());
     worldRenderer->setFaceOccludesProvider(content->faceOccludesProvider(world));
     worldRenderer->setConnectsProvider(content->connectsProvider(world));
     worldRenderer->initialize();
@@ -646,6 +657,7 @@ void GameClient::Impl::enterWorld() {
     int32_t radius = worldInfo.radius * 16;
     tactical.setBounds(glm::vec2(float(-radius)), glm::vec2(float(radius)));
     camera.setPerspective(FOV_DEGREES, float(window.width()) / float(window.height()), NEAR_PLANE, FAR_PLANE);
+    applyDetail();
     tactical.setPivot(start);
 
     stewardShapes = createBlockShapeProvider(world);
@@ -919,6 +931,14 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
         fireUi(symAction);
     }
     return true;
+}
+
+// On a bigger or sharper screen a block is more pixels tall, so detail reaches further
+void GameClient::Impl::applyDetail() {
+    if (!worldRenderer) return;
+    float pixels = detailPixels.value_or(manifest.detailPixels);
+    float height = static_cast<float>(engine->window().height());
+    worldRenderer->setDetailDistance(DetailRange::forPixels(pixels, height, FOV_DEGREES));
 }
 
 void GameClient::Impl::setEmbodied(bool on) {
@@ -1365,6 +1385,16 @@ void GameClient::Impl::registerNatives() {
         glm::dvec3 pivot = tactical.pivot();
         return Value::array(std::vector<Value>{Value::number(pivot.x), Value::number(pivot.y),
                                                Value::number(pivot.z)});
+    });
+
+    // detail_pixels [n] -> how far detail reaches, in blocks. With n, draws far forms under n
+    // pixels tall from now on, 0 drawing everything in full.
+    e.registerFunction("detail_pixels", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) {
+            detailPixels = static_cast<float>(number(args[0]));
+            applyDetail();
+        }
+        return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
     });
 
     e.registerFunction("cam_pos", [this](ExecutionContext&, const Args&) -> Value {

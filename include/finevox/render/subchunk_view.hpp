@@ -276,6 +276,14 @@ public:
     /// Set the LOD level after building a mesh
     void setLastBuiltLOD(LODLevel lod) { lastBuiltLOD_ = lod; }
 
+    /// Whether the mesh was built in full or in far forms, and whether that made a difference
+    [[nodiscard]] bool builtDetailed() const { return builtDetailed_; }
+    [[nodiscard]] bool hasFarForms() const { return hasFarForms_; }
+    void setBuiltDetail(bool detailed, bool hasFarForms) {
+        builtDetailed_ = detailed;
+        hasFarForms_ = hasFarForms;
+    }
+
     // Non-copyable, movable
     SubChunkView(const SubChunkView&) = delete;
     SubChunkView& operator=(const SubChunkView&) = delete;
@@ -298,6 +306,8 @@ private:
     size_t fluidGpuMemoryBytes_ = 0;
 
     LODLevel lastBuiltLOD_ = LODLevel::LOD0;
+    bool builtDetailed_ = true;
+    bool hasFarForms_ = false;
 };
 
 }  // namespace finevox::render

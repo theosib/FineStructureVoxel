@@ -102,6 +102,8 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
     MeshData meshData;
     MeshData fluidData;
     bool success = false;
+    bool detailed = true;
+    bool hasFarForms = false;
 
     try {
         // Get the subchunk from the world
@@ -126,6 +128,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         BlockGeometryProvider geometryProvider;
         BlockFaceOccludesProvider faceOccludesProvider;
         BlockConnectsProvider connectsProvider;
+        BlockGeometryProvider farGeometryProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
             textureProvider = textureProvider_;
@@ -133,6 +136,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             geometryProvider = geometryProvider_;
             faceOccludesProvider = faceOccludesProvider_;
             connectsProvider = connectsProvider_;
+            farGeometryProvider = farGeometryProvider_;
         }
 
         // Use default texture provider if none set (returns (0,0,1,1) UVs)
@@ -158,6 +162,14 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         }
         if (faceOccludesProvider) {
             builder.setFaceOccludesProvider(faceOccludesProvider);
+        }
+        if (farGeometryProvider) {
+            builder.setFarGeometryProvider(farGeometryProvider);
+            DetailRange range{detailNear_.load(std::memory_order_relaxed)};
+            glm::dvec3 camera(detailCameraX_.load(std::memory_order_relaxed),
+                              detailCameraY_.load(std::memory_order_relaxed),
+                              detailCameraZ_.load(std::memory_order_relaxed));
+            builder.setDetailed(range.detailed(DetailRange::distance(camera, pos)));
         }
 
         // Build the mesh at the requested LOD level
@@ -204,6 +216,8 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         }
 
         success = true;
+        detailed = builder.detailed();
+        hasFarForms = builder.sawFarForms();
 
         // Update statistics
         stats_.meshesBuilt.fetch_add(1, std::memory_order_relaxed);
@@ -219,7 +233,10 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
 
     // Push to upload queue (move semantics - no copy)
     if (success) {
-        uploadQueue_.push(MeshUploadData(pos, std::move(meshData), std::move(fluidData), buildLOD));
+        MeshUploadData upload(pos, std::move(meshData), std::move(fluidData), buildLOD);
+        upload.detailed = detailed;
+        upload.hasFarForms = hasFarForms;
+        uploadQueue_.push(std::move(upload));
     }
 
     return success;

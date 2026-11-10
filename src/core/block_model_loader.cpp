@@ -71,6 +71,11 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
         }
     }
 
+    if (auto* farEntry = doc->get("far-geometry")) {
+        std::string farPath = resolveFile(ensureExtension(farEntry->value.asStringOwned(), ".geom"), baseDir);
+        if (auto geometry = loadGeometry(farPath)) model.setFarGeometry(std::move(*geometry));
+    }
+
     // Load collision if specified
     if (auto* collEntry = doc->get("collision")) {
         std::string value = collEntry->value.asStringOwned();
@@ -278,6 +283,16 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
                 if (geometry) {
                     model.setGeometry(std::move(*geometry));
                 }
+            }
+        }
+    }
+
+    if (const ConfigEntry* farEntry = doc.get("far-geometry")) {
+        std::string farPath = ensureExtension(farEntry->value.asStringOwned(), ".geom");
+        if (resolver_) {
+            std::string resolvedContent = resolver_(farPath);
+            if (!resolvedContent.empty()) {
+                if (auto geometry = parseGeometryFromString(resolvedContent)) model.setFarGeometry(std::move(*geometry));
             }
         }
     }

@@ -92,6 +92,28 @@ TEST_F(GameRuntimeTest, GeneratesTheWorldTheManifestAsksFor) {
     EXPECT_TRUE(game.session().world().getBlock(64, 10, 8).isAir()) << "beyond world_radius";
 }
 
+// A lobby always sends a seed, a random one by default, and --seed has to win over it
+TEST_F(GameRuntimeTest, TheCommandLineBeatsTheLobby) {
+    write("scripts/main.fsc", "");
+    RuntimeOptions options;
+    options.gameRoot = root;
+    options.manifestOverrides["world_seed"] = "12345";
+    options.manifestOverrides["world_radius"] = "3";
+    options.seedOverride = 99;
+    options.radiusOverride = 1;
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+    EXPECT_EQ(runtime->manifest().worldSeed, 99u);
+    EXPECT_EQ(runtime->manifest().worldRadius, 1);
+
+    options.seedOverride.reset();
+    options.radiusOverride.reset();
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+    EXPECT_EQ(runtime->manifest().worldSeed, 12345u) << "and without it the lobby beats game.conf";
+    EXPECT_EQ(runtime->manifest().worldRadius, 3);
+}
+
 TEST_F(GameRuntimeTest, RunsStartAndTickHandlers) {
     auto& game = boot(R"(
 set started false

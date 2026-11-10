@@ -142,13 +142,14 @@ void GameRuntime::load() {
         throw std::runtime_error("no readable game.conf in " + options_.gameRoot.string());
     }
     manifest_ = *manifest;
-    if (options_.seedOverride) manifest_.worldSeed = *options_.seedOverride;
-    if (options_.radiusOverride) manifest_.worldRadius = *options_.radiusOverride;
     for (const auto& [key, value] : options_.manifestOverrides) {
         if (!manifest_.applyOverride(key, value)) {
             std::cerr << "[game] a setting can't change " << key << "\n";
         }
     }
+    // The command line beats the lobby, whose seed is a random one unless somebody picked it
+    if (options_.seedOverride) manifest_.worldSeed = *options_.seedOverride;
+    if (options_.radiusOverride) manifest_.worldRadius = *options_.radiusOverride;
 
     ResourceLocator::instance().setGameRoot(options_.gameRoot);
     blueprints_.loadDirectory(options_.gameRoot / "blueprints");

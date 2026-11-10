@@ -478,9 +478,14 @@ void GameClient::Impl::setupShell() {
             finevk::SwapChain* swapChain = r.swapChain();
             if (swapChain) {
                 uint32_t index = engine->window().currentImageIndex();
-                bool ok = render::FrameCapture::captureImage(swapChain->image(index), *stagingPool,
-                                                             screenshotPath,
-                                                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                std::vector<uint8_t> rgba;
+                uint32_t w = 0, h = 0;
+                bool ok = render::FrameCapture::readbackRGBA(swapChain->image(index), *stagingPool, {},
+                                                             rgba, w, h, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                // The window shows opaque whatever the alpha, and a cut-out texture's edge leaves
+                // some, which a viewer would show over its own background
+                for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = 255;
+                ok = ok && render::FrameCapture::savePNG(screenshotPath, w, h, rgba);
                 std::cout << (ok ? "Screenshot saved: " : "Screenshot FAILED: ") << screenshotPath
                           << std::endl;
             }

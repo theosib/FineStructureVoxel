@@ -339,14 +339,17 @@ couldn't see shows nothing, and `despawnEntity` on a living one removes it at on
 
 ### .model additions
 
-`texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`. With `opaque:
-false` a block lets sky light through; its `light-attenuation` defaults to 1, so foliage
-casts shade rather than a black hole.
+`texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`,
+`blocks-sky-light`. With `opaque: false` a block lets light through, its `light-attenuation`
+defaulting to 1, and sky light falls past it. `blocks-sky-light: true` stops the sky light while
+letting the rest through, for leaves that shade the ground under them.
 
 `connects: <group>` makes blocks of a group join up. A geometry face named
 `connect_<dir>_<anything>`, with dir one of `n ne e se s sw w nw`, shows only towards a
 neighbour of the same group at the same height. A diagonal joins only where neither straight
-neighbour beside it does, so three blocks in an L make a corner, not a triangle.
+neighbour beside it does, so three blocks in an L make a corner, not a triangle. `up` and `down`
+are directions too, and `open_<dir>_<anything>` shows only where nothing of the group is: a rock
+under another can have a flat top to carry it, and a rounded one with nothing on it.
 
 ### .feature additions
 

@@ -202,6 +202,7 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
                 if (model->lightAttenuation() >= 15) blockType.setLightAttenuation(1);
             }
         }
+        if (model->hasBlocksSkyLightOverride()) blockType.setBlocksSkyLight(model->blocksSkyLight());
 
         if (model->hasCustomGeometry()) {
             blockType.setHasCustomMesh(true);

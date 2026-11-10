@@ -295,6 +295,12 @@ BlockModel& BlockModel::setOpaque(bool opaque) {
     return *this;
 }
 
+BlockModel& BlockModel::setBlocksSkyLight(bool blocks) {
+    hasBlocksSkyLightOverride_ = true;
+    blocksSkyLight_ = blocks;
+    return *this;
+}
+
 BlockModel& BlockModel::setSounds(const std::string& sounds) {
     sounds_ = sounds;
     return *this;
@@ -390,11 +396,28 @@ int parseFaceName(const std::string& name) {
     return -1;
 }
 
+namespace {
+
+constexpr std::string_view CONNECT_PREFIX = "connect_";
+constexpr std::string_view OPEN_PREFIX = "open_";
+
+}  // namespace
+
+bool isOpenConnection(const std::string& name) {
+    return name.rfind(OPEN_PREFIX, 0) == 0 && parseConnection(name) >= 0;
+}
+
 int parseConnection(const std::string& name) {
-    static constexpr std::array<std::string_view, 8> DIRECTIONS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
-    static constexpr std::string_view PREFIX = "connect_";
-    if (name.rfind(PREFIX, 0) != 0) return -1;
-    const size_t start = PREFIX.size();
+    static constexpr std::array<std::string_view, 10> DIRECTIONS = {"n", "ne", "e", "se", "s", "sw",
+                                                                    "w", "nw", "up", "down"};
+    size_t start = 0;
+    if (name.rfind(CONNECT_PREFIX, 0) == 0) {
+        start = CONNECT_PREFIX.size();
+    } else if (name.rfind(OPEN_PREFIX, 0) == 0) {
+        start = OPEN_PREFIX.size();
+    } else {
+        return -1;
+    }
     const size_t end = name.find('_', start);
     if (end == std::string::npos) return -1;
     const std::string_view direction = std::string_view(name).substr(start, end - start);

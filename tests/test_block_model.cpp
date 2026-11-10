@@ -466,9 +466,12 @@ TEST(BlockModelLoaderTest, ConnectFacesNameTheirDirection) {
     const std::vector<std::pair<std::string, int>> names = {
         {"connect_n_side", 0}, {"connect_ne_side", 1}, {"connect_e_top", 2}, {"connect_se_a_b", 3},
         {"connect_s_x", 4},    {"connect_sw_x", 5},    {"connect_w_x", 6},   {"connect_nw_x", 7},
-        {"connect_up_x", -1},  {"connect_n", -1},      {"connector", -1},    {"top", -1}};
+        {"connect_up_x", 8},   {"connect_down_x", 9},  {"open_up_x", 8},     {"open_sw_x", 5},
+        {"connect_n", -1},     {"open_up", -1},        {"connector", -1},    {"opening_x", -1},
+        {"top", -1}};
     for (const auto& [name, direction] : names) {
         EXPECT_EQ(parseConnection(name), direction) << name;
+        EXPECT_EQ(isOpenConnection(name), direction >= 0 && name.rfind("open_", 0) == 0) << name;
     }
 
     BlockModelLoader loader;
@@ -486,10 +489,23 @@ face:connect_se_arm:
     EXPECT_TRUE(geom->hasConnections());
     EXPECT_EQ(geom->getFace("post")->connection, -1);
     EXPECT_EQ(geom->getFace("connect_se_arm")->connection, 3);
+    EXPECT_FALSE(geom->getFace("connect_se_arm")->whenOpen);
 
     auto model = loader.parseModelFromString("connects: fence\n");
     ASSERT_TRUE(model.has_value());
     EXPECT_EQ(model->connects(), "fence");
+}
+
+TEST(BlockModelLoaderTest, SeeThroughLeavesCanStillShade) {
+    BlockModelLoader loader;
+    auto leaves = loader.parseModelFromString("opaque: false\nblocks-sky-light: true\n");
+    ASSERT_TRUE(leaves.has_value());
+    EXPECT_TRUE(leaves->hasBlocksSkyLightOverride());
+    EXPECT_TRUE(leaves->blocksSkyLight());
+
+    auto bush = loader.parseModelFromString("opaque: false\n");
+    ASSERT_TRUE(bush.has_value());
+    EXPECT_FALSE(bush->hasBlocksSkyLightOverride()) << "and unsaid, opacity decides";
 }
 
 TEST(BlockModelLoaderTest, ParseCustomFaceName) {

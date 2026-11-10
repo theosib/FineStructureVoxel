@@ -378,6 +378,10 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
         model.setOpaque(opaqueEntry->value.asBool(true));
     }
 
+    if (const ConfigEntry* skyEntry = doc.get("blocks-sky-light")) {
+        model.setBlocksSkyLight(skyEntry->value.asBool(true));
+    }
+
     if (const ConfigEntry* connectsEntry = doc.get("connects")) {
         model.setConnects(connectsEntry->value.asStringOwned());
     }
@@ -404,6 +408,7 @@ std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
         face.faceIndex = nextCustomIndex++;
     }
     face.connection = parseConnection(entry.suffix);
+    face.whenOpen = isOpenConnection(entry.suffix);
 
     // Parse vertices from data lines
     for (const auto& dataLine : entry.dataLines) {

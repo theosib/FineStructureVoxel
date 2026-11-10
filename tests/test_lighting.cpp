@@ -1646,6 +1646,7 @@ protected:
     void SetUp() override {
         ground = BlockTypeId::fromName("clearing_ground");
         leaves = BlockTypeId::fromName("clearing_leaves");
+        bush = BlockTypeId::fromName("clearing_bush");
         log = BlockTypeId::fromName("clearing_log");
 
         BlockType groundType;
@@ -1653,12 +1654,18 @@ protected:
         BlockRegistry::global().registerOrUpdateType(ground, groundType);
         BlockRegistry::global().registerOrUpdateType(log, groundType);
 
+        // Leaves are see-through, but shade what's under them
         BlockType leafType;
         leafType.setOpaque(false);
         leafType.setNoCollision();
-        leafType.setBlocksSkyLight(false);
+        leafType.setBlocksSkyLight(true);
         leafType.setLightAttenuation(1);
         BlockRegistry::global().registerOrUpdateType(leaves, leafType);
+
+        // A bush doesn't
+        BlockType bushType = leafType;
+        bushType.setBlocksSkyLight(false);
+        BlockRegistry::global().registerOrUpdateType(bush, bushType);
 
         for (int x = 0; x < 16; ++x) {
             for (int z = 0; z < 16; ++z) world.setBlock(x, 20, z, ground);
@@ -1685,7 +1692,7 @@ protected:
 
     World world;
     LightEngine engine{world};
-    BlockTypeId ground, leaves, log;
+    BlockTypeId ground, leaves, bush, log;
 };
 
 TEST_F(SkyLightClearingTest, FellingALogLetsTheSkyBackIn) {
@@ -1715,6 +1722,16 @@ TEST_F(SkyLightClearingTest, ClearingFoliageRemovesItsShade) {
     }
     settle();
     EXPECT_GE(engine.getSkyLight({8, 21, 8}), 14) << "no canopy, no shade";
+}
+
+// A block that lets the sky through is lit inside from the start, as it is once placed. Anything
+// drawn there reads that cell, and shows black if it's dark.
+TEST_F(SkyLightClearingTest, WhatLetsTheSkyThroughIsLitFromTheStart) {
+    world.setBlock(8, 21, 8, bush);
+    world.setBlock(8, 22, 8, bush);
+    initialise();
+    EXPECT_EQ(engine.getSkyLight({8, 22, 8}), 15);
+    EXPECT_EQ(engine.getSkyLight({8, 21, 8}), 15) << "under another";
 }
 
 TEST_F(SkyLightClearingTest, ASubchunkBroughtBackIsOpenToTheSky) {

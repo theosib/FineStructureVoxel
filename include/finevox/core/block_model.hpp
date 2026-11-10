@@ -56,7 +56,9 @@ struct FaceGeometry {
     std::string name;                    // Face name (e.g., "top", "step_top")
     int faceIndex = -1;                  // 0-5 for standard, 6+ for extra, -1 if unset
     bool isSolid = false;                // Does this face fully occlude neighbor?
-    int connection = -1;                 // Direction it reaches, 0-7 clockwise from north, or -1
+    int connection = -1;                 // Direction it reaches, 0-7 clockwise from north, 8 up,
+                                         // 9 down, or -1
+    bool whenOpen = false;               // Shown when nothing joins there, instead of when it does
 
     FaceGeometry() = default;
 
@@ -209,6 +211,10 @@ public:
     /// Explicit opacity override; unset keeps the BlockType default (opaque).
     BlockModel& setOpaque(bool opaque);
 
+    /// Whether sky light stops here, for a block that isn't opaque but shades what's under it, as
+    /// leaves do. Unset, a block stops it if it's opaque.
+    BlockModel& setBlocksSkyLight(bool blocks);
+
     /// Blocks naming the same group join up, showing their connect_* faces
     BlockModel& setConnects(std::string group);
 
@@ -274,6 +280,8 @@ public:
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
     [[nodiscard]] const std::string& connects() const { return connects_; }
     [[nodiscard]] bool opaque() const { return opaque_; }
+    [[nodiscard]] bool hasBlocksSkyLightOverride() const { return hasBlocksSkyLightOverride_; }
+    [[nodiscard]] bool blocksSkyLight() const { return blocksSkyLight_; }
 
     /// Get sound set name
     [[nodiscard]] const std::string& sounds() const { return sounds_; }
@@ -321,6 +329,8 @@ private:
     float walkSpeed_ = 1.0f;
     bool hasOpaqueOverride_ = false;
     bool opaque_ = true;
+    bool hasBlocksSkyLightOverride_ = false;
+    bool blocksSkyLight_ = true;
     std::string connects_;
     std::string sounds_;
     std::string script_;
@@ -358,9 +368,13 @@ private:
  */
 [[nodiscard]] bool isStandardFaceName(const std::string& name);
 
-/// The direction in a face name of the form connect_<dir>_<anything>, where dir is one of
-/// n ne e se s sw w nw: 0-7 clockwise from north (-Z). -1 for any other name.
+/// The direction in a face name of the form connect_<dir>_<anything> or open_<dir>_<anything>,
+/// where dir is one of n ne e se s sw w nw (0-7 clockwise from north, -Z), up (8) or down (9).
+/// -1 for any other name.
 [[nodiscard]] int parseConnection(const std::string& name);
+
+/// Whether a face name is open_<dir>_<anything>: shown when nothing joins in that direction
+[[nodiscard]] bool isOpenConnection(const std::string& name);
 
 /**
  * @brief Get the canonical name for a face index

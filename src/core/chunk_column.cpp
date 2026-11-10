@@ -1,4 +1,5 @@
 #include "finevox/core/chunk_column.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/shared_cell.hpp"
 #include <algorithm>
@@ -213,6 +214,28 @@ void ChunkColumn::compactAll() {
 // Heightmap Implementation
 // ============================================================================
 
+namespace {
+
+/// Whether a block stops sky light, as a leaf or a bush doesn't. Block properties sit behind the
+/// registry's lock, and a column holds few kinds of block, so a scan asks once for each.
+class SkyBlockers {
+public:
+    bool operator()(BlockTypeId block) {
+        if (block.isAir()) return false;
+        for (const auto& [id, blocks] : seen_) {
+            if (id == block.id) return blocks;
+        }
+        bool blocks = BlockRegistry::global().getType(block).blocksSkyLight();
+        seen_.emplace_back(block.id, blocks);
+        return blocks;
+    }
+
+private:
+    std::vector<std::pair<uint32_t, bool>> seen_;
+};
+
+}  // namespace
+
 int32_t ChunkColumn::getHeight(int32_t localX, int32_t localZ) const {
     if (localX < 0 || localX >= 16 || localZ < 0 || localZ >= 16) {
         return NO_HEIGHT;
@@ -240,6 +263,7 @@ void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, b
         if (currentHeight != NO_HEIGHT && blockY + 1 == currentHeight) {
             // Scan down to find new highest opaque block
             sharedStore(heightmap_[idx], NO_HEIGHT);
+            SkyBlockers blocksSky;
 
             // We need to look through all subchunks at this X,Z
             // Start from the block below the one we just removed
@@ -255,12 +279,7 @@ void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, b
                 int32_t localY = worldYToLocalY(y);
                 BlockTypeId block = subChunk->getBlock(localX, localY, localZ);
 
-                // Check if this block is opaque (blocks sky light)
-                // For now, we consider any non-air block as potentially blocking
-                // The caller should use BlockRegistry to check blocksSkyLight
-                if (!block.isAir()) {
-                    // Found a non-air block - assume it blocks sky light
-                    // (Proper implementation would check BlockRegistry)
+                if (blocksSky(block)) {
                     sharedStore(heightmap_[idx], y + 1);
                     break;
                 }
@@ -270,7 +289,8 @@ void ChunkColumn::updateHeight(int32_t localX, int32_t localZ, int32_t blockY, b
 }
 
 void ChunkColumn::recalculateHeightmap() {
-    // For each X,Z column, find the highest opaque block
+    // For each X,Z column, find the highest block that stops sky light
+    SkyBlockers blocksSky;
     for (int32_t localZ = 0; localZ < 16; ++localZ) {
         for (int32_t localX = 0; localX < 16; ++localX) {
             int32_t height = NO_HEIGHT;
@@ -283,9 +303,7 @@ void ChunkColumn::recalculateHeightmap() {
                 // Scan this subchunk from top to bottom
                 for (int32_t localY = 15; localY >= 0; --localY) {
                     BlockTypeId block = subChunk->getBlock(localX, localY, localZ);
-                    if (!block.isAir()) {
-                        // Found a non-air block
-                        // For proper implementation, check BlockRegistry::getType(block).blocksSkyLight()
+                    if (blocksSky(block)) {
                         height = chunkY * 16 + localY + 1;
                         goto next_column;
                     }

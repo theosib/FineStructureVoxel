@@ -35,6 +35,7 @@ namespace fs = std::filesystem;
 
 void registerBlueprintNatives(GameRuntime& runtime);
 void registerConflictNatives(GameRuntime& runtime);
+void registerTaskBoardNatives(GameRuntime& runtime);
 
 namespace {
 
@@ -557,6 +558,7 @@ void GameRuntime::registerNatives() {
 
     registerBlueprintNatives(*this);
     registerConflictNatives(*this);
+    registerTaskBoardNatives(*this);
 }
 
 void GameRuntime::loadWorldContent() {

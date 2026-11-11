@@ -298,6 +298,59 @@ end
     EXPECT_EQ(progress.asMap().get(si.intern("total")).asInt(), 4);
 }
 
+TEST_F(GameRuntimeTest, ABoardOffersTheLayerBeingBuiltToWhoeverIsNearest) {
+    write("blueprints/tower.blueprint", "s = stone\n---\ns\n---\ns\n");
+    auto& game = boot(R"(
+set first nil
+set far_task nil
+set stats nil
+set second nil
+set after_all nil
+set kept nil
+set allowed nil
+on :start do
+    let other {site_create :tower 12 40 12}
+    let strict {board_create}
+    board_resources strict {=stone :rock}
+    board_sites strict [[other 0 []]]
+    set kept {board_solve strict}
+    board_sites strict [[other 0 [:rock]]]
+    set allowed {board_solve strict}
+    let site {site_create :tower 8 40 8}
+    let near {ent_spawn :walker 9.5 40 8.5 =faction 1}
+    let far {ent_spawn :walker 30.5 40 30.5 =faction 1}
+    let board {board_create}
+    board_resources board {=stone :rock}
+    board_sites board [[site 0]]
+    board_agent board near =holds :rock
+    board_agent board far =holds :rock
+    set stats {board_solve board}
+    set first {board_task board near}
+    set far_task {board_task board far}
+    world_set_block first.x first.y first.z first.block
+    set second {board_take board near}
+    world_set_block second.x second.y second.z second.block
+    set after_all {board_take board near}
+end
+)");
+    auto& ctx = game.gameScript().context();
+    auto& si = StringInterner::global();
+    auto stats = ctx.get("stats");
+    ASSERT_TRUE(stats.isMap());
+    EXPECT_EQ(stats.asMap().get(si.intern("tasks")).asInt(), 1) << "only the bottom layer is work yet";
+    auto first = ctx.get("first");
+    ASSERT_TRUE(first.isMap()) << "the walker beside the tower gets the task";
+    EXPECT_EQ(first.asMap().get(si.intern("y")).asInt(), 40);
+    EXPECT_EQ(first.asMap().get(si.intern("block")).asSymbol(), si.intern("stone"));
+    EXPECT_TRUE(ctx.get("far_task").isNil()) << "and the one far off doesn't";
+    auto second = ctx.get("second");
+    ASSERT_TRUE(second.isMap()) << "the next layer is work as soon as the first is built";
+    EXPECT_EQ(second.asMap().get(si.intern("y")).asInt(), 41);
+    EXPECT_TRUE(ctx.get("after_all").isNil());
+    EXPECT_EQ(ctx.get("kept").asMap().get(si.intern("tasks")).asInt(), 0) << "rock isn't on the list";
+    EXPECT_EQ(ctx.get("allowed").asMap().get(si.intern("tasks")).asInt(), 1);
+}
+
 TEST_F(GameRuntimeTest, AirSymbolMeansRealAir) {
     auto& game = boot(R"(
 on :start do

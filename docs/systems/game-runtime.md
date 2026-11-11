@@ -193,6 +193,23 @@ Sites compare against the live world, so a destroyed block becomes work again. C
 bottom-up. A position has one target; the first added wins, which lets foundations be
 added after the structure without undoing it.
 
+### Work assignment
+
+```
+board_create -> id         board_remove id        board_alive id -> bool
+board_options id [=stick blocks] [=vertical weight]
+board_resources id {=block resource ...}      board_sources id resource [[x y z] ...]
+board_sites id [[site priority [resource ...]] ...]
+board_post id key x y z [=needs r] [=priority p]     board_unpost id key
+board_agent id entity [=holds r] [=fetches b] [=only_holds b] [=committed b] [=speed s]
+board_drop id entity       board_release id entity
+board_solve id -> {=agents =tasks =assigned =micros}
+board_task id entity -> task or nil          board_take id entity -> task or nil
+```
+
+A task board gives each agent the job that makes the whole team's travel least, solved exactly,
+with construction sites' layers being built as tasks. See [task-board.md](task-board.md).
+
 ### Vision and projectiles
 
 ```

@@ -69,7 +69,9 @@ physics with step climbing, raycasting, and scheduled block updates.
 [physics.md](docs/systems/physics.md), [events.md](docs/systems/events.md)
 
 **Entities.** AI brains built from goals, pathfinding and navigation, senses, skeletons and
-animation, and script hooks. [entities.md](docs/systems/entities.md)
+animation, and script hooks. [entities.md](docs/systems/entities.md). A task board decides which
+worker does which job for a whole team at once, solved exactly.
+[task-board.md](docs/systems/task-board.md)
 
 **World generation.** Noise, biomes from data files, and a pipeline of passes and placed features.
 [worldgen.md](docs/systems/worldgen.md)

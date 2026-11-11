@@ -147,6 +147,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/pathfinder.cpp
     src/core/navigation.cpp
     src/core/work_claims.cpp
+    src/core/task_board.cpp
     src/core/faction_vision.cpp
     src/core/projectile_system.cpp
     src/core/world_replica.cpp
@@ -352,6 +353,7 @@ if(TARGET finevox_script)
         src/game/replication_server.cpp
         src/game/blueprint_natives.cpp
         src/game/conflict_natives.cpp
+        src/game/task_board_natives.cpp
         src/game/mcp_server.cpp
         src/game/mcp_tools.cpp
     )
@@ -764,6 +766,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_world_replica.cpp
         tests/test_projectile_system.cpp
         tests/test_work_claims.cpp
+        tests/test_task_board.cpp
         tests/test_tactical_camera.cpp
         tests/test_region_tint.cpp
         tests/test_world_concurrency.cpp

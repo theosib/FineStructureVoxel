@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -76,6 +77,9 @@ struct RuntimeOptions {
     bool newGame = false;
     /// Neither read nor write saves: for automation, which must not touch the player's game
     bool noSaves = false;
+    /// Where script `trace` lines go. Empty means a new file in logs/ beside the saves, or none
+    /// with noSaves.
+    std::filesystem::path tracePath;
     /// Serve MCP on this port (see mcp_server.hpp). Unset, the game has no server at all.
     std::optional<int> mcpPort;
     /// Offer only the tools a player could fairly use, for an LLM to play with
@@ -201,6 +205,7 @@ private:
     void loadSites(const finescript::Value& saved, int64_t nextId);
 
     void startMcp();
+    void writeTrace(const std::string& line);
     void bindSeeds();
     void bindTheUnbound();
     [[nodiscard]] ClientSave clientSaveCopy() const;
@@ -222,6 +227,8 @@ private:
     std::shared_ptr<ReplicationServer> replication_;
     std::unique_ptr<McpServer> ownedMcp_;
     McpServer* mcp_ = nullptr;
+    std::ofstream trace_;
+    bool traceOpened_ = false;
     mutable std::mutex seatMutex_;
     std::map<int64_t, Seat> seats_;
     /// What a save says about who was who: name, faction, and whether they were local

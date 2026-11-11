@@ -149,6 +149,11 @@ With `=place` or `=dig`, a path may route through cells needing a block changed.
 stops at each and reports `:blocked`. Policy decides what to do, then calls
 `ent_nav_resume`. The search knows only blocks: the cell it wants filled can have someone in it. `:arrived` and `:failed` persist until `ent_nav_ack`.
 
+The search works in whole cells, but climbs by real floor heights: a block's collision top (0.5
+for a half slab) is what's underfoot, and no step may rise more than the agents' 1.05. Standing
+on a slab, a one-cell step is a step and a half, so a route from there goes down and builds up
+from the ground instead. Anything the route places counts as a full block.
+
 Budget the searches: an unreachable goal costs the full `max_nodes` every attempt, so
 agents should back off after `:failed`. Chasing a moving target should re-search only once
 the old route has stopped being useful.
@@ -394,6 +399,13 @@ Any feature with `density` registers its own placement: `density`, `surface`,
 With `saves: true`, every clean exit saves and the next launch resumes, firing `on :resume`
 instead of `on :start`. `--new` starts over, and `--no-save` or `--exit-after` leave saves alone.
 `finevox_headless` only saves when told: `--save DIR` at the end of a run, `--resume DIR` to load.
+
+`trace category a b c` writes a line to the game's trace file, with the tick and the time:
+`logs/game-<date>-<time>-<pid>.log` beside `saves/`, the newest 20 kept. It's flushed a line at a
+time, so a crash keeps everything up to it. `--trace FILE` sends it somewhere else, and a run that
+doesn't save (`--no-save`, any headless run without `--trace`) writes none. With MCP on, each line
+also goes to the `logs` tool. It's for the questions a game can't answer by looking at it now:
+why nothing was trained, where a unit went and why.
 
 The engine keeps the world, what the viewer has explored, entities under their ids, construction
 sites, vision, and the clocks. Anything else is the game's, in its handlers:

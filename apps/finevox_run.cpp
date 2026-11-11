@@ -5,7 +5,7 @@
  *   finevox_run [--game-root DIR] [--user-dir DIR] [--seed S] [--radius R] [--script FILE]
  *               [--new | --continue | --join ADDR] [--name N] [--password P]
  *               [--screenshot PATH --screenshot-frame N] [--exit-after N]
- *               [--mcp] [--mcp-port N] [--mcp-player]
+ *               [--mcp] [--mcp-port N] [--mcp-player] [--trace FILE]
  *   finevox_run [--game-root DIR] [--user-dir DIR] --server [--config FILE] [--port N] [--new]
  *
  * With none of --new, --continue or --join it opens on the game's menu, or goes straight into a
@@ -215,6 +215,8 @@ int main(int argc, char* argv[]) {
             clientOptions.start = client::ClientStart::NewGame;
         } else if (arg == "--no-save") {
             runtimeOptions.noSaves = true;
+        } else if (arg == "--trace") {
+            runtimeOptions.tracePath = value();
         } else if (arg == "--mcp") {
             if (!runtimeOptions.mcpPort) runtimeOptions.mcpPort = game::MCP_DEFAULT_PORT;
         } else if (arg == "--mcp-port") {

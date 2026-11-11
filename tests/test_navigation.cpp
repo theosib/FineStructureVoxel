@@ -320,6 +320,50 @@ TEST_F(NavigationTest, ConstructivePathBuildsAStaircaseToAHighLedge) {
     EXPECT_EQ(path->steps.back().pos, BlockCoord(21, GROUND_Y + 5, 1));
 }
 
+// Standing on a half slab, a one-cell step is a step and a half: more than a body can climb. A route
+// that raised a block beside the slab to climb onto stranded the agent on the slab beside it.
+TEST_F(NavigationTest, ConstructivePathNeverClimbsMoreThanAStepFromASlab) {
+    BlockTypeId slab = BlockTypeId::fromName("nav_slab");
+    BlockType slabType;
+    slabType.setCollisionShape(CollisionShape::HALF_SLAB_BOTTOM);
+    BlockRegistry::global().registerOrUpdateType(slab, slabType);
+    for (int x = 1; x <= 5; ++x) {
+        for (int z = -2; z <= 2; ++z) world.setBlock(x, GROUND_Y, z, slab);
+    }
+    for (int x = 6; x < 8; ++x) {
+        for (int z = -1; z <= 1; ++z) {
+            for (int y = 0; y < 3; ++y) world.setBlock(x, GROUND_Y + y, z, stone);
+        }
+    }
+    NavQuery q = query({5.5, GROUND_Y + 0.5, 0.5}, cell(6, GROUND_Y + 3, 0));
+    q.allowPlace = true;
+    q.maxNodes = 40000;
+    auto path = findNavPath(world, q);
+    ASSERT_TRUE(path.has_value());
+
+    // Heights worked out here, not by the search: a slab is half a block, anything else whole
+    auto floorUnder = [&](BlockCoord feet) {
+        BlockCoord below{feet.x, feet.y - 1, feet.z};
+        BlockTypeId block = world.getBlock(below);
+        if (block.isAir()) return -1000.0f;
+        return static_cast<float>(below.y) + (block == slab ? 0.5f : 1.0f);
+    };
+    float floor = GROUND_Y + 0.5f;
+    for (const auto& step : path->steps) {
+        if (step.action == NavAction::Place) {
+            ASSERT_TRUE(world.getBlock(step.actionPos).isAir()) << "Place into occupied cell";
+            world.setBlock(step.actionPos, stone);
+            continue;
+        }
+        float next = floorUnder(step.pos);
+        ASSERT_GT(next, -100.0f) << "no floor at " << step.pos.x << "," << step.pos.y << "," << step.pos.z;
+        EXPECT_LE(next - floor, 1.05f) << "a climb of " << (next - floor) << " onto " << step.pos.x << ","
+                                       << step.pos.y << "," << step.pos.z;
+        floor = next;
+    }
+    EXPECT_FLOAT_EQ(floor, GROUND_Y + 3.0f);
+}
+
 TEST_F(NavigationTest, ConstructivePathBridgesAGap) {
     for (int x = 10; x < 14; ++x) {
         for (int z = -8; z < 64; ++z) {

@@ -630,11 +630,11 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     });
 
     // log a b c: diagnostics, distinct from script `print`
-    e.registerFunction("log", [](ExecutionContext&, const Args& args) -> Value {
+    e.registerFunction("log", [](ExecutionContext& ctx, const Args& args) -> Value {
         std::string line;
         for (size_t i = 0; i < args.size(); ++i) {
             if (i) line += ' ';
-            line += args[i].toString();
+            line += args[i].toString(&ctx.engine().interner());
         }
         std::cout << "[game] " << line << std::endl;
         return Value::nil();

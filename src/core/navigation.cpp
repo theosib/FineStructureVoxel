@@ -19,6 +19,9 @@ constexpr float WADE_PENALTY = 3.0f;
 /// Step height for agents under navigation. Default physics stops at 0.6, and a
 /// mob jump clears less than a block, so without this no terrain step is passable.
 constexpr float AGENT_STEP_HEIGHT = 1.05f;
+/// The most a route may climb in one step, by real floor heights: a half slab under the feet
+/// makes a one-cell step a step and a half
+constexpr float MAX_RISE = AGENT_STEP_HEIGHT;
 
 constexpr float ARRIVE_RADIUS = 0.45f;
 /// Placing a block next to an agent needs its body clear of that cell
@@ -57,6 +60,8 @@ public:
         BlockTypeId block = world_.getBlock(pos);
         if (!block.isAir() && BlockRegistry::global().getType(block).hasCollision()) {
             result |= Solid | Blocked;
+            float top = BlockRegistry::global().getType(block).collisionShape().bounds().max.y;
+            if (top < 0.999f) tops_[key] = std::max(0.0f, top);
         }
         if (!world_.getFluid(pos).isEmpty()) {
             result |= Fluid;
@@ -66,6 +71,14 @@ public:
     }
 
     bool solid(const BlockCoord& pos) { return flags(pos) & Solid; }
+
+    /// How high a cell's top is, within it: 0.5 for a half slab. Anything else counts as a full
+    /// block, an empty cell too: a route only stands on one that it builds a block in first.
+    float top(const BlockCoord& pos) {
+        if (!solid(pos)) return 1.0f;
+        auto it = tops_.find(packCoord(pos));
+        return it == tops_.end() ? 1.0f : it->second;
+    }
     bool clear(const BlockCoord& pos) { return !(flags(pos) & Blocked); }
 
     float floorSpeed(const BlockCoord& below) {
@@ -76,6 +89,7 @@ public:
 private:
     const World& world_;
     std::unordered_map<uint64_t, uint8_t> cells_;
+    std::unordered_map<uint64_t, float> tops_;
 };
 
 BlockCoord up(BlockCoord p, int n = 1) { return BlockCoord(p.x, p.y + n, p.z); }
@@ -104,6 +118,11 @@ public:
         : query_(query), probe_(world), clearance_(std::max(1, int(std::ceil(query.entityHeight)))) {
         startCell_ = toCell(query.start);
         goalCell_ = toCell(query.goal);
+        // Standing on a slab puts the feet in its cell. Routes stand in the cell above what's
+        // underfoot, so that's where this one starts.
+        if (probe_.solid(startCell_) && probe_.top(startCell_) < 1.0f && probe_.clear(up(startCell_))) {
+            startCell_ = up(startCell_);
+        }
     }
 
     std::optional<NavPath> run(int* outNodes) {
@@ -164,6 +183,15 @@ private:
     bool isStandableHere(const BlockCoord& feet) {
         return probe_.solid(down(feet)) && bodyClear(feet);
     }
+
+    /// Where the feet are, standing in this cell: on top of what's below
+    float floorHeight(const BlockCoord& feet) {
+        BlockCoord below = down(feet);
+        return static_cast<float>(below.y) + probe_.top(below);
+    }
+
+    /// From this node, can a body step up to a floor this high?
+    bool canRise(const BlockCoord& from, float floor) { return floor - floorHeight(from) <= MAX_RISE; }
 
     bool closeEnough(const BlockCoord& cell) {
         int dx = cell.x - goalCell_.x;
@@ -227,7 +255,7 @@ private:
                 BlockCoord sideA(node.pos.x + DX[i], node.pos.y, node.pos.z);
                 BlockCoord sideB(node.pos.x, node.pos.y, node.pos.z + DZ[i]);
                 if (!bodyClear(sideA) || !bodyClear(sideB)) continue;
-                if (isStandableHere(next)) {
+                if (isStandableHere(next) && canRise(node.pos, floorHeight(next))) {
                     consider(key, node, next, walkCost(next, DIAGONAL_COST));
                 }
                 continue;
@@ -243,7 +271,7 @@ private:
 
         if (bodyClear(next)) {
             if (probe_.solid(down(next))) {
-                consider(key, node, next, walkCost(next, 1.0f));
+                if (canRise(node.pos, floorHeight(next))) consider(key, node, next, walkCost(next, 1.0f));
                 return;
             }
 
@@ -260,12 +288,12 @@ private:
                     break;
                 }
             }
-            if (!landed && query_.allowPlace) {
+            if (!landed && query_.allowPlace && canRise(node.pos, static_cast<float>(next.y))) {
                 consider(key, node, next, query_.placeCost + 1.0f, 1, NavAction::Place, down(next));
             }
 
             // Raise a step in the open cell and climb onto it
-            if (query_.allowPlace && headroomToClimb) {
+            if (query_.allowPlace && headroomToClimb && canRise(node.pos, static_cast<float>(next.y + 1))) {
                 BlockCoord above = up(next);
                 if (bodyClear(above)) {
                     consider(key, node, above, query_.placeCost + 1.0f + CLIMB_PENALTY, 1,
@@ -278,7 +306,7 @@ private:
         // Something in the way: step onto it if it's a single block high
         if (headroomToClimb) {
             BlockCoord above = up(next);
-            if (probe_.solid(next) && bodyClear(above)) {
+            if (probe_.solid(next) && bodyClear(above) && canRise(node.pos, floorHeight(above))) {
                 consider(key, node, above, walkCost(above, 1.0f + CLIMB_PENALTY));
                 return;
             }

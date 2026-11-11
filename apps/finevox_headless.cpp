@@ -4,7 +4,7 @@
  *
  *   finevox_headless --game-root DIR [--ticks N] [--seed S] [--radius R]
  *                    [--script FILE]... [--define NAME=VALUE]... [--save DIR | --resume DIR]
- *                    [--mcp] [--mcp-port N] [--mcp-player]
+ *                    [--mcp] [--mcp-port N] [--mcp-player] [--trace FILE]
  *   finevox_headless --game-root DIR --serve [--config FILE] [--port N]
  *
  * Exits with the script's `game_exit` code. Any game script error makes the
@@ -67,6 +67,8 @@ int main(int argc, char* argv[]) {
             options.radiusOverride = std::stoi(value());
         } else if (arg == "--script") {
             options.extraScripts.emplace_back(value());
+        } else if (arg == "--trace") {
+            options.tracePath = value();
         } else if (arg == "--mcp") {
             if (!options.mcpPort) options.mcpPort = MCP_DEFAULT_PORT;
         } else if (arg == "--mcp-port") {

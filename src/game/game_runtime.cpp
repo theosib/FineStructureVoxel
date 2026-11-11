@@ -22,12 +22,22 @@
 #include <finescript/resource_finder.h>
 #include <finescript/script_engine.h>
 
+#include <algorithm>
+#include <ctime>
+#include <cstdio>
 #include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <thread>
+
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 namespace finevox::game {
 
@@ -462,8 +472,89 @@ void GameRuntime::startMcp() {
     session_->addSubsystem(std::make_shared<McpTickEnd>(*mcp_));
 }
 
+namespace {
+
+// A value as a trace line shows it: symbols without their colon, maps as {key=value ...}
+std::string traceText(const finescript::Value& v, finescript::Interner& interner, int depth = 0) {
+    if (v.isString()) return v.asString();
+    if (v.isSymbol()) return std::string(interner.lookup(v.asSymbol()));
+    if (depth > 3) return "...";
+    if (v.isArray()) {
+        std::string out = "[";
+        for (size_t i = 0; i < v.asArray().size(); ++i) {
+            if (i) out += ' ';
+            out += traceText(v.asArray()[i], interner, depth + 1);
+        }
+        return out + "]";
+    }
+    if (v.isMap()) {
+        auto& map = const_cast<finescript::Value&>(v).asMap();
+        std::string out = "{";
+        bool first = true;
+        for (uint32_t key : map.keys()) {
+            if (!first) out += ' ';
+            first = false;
+            out += std::string(interner.lookup(key)) + "=" + traceText(map.get(key), interner, depth + 1);
+        }
+        return out + "}";
+    }
+    return v.toString(&interner);
+}
+
+}  // namespace
+
+// A trace file per game: logs/game-<when>-<pid>.log beside the saves, keeping the newest few.
+// Flushed a line at a time, so a crash keeps everything up to it.
+void GameRuntime::writeTrace(const std::string& line) {
+    if (!traceOpened_) {
+        traceOpened_ = true;
+        fs::path path = options_.tracePath;
+        if (path.empty() && !options_.noSaves) {
+            fs::path dir = options_.saveRoot().parent_path() / "logs";
+            std::error_code ignored;
+            fs::create_directories(dir, ignored);
+            constexpr size_t KEEP = 20;
+            std::vector<fs::path> old;
+            for (const auto& entry : fs::directory_iterator(dir, ignored)) {
+                auto name = entry.path().filename().string();
+                if (name.rfind("game-", 0) == 0 && entry.path().extension() == ".log") old.push_back(entry.path());
+            }
+            std::sort(old.begin(), old.end());
+            for (size_t i = 0; i + KEEP <= old.size(); ++i) fs::remove(old[i], ignored);
+            std::time_t now = std::time(nullptr);
+            char stamp[32];
+            std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", std::localtime(&now));
+            path = dir / ("game-" + std::string(stamp) + "-" + std::to_string(static_cast<long>(getpid())) + ".log");
+        }
+        if (!path.empty()) {
+            trace_.open(path, std::ios::app);
+            if (trace_) std::cout << "[game] tracing to " << path.string() << std::endl;
+        }
+    }
+    if (trace_) trace_ << line << '\n' << std::flush;
+    // With MCP on, the `logs` tool shows it too
+    if (mcp_) std::cout << "[trace] " << line << std::endl;
+}
+
 void GameRuntime::registerNatives() {
     auto& engine = scripts_->engine();
+
+    // trace category a b c ...: a line in the game's trace file, for finding out afterwards why
+    // something happened. t= is the tick.
+    engine.registerFunction(
+        "trace", [this](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args) {
+            uint64_t tick = gameScript_ ? gameScript_->tickCount() : 0;
+            char head[48];
+            std::snprintf(head, sizeof(head), "t=%llu %.1fs", static_cast<unsigned long long>(tick),
+                          static_cast<double>(tick) / static_cast<double>(std::max<uint32_t>(manifest_.tickRate, 1)));
+            std::string line = head;
+            for (const auto& arg : args) {
+                line += ' ';
+                line += traceText(arg, ctx.engine().interner());
+            }
+            writeTrace(line);
+            return finescript::Value::nil();
+        });
 
     // game_state_store value: in `on :save`, hand over what to keep
     engine.registerFunction(

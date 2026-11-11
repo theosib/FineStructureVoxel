@@ -178,7 +178,8 @@ blueprint_info name -> {=size_x =size_y =size_z}    blueprint_cost name -> {=blo
 site_create name x y z [turns] -> id     site_create -> empty site
 site_add id x y z block                  site_claim id agent x y z -> {=x =y =z =block}
 site_release id agent                    site_progress id -> {=done =total =complete}
-site_remaining id -> {=block n}          site_remove id
+site_remaining id [=now true] -> {=block n}, with =now only for the layer being built
+site_remove id
 light_at x y z -> {=sky =block}
 site_show_ghosts [id ...]                 what's left of these sites, drawn for the viewer
 hold_time_of_day fraction                 stop the clock here, and it stays stopped

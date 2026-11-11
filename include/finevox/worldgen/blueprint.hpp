@@ -154,6 +154,10 @@ public:
     /// Unfinished cells: what a material count or a refit needs
     [[nodiscard]] std::vector<SiteCell> remaining(const World& world) const;
 
+    /// Unfinished cells on the lowest unfinished layer, the only one claimNext hands out:
+    /// what's wanted now, as opposed to eventually
+    [[nodiscard]] std::vector<SiteCell> remainingNow(const World& world) const;
+
     /// Every cell a structure occupies; used to decide whether a spot is free
     [[nodiscard]] const std::vector<SiteCell>& cells() const { return cells_; }
 
@@ -161,6 +165,9 @@ public:
 
 private:
     [[nodiscard]] static bool isDone(const World& world, const SiteCell& cell);
+
+    /// The lowest layer with work left, or nullopt when there's none
+    [[nodiscard]] std::optional<int32_t> lowestUnfinished(const World& world) const;
 
     BlockCoord origin_;
     std::vector<SiteCell> cells_;

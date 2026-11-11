@@ -153,13 +153,18 @@ void registerBlueprintNatives(GameRuntime& runtime) {
         return result;
     });
 
-    // site_remaining id -> {=block_name count ...}: materials still needed
+    // site_remaining id [=now true] -> {=block_name count ...}: materials still needed, or with
+    // =now only those for the layer being built
+    const uint32_t keyNow = si.intern("now");
     e.registerFunction("site_remaining", [=](ExecutionContext&, const Args& args) -> Value {
         auto result = Value::map();
         auto* target = args.empty() ? nullptr : site(args[0]);
         if (!target) return result;
+        bool now = args.size() > 1 && args.back().isMap() &&
+                   const_cast<Value&>(args.back()).asMap().get(keyNow).truthy();
+        const World& world = rt->session().world();
         std::unordered_map<uint32_t, int64_t> counts;
-        for (const auto& cell : target->remaining(rt->session().world())) {
+        for (const auto& cell : now ? target->remainingNow(world) : target->remaining(world)) {
             if (!cell.block.isAir()) ++counts[cell.block.id];
         }
         for (const auto& [id, count] : counts) result.asMap().set(id, Value::integer(count));

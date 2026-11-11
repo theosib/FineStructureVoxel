@@ -183,13 +183,20 @@ bool BlueprintSite::isDone(const World& world, const SiteCell& cell) {
     return world.getBlock(cell.pos) == cell.block;
 }
 
-std::optional<SiteCell> BlueprintSite::claimNext(const World& world, const glm::dvec3& near,
-                                                 EntityId agent) {
+std::optional<int32_t> BlueprintSite::lowestUnfinished(const World& world) const {
     int32_t lowest = std::numeric_limits<int32_t>::max();
     for (const SiteCell& cell : cells_) {
         if (!isDone(world, cell)) lowest = std::min(lowest, cell.pos.y);
     }
     if (lowest == std::numeric_limits<int32_t>::max()) return std::nullopt;
+    return lowest;
+}
+
+std::optional<SiteCell> BlueprintSite::claimNext(const World& world, const glm::dvec3& near,
+                                                 EntityId agent) {
+    auto layer = lowestUnfinished(world);
+    if (!layer) return std::nullopt;
+    int32_t lowest = *layer;
 
     SiteCell* best = nullptr;
     double bestDistance = std::numeric_limits<double>::max();
@@ -234,6 +241,16 @@ std::vector<SiteCell> BlueprintSite::remaining(const World& world) const {
     std::vector<SiteCell> result;
     for (const SiteCell& cell : cells_) {
         if (!isDone(world, cell)) result.push_back(cell);
+    }
+    return result;
+}
+
+std::vector<SiteCell> BlueprintSite::remainingNow(const World& world) const {
+    std::vector<SiteCell> result;
+    auto layer = lowestUnfinished(world);
+    if (!layer) return result;
+    for (const SiteCell& cell : cells_) {
+        if (cell.pos.y == *layer && !isDone(world, cell)) result.push_back(cell);
     }
     return result;
 }

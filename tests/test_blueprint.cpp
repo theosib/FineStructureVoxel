@@ -90,6 +90,21 @@ TEST_F(BlueprintSiteTest, BuildsBottomUpAndNeverHandsOutACellTwice) {
     EXPECT_EQ(roof->pos.y, origin.y + 1);
 }
 
+TEST_F(BlueprintSiteTest, WhatsWantedNowIsTheLayerBeingBuilt) {
+    BlueprintSite site(*schematic, origin, 0);
+    auto now = site.remainingNow(world);
+    EXPECT_EQ(now.size(), 8u);
+    for (const auto& cell : now) EXPECT_EQ(cell.block, planks()) << "no thatch before the roof";
+
+    for (const auto& cell : now) world.setBlock(cell.pos, planks());
+    now = site.remainingNow(world);
+    EXPECT_EQ(now.size(), 8u) << "the roof's clear cell is already done";
+    for (const auto& cell : now) EXPECT_EQ(cell.block, thatch());
+
+    for (const auto& cell : now) world.setBlock(cell.pos, thatch());
+    EXPECT_TRUE(site.remainingNow(world).empty());
+}
+
 TEST_F(BlueprintSiteTest, ReleasedClaimsGoBackInThePool) {
     BlueprintSite site(*schematic, origin, 0);
     for (EntityId agent = 1; agent <= 8; ++agent) {

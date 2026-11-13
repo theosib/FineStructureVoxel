@@ -202,6 +202,7 @@ struct GameClient::Impl {
     BlockShapeProvider stewardShapes;
     EntityId stewardId = INVALID_ENTITY_ID;
     bool embodied = false;
+    bool mouseFree = false;  ///< On foot with the cursor out, for a screen over the view
     bool jumpHeld = false;
 
     worldgen::SiteGhostView ghostView;
@@ -945,6 +946,7 @@ void GameClient::Impl::applyDetail() {
 
 void GameClient::Impl::setEmbodied(bool on) {
     embodied = on;
+    mouseFree = false;
     auto& input = engine->inputManager();
     panLeft = panRight = panForward = panBack = false;
     grabHeld = 0;
@@ -981,7 +983,7 @@ void GameClient::Impl::updateStewardView(float dt) {
     steward.setMoveRight(panRight);
 
     glm::vec2 delta = input.mouseDelta();
-    if (delta.x != 0.0f || delta.y != 0.0f) steward.look(delta.x, delta.y);
+    if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward.look(delta.x, delta.y);
     float footing = stewardBody->position().y;
     if (!session->paused()) steward.update(dt);
 
@@ -1667,6 +1669,22 @@ void GameClient::Impl::registerNatives() {
             ImVec2(float(number(args[0])), float(number(args[1]))),
             ImVec2(float(number(args[2])), float(number(args[3]))), color, 0.0f, 0, 1.5f);
         return Value::nil();
+    });
+
+    // mouse_free [b]: on foot, let the cursor out to use a screen over the view (an inventory),
+    // or take it back for looking around. Answers whether it's out.
+    e.registerFunction("mouse_free", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) {
+            mouseFree = args[0].truthy();
+            if (embodied) {
+                ImGuiIO& io = ImGui::GetIO();
+                if (mouseFree) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+                else io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+                engine->inputManager().setCursorMode(mouseFree ? finevk::CursorMode::Normal
+                                                               : finevk::CursorMode::Disabled);
+            }
+        }
+        return Value::boolean(mouseFree);
     });
 
     // ui_fill x0 y0 x1 y1 r g b a: a filled rectangle over everything, this frame only

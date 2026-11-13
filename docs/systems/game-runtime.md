@@ -259,6 +259,7 @@ entity_type id -> :militia, or nil if not known
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a   (an outline)
 ui_fill x0 y0 x1 y1 r g b a            ui_text x y text [=color [r g b a]] [=size px]
+mouse_free [b]       on foot, the cursor out for a screen over the view (looking stops)
 ui_image name x0 y0 x1 y1 [u0 v0 u1 v1] [=tint [r g b a]]   a ui_texture, for a HUD
 marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt

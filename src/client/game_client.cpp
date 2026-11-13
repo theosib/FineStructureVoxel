@@ -268,6 +268,7 @@ struct GameClient::Impl {
     void buildProjectiles();
     void updateFog(float dt);
     void setEmbodied(bool on);
+    void buildSkyBodies();
     void applyDetail();
     std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
@@ -637,7 +638,12 @@ void GameClient::Impl::enterWorld() {
         });
 
     models.loadDirectory(contentRoot / "models");
-    sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models);
+    {
+        std::vector<std::string> skyBodies = manifest.skyMoon;
+        if (!manifest.skySun.empty()) skyBodies.push_back(manifest.skySun);
+        sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models,
+                                        skyBodies);
+    }
     EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
         if (def.model == 0) return;
         const EntityModel* model = models.find(StringInterner::global().lookup(def.model));
@@ -1105,9 +1111,43 @@ std::vector<int32_t> GameClient::Impl::groundHeightsAround(const glm::dvec3& cen
     return heights;
 }
 
+// The sun where the light comes from and the moon opposite, as squares facing the eye, far off:
+// just inside the far plane, so anything nearer covers them. Fog doesn't reach the scene. Drawn with
+// the opaque scene, which cuts out what a texture leaves clear rather than blending it.
+void GameClient::Impl::buildSkyBodies() {
+    auto body = [this](const std::string& texture, glm::vec3 direction) {
+        auto rect = sceneRenderer->atlasRect(texture);
+        if (!rect || direction.y < -0.2f) return;
+        const float distance = FAR_PLANE * 0.9f;
+        const float half = distance * manifest.skyBodySize;
+        glm::vec3 centre = glm::normalize(direction) * distance;
+        glm::vec3 forward = -glm::normalize(direction);
+        // Edges along the path across the sky and across it, as the path's plane is turned
+        // about Z: a square that keeps its bearing as it climbs, not one that rolls
+        glm::vec3 side = glm::normalize(glm::cross(forward, std::abs(forward.z) > 0.99f ? glm::vec3(1, 0, 0)
+                                                                                        : glm::vec3(0, 0, 1)));
+        glm::vec3 up = glm::cross(side, forward);
+        glm::vec3 a = centre - side * half - up * half, b = centre + side * half - up * half;
+        glm::vec3 c = centre + side * half + up * half, d = centre - side * half + up * half;
+        glm::vec4 white(1.0f);
+        glm::vec2 ua(rect->x, rect->w), ub(rect->z, rect->w), uc(rect->z, rect->y), ud(rect->x, rect->y);
+        auto& out = sceneRenderer->opaque();
+        for (auto [p, uv] : {std::pair{a, ua}, {b, ub}, {c, uc}, {a, ua}, {c, uc}, {d, ud}}) {
+            out.push_back({p, glm::vec3(0.0f), white, uv});
+        }
+    };
+    if (!manifest.skySun.empty()) body(manifest.skySun, sky.sunDirection);
+    if (!manifest.skyMoon.empty()) {
+        int64_t day = session->day();
+        const auto& phase = manifest.skyMoon[static_cast<size_t>(day % static_cast<int64_t>(manifest.skyMoon.size()))];
+        body(phase, -sky.sunDirection);
+    }
+}
+
 void GameClient::Impl::buildScene() {
     const net::ClientWorld& known = session->world();
     glm::dvec3 cameraPos = camera.positionD();
+    buildSkyBodies();
     float tickRate = static_cast<float>(worldInfo.entityRate);
     auto& opaque = sceneRenderer->opaque();
     // What the UI asked for last frame, which is as late as any marker

@@ -415,3 +415,10 @@ colour, so a revealed chunk's walls and the map's edge just fade out.
 The grid lives in a mapped storage buffer per frame in flight rather than a texture. An upload
 blocks for about 4ms, while this can change every frame for the cost of a `memcpy`. Set
 `WorldRendererConfig::regionTintCells` before `initialize`, since the buffers have a fixed size.
+
+## Known problem
+
+Scene geometry in the translucent list on every frame (`SceneRenderer::translucent()`) has made
+the whole world draw in one flat colour, as if the chunk pass lost its texture (2026-11-13, sky
+bodies tried there). The opaque list is fine. Not yet found; until it is, keep per-frame scene
+geometry in `opaque()`, which cuts out clear texels.

@@ -158,6 +158,8 @@ public:
     [[nodiscard]] std::vector<ProjectileView> projectiles() const;
     [[nodiscard]] std::shared_ptr<const std::vector<worldgen::SiteGhost>> ghosts() const;
     [[nodiscard]] float timeOfDay() const;
+    /// Whole days since the world began, as the server last said
+    [[nodiscard]] int64_t day() const;
     [[nodiscard]] size_t entitiesKnown() const;
     /// Every entity this client has been told about, as last told
     [[nodiscard]] std::vector<EntityState> entities() const;

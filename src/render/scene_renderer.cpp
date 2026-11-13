@@ -144,7 +144,8 @@ void SceneRenderer::writeTexture() {
 }
 
 size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
-                                       EntityModelRegistry& models) {
+                                       EntityModelRegistry& models,
+                                       const std::vector<std::string>& more) {
     struct Image {
         std::string model;
         int w = 0, h = 0;
@@ -154,11 +155,9 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
     std::vector<Image> images;
     std::unordered_map<std::string, size_t> byTexture;  // one copy of a shared skin
     std::vector<std::pair<std::string, std::string>> uses;
-    models.forEach([&](const EntityModel& model) {
-        if (model.texture.empty()) return;
-        uses.emplace_back(model.name, model.texture);
-        if (byTexture.count(model.texture)) return;
-        std::string path = textureRoot + "/" + model.texture + ".png";
+    auto add = [&](const std::string& texture) {
+        if (byTexture.count(texture)) return;
+        std::string path = textureRoot + "/" + texture + ".png";
         int w = 0, h = 0, n = 0;
         unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
         if (!data) {
@@ -166,14 +165,20 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
             return;
         }
         Image img;
-        img.model = model.texture;
+        img.model = texture;
         img.w = w;
         img.h = h;
         img.pixels.assign(data, data + static_cast<size_t>(w) * h * 4);
         stbi_image_free(data);
-        byTexture[model.texture] = images.size();
+        byTexture[texture] = images.size();
         images.push_back(std::move(img));
+    };
+    models.forEach([&](const EntityModel& model) {
+        if (model.texture.empty()) return;
+        uses.emplace_back(model.name, model.texture);
+        add(model.texture);
     });
+    for (const auto& texture : more) add(texture);
     if (images.empty()) return 0;
 
     // Shelves, tallest first, in an atlas as wide as the widest skin and at least 512
@@ -212,8 +217,22 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
         models.setAtlasRect(model, glm::vec4(float(img.x) / width, float(img.y) / height,
                                              float(img.x + img.w) / width, float(img.y + img.h) / height));
     }
+    extraRects_.clear();
+    for (const auto& texture : more) {
+        auto it = byTexture.find(texture);
+        if (it == byTexture.end()) continue;
+        const auto& img = images[it->second];
+        extraRects_[texture] = glm::vec4(float(img.x) / width, float(img.y) / height,
+                                         float(img.x + img.w) / width, float(img.y + img.h) / height);
+    }
     setTexture(atlasTexture_.get());
     return images.size();
+}
+
+std::optional<glm::vec4> SceneRenderer::atlasRect(const std::string& texture) const {
+    auto it = extraRects_.find(texture);
+    if (it == extraRects_.end()) return std::nullopt;
+    return it->second;
 }
 
 void SceneRenderer::updateCamera(const finevk::CameraState& state, const glm::dvec3& position) {

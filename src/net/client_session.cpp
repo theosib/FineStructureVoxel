@@ -177,6 +177,11 @@ float ClientSession::timeOfDay() const {
     return now.timeOfDay();
 }
 
+int64_t ClientSession::day() const {
+    std::lock_guard lock(mutex_);
+    return time_.totalTicks() / WorldTime::TICKS_PER_DAY;
+}
+
 size_t ClientSession::entitiesKnown() const {
     std::lock_guard lock(mutex_);
     return entities_.size();

@@ -47,6 +47,11 @@ struct GameManifest {
     int navMaxFall = 3;           ///< Largest drop path-following units will take
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
     std::string playerEntity = "finevox:player";  ///< Entity type of the player's body
+    /// Bodies in the sky, textures under textures/: the sun where the light comes from, and a
+    /// moon opposite, one texture a day in turn (its phases). Empty draws none.
+    std::string skySun;
+    std::vector<std::string> skyMoon;
+    float skyBodySize = 0.12f;  ///< Half-width, as a fraction of how far away they're drawn
     bool saves = false;           ///< Keep the game in <gameRoot>/saves and resume it
     float autosaveMinutes = 0.0f; ///< Save during play this often; 0 only saves on exit
     std::string defaultLocale = "en";

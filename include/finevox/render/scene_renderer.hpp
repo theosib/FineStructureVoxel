@@ -10,6 +10,8 @@
  * where only what's behind something shows.
  */
 
+#include <unordered_map>
+#include <optional>
 #include "finevox/core/entity_model.hpp"
 #include <finevk/device/sampler.hpp>
 #include <finevk/high/texture.hpp>
@@ -48,7 +50,10 @@ public:
     /// Pack every model's texture into one, set each model's place in it, and use it. Pixel
     /// art stays sharp: sampled nearest. Returns how many textures it placed.
     size_t buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
-                            EntityModelRegistry& models);
+                            EntityModelRegistry& models, const std::vector<std::string>& more = {});
+
+    /// Where buildEntityAtlas put one of `more`, or nothing
+    [[nodiscard]] std::optional<glm::vec4> atlasRect(const std::string& texture) const;
     void setSky(const glm::vec3& sunDirection, const glm::vec3& fogColor, float fogStart,
                 float fogEnd, float skyBrightness, float ambientLevel);
 
@@ -89,6 +94,7 @@ private:
     finevk::TextureRef atlasTexture_;
     finevk::SamplerPtr sampler_;
     void writeTexture();
+    std::unordered_map<std::string, glm::vec4> extraRects_;
 
     DynamicMesh opaqueMesh_;
     DynamicMesh translucentMesh_;

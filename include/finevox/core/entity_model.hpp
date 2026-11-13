@@ -19,7 +19,9 @@
  * Textured instead: `texture: entity/beast` (under textures/) and `texture_size: 64 32` at the
  * top, then per part `uv: 0 16` where its unwrap starts, optionally `uv_size: w h d` in
  * texture pixels (else the part's size at 16 a block), `mirror: true`, and `turn: 90 0 0`
- * (degrees about its centre, X then Y then Z).
+ * (degrees about its centre, X then Y then Z). A part can wear its own skin, `texture:` and
+ * `texture_size:` after its `part:` line, for a layer over another (wool, armour), and `grow: n`
+ * makes its box n pixels bigger each way than its unwrap, to sit over the one beneath.
  *
  * Keys following `part:` apply to that part. They must not be indented: the
  * config parser reads indented lines as continuation data.
@@ -77,6 +79,10 @@ public:
     void setAtlasRect(std::string_view name, const glm::vec4& rect) {
         auto it = models_.find(std::string(name));
         if (it != models_.end()) it->second.atlasRect = rect;
+    }
+    void setPartAtlasRect(std::string_view name, size_t part, const glm::vec4& rect) {
+        auto it = models_.find(std::string(name));
+        if (it != models_.end() && part < it->second.mesh.parts.size()) it->second.mesh.parts[part].atlas = rect;
     }
 
 private:

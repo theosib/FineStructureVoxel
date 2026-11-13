@@ -135,3 +135,33 @@ TEST(EntitySkin, ModelFileGivesTextureAndParts) {
     EXPECT_EQ(model->mesh.parts[1].uvBox, glm::vec3(1, 2, 1));
 }
 
+
+TEST(EntitySkin, APartCanWearItsOwnSkinAndGrowOverAnother) {
+    EntityModelRegistry registry;
+    auto readFile = [](const std::string& name) -> std::optional<std::string> {
+        if (name == "rig.skeleton") return std::string("bone: body\nparent: -\nposition: 0 0 0\n");
+        return std::nullopt;
+    };
+    auto model = registry.parse("ram",
+                                "skeleton: rig\ntexture: entity/ram\ntexture_size: 64 32\n"
+                                "part: body\nbone: body\nsize: 0.5 0.5 0.5\nuv: 0 0\n"
+                                "part: fleece\nbone: body\nsize: 0.5 0.5 0.5\nuv: 0 0\n"
+                                "texture: entity/fleece\ntexture_size: 32 32\ngrow: 2\n",
+                                readFile);
+    ASSERT_TRUE(model.has_value());
+    const auto& fleece = model->mesh.parts[1];
+    EXPECT_EQ(fleece.texture, "entity/fleece");
+    EXPECT_EQ(fleece.textureSize, glm::vec2(32, 32));
+    EXPECT_EQ(fleece.uvBox, glm::vec3(8.0f));             // the unwrap of the box before growing
+    EXPECT_FLOAT_EQ(fleece.size.x, 0.5f + 4.0f / 16.0f);  // two pixels bigger each way
+
+    // Placed in an atlas of its own, the fleece reads from there and the body from the model's
+    EntityMesh mesh = model->mesh;
+    mesh.parts[1].atlas = glm::vec4(0.5f, 0.5f, 1.0f, 1.0f);
+    std::vector<EntityVertex> v;
+    std::vector<uint32_t> idx;
+    mesh.buildVertices({glm::mat4(1.0f)}, v, idx, glm::vec3(1.0f), {}, glm::vec4(0, 0, 0.5f, 0.5f),
+                       model->textureSize);
+    for (size_t i = 0; i < 24; ++i) EXPECT_LE(v[i].texCoord.x, 0.5f);       // body
+    for (size_t i = 24; i < 48; ++i) EXPECT_GE(v[i].texCoord.x, 0.5f);      // fleece
+}

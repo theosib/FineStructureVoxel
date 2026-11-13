@@ -137,7 +137,8 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
     }
     model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor, animation,
                              model.atlasRect, model.textureSize);
-    const bool placed = model.atlasRect.z > model.atlasRect.x;
+    bool placed = model.atlasRect.z > model.atlasRect.x;
+    for (const auto& part : model.mesh.parts) placed = placed || part.atlas.z > part.atlas.x;
 
     out.reserve(out.size() + scratch.indices.size());
     for (uint32_t index : scratch.indices) {

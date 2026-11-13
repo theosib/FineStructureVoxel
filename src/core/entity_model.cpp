@@ -55,6 +55,7 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
     if (!model.skeleton) return std::nullopt;
 
     EntityMeshPart* part = nullptr;
+    std::vector<std::pair<size_t, float>> growBy;  // after the unwrap's sizes are known
     for (const auto& entry : doc.entries()) {
         if (entry.key == "anim" && entry.hasSuffix()) {
             auto text = readFile(entry.value.asStringOwned() + ".anim");
@@ -89,6 +90,13 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
                 part->textured = true;
             } else if (entry.key == "uv_size") {
                 part->uvBox = parseVec3(entry.value.asString(), part->uvBox);
+            } else if (entry.key == "texture") {
+                part->texture = entry.value.asStringOwned();
+            } else if (entry.key == "texture_size") {
+                glm::vec3 v = parseVec3(std::string(entry.value.asString()) + " 0", glm::vec3(64.0f, 32.0f, 0.0f));
+                part->textureSize = glm::vec2(v.x, v.y);
+            } else if (entry.key == "grow") {
+                growBy.emplace_back(model.mesh.parts.size() - 1, entry.value.asFloat(0.0f));
             } else if (entry.key == "mirror") {
                 part->mirror = entry.value.asBool(false);
             } else if (entry.key == "turn") {
@@ -105,6 +113,9 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
     // A textured part's unwrap is its size at 16 pixels a block unless it says otherwise
     for (auto& p : model.mesh.parts) {
         if (p.textured && p.uvBox == glm::vec3(0.0f)) p.uvBox = p.size * 16.0f;
+    }
+    for (const auto& [index, pixels] : growBy) {
+        model.mesh.parts[index].size += glm::vec3(2.0f * pixels / 16.0f);
     }
     return model;
 }

@@ -132,7 +132,9 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                 EntityVertex v;
                 v.position = glm::vec3(worldPos);
                 v.normal = transformedNormal;
-                v.texCoord = part.textured ? boxUV(part, f, face.corners[c], atlas, textureSize)
+                const bool own = part.atlas.z > part.atlas.x;
+                v.texCoord = part.textured ? boxUV(part, f, face.corners[c], own ? part.atlas : atlas,
+                                                   own ? part.textureSize : textureSize)
                                            : part.uvOffset + faceUVs[c] * part.uvSize;
                 v.skinned = part.textured;
                 v.color = glm::mix(part.color, teamColor, part.teamTint);

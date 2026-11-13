@@ -365,7 +365,10 @@ front, left and back in a strip below them, a face as many pixels as the box is 
 (`uv_size: w h d` to say otherwise). `mirror: true` flips it, for a left limb drawn from a right
 one's pixels, and `turn: x y z` turns a part about its own centre (degrees, X then Y then Z), so a
 beast's body can lie along it and keep a standing box's unwrap. The client packs every skin into
-one atlas, sampled nearest so pixel art stays sharp.
+one atlas, sampled nearest so pixel art stays sharp. A part can wear a skin of its own,
+`texture:` and `texture_size:` after its `part:` line, for a layer over another (wool, armour),
+with `grow: n` making its box n pixels bigger each way than its unwrap so it sits over the one
+beneath.
 
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
 entity needs `model: name` and `anim:name: slot`. `only_in` and `hidden_in` go by those names.

@@ -53,6 +53,11 @@ struct EntityMeshPart {
     /// Turned about its own centre before the bone moves it, degrees about X then Y then Z: a
     /// body lying along a beast drawn from a box standing up keeps the standing box's unwrap
     glm::vec3 turnDegrees{0.0f};
+    /// A skin of its own instead of the model's (wool over a body, armour over a person), by
+    /// name under textures/, with its pixel size; where a renderer placed it, zero if nowhere
+    std::string texture;
+    glm::vec2 textureSize{64.0f, 32.0f};
+    glm::vec4 atlas{0.0f};
     /// Shown only while one of these animations plays (a tool in hand), or never during one of
     /// these (the same tool put away). Empty means always, and never.
     std::vector<std::string> onlyIn;

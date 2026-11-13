@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <tuple>
 #include <unordered_map>
 
 namespace finevox::render {
@@ -173,7 +174,14 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
         byTexture[texture] = images.size();
         images.push_back(std::move(img));
     };
+    std::vector<std::tuple<std::string, size_t, std::string>> partUses;
     models.forEach([&](const EntityModel& model) {
+        for (size_t i = 0; i < model.mesh.parts.size(); ++i) {
+            const auto& texture = model.mesh.parts[i].texture;
+            if (texture.empty()) continue;
+            partUses.emplace_back(model.name, i, texture);
+            add(texture);
+        }
         if (model.texture.empty()) return;
         uses.emplace_back(model.name, model.texture);
         add(model.texture);
@@ -216,6 +224,13 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
         const auto& img = images[it->second];
         models.setAtlasRect(model, glm::vec4(float(img.x) / width, float(img.y) / height,
                                              float(img.x + img.w) / width, float(img.y + img.h) / height));
+    }
+    for (const auto& [model, part, texture] : partUses) {
+        auto it = byTexture.find(texture);
+        if (it == byTexture.end()) continue;
+        const auto& img = images[it->second];
+        models.setPartAtlasRect(model, part, glm::vec4(float(img.x) / width, float(img.y) / height,
+                                                       float(img.x + img.w) / width, float(img.y + img.h) / height));
     }
     extraRects_.clear();
     for (const auto& texture : more) {

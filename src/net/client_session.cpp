@@ -25,7 +25,7 @@ constexpr auto RECONNECT_EVERY = std::chrono::seconds(1);
 constexpr auto LOOP_WAIT = std::chrono::milliseconds(5);
 
 /// A prediction stands for this long plus two round trips
-constexpr int PREDICTION_BASE_MS = 150;
+constexpr int PREDICTION_BASE_MS = 250;
 
 }  // namespace
 

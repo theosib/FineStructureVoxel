@@ -16,7 +16,7 @@ constexpr int32_t COLUMNS_PER_TICK = 40;
 
 /// Ticks to wait before looking at a column a client said would change. A command is run in the
 /// first tick after it arrives, and this subsystem runs late in the tick, so two would do.
-constexpr uint64_t EXPECT_TICKS = 3;
+constexpr uint64_t EXPECT_TICKS = 2;
 
 uint64_t subchunkKey(const ChunkPos& pos) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(pos.x) & 0xFFFFF) << 40) |

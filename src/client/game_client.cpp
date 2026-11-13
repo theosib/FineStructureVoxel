@@ -1,6 +1,7 @@
 #include "finevox/client/game_client.hpp"
 
 #include "finevox/core/action_dispatch.hpp"
+#include "finevox/core/block_properties.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/content_pack_loader.hpp"
 #include "finevox/core/entity_model.hpp"
@@ -788,6 +789,11 @@ void GameClient::Impl::enterWorld() {
         Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
     stewardBody->setMaxStepHeight(worldInfo.stepHeight);
     steward.setPhysics(stewardBody.get(), stewardPhysics.get());
+    steward.setFluidQuery([&world](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
+        return {world.getFluid(pos), world.getFluidLevel(pos)};
+    });
+    steward.setMoveSpeed(manifest.walkSpeed);
+    steward.setJumpVelocity(manifest.jumpVelocity);
     steward.setFlyMode(false);
 
     if (auto binding = session->binding()) {
@@ -1260,11 +1266,15 @@ void GameClient::Impl::buildSkyBodies() {
         render::appendCloudLayer(sceneRenderer->opaque(), clouds, camera.positionD(), manifest.cloudHeight,
                                  manifest.cloudCell, cloudDrift, 28, glm::vec4(glm::vec3(light), 1.0f));
     }
-    if (!manifest.skySun.empty()) body(manifest.skySun, sky.sunDirection);
+    float t = session->timeOfDay();
+    t = t - std::floor(t);
+    float sunAngle = t * 2.0f * glm::pi<float>();
+    glm::vec3 sunDir = glm::normalize(glm::vec3(-std::cos(sunAngle), std::sin(sunAngle) + 0.1f, 0.3f));
+    if (!manifest.skySun.empty()) body(manifest.skySun, sunDir);
     if (!manifest.skyMoon.empty()) {
         int64_t day = session->day();
         const auto& phase = manifest.skyMoon[static_cast<size_t>(day % static_cast<int64_t>(manifest.skyMoon.size()))];
-        body(phase, -sky.sunDirection);
+        body(phase, -sunDir);
     }
 }
 
@@ -1289,6 +1299,7 @@ void GameClient::Impl::buildScene() {
         const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId);
         float alpha = state.interpolationAlpha(tickRate);
         glm::dvec3 pos = state.interpolatedPosition(alpha);
+        if (glm::length(pos - cameraPos) > worldInfo.viewDistance) continue;
 
         BlockCoord cell(static_cast<int32_t>(std::floor(pos.x)),
                         static_cast<int32_t>(std::floor(pos.y)) + 1,
@@ -1700,9 +1711,33 @@ void GameClient::Impl::registerNatives() {
         if (args.size() < 4) return Value::nil();
         BlockCoord pos(static_cast<int32_t>(number(args[0])), static_cast<int32_t>(number(args[1])),
                        static_cast<int32_t>(number(args[2])));
-        std::string name = args[3].toString();
+        std::string name = args[3].isSymbol()
+            ? std::string(StringInterner::global().lookup(args[3].asSymbol()))
+            : args[3].toString();
         if (session) session->predictBlock(pos, name == "air" ? BlockTypeId() : BlockTypeId::fromName(name));
         return Value::nil();
+    });
+
+    auto nameOf = [](const Value& v) -> std::string {
+        if (v.isSymbol()) return std::string(StringInterner::global().lookup(v.asSymbol()));
+        if (v.isString()) return std::string(v.asString());
+        return {};
+    };
+    e.registerFunction("block_prop", [nameOf](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 2) return Value::nil();
+        auto value = BlockPropertyRegistry::global().property(nameOf(args[0]), nameOf(args[1]));
+        if (!value) return Value::nil();
+        return Value::symbol(StringInterner::global().intern(*value));
+    });
+    e.registerFunction("block_with", [nameOf](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3) return Value::nil();
+        auto state = BlockPropertyRegistry::global().withProperty(nameOf(args[0]), nameOf(args[1]), nameOf(args[2]));
+        if (!state) return Value::nil();
+        return Value::symbol(StringInterner::global().intern(*state));
+    });
+    e.registerFunction("block_family", [nameOf](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        return Value::symbol(StringInterner::global().intern(BlockPropertyRegistry::familyOf(nameOf(args[0]))));
     });
 
     e.registerFunction("expect_change", [this](ExecutionContext&, const Args& args) -> Value {
@@ -1924,7 +1959,7 @@ void GameClient::Impl::registerNatives() {
         if (contentRoot != options.gameRoot && !net::isSafeContentPath(path)) return Value::nil();
         screenshotPath = freshPath(options.userRoot / path).string();
         screenshotRequested = true;
-        return Value::nil();
+        return Value::string(screenshotPath);
     });
 
     // to_menu: leave this game for the menu. The same goes as for new_game.

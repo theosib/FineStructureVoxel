@@ -47,6 +47,8 @@ struct GameManifest {
     float detailPixels = 0.0f;
     int navMaxFall = 3;           ///< Largest drop path-following units will take
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
+    float walkSpeed = 4.5f;       ///< First-person walking speed in blocks/second
+    float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second
     std::string playerEntity = "finevox:player";  ///< Entity type of the player's body
     /// Bodies in the sky, textures under textures/: the sun where the light comes from, and a
     /// moon opposite, one texture a day in turn (its phases). Empty draws none.

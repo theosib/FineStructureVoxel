@@ -54,6 +54,8 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.cloudSpeed = doc->getFloat("cloud_speed", m.cloudSpeed);
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
+    m.walkSpeed = doc->getFloat("walk_speed", m.walkSpeed);
+    m.jumpVelocity = doc->getFloat("jump_velocity", m.jumpVelocity);
     m.playerEntity = std::string(doc->getString("player_entity", m.playerEntity));
     m.saves = doc->getBool("saves", m.saves);
     m.autosaveMinutes = doc->getFloat("autosave_minutes", m.autosaveMinutes);

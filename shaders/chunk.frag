@@ -87,9 +87,15 @@ vec2 wrapTexCoord(vec2 uv, vec4 tileBounds) {
     vec2 tileMax = tileBounds.zw;  // maxU, maxV
     vec2 tileSize = tileMax - tileMin;
 
-    // Wrap UV coordinates within tile bounds using fract()
-    // uv is in tile-space (0 to N for N tiles), wrap to 0-1 then scale to tile
-    vec2 wrapped = fract((uv - tileMin) / tileSize) * tileSize + tileMin;
+    // Wrap UV coordinates within tile bounds when greedy meshing tiles past 1.0;
+    // within a single tile, clamp directly so float interpolation rounding at 0.0
+    // or 1.0 never wraps to the opposite edge of a cutout tile.
+    vec2 t = (uv - tileMin) / tileSize;
+    vec2 local = vec2(
+        t.x > 1.0001 ? fract(t.x) : clamp(t.x, 0.0, 1.0),
+        t.y > 1.0001 ? fract(t.y) : clamp(t.y, 0.0, 1.0)
+    );
+    vec2 wrapped = local * tileSize + tileMin;
 
     // Clamp to stay within tile bounds with half-texel margin
     // This prevents bilinear filtering from sampling adjacent atlas cells
@@ -172,7 +178,7 @@ void main() {
     float faceShade = getFaceShade(normal);
 
     // Combine directional lighting with face shading
-    float dirLighting = (chunk.ambientLevel + diffuse) * faceShade;
+    float dirLighting = min(chunk.ambientLevel + diffuse, 1.0) * faceShade;
 
     // Apply ambient occlusion
     dirLighting *= fragAO;

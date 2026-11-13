@@ -670,8 +670,8 @@ Vec3 PhysicsSystem::moveBody(PhysicsBody& body, const Vec3& desiredMovement) {
         entityBox = body.boundingBox();
     }
 
-    // Try step-climbing for horizontal movement when on ground
-    if (body.isOnGround() && body.canStepUp() &&
+    // Try step-climbing for horizontal movement when walking on ground (not while jumping up)
+    if (body.isOnGround() && body.canStepUp() && desiredMovement.y <= 0.0f &&
         (std::abs(desiredMovement.x) > 1e-6f || std::abs(desiredMovement.z) > 1e-6f)) {
 
         Vec3 stepMovement = tryStepClimbing(entityBox, colliders, desiredMovement, body.maxStepHeight());
@@ -735,8 +735,10 @@ Vec3 PhysicsSystem::update(PhysicsBody& body, float deltaTime) {
     Vec3 desiredMovement = body.velocity() * deltaTime;
     Vec3 actualMovement = moveBody(body, desiredMovement);
 
-    // If we hit something vertically, zero out vertical velocity
-    if (std::abs(actualMovement.y - desiredMovement.y) > COLLISION_MARGIN) {
+    // If we hit a ceiling while rising or a floor while falling, zero out vertical velocity
+    bool hitCeiling = desiredMovement.y > 0.0f && actualMovement.y < desiredMovement.y - COLLISION_MARGIN;
+    bool hitFloor = desiredMovement.y < 0.0f && actualMovement.y > desiredMovement.y + COLLISION_MARGIN;
+    if (hitCeiling || hitFloor) {
         Vec3 vel = body.velocity();
         vel.y = 0.0f;
         body.setVelocity(vel);

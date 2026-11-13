@@ -109,10 +109,16 @@ bool PlayerController::isOnGround() const {
 void PlayerController::updatePhysicsMovement(float dt) {
     Vec3 moveDir = getMoveDirection();
 
+    FluidContactInfo contact;
+    if (fluidQuery_) {
+        contact = computeFluidContact(*body_, eyeHeight_, fluidQuery_);
+    }
+
+    float speed = contact.inFluid ? moveSpeed_ * 0.65f : moveSpeed_;
     Vec3 vel = body_->velocity();
     if (glm::length(moveDir) > 0.0f) {
-        vel.x = moveDir.x * moveSpeed_;
-        vel.z = moveDir.z * moveSpeed_;
+        vel.x = moveDir.x * speed;
+        vel.z = moveDir.z * speed;
     } else {
         // Quick stop friction
         vel.x *= 0.8f;
@@ -121,13 +127,45 @@ void PlayerController::updatePhysicsMovement(float dt) {
         if (std::abs(vel.z) < 0.1f) vel.z = 0.0f;
     }
 
-    if (jumpRequested_ && body_->isOnGround()) {
+    bool swimSurface = false;
+    if (contact.inFluid) {
+        constexpr float kSurfaceSubmersion = 0.28f;
+        float bodyHeight = body_->halfExtents().y * 2.0f;
+        float depthBelowTarget = (contact.submersion - kSurfaceSubmersion) * bodyHeight;
+        if (jumpRequested_) {
+            swimSurface = depthBelowTarget < 0.20f;
+            if (depthBelowTarget > 0.0f) {
+                float targetVelY = std::min(depthBelowTarget * 6.0f, 3.5f);
+                vel.y = targetVelY + physics_->gravity() * dt;
+            } else {
+                // At the surface: hold steady instead of launching into a jump
+                vel.y = std::max(vel.y * std::exp(-12.0f * dt), 0.0f) + physics_->gravity() * dt;
+            }
+            jumpRequested_ = false;
+        } else {
+            // Gently sink with partial buoyancy and water drag
+            vel.y += 0.72f * physics_->gravity() * contact.submersion * dt;
+            vel.y *= std::exp(-5.0f * dt);
+        }
+    } else if (jumpRequested_ && body_->isOnGround()) {
         vel.y = jumpVelocity_;
         jumpRequested_ = false;
     }
 
     body_->setVelocity(vel);
-    physics_->update(*body_, dt);
+    Vec3 desiredHoriz(vel.x * dt, 0.0f, vel.z * dt);
+    Vec3 actualMove = physics_->update(*body_, dt);
+
+    // When treading water at the surface and pressing into a bank, hop up onto the ledge
+    if (swimSurface && glm::length(moveDir) > 0.0f) {
+        bool blockedHoriz = std::abs(actualMove.x - desiredHoriz.x) > 1e-4f ||
+                            std::abs(actualMove.z - desiredHoriz.z) > 1e-4f;
+        if (blockedHoriz) {
+            Vec3 postVel = body_->velocity();
+            postVel.y = std::max(postVel.y, 5.5f);
+            body_->setVelocity(postVel);
+        }
+    }
 }
 
 void PlayerController::updateFlyMovement(float dt) {

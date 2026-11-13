@@ -32,6 +32,9 @@ public:
     /// Caller must ensure body and system outlive this controller.
     void setPhysics(PhysicsBody* body, PhysicsSystem* system);
 
+    /// Set fluid query callback so physics movement can swim and float in fluids.
+    void setFluidQuery(FluidQueryProvider query) { fluidQuery_ = std::move(query); }
+
     /// Get current physics body (may be nullptr)
     [[nodiscard]] PhysicsBody* physicsBody() const { return body_; }
 
@@ -156,6 +159,7 @@ private:
     // Physics (optional)
     PhysicsBody* body_ = nullptr;
     PhysicsSystem* physics_ = nullptr;
+    FluidQueryProvider fluidQuery_;
 
     // Fly mode state
     glm::dvec3 flyPosition_{0.0, 0.0, 0.0};

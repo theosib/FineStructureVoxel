@@ -16,6 +16,7 @@
 #include "finevox/core/rotation.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 #include <array>
+#include <vector>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -199,6 +200,25 @@ public:
 
     /// Set raw light data from serialization
     void setLightData(const std::array<uint8_t, VOLUME>& data);
+
+    // ========================================================================
+    // Biomes: which region each column of the subchunk is in
+    // ========================================================================
+
+    static constexpr int32_t BIOME_CELLS = SIZE * SIZE;
+
+    /// Interned biome names by column, x + z*16, or empty if nothing has said. World
+    /// generation fills it; a renderer can colour things by it. Readers don't lock (mesh
+    /// workers read it while the world changes), so the storage never moves: a read racing a
+    /// write sees old or new ids, and the write bumps the light version for a remesh.
+    [[nodiscard]] std::vector<uint32_t> biomeData() const;
+    [[nodiscard]] bool hasBiomes() const { return hasBiomes_.load(std::memory_order_acquire); }
+    [[nodiscard]] uint32_t biome(int32_t x, int32_t z) const {
+        return hasBiomes() ? biomes_[static_cast<size_t>(x + z * SIZE)] : 0;
+    }
+
+    /// BIOME_CELLS ids, or none to clear them
+    void setBiomeData(const std::vector<uint32_t>& biomes);
 
     /// Get light version (incremented on any light change)
     /// Used to detect when mesh needs rebuilding for smooth lighting
@@ -443,6 +463,8 @@ private:
     // Once made it stays for the life of the SubChunk, so readers can go through a published
     // pointer with no lock. Removing the layer unpublishes it and reuse publishes it again.
     std::unique_ptr<FluidLayer> fluidLayer_;
+    std::array<uint32_t, BIOME_CELLS> biomes_{};
+    std::atomic<bool> hasBiomes_{false};
     std::atomic<FluidLayer*> publishedFluidLayer_{nullptr};
     // Readers call this once and keep the result: a second look can find the layer gone
     [[nodiscard]] FluidLayer* fluid() const { return publishedFluidLayer_.load(std::memory_order_acquire); }

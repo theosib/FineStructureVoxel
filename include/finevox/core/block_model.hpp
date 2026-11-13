@@ -68,6 +68,7 @@ struct FaceGeometry {
     std::string texture;                 // textureRef with any `#name` resolved by the model
     glm::vec4 textureUV{0.0f};           // Where `texture` landed in the atlas (minU minV maxU maxV)
     bool hasTextureUV = false;           // Set once a renderer has placed `texture`
+    int tintIndex = -1;                  // Coloured by the block's tint (`tint=0`), or -1
 
     FaceGeometry() = default;
 
@@ -264,6 +265,17 @@ public:
     /// A texture a geometry face can name as `#name`
     BlockModel& setTextureVariable(const std::string& name, const std::string& texture);
 
+    /// Tint: the colour tinted faces are multiplied by. `source` names a colour each biome
+    /// gives (`tint:<source>:` in a .biome), blended between neighbours; `color` is used where
+    /// a biome doesn't say, or always without a source. A cube face is tinted with
+    /// setFaceTint, a geometry face with `tint=0` after its texture.
+    BlockModel& setTintSource(const std::string& source);
+    BlockModel& setTintColor(glm::vec3 color);
+    BlockModel& setFaceTint(Face face, int tint);
+    [[nodiscard]] const std::string& tintSource() const { return tintSource_; }
+    [[nodiscard]] std::optional<glm::vec3> tintColor() const { return tintColor_; }
+    [[nodiscard]] int faceTint(Face face) const { return faceTint_[static_cast<size_t>(face)]; }
+
     /// Movement speed multiplier for entities walking on this block (1 = normal)
     BlockModel& setWalkSpeed(float multiplier);
 
@@ -420,6 +432,9 @@ private:
     std::string textureBottom_;
     std::string textureSide_;
     std::array<std::string, 6> faceTextures_;
+    std::array<int, 6> faceTint_{-1, -1, -1, -1, -1, -1};
+    std::string tintSource_;
+    std::optional<glm::vec3> tintColor_;
     std::vector<BlockProperty> properties_;
     std::vector<PropertyLook> variants_;
     std::vector<PropertyLook> parts_;

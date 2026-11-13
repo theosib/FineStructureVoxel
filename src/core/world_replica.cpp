@@ -82,7 +82,10 @@ void WorldReplica::syncColumn(ColumnPos pos) {
 
         // Air has light too, so a subchunk with nothing in it still needs to exist here
         SubChunk& copy = replica_.getOrCreateColumn(pos).getOrCreateSubChunk(chunkY);
-        if (lightChanged) copy.setLightData(subchunk.lightData());
+        if (lightChanged) {
+            copy.setLightData(subchunk.lightData());
+            copy.setBiomeData(subchunk.biomeData());
+        }
 
         if (fluidChanged && (subchunk.fluidLayer() || copy.fluidLayer())) {
             for (int32_t i = 0; i < SubChunk::VOLUME; ++i) {

@@ -282,6 +282,15 @@ feature finevox:tall_grass 0.2
 
 ---
 
+## Biomes in the World
+
+After the passes, every subchunk the column has gets the column's biome ids (`SubChunk::biomeData`,
+256 interned names, `x + z*16`). They're saved with the subchunk, copied into replicas, and sent to
+clients in the Subchunk message, so a client can colour things by biome (block tint) without
+knowing how the world was made. A subchunk created later, by building upward, has none; readers look
+for the nearest subchunk in the column that does. Storage never moves, because mesh workers read
+it without a lock.
+
 ## Gotchas
 
 - Forward declarations of core types in worldgen: use `namespace finevox { }` (NOT `finevox::worldgen`)

@@ -71,6 +71,7 @@ net::SubchunkData gather(const SubChunk& subchunk, ChunkPos pos) {
     }
     if (data.palette.size() > 1) data.indices = std::move(indices);
     data.light = subchunk.lightData();
+    data.biomes = subchunk.biomeData();
 
     if (subchunk.fluidLayer()) {
         for (int32_t i = 0; i < static_cast<int32_t>(net::SubchunkData::CELLS); ++i) {

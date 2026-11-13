@@ -187,6 +187,10 @@ void WorldRenderer::initialize() {
         meshWorkerPool_->setConnectsProvider(connectsProvider_);
     }
 
+    if (tintProvider_) {
+        meshWorkerPool_->setTintProvider(tintProvider_);
+    }
+
     if (farGeometryProvider_) {
         meshWorkerPool_->setFarGeometryProvider(farGeometryProvider_);
     }
@@ -909,6 +913,14 @@ void WorldRenderer::setGeometryProvider(BlockGeometryProvider provider) {
 
     if (meshWorkerPool_) {
         meshWorkerPool_->setGeometryProvider(provider);
+    }
+}
+
+void WorldRenderer::setTintProvider(BlockTintProvider provider) {
+    tintProvider_ = provider;
+    meshBuilder_.setTintProvider(provider);
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setTintProvider(std::move(provider));
     }
 }
 

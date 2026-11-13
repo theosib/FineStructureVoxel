@@ -29,6 +29,9 @@ struct SubchunkData {
         uint8_t level = 0;
     };
     std::vector<Fluid> fluids;
+
+    /// Interned biome names by column, x + z*16: 256 of them, or none
+    std::vector<uint32_t> biomes;
 };
 
 /// The message body. Compression is for networks: a local connection has no use for it.

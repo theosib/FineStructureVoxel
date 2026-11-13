@@ -1,6 +1,7 @@
 #include "finevox/net/subchunk_codec.hpp"
 
 #include "finevox/net/wire.hpp"
+#include "finevox/core/string_interner.hpp"
 
 #include <lz4.h>
 
@@ -22,7 +23,10 @@ enum : uint32_t {
     K_LIGHT_ALL = 4,
     K_FLUIDS = 5,
     K_ROTATIONS = 6,
+    K_BIOME_NAMES = 7,
+    K_BIOMES = 8,
 };
+constexpr size_t BIOME_CELLS = 256;
 
 /// A palette can't usefully be longer than there are cells
 constexpr uint64_t MAX_PALETTE = SubchunkData::CELLS;
@@ -64,6 +68,24 @@ std::vector<uint8_t> writeCells(const SubchunkData& data) {
             }
         });
     }
+
+    if (data.biomes.size() == BIOME_CELLS) {
+        std::vector<uint32_t> names;
+        std::vector<uint8_t> indices;
+        indices.reserve(BIOME_CELLS);
+        for (uint32_t id : data.biomes) {
+            auto it = std::find(names.begin(), names.end(), id);
+            if (it == names.end()) {
+                if (names.size() == 256) return cells.finish();
+                it = names.insert(names.end(), id);
+            }
+            indices.push_back(static_cast<uint8_t>(it - names.begin()));
+        }
+        cells.array(K_BIOME_NAMES, names.size(), [&](CborOut& out) {
+            for (uint32_t id : names) out.text(std::string(StringInterner::global().lookup(id)));
+        });
+        cells.bytes(K_BIOMES, indices);
+    }
     return cells.finish();
 }
 
@@ -72,7 +94,10 @@ bool readCells(std::span<const uint8_t> body, SubchunkData& data) {
     uint64_t width = 1;
     std::span<const uint8_t> indices;
     bool haveLight = false;
+    std::vector<uint32_t> biomeNames;
+    std::span<const uint8_t> biomeIndices;
     data.palette.clear();
+    data.biomes.clear();
     data.indices.clear();
     data.fluids.clear();
 
@@ -109,12 +134,28 @@ bool readCells(std::span<const uint8_t> body, SubchunkData& data) {
                 }
                 return true;
             }
+            case K_BIOME_NAMES: {
+                uint64_t count = in.array();
+                if (count > 256) return false;
+                biomeNames.resize(count);
+                for (auto& id : biomeNames) id = StringInterner::global().intern(in.text());
+                return true;
+            }
+            case K_BIOMES: biomeIndices = in.bytes(); return true;
             default: return false;  // K_ROTATIONS too: nothing uses them yet
         }
     });
     if (!read || data.palette.empty() || !haveLight) return false;
     for (const auto& fluid : data.fluids) {
         if (fluid.index >= SubchunkData::CELLS) return false;
+    }
+    if (!biomeIndices.empty()) {
+        if (biomeIndices.size() != BIOME_CELLS) return false;
+        data.biomes.reserve(BIOME_CELLS);
+        for (uint8_t index : biomeIndices) {
+            if (index >= biomeNames.size()) return false;
+            data.biomes.push_back(biomeNames[index]);
+        }
     }
     if (data.palette.size() == 1) return true;
 

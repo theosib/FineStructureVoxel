@@ -67,6 +67,15 @@ void GenerationPipeline::generateColumn(ChunkColumn& column, World& world,
     for (auto& pass : passes_) {
         pass->generate(ctx);
     }
+
+    // Every subchunk the column ended up with says which biome each of its columns is in
+    std::vector<uint32_t> biomes(SubChunk::BIOME_CELLS);
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            biomes[static_cast<size_t>(x + z * 16)] = ctx.biomes[GenerationContext::hmIndex(x, z)].id;
+        }
+    }
+    column.forEachSubChunk([&](int32_t, SubChunk& subchunk) { subchunk.setBiomeData(biomes); });
 }
 
 GenerationPass* GenerationPipeline::getPass(std::string_view name) const {

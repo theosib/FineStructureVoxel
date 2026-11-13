@@ -36,6 +36,7 @@ struct ChunkVertex {
     float ao;             // Ambient occlusion (0-1, 1 = fully lit)
     float skyLight;       // Sky light (0-1, from LightEngine sky channel)
     float blockLight;     // Block light (0-1, from LightEngine block channel)
+    uint32_t tint = 0xFFFFFFFFu;  // Colour the texture is multiplied by, RGBA8 (R in the low byte)
 
     ChunkVertex() = default;
     ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex,
@@ -51,7 +52,8 @@ struct ChunkVertex {
                tileBounds == other.tileBounds &&
                ao == other.ao &&
                skyLight == other.skyLight &&
-               blockLight == other.blockLight;
+               blockLight == other.blockLight &&
+               tint == other.tint;
     }
 
     /// Get combined brightness (AO * max light) for final rendering
@@ -172,6 +174,11 @@ using BlockGeometryProvider = std::function<const BlockGeometry*(BlockTypeId typ
 // For air/transparent blocks, no faces occlude
 using BlockFaceOccludesProvider = std::function<bool(const BlockCoord& pos, Face face)>;
 
+// The colour a face's texture is multiplied by, RGBA8 with R in the low byte; white for none.
+// `face` is 0-5 for a cube face, with `tint` -1, or -1 for a geometry face, with `tint` its slot.
+using BlockTintProvider = std::function<uint32_t(BlockTypeId type, int face, int tint, const BlockCoord& pos)>;
+constexpr uint32_t TINT_NONE = 0xFFFFFFFFu;
+
 // Does the block at this position join up with a block of this type?
 using BlockConnectsProvider = std::function<bool(const BlockCoord& pos, BlockTypeId type)>;
 
@@ -282,6 +289,9 @@ public:
     // Set connects provider, for custom geometry whose connect_* faces follow its neighbours
     void setConnectsProvider(BlockConnectsProvider provider) { connectsProvider_ = std::move(provider); }
 
+    // Colours faces by where they are, as foliage by its biome. Null draws everything as it is.
+    void setTintProvider(BlockTintProvider provider) { tintProvider_ = std::move(provider); }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -342,6 +352,14 @@ private:
     [[nodiscard]] const BlockGeometry* geometryFor(BlockTypeId type) const;
     BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
     BlockConnectsProvider connectsProvider_;
+    BlockTintProvider tintProvider_;
+
+    [[nodiscard]] uint32_t cubeTint(BlockTypeId type, Face face, const BlockCoord& pos) const {
+        return tintProvider_ ? tintProvider_(type, static_cast<int>(face), -1, pos) : TINT_NONE;
+    }
+    [[nodiscard]] uint32_t faceTint(BlockTypeId type, const FaceGeometry& face, const BlockCoord& pos) const {
+        return (tintProvider_ && face.tintIndex >= 0) ? tintProvider_(type, -1, face.tintIndex, pos) : TINT_NONE;
+    }
 
     // Light for a custom face. `sky` and `block` come in as the block's own cell.
     void customFaceLight(const FaceGeometry& face, BlockCoord pos, float& sky, float& block) const;
@@ -354,7 +372,8 @@ private:
         const glm::vec4& uvBounds,   // (minU, minV, maxU, maxV)
         const std::array<float, 4>& aoValues,  // AO for each corner (CCW from bottom-left)
         const std::array<float, 4>& skyLightValues = {1.0f, 1.0f, 1.0f, 1.0f},
-        const std::array<float, 4>& blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f}
+        const std::array<float, 4>& blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f},
+        uint32_t tint = TINT_NONE
     );
 
     // Which directions a block joins up in: bit N for FaceGeometry::connection N
@@ -369,7 +388,8 @@ private:
         const glm::vec4& uvBounds,   // Texture tile bounds for atlas wrapping
         float ao = 1.0f,             // Ambient occlusion (uniform for custom faces)
         float sky = 1.0f,            // Sky light level (uniform for custom faces)
-        float block = 0.0f           // Block light level (uniform for custom faces)
+        float block = 0.0f,          // Block light level (uniform for custom faces)
+        uint32_t tint = TINT_NONE
     );
 
     // Add a scaled face to the mesh data (for LOD blocks)
@@ -434,11 +454,13 @@ private:
         std::array<float, 4> aoValues{1.0f, 1.0f, 1.0f, 1.0f};        // AO per corner
         std::array<float, 4> skyLightValues{1.0f, 1.0f, 1.0f, 1.0f};  // Sky light per corner
         std::array<float, 4> blockLightValues{0.0f, 0.0f, 0.0f, 0.0f};// Block light per corner
+        uint32_t tint = TINT_NONE;
 
         bool operator==(const FaceMaskEntry& other) const {
             // For greedy meshing, faces can merge if they have same block type, AO, and light
             // UVs will be tiled, so we don't check them
             return blockType == other.blockType &&
+                   tint == other.tint &&
                    aoValues == other.aoValues &&
                    skyLightValues == other.skyLightValues &&
                    blockLightValues == other.blockLightValues;

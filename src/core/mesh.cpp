@@ -317,7 +317,8 @@ void MeshBuilder::buildSimpleMesh(
                         customFaceLight(faceGeom, blockWorldPos, faceSkyLight, faceBlockLight);
 
                         // Add the custom face
-                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight,
+                                      faceTint(blockType, faceGeom, blockWorldPos));
                     }
                 } else {
                     // Standard cube rendering
@@ -375,7 +376,8 @@ void MeshBuilder::buildSimpleMesh(
                         }
 
                         // Add the face to the mesh
-                        addFace(mesh, localPos, face, uvBounds, aoValues, skyLightValues, blockLightValues);
+                        addFace(mesh, localPos, face, uvBounds, aoValues, skyLightValues, blockLightValues,
+                                cubeTint(blockType, face, blockWorldPos));
                     }
                 }
             }
@@ -490,7 +492,8 @@ void MeshBuilder::buildGreedyMesh(
                         float faceBlockLight = baseBlockLight;
                         customFaceLight(faceGeom, blockWorldPos, faceSkyLight, faceBlockLight);
 
-                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight);
+                        addCustomFace(mesh, localPos, faceGeom, uvBounds, 1.0f, faceSkyLight, faceBlockLight,
+                                      faceTint(blockType, faceGeom, blockWorldPos));
                     }
                 }
             }
@@ -602,6 +605,7 @@ void MeshBuilder::greedyMeshFace(
                 int maskIdx = v * SIZE + u;
                 mask[maskIdx].blockType = blockType;
                 mask[maskIdx].uvBounds = textureProvider(blockType, face);
+                mask[maskIdx].tint = cubeTint(blockType, face, blockWorldPos);
 
                 if (calculateAO_) {
                     mask[maskIdx].aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
@@ -810,6 +814,7 @@ void MeshBuilder::addGreedyQuad(
         vertex.ao = aoValues[i];
         vertex.skyLight = skyLightValues[i];
         vertex.blockLight = blockLightValues[i];
+        vertex.tint = entry.tint;
         mesh.vertices.push_back(vertex);
     }
 
@@ -840,7 +845,8 @@ void MeshBuilder::addFace(
     const glm::vec4& uvBounds,
     const std::array<float, 4>& aoValues,
     const std::array<float, 4>& skyLightValues,
-    const std::array<float, 4>& blockLightValues
+    const std::array<float, 4>& blockLightValues,
+    uint32_t tint
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -869,6 +875,7 @@ void MeshBuilder::addFace(
         vertex.ao = aoValues[i];
         vertex.skyLight = skyLightValues[i];
         vertex.blockLight = blockLightValues[i];
+        vertex.tint = tint;
         mesh.vertices.push_back(vertex);
     }
 
@@ -987,7 +994,8 @@ void MeshBuilder::addCustomFace(
     const glm::vec4& uvBounds,
     float ao,
     float sky,
-    float block
+    float block,
+    uint32_t tint
 ) {
     if (face.vertices.size() < 3) {
         return;  // Invalid face
@@ -1027,6 +1035,7 @@ void MeshBuilder::addCustomFace(
         vertex.ao = ao;
         vertex.skyLight = sky;
         vertex.blockLight = block;
+        vertex.tint = tint;
         mesh.vertices.push_back(vertex);
     }
 

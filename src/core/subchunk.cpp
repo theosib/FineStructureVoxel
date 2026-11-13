@@ -1,4 +1,5 @@
 #include "finevox/core/subchunk.hpp"
+#include <algorithm>
 #include "finevox/core/shared_cell.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/block_type.hpp"
@@ -395,6 +396,25 @@ bool SubChunk::isFullSkyLight() const {
 
 void SubChunk::setLightData(const std::array<uint8_t, VOLUME>& data) {
     light_ = data;
+    bumpLightVersion();
+}
+
+std::vector<uint32_t> SubChunk::biomeData() const {
+    if (!hasBiomes()) return {};
+    return {biomes_.begin(), biomes_.end()};
+}
+
+void SubChunk::setBiomeData(const std::vector<uint32_t>& biomes) {
+    if (biomes.empty()) {
+        if (!hasBiomes()) return;
+        hasBiomes_.store(false, std::memory_order_release);
+    } else {
+        if (biomes.size() != static_cast<size_t>(BIOME_CELLS)) return;
+        if (hasBiomes() && std::equal(biomes.begin(), biomes.end(), biomes_.begin())) return;
+        std::copy(biomes.begin(), biomes.end(), biomes_.begin());
+        hasBiomes_.store(true, std::memory_order_release);
+    }
+    // What's drawn may be coloured by it
     bumpLightVersion();
 }
 

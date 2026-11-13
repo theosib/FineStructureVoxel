@@ -200,6 +200,15 @@ public:
     [[nodiscard]] std::function<bool(const BlockCoord&, BlockTypeId)> connectsProvider(
         const World& world) const;
 
+    /// Callback suitable for WorldRenderer::setTintProvider(...), or null if nothing is tinted.
+    /// A biome-driven tint is the average of the biomes around, five columns across, so
+    /// colours shade into each other at a border. Holds `world` by reference.
+    [[nodiscard]] std::function<uint32_t(BlockTypeId, int, int, const BlockCoord&)> tintProvider(
+        const World& world) const;
+
+    /// Load the `tint:<source>: r g b` lines of biomes/*.biome, by biome id (namespace:file)
+    size_t loadBiomeTints(const std::filesystem::path& rootDir);
+
     /// Callback suitable for WorldRenderer::setFaceOccludesProvider(...)
     [[nodiscard]] std::function<bool(const BlockCoord&, Face)> faceOccludesProvider(
         const World& world) const;
@@ -252,6 +261,14 @@ private:
     std::unordered_map<uint32_t, BlockGeometry> blockFarGeometries_;
     std::unordered_map<uint32_t, uint32_t> blockConnects_;  ///< Block id to its group's interned name
     std::unordered_map<uint32_t, BlockTextureSet> blockTextures_;
+    struct BlockTint {
+        uint32_t source = 0;          ///< Interned name a biome gives a colour for, or 0
+        uint32_t color = 0xFFFFFFFFu; ///< Where no biome says, or always without a source
+        uint8_t cubeMask = 0;         ///< Which cube faces are tinted, by Face
+    };
+    std::unordered_map<uint32_t, BlockTint> blockTints_;
+    /// Biome id -> (source, colour) pairs
+    std::unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> biomeTints_;
     size_t customGeometryModelCount_ = 0;
     std::vector<ScriptedBlockEntry> scriptedBlocks_;
     SkyConfig skyConfig_;

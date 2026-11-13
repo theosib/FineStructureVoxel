@@ -433,6 +433,25 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
         model.setBlocksSkyLight(skyEntry->value.asBool(true));
     }
 
+    if (const ConfigEntry* tintEntry = doc.get("tint")) model.setTintSource(tintEntry->value.asStringOwned());
+    if (const ConfigEntry* colorEntry = doc.get("tint-color")) {
+        std::istringstream iss(colorEntry->value.asStringOwned());
+        glm::vec3 c(1.0f);
+        iss >> c.r >> c.g >> c.b;
+        model.setTintColor(c);
+    }
+    if (const ConfigEntry* tintedEntry = doc.get("tinted")) {
+        std::istringstream iss(tintedEntry->value.asStringOwned());
+        std::string name;
+        while (iss >> name) {
+            if (name == "all") {
+                for (int f = 0; f < 6; ++f) model.setFaceTint(static_cast<Face>(f), 0);
+            } else if (int f = parseFaceName(name); f >= 0 && f < 6) {
+                model.setFaceTint(static_cast<Face>(f), 0);
+            }
+        }
+    }
+
     if (const ConfigEntry* connectsEntry = doc.get("connects")) {
         model.setConnects(connectsEntry->value.asStringOwned());
     }
@@ -465,6 +484,10 @@ std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
     {
         std::istringstream words(entry.value.asStringOwned());
         words >> face.textureRef;
+        std::string word;
+        while (words >> word) {
+            if (word.rfind("tint=", 0) == 0) face.tintIndex = std::atoi(word.c_str() + 5);
+        }
     }
 
     // Parse vertices from data lines

@@ -164,6 +164,12 @@ public:
         connectsProvider_ = std::move(provider);
     }
 
+    // Colours faces by where they are. Thread-safe: can be called while workers are running
+    void setTintProvider(BlockTintProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        tintProvider_ = std::move(provider);
+    }
+
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
         std::lock_guard<std::mutex> lock(providerMutex_);
         faceOccludesProvider_ = std::move(provider);
@@ -235,6 +241,7 @@ private:
     BlockGeometryProvider geometryProvider_;
     BlockFaceOccludesProvider faceOccludesProvider_;
     BlockConnectsProvider connectsProvider_;
+    BlockTintProvider tintProvider_;
     BlockGeometryProvider farGeometryProvider_;
 
     std::atomic<double> detailCameraX_{0.0}, detailCameraY_{0.0}, detailCameraZ_{0.0};

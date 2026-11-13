@@ -609,6 +609,7 @@ void GameClient::Impl::enterWorld() {
     worldRenderer->setFarGeometryProvider(content->farGeometryProvider());
     worldRenderer->setFaceOccludesProvider(content->faceOccludesProvider(world));
     worldRenderer->setConnectsProvider(content->connectsProvider(world));
+    if (auto tint = content->tintProvider(world)) worldRenderer->setTintProvider(std::move(tint));
     worldRenderer->initialize();
 
     particleAtlas = std::make_unique<render::ParticleAtlas>();

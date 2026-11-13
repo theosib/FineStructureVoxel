@@ -405,6 +405,13 @@ block_prop name :open -> :true       block_with name :open :false -> name
 block_family name -> the plain name
 ```
 
+**Tint.** A face can be coloured by where it is, as grass and leaves are by their biome.
+`tint: grass` names a colour each biome gives (`tint:grass: r g b` in its `.biome`), blended over
+the five columns either way so that colours shade into each other at a border; `tint-color: r g b`
+is used where a biome doesn't say, or always for a block with no `tint:`. `tinted: up` (or face
+names, or `all`) tints a cube's faces, and a `.geom` face is tinted by `tint=0` after its texture.
+Colours are as they look: the multiply happens as an artist would do it, not in linear light.
+
 `connects: <group>` makes blocks of a group join up. A geometry face named
 `connect_<dir>_<anything>`, with dir one of `n ne e se s sw w nw`, shows only towards a
 neighbour of the same group at the same height. A diagonal joins only where neither straight

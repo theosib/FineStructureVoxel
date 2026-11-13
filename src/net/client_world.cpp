@@ -59,6 +59,7 @@ void ClientWorld::apply(const SubchunkData& data) {
 
     SubChunk& subchunk = world_.getOrCreateColumn(ColumnPos(chunk.x, chunk.z)).getOrCreateSubChunk(chunk.y);
     subchunk.setLightData(data.light);
+    subchunk.setBiomeData(data.biomes);
 
     bool hadFluid = subchunk.fluidLayer() != nullptr;
     if (hadFluid || !data.fluids.empty()) {

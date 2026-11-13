@@ -37,6 +37,8 @@ struct SerializedSubChunk {
     // Fluid layer (optional — only present when subchunk has fluid)
     std::vector<std::string> fluidPalette;       // Fluid type names; index 1-15, index 0 unused/empty
     std::vector<uint8_t> fluidData;              // 4096 packed bytes (palette_idx<<4 | level), empty = no fluid
+    std::vector<std::string> biomePalette;       // Biome names the indices below refer to
+    std::vector<uint8_t> biomes;                 // 256 indices by column (x + z*16), empty = none
 };
 
 class SubChunkSerializer {

@@ -19,6 +19,7 @@ layout(location = 5) in vec4 fragClipPos;      // DEBUG
 layout(location = 6) in float fragDistance;    // Distance from camera (for fog)
 layout(location = 7) in float fragSkyLight;    // Sky light (0-1)
 layout(location = 8) in float fragBlockLight;  // Block light (0-1)
+layout(location = 9) in vec3 fragTint;         // Colour the texture is multiplied by
 
 // Output color
 layout(location = 0) out vec4 outColor;
@@ -185,7 +186,7 @@ void main() {
     float lighting = dirLighting * smoothLight;
 
     // Final color before fog
-    vec3 finalColor = texColor.rgb * lighting;
+    vec3 finalColor = texColor.rgb * fragTint * lighting;
 
     // Apply distance fog
     float fogFactor = calculateFog(fragDistance);

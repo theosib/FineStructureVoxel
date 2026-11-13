@@ -63,8 +63,14 @@ struct ChunkVertex {
     float skyLight;       // 0.0-1.0
     float blockLight;     // 0.0-1.0
     glm::vec4 tileBounds; // for custom/fluid: used as tint color
+    uint32_t tint;        // RGBA8, R in the low byte, multiplies the texture; white if unused
 };
 ```
+
+**Tint**: `BlockTintProvider` (`setTintProvider` on `WorldRenderer`, `MeshWorkerPool` and
+`MeshBuilder`) gives a face its colour; `ContentPackLoader::tintProvider` blends biome colours from
+the subchunks' biome ids. The shader brings it to linear before multiplying, so a colour multiplies
+as it looks. Greedy meshing only merges faces whose tints match.
 
 **View-relative rendering**: all vertex positions are `worldPos - cameraPos` (double-precision subtraction, then stored as float). Eliminates float precision jitter at large world coordinates.
 

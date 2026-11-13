@@ -3,6 +3,7 @@
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/fluid_layer.hpp"
 #include "finevox/core/fluid_type_id.hpp"
+#include <unordered_map>
 
 namespace finevox {
 
@@ -113,6 +114,19 @@ SerializedSubChunk SubChunkSerializer::serialize(const SubChunk& chunk, int32_t 
         result.fluidData.assign(raw.begin(), raw.end());
     }
 
+    if (chunk.hasBiomes()) {
+        std::unordered_map<uint32_t, uint8_t> seen;
+        result.biomes.reserve(SubChunk::BIOME_CELLS);
+        for (uint32_t id : chunk.biomeData()) {
+            auto [it, inserted] = seen.try_emplace(id, static_cast<uint8_t>(result.biomePalette.size()));
+            if (inserted) {
+                if (result.biomePalette.size() == 256) return result;  // more than a byte names
+                result.biomePalette.emplace_back(StringInterner::global().lookup(id));
+            }
+            result.biomes.push_back(it->second);
+        }
+    }
+
     return result;
 }
 
@@ -132,6 +146,8 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
     if (hasBlockData) fieldCount++;
     if (hasSubchunkData) fieldCount++;
     if (hasFluidData) fieldCount += 2;  // fluid_palette + fluid_data
+    bool hasBiomes = data.biomes.size() == static_cast<size_t>(SubChunk::BIOME_CELLS);
+    if (hasBiomes) fieldCount += 2;  // biome_palette + biomes
 
     cbor::encodeMapHeader(out, fieldCount);
 
@@ -191,6 +207,14 @@ std::vector<uint8_t> SubChunkSerializer::toCBOR(const SubChunk& chunk, int32_t y
 
         cbor::encodeString(out, "fluid_data");
         cbor::encodeBytes(out, data.fluidData);
+    }
+
+    if (hasBiomes) {
+        cbor::encodeString(out, "biome_palette");
+        cbor::encodeArrayHeader(out, data.biomePalette.size());
+        for (const auto& name : data.biomePalette) cbor::encodeString(out, name);
+        cbor::encodeString(out, "biomes");
+        cbor::encodeBytes(out, data.biomes);
     }
 
     return out;
@@ -299,6 +323,16 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
         }
     }
 
+    if (data.biomes.size() == static_cast<size_t>(SubChunk::BIOME_CELLS)) {
+        std::vector<uint32_t> ids;
+        ids.reserve(data.biomes.size());
+        for (uint8_t index : data.biomes) {
+            ids.push_back(index < data.biomePalette.size()
+                              ? StringInterner::global().intern(data.biomePalette[index]) : 0);
+        }
+        chunk->setBiomeData(std::move(ids));
+    }
+
     return chunk;
 }
 
@@ -403,6 +437,17 @@ std::unique_ptr<SubChunk> SubChunkSerializer::fromCBOR(std::span<const uint8_t> 
             if (bytesType == cbor::BYTE_STRING) {
                 serialized.fluidData = decoder.readBytes(bytesLen);
             }
+        } else if (key == "biome_palette") {
+            auto [arrType, arrLen] = decoder.readHeader();
+            if (arrType == cbor::ARRAY) {
+                for (uint64_t j = 0; j < arrLen; ++j) {
+                    auto [strType, strLen] = decoder.readHeader();
+                    serialized.biomePalette.push_back(strType == cbor::TEXT_STRING ? decoder.readString(strLen) : "");
+                }
+            }
+        } else if (key == "biomes") {
+            auto [bytesType, bytesLen] = decoder.readHeader();
+            if (bytesType == cbor::BYTE_STRING) serialized.biomes = decoder.readBytes(bytesLen);
         } else {
             decoder.skipValue();
         }

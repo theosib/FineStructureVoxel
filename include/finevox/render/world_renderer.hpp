@@ -530,6 +530,9 @@ public:
     /// Set the connects provider, for blocks that join up with their neighbours
     void setConnectsProvider(BlockConnectsProvider provider);
 
+    /// Colours faces by where they are, as foliage by its biome
+    void setTintProvider(BlockTintProvider provider);
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================
@@ -760,6 +763,7 @@ private:
     BlockGeometryProvider geometryProvider_;  // For custom mesh blocks
     BlockFaceOccludesProvider faceOccludesProvider_;  // For directional face culling
     BlockConnectsProvider connectsProvider_;  // For blocks that join up
+    BlockTintProvider tintProvider_;
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

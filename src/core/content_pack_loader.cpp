@@ -2,6 +2,8 @@
 
 #include "finevox/audio/sound_loader.hpp"
 #include "finevox/core/block_model_loader.hpp"
+#include "finevox/core/config_parser.hpp"
+#include "finevox/core/subchunk.hpp"
 #include "finevox/core/block_model_transform.hpp"
 #include "finevox/core/block_properties.hpp"
 #include "finevox/core/entity_type_loader.hpp"
@@ -19,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <optional>
 
 namespace finevox {
@@ -51,6 +54,7 @@ ContentPackLoadStats ContentPackLoader::loadAll(const fs::path& rootDir) {
     size_t prevGeomCount = customGeometryModelCount_;
     size_t prevScriptCount = scriptedBlocks_.size();
     stats.blocksLoaded = loadBlocks(rootDir);
+    loadBiomeTints(rootDir);
     stats.customGeometriesLoaded =
         (customGeometryModelCount_ >= prevGeomCount)
             ? (customGeometryModelCount_ - prevGeomCount)
@@ -260,7 +264,27 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
                 }
             }
 
-            if (!m.connects().empty()) {
+            {
+            uint8_t cubeMask = 0;
+            for (int f = 0; f < 6; ++f) {
+                if (m.faceTint(static_cast<Face>(f)) >= 0) cubeMask |= static_cast<uint8_t>(1 << f);
+            }
+            bool geometryTinted = false;
+            for (const auto& face : m.geometry().faces()) geometryTinted = geometryTinted || face.tintIndex >= 0;
+            if (cubeMask || geometryTinted || !m.tintSource().empty() || m.tintColor()) {
+                BlockTint tint;
+                tint.source = m.tintSource().empty() ? 0 : StringInterner::global().intern(m.tintSource());
+                glm::vec3 c = glm::clamp(m.tintColor().value_or(glm::vec3(1.0f)), 0.0f, 1.0f);
+                tint.color = static_cast<uint32_t>(c.r * 255.0f + 0.5f) |
+                             static_cast<uint32_t>(c.g * 255.0f + 0.5f) << 8 |
+                             static_cast<uint32_t>(c.b * 255.0f + 0.5f) << 16 | 0xFF000000u;
+                tint.cubeMask = cubeMask;
+                blockTints_[bareId.id] = tint;
+                blockTints_[qualifiedId.id] = tint;
+            }
+        }
+
+        if (!m.connects().empty()) {
                 const uint32_t group = StringInterner::global().intern(m.connects());
                 blockConnects_[bareId.id] = group;
                 blockConnects_[qualifiedId.id] = group;
@@ -503,6 +527,93 @@ bool ContentPackLoader::loadSkyConfig(const fs::path& rootDir) {
     hasCustomSkyConfig_ = !skyConfig_.colorKeyframes.empty() &&
                           !skyConfig_.brightnessKeyframes.empty();
     return hasCustomSkyConfig_;
+}
+
+size_t ContentPackLoader::loadBiomeTints(const fs::path& rootDir) {
+    fs::path dir = rootDir / "biomes";
+    if (!fs::exists(dir) || !fs::is_directory(dir)) return 0;
+    ConfigParser parser;
+    size_t count = 0;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (entry.path().extension() != ".biome") continue;
+        auto doc = parser.parseFile(entry.path().string());
+        if (!doc) continue;
+        std::string stem = entry.path().stem().string();
+        uint32_t biome = StringInterner::global().intern(
+            defaultNamespace_.empty() ? stem : defaultNamespace_ + ":" + stem);
+        for (const ConfigEntry* tint : doc->getAll("tint")) {
+            if (!tint->hasSuffix()) continue;
+            std::istringstream iss(tint->value.asStringOwned());
+            float r = 1, g = 1, b = 1;
+            iss >> r >> g >> b;
+            auto byte = [](float v) { return static_cast<uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
+            biomeTints_[biome].emplace_back(StringInterner::global().intern(tint->suffix),
+                                            byte(r) | byte(g) << 8 | byte(b) << 16 | 0xFF000000u);
+            ++count;
+        }
+    }
+    return count;
+}
+
+namespace {
+
+// The biome at a column, from the subchunk at this height or the nearest one that knows: a
+// subchunk built into after the world was made may have none
+uint32_t biomeAt(const World& world, int32_t x, int32_t y, int32_t z) {
+    const int32_t cx = x >> 4, cy = y >> 4, cz = z >> 4;
+    for (int32_t step = 0; step < 8; ++step) {
+        for (int32_t dy : {-step, step}) {
+            const SubChunk* sub = world.getSubChunk(ChunkPos(cx, cy + dy, cz));
+            if (sub && sub->hasBiomes()) return sub->biome(x & 15, z & 15);
+            if (step == 0) break;
+        }
+    }
+    return 0;
+}
+
+}  // namespace
+
+std::function<uint32_t(BlockTypeId, int, int, const BlockCoord&)> ContentPackLoader::tintProvider(
+    const World& world) const {
+    if (blockTints_.empty()) return nullptr;
+    return [this, &world](BlockTypeId type, int face, int, const BlockCoord& pos) -> uint32_t {
+        auto it = blockTints_.find(type.id);
+        if (it == blockTints_.end()) return 0xFFFFFFFFu;
+        const BlockTint& tint = it->second;
+        if (face >= 0 && !((tint.cubeMask >> face) & 1)) return 0xFFFFFFFFu;
+        if (tint.source == 0) return tint.color;
+
+        // A column's blend is the same for every face in it, and leaves have six
+        thread_local std::unordered_map<uint64_t, uint32_t> cache;
+        uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(pos.x)) << 40) ^
+                       (static_cast<uint64_t>(static_cast<uint32_t>(pos.z)) << 16) ^
+                       (static_cast<uint64_t>(static_cast<uint32_t>(pos.y >> 4)) << 8) ^ tint.source * 0x9E3779B1u;
+        if (auto hit = cache.find(key); hit != cache.end()) return hit->second;
+        if (cache.size() > 65536) cache.clear();
+
+        uint32_t r = 0, g = 0, b = 0, n = 0;
+        bool allKnown = true;
+        for (int32_t dz = -2; dz <= 2; ++dz) {
+            for (int32_t dx = -2; dx <= 2; ++dx) {
+                uint32_t biome = biomeAt(world, pos.x + dx, pos.y, pos.z + dz);
+                if (biome == 0) allKnown = false;
+                uint32_t color = tint.color;
+                if (auto b2 = biomeTints_.find(biome); b2 != biomeTints_.end()) {
+                    for (const auto& [source, c] : b2->second) {
+                        if (source == tint.source) color = c;
+                    }
+                }
+                r += color & 0xFF;
+                g += (color >> 8) & 0xFF;
+                b += (color >> 16) & 0xFF;
+                ++n;
+            }
+        }
+        uint32_t blended = (r / n) | (g / n) << 8 | (b / n) << 16 | 0xFF000000u;
+        // Nothing known here yet means the subchunks around haven't arrived: ask again later
+        if (allKnown) cache[key] = blended;
+        return blended;
+    };
 }
 
 std::vector<std::string> ContentPackLoader::faceTextureNames() const {

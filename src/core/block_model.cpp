@@ -290,6 +290,21 @@ BlockModel& BlockModel::setFaceTexture(Face face, const std::string& texture) {
     return *this;
 }
 
+BlockModel& BlockModel::setTintSource(const std::string& source) {
+    tintSource_ = source;
+    return *this;
+}
+
+BlockModel& BlockModel::setTintColor(glm::vec3 color) {
+    tintColor_ = color;
+    return *this;
+}
+
+BlockModel& BlockModel::setFaceTint(Face face, int tint) {
+    faceTint_[static_cast<size_t>(face)] = tint;
+    return *this;
+}
+
 BlockModel& BlockModel::setTextureVariable(const std::string& name, const std::string& texture) {
     textureVariables_[name] = texture;
     return *this;
@@ -334,6 +349,7 @@ void BlockModel::takeAppearance(const BlockModel& look) {
     textureBottom_ = look.textureBottom_;
     textureSide_ = look.textureSide_;
     faceTextures_ = look.faceTextures_;
+    faceTint_ = look.faceTint_;
     // The block's own variables win: a shared look can leave `#name` for each block to fill
     for (const auto& [name, texture] : look.textureVariables_) textureVariables_.try_emplace(name, texture);
     if (look.hasExplicitCollision_) setCollision(look.collision_);

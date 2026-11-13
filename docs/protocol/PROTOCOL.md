@@ -227,6 +227,8 @@ Cells:
 4 light_all?: uint                Or one value for every cell. One of the two is required.
 5 fluids?: [uint]                 Three to a cell: index, FluidName id, level
 6 rotations?: bytes               Reserved: 4096, one a cell
+7 biome_names?: [text]            Biome names, up to 256
+8 biomes?: bytes                  256 indices into biome_names, one a column (x + z*16). With 7.
 ```
 
 A client MUST refuse a subchunk whose indices aren't all inside its palette, or whose cells come to

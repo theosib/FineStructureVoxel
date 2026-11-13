@@ -229,6 +229,18 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
     return images.size();
 }
 
+bool SceneRenderer::loadCloudMask(const std::string& path, CloudMask& mask) {
+    int w = 0, h = 0, n = 0;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
+    if (!data) return false;
+    mask.width = w;
+    mask.height = h;
+    mask.solid.resize(static_cast<size_t>(w) * h);
+    for (size_t i = 0; i < mask.solid.size(); ++i) mask.solid[i] = data[i * 4 + 3] > 128 ? 1 : 0;
+    stbi_image_free(data);
+    return true;
+}
+
 std::optional<glm::vec4> SceneRenderer::atlasRect(const std::string& texture) const {
     auto it = extraRects_.find(texture);
     if (it == extraRects_.end()) return std::nullopt;

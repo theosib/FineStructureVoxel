@@ -13,6 +13,7 @@
 #include "finevox/core/entity_render_state.hpp"
 
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <vector>
 
 namespace finevox::render {
@@ -28,6 +29,25 @@ struct SceneVertex {
 /// the order of finevox::Face, so stacked boxes can leave out the sides they share.
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& center, const glm::vec3& halfExtents,
                const glm::vec4& color, bool lit = true, uint8_t faces = 0x3F);
+
+/// A layer of cloud from a picture: each pixel that isn't clear is a cell of cloud, the picture
+/// repeating across the sky
+struct CloudMask {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> solid;  ///< width*height, row by row
+    [[nodiscard]] bool at(int64_t x, int64_t z) const {
+        if (width <= 0 || height <= 0) return false;
+        int64_t i = ((x % width) + width) % width;
+        int64_t j = ((z % height) + height) % height;
+        return solid[static_cast<size_t>(j * width + i)] != 0;
+    }
+};
+
+/// The cells of cloud within `radius` cells of the camera, flat at `height`, `cell` blocks across,
+/// drifted by `drift` blocks along +X; a row's neighbouring cells merge into one quad
+void appendCloudLayer(std::vector<SceneVertex>& out, const CloudMask& mask, const glm::dvec3& cameraPos,
+                      double height, double cell, double drift, int radius, const glm::vec4& color);
 
 /// Flat ring on the ground, facing up
 void appendRing(std::vector<SceneVertex>& out, const glm::vec3& center, float radius, float width,

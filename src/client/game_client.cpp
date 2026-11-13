@@ -269,6 +269,8 @@ struct GameClient::Impl {
     void updateFog(float dt);
     void setEmbodied(bool on);
     void buildSkyBodies();
+    render::CloudMask clouds;
+    double cloudDrift = 0.0;
     void applyDetail();
     std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
@@ -422,6 +424,7 @@ void GameClient::Impl::setupShell() {
         // The world holds still in a pause, whatever's looking at it
         float worldDt = session->paused() ? 0.0f : dt;
         entityRenderer.update(worldDt, camera.positionD());
+        cloudDrift += worldDt * manifest.cloudSpeed;
         startDeathBursts();
         particles->tick(worldDt);
 
@@ -643,6 +646,10 @@ void GameClient::Impl::enterWorld() {
         if (!manifest.skySun.empty()) skyBodies.push_back(manifest.skySun);
         sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models,
                                         skyBodies);
+        if (!manifest.skyClouds.empty()) {
+            render::SceneRenderer::loadCloudMask((contentRoot / "textures" / (manifest.skyClouds + ".png")).string(),
+                                                 clouds);
+        }
     }
     EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
         if (def.model == 0) return;
@@ -1140,6 +1147,12 @@ void GameClient::Impl::buildSkyBodies() {
             out.push_back({p, glm::vec3(0.0f), white, uv});
         }
     };
+    if (!clouds.solid.empty()) {
+        // Lit as the sky is: white by day, grey at night
+        float light = 0.25f + 0.75f * sky.skyBrightness;
+        render::appendCloudLayer(sceneRenderer->opaque(), clouds, camera.positionD(), manifest.cloudHeight,
+                                 manifest.cloudCell, cloudDrift, 28, glm::vec4(glm::vec3(light), 1.0f));
+    }
     if (!manifest.skySun.empty()) body(manifest.skySun, sky.sunDirection);
     if (!manifest.skyMoon.empty()) {
         int64_t day = session->day();

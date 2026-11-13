@@ -45,6 +45,7 @@ sky.conf
 | `player_entity` | `finevox:player` | Entity type of the player's body, as seen when they aren't in it. With no such type, or one without a model, it draws as a box in the viewer's faction colour |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 | `sky_sun`, `sky_moon` | none | Textures (under `textures/`) drawn in the sky: the sun where the light comes from, the moon opposite, `sky_moon` a list taken a day at a time. Where they're clear is cut out, not blended; `sky_body_size` is their half-width as a fraction of their distance |
+| `sky_clouds`, `cloud_height`, `cloud_cell`, `cloud_speed` | none, 180, 12, 0.6 | A cloud layer: a picture (under `textures/`) whose solid pixels are cells of cloud `cloud_cell` blocks across, repeating over the sky at that height and drifting toward +X |
 
 The content root must be self-contained: nothing falls back to the engine's `resources/`,
 including `blocks/base/*`. See [content-roots.md](content-roots.md).

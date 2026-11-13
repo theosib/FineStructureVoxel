@@ -47,6 +47,10 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.skySun = std::string(doc->getString("sky_sun", m.skySun));
     m.skyMoon = splitWords(doc->getString("sky_moon", ""));
     m.skyBodySize = doc->getFloat("sky_body_size", m.skyBodySize);
+    m.skyClouds = std::string(doc->getString("sky_clouds", m.skyClouds));
+    m.cloudHeight = doc->getFloat("cloud_height", m.cloudHeight);
+    m.cloudCell = doc->getFloat("cloud_cell", m.cloudCell);
+    m.cloudSpeed = doc->getFloat("cloud_speed", m.cloudSpeed);
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
     m.playerEntity = std::string(doc->getString("player_entity", m.playerEntity));

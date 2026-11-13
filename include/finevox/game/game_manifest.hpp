@@ -52,6 +52,11 @@ struct GameManifest {
     std::string skySun;
     std::vector<std::string> skyMoon;
     float skyBodySize = 0.12f;  ///< Half-width, as a fraction of how far away they're drawn
+    /// A cloud layer: a picture whose solid pixels are cells of cloud, repeating across the sky
+    std::string skyClouds;
+    float cloudHeight = 180.0f;
+    float cloudCell = 12.0f;    ///< Blocks a pixel covers
+    float cloudSpeed = 0.6f;    ///< Blocks a second, toward +X
     bool saves = false;           ///< Keep the game in <gameRoot>/saves and resume it
     float autosaveMinutes = 0.0f; ///< Save during play this often; 0 only saves on exit
     std::string defaultLocale = "en";

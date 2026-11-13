@@ -52,6 +52,9 @@ public:
     size_t buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
                             EntityModelRegistry& models, const std::vector<std::string>& more = {});
 
+    /// Read a cloud picture: a pixel is cloud where it isn't mostly clear. False if unreadable.
+    static bool loadCloudMask(const std::string& path, CloudMask& mask);
+
     /// Where buildEntityAtlas put one of `more`, or nothing
     [[nodiscard]] std::optional<glm::vec4> atlasRect(const std::string& texture) const;
     void setSky(const glm::vec3& sunDirection, const glm::vec3& fogColor, float fogStart,

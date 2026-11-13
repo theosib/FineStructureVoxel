@@ -134,3 +134,4 @@ TEST(EntitySkin, ModelFileGivesTextureAndParts) {
     EXPECT_EQ(model->mesh.parts[0].uvBox, glm::vec3(8.0f));  // from its size, 16 a block
     EXPECT_EQ(model->mesh.parts[1].uvBox, glm::vec3(1, 2, 1));
 }
+

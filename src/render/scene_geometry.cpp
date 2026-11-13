@@ -48,6 +48,31 @@ void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec
     if (side(Face::NegZ)) pushQuad(out, p[0], p[1], p[2], p[3], normal(0, 0, -1), color);
 }
 
+void appendCloudLayer(std::vector<SceneVertex>& out, const CloudMask& mask, const glm::dvec3& cameraPos,
+                      double height, double cell, double drift, int radius, const glm::vec4& color) {
+    if (mask.width <= 0 || cell <= 0.0) return;
+    const int64_t cx = static_cast<int64_t>(std::floor((cameraPos.x - drift) / cell));
+    const int64_t cz = static_cast<int64_t>(std::floor(cameraPos.z / cell));
+    const float y = static_cast<float>(height - cameraPos.y);
+    const glm::vec3 up(0.0f, 0.0f, 0.0f);  // unlit: clouds are as bright as the sky makes them
+    for (int64_t j = cz - radius; j <= cz + radius; ++j) {
+        int64_t i = cx - radius;
+        while (i <= cx + radius) {
+            if (!mask.at(i, j)) {
+                ++i;
+                continue;
+            }
+            int64_t start = i;
+            while (i <= cx + radius && mask.at(i, j)) ++i;
+            float x0 = static_cast<float>(start * cell + drift - cameraPos.x);
+            float x1 = static_cast<float>(i * cell + drift - cameraPos.x);
+            float z0 = static_cast<float>(j * cell - cameraPos.z);
+            float z1 = static_cast<float>((j + 1) * cell - cameraPos.z);
+            pushQuad(out, {x0, y, z0}, {x1, y, z0}, {x1, y, z1}, {x0, y, z1}, up, color);
+        }
+    }
+}
+
 void appendRing(std::vector<SceneVertex>& out, const glm::vec3& center, float radius, float width,
                 const glm::vec4& color, int segments) {
     const glm::vec3 unlit(0.0f);

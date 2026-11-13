@@ -21,6 +21,7 @@ struct SceneVertex {
     glm::vec3 position;
     glm::vec3 normal;   ///< Zero = unlit
     glm::vec4 color;
+    glm::vec2 uv{-1.0f, -1.0f};  ///< In the entity atlas, multiplying color; negative = none
 };
 
 /// Axis-aligned box. `lit` false gives a flat, unlit marker. `faces` has a bit per side, in

@@ -16,6 +16,11 @@
  *     color: 0.5 0.4 0.3
  *     team: 1.0                   # 0..1 blend toward the entity's faction colour
  *
+ * Textured instead: `texture: entity/beast` (under textures/) and `texture_size: 64 32` at the
+ * top, then per part `uv: 0 16` where its unwrap starts, optionally `uv_size: w h d` in
+ * texture pixels (else the part's size at 16 a block), `mirror: true`, and `turn: 90 0 0`
+ * (degrees about its centre, X then Y then Z).
+ *
  * Keys following `part:` apply to that part. They must not be indented: the
  * config parser reads indented lines as continuation data.
  *
@@ -43,6 +48,10 @@ struct EntityModel {
     EntityMesh mesh;
     /// Animation state name -> clip, as named by the entity's `anim:` keys
     std::unordered_map<std::string, std::shared_ptr<const AnimationClip>> clips;
+
+    std::string texture;                   ///< Under textures/, no extension; empty for colours
+    glm::vec2 textureSize{64.0f, 64.0f};   ///< Pixels, as the parts' uv: are measured in
+    glm::vec4 atlasRect{0.0f};             ///< Where a renderer put the texture; zero if nowhere
 };
 
 class EntityModelRegistry {
@@ -60,6 +69,15 @@ public:
 
     [[nodiscard]] const EntityModel* find(std::string_view name) const;
     [[nodiscard]] size_t size() const { return models_.size(); }
+
+    /// For a renderer placing textures: every model, and where one's texture landed
+    void forEach(const std::function<void(const EntityModel&)>& fn) const {
+        for (const auto& [name, model] : models_) fn(model);
+    }
+    void setAtlasRect(std::string_view name, const glm::vec4& rect) {
+        auto it = models_.find(std::string(name));
+        if (it != models_.end()) it->second.atlasRect = rect;
+    }
 
 private:
     std::shared_ptr<const Skeleton> skeletonFor(const std::string& name, const FileReader& readFile);

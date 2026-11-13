@@ -110,13 +110,16 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
             if (slot == state.currentAnimationId) animation = name;
         }
     }
-    model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor, animation);
+    model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor, animation,
+                             model.atlasRect, model.textureSize);
+    const bool placed = model.atlasRect.z > model.atlasRect.x;
 
     out.reserve(out.size() + scratch.indices.size());
     for (uint32_t index : scratch.indices) {
         const EntityVertex& v = scratch.vertices[index];
         glm::vec3 color = glm::mix(v.color * light, DEATH_PALE_COLOR, pale);
-        out.push_back({v.position, v.normal, glm::vec4(color, 1.0f)});
+        glm::vec2 uv = (placed && v.skinned) ? v.texCoord : glm::vec2(-1.0f);
+        out.push_back({v.position, v.normal, glm::vec4(color, 1.0f), uv});
     }
 }
 

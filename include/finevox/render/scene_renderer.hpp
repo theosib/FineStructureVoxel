@@ -10,6 +10,9 @@
  * where only what's behind something shows.
  */
 
+#include "finevox/core/entity_model.hpp"
+#include <finevk/device/sampler.hpp>
+#include <finevk/high/texture.hpp>
 #include "finevox/render/scene_geometry.hpp"
 
 #include <finevk/engine/camera.hpp>
@@ -37,6 +40,15 @@ public:
     void initialize();
 
     void updateCamera(const finevk::CameraState& state, const glm::dvec3& position);
+
+    /// The texture vertices with a uv sample (an atlas of entity skins). Without one, a plain
+    /// white texel, so uv does nothing. Call before initialize, or between frames.
+    void setTexture(finevk::Texture* texture);
+
+    /// Pack every model's texture into one, set each model's place in it, and use it. Pixel
+    /// art stays sharp: sampled nearest. Returns how many textures it placed.
+    size_t buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
+                            EntityModelRegistry& models);
     void setSky(const glm::vec3& sunDirection, const glm::vec3& fogColor, float fogStart,
                 float fogEnd, float skyBrightness, float ambientLevel);
 
@@ -72,6 +84,11 @@ private:
     finevk::GraphicsPipelinePtr xrayPipeline_;
     std::unique_ptr<finevk::UniformBuffer<finevk::CameraUniform>> cameraUniform_;
     std::vector<VkDescriptorSet> descriptorSets_;
+    finevk::Texture* texture_ = nullptr;
+    finevk::TextureRef whiteTexture_;
+    finevk::TextureRef atlasTexture_;
+    finevk::SamplerPtr sampler_;
+    void writeTexture();
 
     DynamicMesh opaqueMesh_;
     DynamicMesh translucentMesh_;

@@ -637,6 +637,7 @@ void GameClient::Impl::enterWorld() {
         });
 
     models.loadDirectory(contentRoot / "models");
+    sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models);
     EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
         if (def.model == 0) return;
         const EntityModel* model = models.find(StringInterner::global().lookup(def.model));

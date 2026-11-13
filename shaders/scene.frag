@@ -10,6 +10,9 @@
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec4 fragColor;
 layout(location = 2) in float fragDistance;
+layout(location = 3) in vec2 fragUV;
+
+layout(set = 0, binding = 1) uniform sampler2D skins;
 
 layout(location = 0) out vec4 outColor;
 
@@ -35,6 +38,11 @@ float getFaceShade(vec3 normal) {
 
 void main() {
     vec3 color = fragColor.rgb;
+    if (fragUV.x >= 0.0) {
+        vec4 texel = texture(skins, fragUV);
+        if (texel.a < 0.1) discard;
+        color *= texel.rgb;
+    }
 
     if (dot(fragNormal, fragNormal) > 0.01) {
         vec3 normal = normalize(fragNormal);

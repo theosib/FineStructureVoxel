@@ -63,6 +63,11 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
             if (clip) {
                 model.clips[entry.suffix] = std::make_shared<const AnimationClip>(std::move(*clip));
             }
+        } else if (entry.key == "texture" && !part) {
+            model.texture = entry.value.asStringOwned();
+        } else if (entry.key == "texture_size" && !part) {
+            glm::vec3 v = parseVec3(std::string(entry.value.asString()) + " 0", glm::vec3(64.0f, 64.0f, 0.0f));
+            model.textureSize = glm::vec2(v.x, v.y);
         } else if (entry.key == "part") {
             model.mesh.parts.emplace_back();
             part = &model.mesh.parts.back();
@@ -78,6 +83,16 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
                 part->color = parseVec3(entry.value.asString(), part->color);
             } else if (entry.key == "team") {
                 part->teamTint = entry.value.asFloat(0.0f);
+            } else if (entry.key == "uv") {
+                glm::vec3 v = parseVec3(std::string(entry.value.asString()) + " 0", glm::vec3(0.0f));
+                part->uvPixels = glm::vec2(v.x, v.y);
+                part->textured = true;
+            } else if (entry.key == "uv_size") {
+                part->uvBox = parseVec3(entry.value.asString(), part->uvBox);
+            } else if (entry.key == "mirror") {
+                part->mirror = entry.value.asBool(false);
+            } else if (entry.key == "turn") {
+                part->turnDegrees = parseVec3(entry.value.asString(), part->turnDegrees);
             } else if (entry.key == "only_in") {
                 part->onlyIn = words(entry.value.asString());
             } else if (entry.key == "hidden_in") {
@@ -87,6 +102,10 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
     }
 
     if (model.mesh.isEmpty()) return std::nullopt;
+    // A textured part's unwrap is its size at 16 pixels a block unless it says otherwise
+    for (auto& p : model.mesh.parts) {
+        if (p.textured && p.uvBox == glm::vec3(0.0f)) p.uvBox = p.size * 16.0f;
+    }
     return model;
 }
 

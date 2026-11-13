@@ -168,6 +168,7 @@ no ground.
 ```
 surface_y x z        is_standable x y z       world_get_block  world_set_block
 biome_at x z [y] -> the biome's name as a symbol, or nil
+player_body id -> the entity a player walks in     time_of_day -> 0 dawn .. 0.5 dusk .. 1
 find_blocks x y z radius block_or_list [=max n] -> [[x y z]...], nearest first
 count_blocks x0 y0 z0 x1 y1 z1 [block ...] -> {=name count}
 claim_block scope x y z owner [ttl_ticks]     release_block scope x y z owner
@@ -352,6 +353,15 @@ team: 1.0                 # 0..1 blend toward faction colour
 only_in: chop quarry      # drawn only while one of these animations plays: a tool in hand
 hidden_in: shoot          # never while one of these does: the same tool put away
 ```
+
+A model can wear a skin instead of colours: `texture: entity/beast` (under `textures/`) and
+`texture_size: 64 32` before the parts, then per part `uv: u v`, where its box unwrap starts in
+skin pixels. The unwrap is the usual one: top and bottom side by side at (u+d, v), then right,
+front, left and back in a strip below them, a face as many pixels as the box is at 16 a block
+(`uv_size: w h d` to say otherwise). `mirror: true` flips it, for a left limb drawn from a right
+one's pixels, and `turn: x y z` turns a part about its own centre (degrees, X then Y then Z), so a
+beast's body can lie along it and keep a standing box's unwrap. The client packs every skin into
+one atlas, sampled nearest so pixel art stays sharp.
 
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
 entity needs `model: name` and `anim:name: slot`. `only_in` and `hidden_in` go by those names.

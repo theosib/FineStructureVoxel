@@ -3,8 +3,13 @@
 #include <finevk/device/command.hpp>
 #include <finevk/device/logical_device.hpp>
 
+#include <stb_image.h>
+
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <iostream>
+#include <unordered_map>
 
 namespace finevox::render {
 
@@ -44,6 +49,7 @@ void SceneRenderer::initialize() {
 
     descriptorLayout_ = finevk::DescriptorSetLayout::create(device_)
         .uniformBuffer(0, VK_SHADER_STAGE_VERTEX_BIT)
+        .combinedImageSampler(1, VK_SHADER_STAGE_FRAGMENT_BIT)
         .build();
 
     descriptorPool_ = finevk::DescriptorPool::fromLayout(
@@ -58,6 +64,8 @@ void SceneRenderer::initialize() {
                            *cameraUniform_->buffer(i));
     }
     writer.update();
+    if (!sampler_) sampler_ = finevk::Sampler::createNearest(device_);
+    writeTexture();
 
     pipelineLayout_ = finevk::PipelineLayout::create(device_)
         .addDescriptorSetLayout(descriptorLayout_->handle())
@@ -73,7 +81,8 @@ void SceneRenderer::initialize() {
             .vertexBinding(0, sizeof(SceneVertex), VK_VERTEX_INPUT_RATE_VERTEX)
             .vertexAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SceneVertex, position))
             .vertexAttribute(1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SceneVertex, normal))
-            .vertexAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(SceneVertex, color));
+            .vertexAttribute(2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(SceneVertex, color))
+            .vertexAttribute(3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(SceneVertex, uv));
         return builder;
     };
 
@@ -110,6 +119,101 @@ void SceneRenderer::initialize() {
         .build();
 
     initialized_ = true;
+}
+
+void SceneRenderer::setTexture(finevk::Texture* texture) {
+    texture_ = texture;
+    writeTexture();
+}
+
+void SceneRenderer::writeTexture() {
+    if (descriptorSets_.empty()) return;
+    finevk::Texture* use = texture_;
+    if (!use) {
+        if (!whiteTexture_) {
+            const uint8_t white[4] = {255, 255, 255, 255};
+            whiteTexture_ = finevk::Texture::fromMemory(device_, white, 1, 1, surface_->commandPool(), false, false);
+        }
+        use = whiteTexture_.get();
+    }
+    finevk::DescriptorWriter writer(device_);
+    for (VkDescriptorSet set : descriptorSets_) {
+        writer.writeImage(set, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, use->view(), sampler_.get());
+    }
+    writer.update();
+}
+
+size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
+                                       EntityModelRegistry& models) {
+    struct Image {
+        std::string model;
+        int w = 0, h = 0;
+        std::vector<uint8_t> pixels;
+        int x = 0, y = 0;
+    };
+    std::vector<Image> images;
+    std::unordered_map<std::string, size_t> byTexture;  // one copy of a shared skin
+    std::vector<std::pair<std::string, std::string>> uses;
+    models.forEach([&](const EntityModel& model) {
+        if (model.texture.empty()) return;
+        uses.emplace_back(model.name, model.texture);
+        if (byTexture.count(model.texture)) return;
+        std::string path = textureRoot + "/" + model.texture + ".png";
+        int w = 0, h = 0, n = 0;
+        unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
+        if (!data) {
+            std::cerr << "[SceneRenderer] missing entity texture " << path << "\n";
+            return;
+        }
+        Image img;
+        img.model = model.texture;
+        img.w = w;
+        img.h = h;
+        img.pixels.assign(data, data + static_cast<size_t>(w) * h * 4);
+        stbi_image_free(data);
+        byTexture[model.texture] = images.size();
+        images.push_back(std::move(img));
+    });
+    if (images.empty()) return 0;
+
+    // Shelves, tallest first, in an atlas as wide as the widest skin and at least 512
+    std::vector<size_t> order(images.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return images[a].h > images[b].h; });
+    int width = 512;
+    for (const auto& img : images) width = std::max(width, img.w);
+    int x = 0, y = 0, shelf = 0;
+    for (size_t i : order) {
+        auto& img = images[i];
+        if (x + img.w > width) {
+            x = 0;
+            y += shelf;
+            shelf = 0;
+        }
+        img.x = x;
+        img.y = y;
+        x += img.w;
+        shelf = std::max(shelf, img.h);
+    }
+    int height = y + shelf;
+    std::vector<uint8_t> atlas(static_cast<size_t>(width) * height * 4, 0);
+    for (const auto& img : images) {
+        for (int row = 0; row < img.h; ++row) {
+            std::memcpy(&atlas[(static_cast<size_t>(img.y + row) * width + img.x) * 4],
+                        &img.pixels[static_cast<size_t>(row) * img.w * 4], static_cast<size_t>(img.w) * 4);
+        }
+    }
+    atlasTexture_ = finevk::Texture::fromMemory(device_, atlas.data(), static_cast<uint32_t>(width),
+                                                static_cast<uint32_t>(height), pool, false, true);
+    for (const auto& [model, texture] : uses) {
+        auto it = byTexture.find(texture);
+        if (it == byTexture.end()) continue;
+        const auto& img = images[it->second];
+        models.setAtlasRect(model, glm::vec4(float(img.x) / width, float(img.y) / height,
+                                             float(img.x + img.w) / width, float(img.y + img.h) / height));
+    }
+    setTexture(atlasTexture_.get());
+    return images.size();
 }
 
 void SceneRenderer::updateCamera(const finevk::CameraState& state, const glm::dvec3& position) {

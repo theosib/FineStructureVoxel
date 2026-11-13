@@ -26,6 +26,7 @@ struct EntityVertex {
     glm::vec3 normal;
     glm::vec2 texCoord;
     glm::vec3 color{1.0f};
+    bool skinned = false;  ///< texCoord is from the box unwrap, in the model's atlas place
 };
 
 // ============================================================================
@@ -40,6 +41,18 @@ struct EntityMeshPart {
     glm::vec2 uvSize{1.0f};     // UV dimensions for one face
     glm::vec3 color{1.0f};      // Flat colour, for models that aren't textured
     float teamTint = 0.0f;      // 0..1 blend from color toward the faction colour
+
+    /// Textured with the usual box unwrap: from `uvPixels` on the model's texture, a strip of
+    /// the sides below the top and bottom, each face as many texture pixels as the box is in
+    /// `uvBox` (width, height, depth). The front is the rig's front, +Z. `mirror` flips it, for a left limb
+    /// drawn from a right one's pixels.
+    bool textured = false;
+    glm::vec2 uvPixels{0.0f};
+    glm::vec3 uvBox{0.0f};
+    bool mirror = false;
+    /// Turned about its own centre before the bone moves it, degrees about X then Y then Z: a
+    /// body lying along a beast drawn from a box standing up keeps the standing box's unwrap
+    glm::vec3 turnDegrees{0.0f};
     /// Shown only while one of these animations plays (a tool in hand), or never during one of
     /// these (the same tool put away). Empty means always, and never.
     std::vector<std::string> onlyIn;
@@ -58,11 +71,15 @@ public:
 
     /// Generate vertices and indices from skeleton world poses
     /// Each part produces 24 vertices (4 per face × 6 faces) and 36 indices
+    /// Textured parts map into `atlas` (minU minV maxU maxV) of a texture `textureSize`
+    /// pixels across, and are marked skinned; others keep uvOffset + uvSize per face.
     void buildVertices(const std::vector<glm::mat4>& worldPoses,
                        std::vector<EntityVertex>& vertices,
                        std::vector<uint32_t>& indices,
                        const glm::vec3& teamColor = glm::vec3(1.0f),
-                       std::string_view animation = {}) const;
+                       std::string_view animation = {},
+                       const glm::vec4& atlas = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
+                       const glm::vec2& textureSize = glm::vec2(64.0f, 64.0f)) const;
 
     [[nodiscard]] size_t partCount() const { return parts.size(); }
     [[nodiscard]] bool isEmpty() const { return parts.empty(); }

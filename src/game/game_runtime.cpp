@@ -638,6 +638,21 @@ void GameRuntime::registerNatives() {
             return finescript::Value::nil();
         });
 
+    // player_body id -> the entity a player walks around in, or nil before they have one
+    engine.registerFunction(
+        "player_body", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.empty() || !args[0].isNumeric()) return finescript::Value::nil();
+            auto found = seat(static_cast<int64_t>(args[0].asNumber()));
+            if (!found || found->body == INVALID_ENTITY_ID) return finescript::Value::nil();
+            return finescript::Value::integer(static_cast<int64_t>(found->body));
+        });
+
+    // time_of_day -> 0 dawn, 0.25 noon, 0.5 dusk, 0.75 midnight
+    scripts_->engine().registerFunction(
+        "time_of_day", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>&) {
+            return finescript::Value::number(session_->worldTime().timeOfDay());
+        });
+
     // player_faction id -> faction, or nil if they have none
     engine.registerFunction(
         "player_faction", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {

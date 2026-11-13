@@ -572,6 +572,11 @@ state. It ends the run with `game_exit code`.
 
 ## Gotchas
 
+- A `send_command` from the top level of `ui_script`, while it loads, never reaches the game
+  script, and a `ui_publish` from `on :start` reaches no UI: neither end is listening yet. Ask from
+  `on :frame` until the game answers.
+- The client owns its body's position: `ent_set_pos` on a player's body is lost. Use `player_move`.
+
 - Lifetime in `GameClient::Impl` is order-sensitive: atlases must outlive `WorldRenderer`,
   whose mesh workers read them until it stops.
 - `WorldRenderer` renders `ClientSession::world()`, not the session's world, and light comes from

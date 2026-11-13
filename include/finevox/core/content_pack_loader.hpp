@@ -93,7 +93,11 @@ struct ScriptedBlockEntry {
  */
 class ContentPackLoader {
 public:
+    using ProgressCallback = std::function<void(size_t done, size_t total)>;
+
     explicit ContentPackLoader(std::string defaultNamespace = "finevox");
+
+    void setProgressCallback(ProgressCallback callback) { progressCallback_ = std::move(callback); }
 
     /// Load all content subdirectories and sky.conf from rootDir
     ContentPackLoadStats loadAll(const std::filesystem::path& rootDir);
@@ -274,6 +278,7 @@ private:
     SkyConfig skyConfig_;
     bool hasCustomSkyConfig_ = false;
     ContentPackLoadStats lastStats_;
+    ProgressCallback progressCallback_;
 };
 
 }  // namespace finevox

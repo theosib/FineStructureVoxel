@@ -98,38 +98,47 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
     fs::path blocksDir = rootDir / "blocks";
 
     BlockModelLoader modelLoader;
+    std::unordered_map<std::string, std::string> resolvedCache;
     const std::function<std::string(const std::string&)> resolveBlockFile =
-        [rootDir, blocksDir](const std::string& relPath) -> std::string {
+        [rootDir, blocksDir, &resolvedCache](const std::string& relPath) -> std::string {
+        auto found = resolvedCache.find(relPath);
+        if (found != resolvedCache.end()) {
+            return found->second;
+        }
+        auto remember = [&](std::string result) -> std::string {
+            resolvedCache.emplace(relPath, result);
+            return result;
+        };
         // 1. Direct under <rootDir>/blocks/ (for includes like "base/solid_cube.model")
         fs::path candidate = blocksDir / relPath;
         if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
         // 2. Direct under <rootDir>/ (for "shapes/slab_faces.geom", "shapes/slab_collision.collision")
         candidate = rootDir / relPath;
         if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
         // 3. ResourceLocator game/ scope
         auto& locator = ResourceLocator::instance();
         candidate = locator.resolve("game/blocks/" + relPath);
         if (!candidate.empty() && fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
         candidate = locator.resolve("game/" + relPath);
         if (!candidate.empty() && fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
         // 4. ResourceLocator engine/ scope
         candidate = locator.resolve("engine/blocks/" + relPath);
         if (!candidate.empty() && fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
         candidate = locator.resolve("engine/" + relPath);
         if (!candidate.empty() && fs::exists(candidate) && fs::is_regular_file(candidate)) {
-            return candidate.string();
+            return remember(candidate.string());
         }
-        return "";
+        return remember("");
     };
     modelLoader.setFileResolver(resolveBlockFile);
 
@@ -337,7 +346,11 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
         return looks.emplace(key, std::move(look)).first->second;
     };
 
+    size_t entryIndex = 0;
+    if (progressCallback_) progressCallback_(0, entries.size());
     for (const auto& item : entries) {
+        ++entryIndex;
+        if (progressCallback_) progressCallback_(entryIndex, entries.size());
         auto model = modelLoader.loadModel(item.path.string());
         if (!model) {
             continue;

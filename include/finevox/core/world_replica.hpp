@@ -23,6 +23,7 @@
 #include "finevox/core/world.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string_view>
@@ -49,7 +50,7 @@ public:
     void setViewer(uint16_t viewer) { viewer_ = viewer; }
 
     /// Copy every column the viewer currently sees
-    void syncAll();
+    void syncAll(const std::function<void(ColumnPos)>& onColumn = {});
 
     /// Stop filtering: everything replicates, unseen or not
     void setRevealAll(bool reveal) { revealAll_ = reveal; }

@@ -12,6 +12,9 @@ namespace finevox {
 
 void BlockModelLoader::setFileResolver(FileResolver resolver) {
     resolver_ = std::move(resolver);
+    modelCache_.clear();
+    geometryCache_.clear();
+    collisionCache_.clear();
     parser_.setIncludeResolver([this](const std::string& path) -> std::string {
         if (resolver_) {
             // ConfigParser calls with raw path; add .model extension for model includes
@@ -23,6 +26,11 @@ void BlockModelLoader::setFileResolver(FileResolver resolver) {
 }
 
 std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
+    auto cached = modelCache_.find(path);
+    if (cached != modelCache_.end()) {
+        return cached->second;
+    }
+
     // Cycle detection
     if (loadingStack_.count(path) > 0) {
         lastError_ = "Circular include detected: " + path;
@@ -180,27 +188,42 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
     model.resolveFaceTextures();
 
     cleanup();
+    modelCache_.emplace(path, model);
     return model;
 }
 
 std::optional<BlockGeometry> BlockModelLoader::loadGeometry(const std::string& path) {
+    auto cached = geometryCache_.find(path);
+    if (cached != geometryCache_.end()) {
+        return cached->second;
+    }
+
     auto doc = parser_.parseFile(path);
     if (!doc) {
         lastError_ = "Failed to parse geometry file: " + path;
         return std::nullopt;
     }
 
-    return parseGeometryFromDocument(*doc);
+    BlockGeometry geom = parseGeometryFromDocument(*doc);
+    geometryCache_.emplace(path, geom);
+    return geom;
 }
 
 std::optional<CollisionShape> BlockModelLoader::loadCollision(const std::string& path) {
+    auto cached = collisionCache_.find(path);
+    if (cached != collisionCache_.end()) {
+        return cached->second;
+    }
+
     auto doc = parser_.parseFile(path);
     if (!doc) {
         lastError_ = "Failed to parse collision file: " + path;
         return std::nullopt;
     }
 
-    return parseCollisionFromDocument(*doc);
+    CollisionShape shape = parseCollisionFromDocument(*doc);
+    collisionCache_.emplace(path, shape);
+    return shape;
 }
 
 BlockGeometry BlockModelLoader::parseGeometryFromDocument(const ConfigDocument& doc) {

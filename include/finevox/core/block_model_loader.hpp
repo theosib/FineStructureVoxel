@@ -39,6 +39,7 @@
 #include <string>
 #include <optional>
 #include <functional>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace finevox {
@@ -131,6 +132,9 @@ private:
     ConfigParser parser_;
     mutable std::string lastError_;
     std::unordered_set<std::string> loadingStack_;  // For cycle detection
+    std::unordered_map<std::string, BlockModel> modelCache_;
+    std::unordered_map<std::string, BlockGeometry> geometryCache_;
+    std::unordered_map<std::string, CollisionShape> collisionCache_;
 
     /**
      * @brief Parse a face entry into FaceGeometry

@@ -3,6 +3,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/subchunk.hpp"
+#include "finevox/core/fluid_layer.hpp"
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 
@@ -853,20 +854,48 @@ void LightEngine::initializeColumnLighting(const ColumnPos& columnPos) {
         SubChunk* sub = column->getSubChunk(chunkY);
         if (!sub) continue;
 
+        const auto& entries = sub->palette().entries();
+        bool anyBlockEmits = false;
+        for (size_t i = 1; i < entries.size(); ++i) {
+            if (!entries[i].isAir() && queryCombinedEmission(entries[i]) > 0) {
+                anyBlockEmits = true;
+                break;
+            }
+        }
+
         bool hasFluid = sub->hasFluidLayer();
+        bool anyFluidEmits = false;
+        if (hasFluid) {
+            const FluidPalette& fp = sub->fluidLayer()->palette();
+            for (uint8_t i = 1; i <= FluidPalette::MAX_ENTRIES; ++i) {
+                FluidTypeId fid = fp.getType(i);
+                if (!fid.isEmpty()) {
+                    const FluidType* ft = FluidRegistry::global().getType(fid);
+                    if (ft && ft->lightEmission > 0) {
+                        anyFluidEmits = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!anyBlockEmits && !anyFluidEmits) continue;
 
         for (int32_t y = 0; y < 16; ++y) {
             for (int32_t z = 0; z < 16; ++z) {
                 for (int32_t x = 0; x < 16; ++x) {
                     uint8_t blockEmission = 0;
-                    BlockTypeId block = sub->getBlock(x, y, z);
-                    if (!block.isAir()) {
-                        blockEmission = queryCombinedEmission(block);
+                    BlockTypeId block;
+                    if (anyBlockEmits) {
+                        block = sub->getBlock(x, y, z);
+                        if (!block.isAir()) {
+                            blockEmission = queryCombinedEmission(block);
+                        }
                     }
 
                     FluidTypeId fluid;
                     uint8_t fluidEmission = 0;
-                    if (hasFluid) {
+                    if (anyFluidEmits) {
                         fluid = sub->getFluid(x, y, z);
                         if (!fluid.isEmpty()) {
                             const FluidType* ft = FluidRegistry::global().getType(fluid);

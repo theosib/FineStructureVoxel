@@ -55,6 +55,7 @@ ClientSession::ClientSession(Options options) : options_(std::move(options)) {
 
 ClientSession::~ClientSession() {
     stopping_ = true;
+    signal_.signal();
     if (thread_.joinable()) thread_.join();
     std::shared_ptr<finenet::Connection> connection;
     {
@@ -71,15 +72,18 @@ void ClientSession::connect(std::vector<std::string> addresses, uint16_t default
     nextDial_ = Clock::now();
     phase_ = ClientPhase::Connecting;
     events_.push_back({SessionEvent::Kind::Phase, std::string(phaseName(ClientPhase::Connecting)), {}});
+    signal_.signal();
 }
 
 void ClientSession::attach(std::unique_ptr<finenet::Connection> connection) {
     std::lock_guard lock(mutex_);
     local_ = connection->isLocal();
+    connection->setWakeSignal(&signal_);
     connection_ = std::move(connection);
     helloSent_ = false;
     registerHandlers();
     phase_ = ClientPhase::Connecting;
+    signal_.signal();
 }
 
 void ClientSession::leave() {
@@ -410,6 +414,7 @@ void ClientSession::dial() {
     auto connection = finenet::Connection::connect(endpoint->host, endpoint->port, connectionConfig());
 
     std::lock_guard lock(mutex_);
+    connection->setWakeSignal(&signal_);
     connection_ = std::move(connection);
     helloSent_ = false;
     registerHandlers();
@@ -497,7 +502,7 @@ void ClientSession::run() {
             world_.settle(now);
             lastSettle = now;
         }
-        std::this_thread::sleep_for(LOOP_WAIT);
+        signal_.waitFor(LOOP_WAIT);
     }
 }
 

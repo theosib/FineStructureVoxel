@@ -66,22 +66,26 @@ void WorldReplica::syncColumn(ColumnPos pos) {
         if (!blocksChanged && !lightChanged && !fluidChanged) return;
         it->second = {blocks, light, fluid};
 
-        if (blocksChanged) {
-            std::vector<std::pair<BlockCoord, BlockTypeId>> changes;
-            for (int32_t ly = 0; ly < 16; ++ly) {
-                for (int32_t lz = 0; lz < 16; ++lz) {
-                    for (int32_t lx = 0; lx < 16; ++lx) {
-                        BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
-                        BlockTypeId block = subchunk.getBlock(lx, ly, lz);
-                        if (replica_.getBlock(world) != block) changes.emplace_back(world, block);
-                    }
-                }
-            }
-            if (!changes.empty()) replica_.setBlocks(changes);
-        }
-
         // Air has light too, so a subchunk with nothing in it still needs to exist here
         SubChunk& copy = replica_.getOrCreateColumn(pos).getOrCreateSubChunk(chunkY);
+        if (blocksChanged) {
+            if (subchunk.isAirOnly()) {
+                if (!copy.isAirOnly()) copy.clear();
+            } else if (copy.isAirOnly() && subchunk.nonAirCount() == SubChunk::VOLUME &&
+                       subchunk.palette().activeCount() == 2) {
+                copy.fill(subchunk.getBlock(uint16_t(0)));
+            } else if (copy.isAirOnly()) {
+                for (uint16_t i = 0; i < SubChunk::VOLUME; ++i) {
+                    BlockTypeId block = subchunk.getBlock(i);
+                    if (!block.isAir()) copy.setBlock(i, block);
+                }
+            } else {
+                for (uint16_t i = 0; i < SubChunk::VOLUME; ++i) {
+                    BlockTypeId block = subchunk.getBlock(i);
+                    if (copy.getBlock(i) != block) copy.setBlock(i, block);
+                }
+            }
+        }
         if (lightChanged) {
             copy.setLightData(subchunk.lightData());
             copy.setBiomeData(subchunk.biomeData());
@@ -103,12 +107,22 @@ void WorldReplica::syncColumn(ColumnPos pos) {
     });
 }
 
-void WorldReplica::syncAll() {
+void WorldReplica::syncAll(const std::function<void(ColumnPos)>& onColumn) {
     const auto& bounds = vision_.bounds();
-    for (int32_t cx = bounds.minX >> 4; cx < (bounds.maxX + 15) >> 4; ++cx) {
-        for (int32_t cz = bounds.minZ >> 4; cz < (bounds.maxZ + 15) >> 4; ++cz) {
-            ColumnPos pos(cx, cz);
-            if (columnVisible(pos)) syncColumn(pos);
+    int32_t minX = bounds.minX >> 4;
+    int32_t maxX = (bounds.maxX + 15) >> 4;
+    int32_t minZ = bounds.minZ >> 4;
+    int32_t maxZ = (bounds.maxZ + 15) >> 4;
+    int32_t maxRing = std::max({-minX, maxX, -minZ, maxZ});
+    for (int32_t ring = 0; ring < maxRing; ++ring) {
+        int32_t lo = -ring - 1, hi = ring;
+        for (int32_t cx = std::max(lo, minX); cx <= std::min(hi, maxX - 1); ++cx) {
+            for (int32_t cz = std::max(lo, minZ); cz <= std::min(hi, maxZ - 1); ++cz) {
+                if (cx != lo && cx != hi && cz != lo && cz != hi) continue;
+                ColumnPos pos(cx, cz);
+                if (columnVisible(pos)) syncColumn(pos);
+                if (onColumn) onColumn(pos);
+            }
         }
     }
 }

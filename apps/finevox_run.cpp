@@ -134,6 +134,8 @@ public:
         return runtime ? &runtime->content() : nullptr;
     }
 
+    const game::LoadProgress* loadProgress() const override { return host_.loadProgress(); }
+
 private:
     game::GameHost host_;
 };

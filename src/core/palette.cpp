@@ -51,10 +51,22 @@ void SubChunkPalette::publishAll() {
 }
 
 SubChunkPalette::LocalIndex SubChunkPalette::addType(BlockTypeId globalId) {
+    if (globalId == AIR_BLOCK_TYPE) {
+        return 0;
+    }
+
     // Check if already in palette
-    auto it = reverse_.find(globalId);
-    if (it != reverse_.end()) {
-        return it->second;
+    if (palette_.size() <= 16) {
+        for (size_t i = 1; i < palette_.size(); ++i) {
+            if (palette_[i] == globalId) {
+                return static_cast<LocalIndex>(i);
+            }
+        }
+    } else {
+        auto it = reverse_.find(globalId);
+        if (it != reverse_.end()) {
+            return it->second;
+        }
     }
 
     LocalIndex index;
@@ -107,6 +119,17 @@ bool SubChunkPalette::removeType(BlockTypeId globalId) {
 }
 
 SubChunkPalette::LocalIndex SubChunkPalette::getLocalIndex(BlockTypeId globalId) const {
+    if (globalId == AIR_BLOCK_TYPE) {
+        return 0;
+    }
+    if (palette_.size() <= 16) {
+        for (size_t i = 1; i < palette_.size(); ++i) {
+            if (palette_[i] == globalId) {
+                return static_cast<LocalIndex>(i);
+            }
+        }
+        return INVALID_LOCAL_INDEX;
+    }
     auto it = reverse_.find(globalId);
     if (it != reverse_.end()) {
         return it->second;

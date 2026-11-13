@@ -50,6 +50,53 @@ struct PlayerSeed {
     std::vector<uint8_t> settings;  ///< CBOR: what they chose for themselves in the lobby
 };
 
+/// Live progress while GameRuntime::load() and initial sync are under way. Updated from the
+/// loader/host threads and read lock-free by the client's render thread.
+struct LoadProgress {
+    enum class Stage : uint8_t {
+        Content = 0,
+        World = 1,
+        Light = 2,
+        Prepare = 3,
+        Sync = 4,
+    };
+
+    std::atomic<Stage> stage{Stage::Content};
+    std::atomic<bool> resuming{false};
+    std::atomic<bool> cancelled{false};
+    std::atomic<int32_t> radius{0};
+    std::atomic<uint32_t> done{0};
+    std::atomic<uint32_t> total{0};
+    std::unique_ptr<std::atomic<uint8_t>[]> columns;
+
+    void initColumns(int32_t r) {
+        int32_t side = std::max(0, r * 2);
+        columns = std::make_unique<std::atomic<uint8_t>[]>(static_cast<size_t>(side * side));
+        for (int32_t i = 0; i < side * side; ++i) {
+            columns[i].store(0, std::memory_order_relaxed);
+        }
+        radius.store(r, std::memory_order_release);
+    }
+
+    void setColumn(int32_t cx, int32_t cz, uint8_t value) {
+        int32_t r = radius.load(std::memory_order_acquire);
+        if (r <= 0 || cx < -r || cx >= r || cz < -r || cz >= r) return;
+        int32_t side = r * 2;
+        size_t idx = static_cast<size_t>((cz + r) * side + (cx + r));
+        uint8_t prev = columns[idx].load(std::memory_order_relaxed);
+        if (value > prev) {
+            columns[idx].store(value, std::memory_order_relaxed);
+        }
+    }
+
+    [[nodiscard]] uint8_t column(int32_t cx, int32_t cz) const {
+        int32_t r = radius.load(std::memory_order_acquire);
+        if (r <= 0 || cx < -r || cx >= r || cz < -r || cz >= r) return 0;
+        int32_t side = r * 2;
+        return columns[static_cast<size_t>((cz + r) * side + (cx + r))].load(std::memory_order_relaxed);
+    }
+};
+
 /// A player's place in the game, which outlasts their connection
 struct Seat {
     int64_t id = 0;
@@ -99,6 +146,8 @@ struct RuntimeOptions {
     std::vector<uint8_t> settings;
     /// Keys for GameManifest::applyOverride, from settings that shape the world
     std::map<std::string, std::string> manifestOverrides;
+    /// Optional progress sink updated as content, columns, lighting and sync advance
+    std::shared_ptr<LoadProgress> progress;
 };
 
 /// What the client wants back on resuming: the world says nothing about where it was looking
@@ -197,6 +246,7 @@ public:
 
     /// World-generation time from load(), for diagnostics
     [[nodiscard]] double worldgenSeconds() const { return worldgenSeconds_; }
+    [[nodiscard]] LoadProgress* loadProgress() const { return options_.progress.get(); }
 
 private:
     void loadWorldContent();

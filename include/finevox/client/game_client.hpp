@@ -25,6 +25,7 @@ class ContentPackLoader;
 }
 
 namespace finevox::game {
+struct LoadProgress;
 class McpServer;
 }
 
@@ -45,6 +46,9 @@ public:
     /// The content this game loaded, for a client in the same process to share: registries are
     /// global, so loading it twice would be wrong. Valid once the world has arrived.
     [[nodiscard]] virtual ContentPackLoader* content() = 0;
+
+    /// Progress while the world is being built or loaded
+    [[nodiscard]] virtual const game::LoadProgress* loadProgress() const { return nullptr; }
 };
 
 struct HostRequest {

@@ -37,27 +37,41 @@ void ClientWorld::apply(const SubchunkData& data) {
         palette.push_back(name == blockNames_.end() ? BlockTypeId() : name->second);
     }
 
-    std::vector<std::pair<BlockCoord, BlockTypeId>> changes;
+    SubChunk& subchunk = world_.getOrCreateColumn(ColumnPos(chunk.x, chunk.z)).getOrCreateSubChunk(chunk.y);
     {
         std::lock_guard lock(predictionMutex_);
-        for (int32_t index = 0; index < static_cast<int32_t>(SubchunkData::CELLS); ++index) {
-            int32_t lx = index & 0xF, lz = (index >> 4) & 0xF, ly = (index >> 8) & 0xF;
-            BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
-            BlockTypeId block = palette[data.indices.empty() ? 0 : data.indices[index]];
+        if (predictions_.empty()) {
+            if (data.indices.empty()) {
+                BlockTypeId fill = palette.empty() ? BlockTypeId() : palette[0];
+                if (!fill.isAir() || !subchunk.isAirOnly()) subchunk.fill(fill);
+            } else if (subchunk.isAirOnly()) {
+                for (uint16_t index = 0; index < static_cast<uint16_t>(SubchunkData::CELLS); ++index) {
+                    BlockTypeId block = palette[data.indices[index]];
+                    if (!block.isAir()) subchunk.setBlock(index, block);
+                }
+            } else {
+                for (uint16_t index = 0; index < static_cast<uint16_t>(SubchunkData::CELLS); ++index) {
+                    BlockTypeId block = palette[data.indices[index]];
+                    if (subchunk.getBlock(index) != block) subchunk.setBlock(index, block);
+                }
+            }
+        } else {
+            for (int32_t index = 0; index < static_cast<int32_t>(SubchunkData::CELLS); ++index) {
+                int32_t lx = index & 0xF, lz = (index >> 4) & 0xF, ly = (index >> 8) & 0xF;
+                BlockCoord world(chunk.x * 16 + lx, chunk.y * 16 + ly, chunk.z * 16 + lz);
+                BlockTypeId block = palette[data.indices.empty() ? 0 : data.indices[index]];
 
-            if (!predictions_.empty()) {
                 auto predicted = predictions_.find(world);
                 if (predicted != predictions_.end()) {
                     predicted->second.serverSays = block;
                     continue;
                 }
+                if (subchunk.getBlock(static_cast<uint16_t>(index)) != block) {
+                    subchunk.setBlock(static_cast<uint16_t>(index), block);
+                }
             }
-            if (world_.getBlock(world) != block) changes.emplace_back(world, block);
         }
     }
-    if (!changes.empty()) world_.setBlocks(changes);
-
-    SubChunk& subchunk = world_.getOrCreateColumn(ColumnPos(chunk.x, chunk.z)).getOrCreateSubChunk(chunk.y);
     subchunk.setLightData(data.light);
     subchunk.setBiomeData(data.biomes);
 

@@ -61,15 +61,26 @@ net::SubchunkData gather(const SubChunk& subchunk, ChunkPos pos) {
     net::SubchunkData data;
     data.pos = pos;
 
-    std::unordered_map<uint32_t, uint16_t> seen;
-    std::vector<uint16_t> indices(net::SubchunkData::CELLS);
-    for (int32_t i = 0; i < static_cast<int32_t>(net::SubchunkData::CELLS); ++i) {
-        uint32_t id = subchunk.getBlock(i).id;
-        auto [it, inserted] = seen.try_emplace(id, static_cast<uint16_t>(data.palette.size()));
-        if (inserted) data.palette.push_back(id);
-        indices[i] = it->second;
+    if (subchunk.isAirOnly()) {
+        data.palette.push_back(0);
+    } else {
+        const auto& entries = subchunk.palette().entries();
+        const auto& blocks = subchunk.blocks();
+        std::vector<uint16_t> remap(entries.size(), UINT16_MAX);
+        std::vector<uint16_t> indices(net::SubchunkData::CELLS);
+        for (int32_t i = 0; i < static_cast<int32_t>(net::SubchunkData::CELLS); ++i) {
+            uint16_t local = blocks[i];
+            uint16_t mapped = local < remap.size() ? remap[local] : UINT16_MAX;
+            if (mapped == UINT16_MAX) {
+                uint32_t id = local < entries.size() ? entries[local].id : 0;
+                mapped = static_cast<uint16_t>(data.palette.size());
+                data.palette.push_back(id);
+                if (local < remap.size()) remap[local] = mapped;
+            }
+            indices[i] = mapped;
+        }
+        if (data.palette.size() > 1) data.indices = std::move(indices);
     }
-    if (data.palette.size() > 1) data.indices = std::move(indices);
     data.light = subchunk.lightData();
     data.biomes = subchunk.biomeData();
 
@@ -240,16 +251,24 @@ void ReplicationServer::sendSubchunk(ClientView& view, ChunkPos pos) {
     }
 
     send(view, net::CH_WORLD, net::msg::Subchunk, net::encodeSubchunk(data, !view.connection_->isLocal()));
+    if (LoadProgress* prog = runtime_.loadProgress()) {
+        if (prog->column(pos.x, pos.z) < 4) {
+            prog->setColumn(pos.x, pos.z, 4);
+            prog->done.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 }
 
 void ReplicationServer::sendWorld(ClientView& view) {
-    if (!view.dirty_.empty() && view.connection_->pendingBytes(net::CH_WORLD) < WORLD_BACKLOG) {
+    size_t backlog = view.connection_->isLocal() ? WORLD_BACKLOG * 8 : WORLD_BACKLOG;
+    size_t perPass = view.connection_->isLocal() ? SUBCHUNKS_PER_PASS * 8 : SUBCHUNKS_PER_PASS;
+    if (!view.dirty_.empty() && view.connection_->pendingBytes(net::CH_WORLD) < backlog) {
         std::vector<ChunkPos> order;
         order.reserve(view.dirty_.size());
         for (const auto& [key, chunk] : view.dirty_) order.push_back(chunk);
 
         // What the player's looking at first, when there's more than can go at once
-        size_t take = std::min<size_t>(order.size(), SUBCHUNKS_PER_PASS);
+        size_t take = std::min<size_t>(order.size(), perPass);
         if (take < order.size()) {
             float x = view.hintX_.load() / 16.0f, z = view.hintZ_.load() / 16.0f;
             auto closer = [x, z](const ChunkPos& a, const ChunkPos& b) {
@@ -261,7 +280,7 @@ void ReplicationServer::sendWorld(ClientView& view) {
         }
 
         for (size_t i = 0; i < take; ++i) {
-            if (view.connection_->pendingBytes(net::CH_WORLD) >= WORLD_BACKLOG) break;
+            if (view.connection_->pendingBytes(net::CH_WORLD) >= backlog) break;
             sendSubchunk(view, order[i]);
             view.dirty_.erase(chunkKey(order[i]));
         }

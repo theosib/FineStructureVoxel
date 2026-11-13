@@ -18,6 +18,7 @@
 #include "finevox/core/world.hpp"
 #include "finevox/core/world_time.hpp"
 #include "finevox/game/game_manifest.hpp"
+#include "finevox/game/game_runtime.hpp"
 #include "finevox/game/mcp_server.hpp"
 #include "finevox/game/mcp_tools.hpp"
 #include "finevox/net/client_session.hpp"
@@ -243,6 +244,7 @@ struct GameClient::Impl {
     float fpsTimer = 0.0f;
 
     void setupShell();
+    void drawLoadingScreen();
     void enterWorld();
     void beginSession(const std::string& name, const std::string& password);
     void startLocal(bool newGame);
@@ -373,6 +375,7 @@ void GameClient::Impl::setupShell() {
     guiLayer->renderFn = [this](const RenderContext& ctx) {
         gui->beginFrame();
         fireUi(symFrame);
+        if (!inWorld && host) drawLoadingScreen();
         if (mcp) mcp->pump(game::McpSide::Frame);
         guiManager->processPendingMessages();
         mapRenderer->renderAll();
@@ -566,6 +569,107 @@ void GameClient::Impl::startLocal(bool newGame) {
     }
     beginSession(playerName, "");
     session->attach(host->connect());
+}
+
+void GameClient::Impl::drawLoadingScreen() {
+    const game::LoadProgress* prog = host ? host->loadProgress() : nullptr;
+    if (!prog) return;
+    if (!directStart && (!session || session->phase() != net::ClientPhase::Loading)) return;
+
+    int32_t r = prog->radius.load(std::memory_order_acquire);
+    if (r <= 0) r = manifest.worldRadius;
+    int32_t side = std::max(1, r * 2);
+
+    using Stage = game::LoadProgress::Stage;
+    Stage stage = prog->stage.load(std::memory_order_relaxed);
+    bool resuming = prog->resuming.load(std::memory_order_relaxed);
+    uint32_t done = prog->done.load(std::memory_order_relaxed);
+    uint32_t total = prog->total.load(std::memory_order_relaxed);
+    float stageFrac = total > 0 ? std::clamp(float(done) / float(total), 0.0f, 1.0f) : 0.0f;
+
+    float overall = 0.0f;
+    const char* label = "Loading content";
+    switch (stage) {
+        case Stage::Content:
+            overall = 0.15f * stageFrac;
+            label = "Loading content";
+            break;
+        case Stage::World:
+            overall = 0.15f + 0.40f * stageFrac;
+            label = resuming ? "Loading world" : "Generating terrain";
+            break;
+        case Stage::Light:
+            overall = 0.55f + 0.20f * stageFrac;
+            label = "Lighting world";
+            break;
+        case Stage::Prepare:
+            overall = 0.75f + 0.15f * stageFrac;
+            label = "Preparing world";
+            break;
+        case Stage::Sync:
+            overall = 0.90f + 0.10f * stageFrac;
+            label = "Entering world";
+            break;
+    }
+
+    float maxGrid = std::min(viewport.x, viewport.y) * 0.44f;
+    float cell = std::clamp(std::floor(maxGrid / float(side)), 2.0f, 10.0f);
+    float gridPx = cell * float(side);
+    float gx0 = std::floor((viewport.x - gridPx) * 0.5f);
+    float gy0 = std::floor((viewport.y - gridPx) * 0.5f);
+    if (!directStart) {
+        // Leave room for a menu's own centred status panel above
+        gy0 = std::floor(viewport.y * 0.54f);
+    }
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    constexpr float PAD = 6.0f;
+    draw->AddRectFilled(ImVec2(gx0 - PAD, gy0 - PAD), ImVec2(gx0 + gridPx + PAD, gy0 + gridPx + PAD),
+                        IM_COL32(12, 15, 22, 240), 3.0f);
+    draw->AddRect(ImVec2(gx0 - PAD, gy0 - PAD), ImVec2(gx0 + gridPx + PAD, gy0 + gridPx + PAD),
+                  IM_COL32(70, 80, 98, 220), 3.0f, 0, 1.5f);
+
+    float gap = cell >= 4.0f ? 1.0f : 0.0f;
+    for (int32_t cz = -r; cz < r; ++cz) {
+        for (int32_t cx = -r; cx < r; ++cx) {
+            uint8_t state = prog->column(cx, cz);
+            ImU32 color = IM_COL32(24, 28, 38, 255);
+            switch (state) {
+                case 1: color = IM_COL32(106, 84, 58, 255); break;
+                case 2: color = IM_COL32(196, 160, 74, 255); break;
+                case 3: color = IM_COL32(76, 152, 72, 255); break;
+                case 4: color = IM_COL32(122, 212, 106, 255); break;
+                default: break;
+            }
+            float x0 = gx0 + float(cx + r) * cell;
+            float y0 = gy0 + float(cz + r) * cell;
+            draw->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + cell - gap, y0 + cell - gap), color);
+        }
+    }
+
+    // Mark the origin where the world is centred
+    float cxMid = gx0 + gridPx * 0.5f;
+    float cyMid = gy0 + gridPx * 0.5f;
+    draw->AddRect(ImVec2(cxMid - cell, cyMid - cell), ImVec2(cxMid + cell, cyMid + cell),
+                  IM_COL32(255, 255, 255, 180), 0.0f, 0, 1.0f);
+
+    if (directStart) {
+        int pct = static_cast<int>( std::round(overall * 100.0f));
+        std::string title = std::string(label) + "  " + std::to_string(pct) + "%";
+        ImVec2 textSize = ImGui::CalcTextSize(title.c_str());
+        draw->AddText(ImVec2( std::floor((viewport.x - textSize.x) * 0.5f), gy0 - PAD - textSize.y - 10.0f),
+                      IM_COL32(235, 238, 245, 255), title.c_str());
+    }
+
+    float barY = gy0 + gridPx + PAD + 10.0f;
+    float barH = 6.0f;
+    draw->AddRectFilled(ImVec2(gx0 - PAD, barY), ImVec2(gx0 + gridPx + PAD, barY + barH),
+                        IM_COL32(28, 32, 44, 255), 2.0f);
+    float fillW = (gridPx + PAD * 2.0f) * std::clamp(overall, 0.0f, 1.0f);
+    if (fillW > 0.0f) {
+        draw->AddRectFilled(ImVec2(gx0 - PAD, barY), ImVec2(gx0 - PAD + fillW, barY + barH),
+                            IM_COL32(122, 212, 106, 255), 2.0f);
+    }
 }
 
 void GameClient::Impl::enterWorld() {
@@ -848,8 +952,9 @@ void GameClient::Impl::shutdown() {
                 return Value::array(std::vector<Value>{Value::number(v.x), Value::number(v.y), Value::number(v.z)});
             };
             Vec3 body = stewardBody->position();
-            net::setField(state, "pivot", vector3(tactical.pivot()));
-            net::setField(state, "steward", vector3(glm::dvec3(body.x, body.y, body.z)));
+            glm::dvec3 bodyPos(body.x, body.y, body.z);
+            net::setField(state, "pivot", vector3(embodied ? bodyPos : tactical.pivot()));
+            net::setField(state, "steward", vector3(bodyPos));
             net::setField(state, "camera", vector3(glm::dvec3(tactical.yaw(), tactical.pitch(), tactical.distance())));
             session->sendClientState(net::encodeBody(state));
         }
@@ -1438,7 +1543,8 @@ void GameClient::Impl::registerNatives() {
 
     e.registerFunction("cam_focus", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() >= 2) {
-            tactical.setPivot(glm::dvec3(number(args[0]), tactical.pivot().y, number(args[1])));
+            double y = args.size() >= 3 ? number(args[2]) : tactical.pivot().y;
+            tactical.setPivot(glm::dvec3(number(args[0]), y, number(args[1])));
         }
         return Value::nil();
     });

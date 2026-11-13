@@ -244,7 +244,7 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
         for (int i = 0; i < SubChunk::VOLUME; ++i) {
             uint16_t serializedIdx = static_cast<uint16_t>(data.blocks[i * 2]) |
                                      (static_cast<uint16_t>(data.blocks[i * 2 + 1]) << 8);
-            if (serializedIdx < paletteMapping.size()) {
+            if (serializedIdx < paletteMapping.size() && paletteMapping[serializedIdx] != 0) {
                 BlockTypeId type = chunk->palette().getGlobalId(paletteMapping[serializedIdx]);
                 chunk->setBlock(i, type);
             }
@@ -252,7 +252,7 @@ std::unique_ptr<SubChunk> SubChunkSerializer::deserialize(const SerializedSubChu
     } else {
         for (int i = 0; i < SubChunk::VOLUME; ++i) {
             uint8_t serializedIdx = data.blocks[i];
-            if (serializedIdx < paletteMapping.size()) {
+            if (serializedIdx < paletteMapping.size() && paletteMapping[serializedIdx] != 0) {
                 BlockTypeId type = chunk->palette().getGlobalId(paletteMapping[serializedIdx]);
                 chunk->setBlock(i, type);
             }

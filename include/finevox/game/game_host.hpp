@@ -99,6 +99,7 @@ public:
 
     /// Null until the game has loaded. Its threads are the host's business.
     [[nodiscard]] GameRuntime* runtime();
+    [[nodiscard]] const LoadProgress* loadProgress() const { return progress_.get(); }
 
     /// Say goodbye to everyone, stop the game, and save it. Blocks.
     void stop();
@@ -240,6 +241,7 @@ private:
 
     std::unique_ptr<GameRuntime> runtime_;
     std::shared_ptr<ReplicationServer> replication_;
+    std::shared_ptr<LoadProgress> progress_ = std::make_shared<LoadProgress>();
     std::mutex runtimeMutex_;
 };
 

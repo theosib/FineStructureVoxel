@@ -23,6 +23,7 @@
 #include "finevox/worldgen/blueprint.hpp"
 
 #include <finenet/connection.hpp>
+#include <finenet/wake_signal.hpp>
 #include <finescript/value.h>
 
 #include <atomic>
@@ -218,6 +219,7 @@ private:
     GraphicsEventQueue graphics_;
 
     std::thread thread_;
+    finenet::WakeSignal signal_;
     std::atomic<bool> stopping_{false};
     std::atomic<ClientPhase> phase_{ClientPhase::Idle};
     std::atomic<int64_t> playerId_{0};

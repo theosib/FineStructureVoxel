@@ -378,6 +378,7 @@ bool GameHost::start(std::string& error) {
         return false;
     }
     manifest_ = *manifest;
+    progress_->initColumns(manifest_.worldRadius);
 
     try {
         loadDeclaration();
@@ -1023,6 +1024,7 @@ void GameHost::beginLoading() {
     lobbyDirty_ = true;
 
     RuntimeOptions options = config_.runtime;
+    options.progress = progress_;
     for (const auto& [id, player] : players_) {
         if (player.connected) options.players.push_back({id, player.name, player.local, encodeBody(player.settings)});
     }
@@ -1134,6 +1136,12 @@ void GameHost::joinRunningGame(Peer& peer) {
 void GameHost::onGameLoaded() {
     GameRuntime* game = runtime();
     replication_ = game->replication();
+    if (progress_) {
+        int32_t side = std::max(0, game->manifest().worldRadius * 2);
+        progress_->stage.store(LoadProgress::Stage::Sync, std::memory_order_relaxed);
+        progress_->done.store(0, std::memory_order_relaxed);
+        progress_->total.store(static_cast<uint32_t>(side * side), std::memory_order_relaxed);
+    }
 
     // Whoever came while it was loading isn't in the game's list of players yet
     for (auto& peer : peers_) {
@@ -1209,6 +1217,8 @@ void GameHost::endGame(std::string_view text) {
 
 void GameHost::stop() {
     if (stopping_.exchange(true)) return;
+    if (progress_) progress_->cancelled.store(true, std::memory_order_relaxed);
+    signal_.signal();
 
     if (thread_.joinable()) thread_.join();
     if (loader_.joinable()) loader_.join();
@@ -1225,7 +1235,7 @@ void GameHost::stop() {
     for (auto& peer : peers_) peer->connection->disconnect("the host left");
     peers_.clear();
 
-    if (game) {
+    if (game && gameStarted_) {
         std::string error;
         if (!game->saveGame(error)) std::cerr << "[save] couldn't save: " << error << "\n";
     }

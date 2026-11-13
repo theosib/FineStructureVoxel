@@ -162,10 +162,25 @@ void GameRuntime::load() {
     if (options_.seedOverride) manifest_.worldSeed = *options_.seedOverride;
     if (options_.radiusOverride) manifest_.worldRadius = *options_.radiusOverride;
 
+    LoadProgress* prog = options_.progress.get();
+    if (prog && prog->radius.load(std::memory_order_acquire) != manifest_.worldRadius) {
+        prog->initColumns(manifest_.worldRadius);
+    }
+
     ResourceLocator::instance().setGameRoot(options_.gameRoot);
     blueprints_.loadDirectory(options_.gameRoot / "blueprints");
 
     content_ = std::make_unique<ContentPackLoader>(manifest_.contentNamespace);
+    if (prog) {
+        prog->stage.store(LoadProgress::Stage::Content, std::memory_order_relaxed);
+        content_->setProgressCallback([prog](size_t done, size_t total) {
+            if (prog->cancelled.load(std::memory_order_relaxed)) {
+                throw std::runtime_error("cancelled");
+            }
+            prog->done.store(static_cast<uint32_t>(done), std::memory_order_relaxed);
+            prog->total.store(static_cast<uint32_t>(total), std::memory_order_relaxed);
+        });
+    }
     content_->loadAll(options_.gameRoot);
 
     GameSessionConfig config;
@@ -175,6 +190,7 @@ void GameRuntime::load() {
     session_ = GameSession::createLocal(config);
 
     resumed_ = saveExists() && !options_.newGame;
+    if (prog) prog->resuming.store(resumed_, std::memory_order_relaxed);
     loadWorldContent();
     if (resumed_) {
         loadSavedWorld();
@@ -255,6 +271,13 @@ void GameRuntime::load() {
         ctx.set(name, finescript::Value::string(value));
     }
 
+    if (prog) {
+        int32_t side = std::max(0, manifest_.worldRadius * 2);
+        prog->stage.store(LoadProgress::Stage::Prepare, std::memory_order_relaxed);
+        prog->done.store(0, std::memory_order_relaxed);
+        prog->total.store(static_cast<uint32_t>(side * side), std::memory_order_relaxed);
+    }
+
     if (!gameScript_->loadScript((options_.gameRoot / manifest_.mainScript).string())) {
         throw std::runtime_error("main script failed: " +
                                  (gameScript_->errors().empty() ? "" : gameScript_->errors().back()));
@@ -281,7 +304,15 @@ void GameRuntime::load() {
     // Don't open on a blank map: show what the starting units can see
     for (const auto& [faction, replica] : replicas_) {
         vision_->refresh(faction);
-        replica->syncAll();
+        replica->syncAll([prog, isMain = (replica.get() == replica_)](ColumnPos pos) {
+            if (prog && prog->cancelled.load(std::memory_order_relaxed)) {
+                throw std::runtime_error("cancelled");
+            }
+            if (prog && isMain) {
+                prog->setColumn(pos.x, pos.z, 3);
+                prog->done.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
     }
 
     if (options_.mcpPort || options_.mcpServer) startMcp();
@@ -336,7 +367,9 @@ void GameRuntime::bindPlayer(int64_t player, uint16_t faction, std::optional<glm
     EntityManager& entities = session_->entities();
     if (updated.body == INVALID_ENTITY_ID) {
         glm::dvec3 where = spot.value_or(glm::dvec3(0.0, double(manifest_.seaLevel + 16), 0.0));
-        if (updated.local && resumed_) where = clientSaveCopy().steward;
+        if (updated.local && resumed_ && clientSaveCopy().steward != glm::dvec3(0.0)) {
+            where = clientSaveCopy().steward;
+        }
         updated.body = entities.spawnPlayer(Vec3(where), manifest_.playerEntity);
         updated.spawn = where;
         if (updated.local) entities.setLocalPlayerId(updated.body);
@@ -738,10 +771,28 @@ void GameRuntime::generateWorld() {
     worldgen::BiomeMap biomeMap(seed, worldgen::BiomeRegistry::global());
 
     int32_t radius = manifest_.worldRadius;
-    for (int32_t cx = -radius; cx < radius; ++cx) {
-        for (int32_t cz = -radius; cz < radius; ++cz) {
-            auto& column = world.getOrCreateColumn(ColumnPos(cx, cz));
-            pipeline.generateColumn(column, world, biomeMap);
+    LoadProgress* prog = options_.progress.get();
+    if (prog) {
+        int32_t side = std::max(0, radius * 2);
+        prog->stage.store(LoadProgress::Stage::World, std::memory_order_relaxed);
+        prog->done.store(0, std::memory_order_relaxed);
+        prog->total.store(static_cast<uint32_t>(side * side), std::memory_order_relaxed);
+    }
+    for (int32_t ring = 0; ring < radius; ++ring) {
+        int32_t lo = -ring - 1, hi = ring;
+        for (int32_t cx = lo; cx <= hi; ++cx) {
+            for (int32_t cz = lo; cz <= hi; ++cz) {
+                if (cx != lo && cx != hi && cz != lo && cz != hi) continue;
+                if (prog && prog->cancelled.load(std::memory_order_relaxed)) {
+                    throw std::runtime_error("cancelled");
+                }
+                auto& column = world.getOrCreateColumn(ColumnPos(cx, cz));
+                pipeline.generateColumn(column, world, biomeMap);
+                if (prog) {
+                    prog->setColumn(cx, cz, 1);
+                    prog->done.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
         }
     }
 
@@ -758,12 +809,31 @@ void GameRuntime::lightWorld() {
         column.recalculateHeightmap();
         columns.push_back(pos);
     });
+    std::stable_sort(columns.begin(), columns.end(), [](const ColumnPos& a, const ColumnPos& b) {
+        int32_t da = std::max(std::abs(a.x * 2 + 1), std::abs(a.z * 2 + 1));
+        int32_t db = std::max(std::abs(b.x * 2 + 1), std::abs(b.z * 2 + 1));
+        return da < db;
+    });
+
+    LoadProgress* prog = options_.progress.get();
+    if (prog) {
+        prog->stage.store(LoadProgress::Stage::Light, std::memory_order_relaxed);
+        prog->done.store(0, std::memory_order_relaxed);
+        prog->total.store(static_cast<uint32_t>(columns.size()), std::memory_order_relaxed);
+    }
 
     LightEngine& light = session_->lightEngine();
     for (const ColumnPos& pos : columns) {
+        if (prog && prog->cancelled.load(std::memory_order_relaxed)) {
+            throw std::runtime_error("cancelled");
+        }
         light.initializeSkyLight(pos);
         light.initializeColumnLighting(pos);
         if (ChunkColumn* column = world.getColumn(pos)) column->markLightInitialized();
+        if (prog) {
+            prog->setColumn(pos.x, pos.z, 2);
+            prog->done.fetch_add(1, std::memory_order_relaxed);
+        }
     }
 }
 

@@ -92,13 +92,24 @@ void saveColumns(const World& world, const fs::path& directory) {
     if (!ok) throw std::runtime_error("couldn't write a column");
 }
 
-void loadColumns(World& world, const fs::path& directory, int32_t radius) {
+void loadColumns(World& world, const fs::path& directory, int32_t radius, LoadProgress* progress = nullptr) {
     Regions regions(directory);
-    for (int32_t x = -radius; x < radius; ++x) {
-        for (int32_t z = -radius; z < radius; ++z) {
-            ColumnPos pos(x, z);
-            if (auto column = regions.at(pos).loadColumn(pos)) {
-                world.insertColumn(pos, std::move(column));
+    for (int32_t ring = 0; ring < radius; ++ring) {
+        int32_t lo = -ring - 1, hi = ring;
+        for (int32_t x = lo; x <= hi; ++x) {
+            for (int32_t z = lo; z <= hi; ++z) {
+                if (x != lo && x != hi && z != lo && z != hi) continue;
+                if (progress && progress->cancelled.load(std::memory_order_relaxed)) {
+                    throw std::runtime_error("cancelled");
+                }
+                ColumnPos pos(x, z);
+                if (auto column = regions.at(pos).loadColumn(pos)) {
+                    world.insertColumn(pos, std::move(column));
+                }
+                if (progress) {
+                    progress->setColumn(x, z, 1);
+                    progress->done.fetch_add(1, std::memory_order_relaxed);
+                }
             }
         }
     }
@@ -178,10 +189,12 @@ bool GameRuntime::saveGame(std::string& error) {
         writeFile(partial / "script.cbor", script::encodeValueGraph(savedScriptState_, interner));
 
         saveColumns(std::as_const(session_->world()), partial / "world");
-        saveColumns(std::as_const(replica_->world()), partial / "replica");
-        for (const auto& [faction, replica] : replicas_) {
-            if (replica.get() == replica_) continue;
-            saveColumns(std::as_const(replica->world()), partial / ("replica_" + std::to_string(faction)));
+        if (manifest_.fogOfWar) {
+            saveColumns(std::as_const(replica_->world()), partial / "replica");
+            for (const auto& [faction, replica] : replicas_) {
+                if (replica.get() == replica_) continue;
+                saveColumns(std::as_const(replica->world()), partial / ("replica_" + std::to_string(faction)));
+            }
         }
 
         // Each entity by its own id, which is how scripts know it
@@ -260,7 +273,14 @@ bool GameRuntime::saveGame(std::string& error) {
 
 void GameRuntime::loadSavedWorld() {
     fs::path path = savePath();
-    loadColumns(session_->world(), path / "world", manifest_.worldRadius);
+    LoadProgress* prog = options_.progress.get();
+    if (prog) {
+        int32_t side = std::max(0, manifest_.worldRadius * 2);
+        prog->stage.store(LoadProgress::Stage::World, std::memory_order_relaxed);
+        prog->done.store(0, std::memory_order_relaxed);
+        prog->total.store(static_cast<uint32_t>(side * side), std::memory_order_relaxed);
+    }
+    loadColumns(session_->world(), path / "world", manifest_.worldRadius, prog);
     lightWorld();
 }
 
@@ -276,14 +296,16 @@ void GameRuntime::loadSavedState() {
     }
 
     savedScriptState_ = script::decodeValueGraph(readFile(path / "script.cbor"), interner);
-    loadColumns(replica_->world(), path / "replica", manifest_.worldRadius);
-    for (const auto& entry : fs::directory_iterator(path)) {
-        std::string name = entry.path().filename().string();
-        if (name.rfind("replica_", 0) != 0) continue;
-        auto faction = static_cast<uint16_t>(std::stoi(name.substr(8)));
-        loadColumns(replicaFor(faction).world(), entry.path(), manifest_.worldRadius);
+    if (manifest_.fogOfWar) {
+        loadColumns(replica_->world(), path / "replica", manifest_.worldRadius);
+        for (const auto& entry : fs::directory_iterator(path)) {
+            std::string name = entry.path().filename().string();
+            if (name.rfind("replica_", 0) != 0) continue;
+            auto faction = static_cast<uint16_t>(std::stoi(name.substr(8)));
+            loadColumns(replicaFor(faction).world(), entry.path(), manifest_.worldRadius);
+        }
+        for (const auto& [faction, replica] : replicas_) replica->refreshLight();
     }
-    for (const auto& [faction, replica] : replicas_) replica->refreshLight();
     loadSites(get("sites"), get("next_site").asInt());
 
     EntityManager& entities = session_->entities();

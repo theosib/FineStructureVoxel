@@ -152,47 +152,65 @@ void DensityTerrainPass::generate(GenerationContext& ctx) {
     }
 
     const bool byFields = !candidates_.empty();
+    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
     for (int32_t lz = 0; lz < 16; ++lz) {
         for (int32_t lx = 0; lx < 16; ++lx) {
             const int32_t ix = lx / across, iz = lz / across;
             const float fx = static_cast<float>(lx % across) / static_cast<float>(across);
             const float fz = static_cast<float>(lz % across) / static_cast<float>(across);
+            auto sampleSlice = [&](int32_t iy) {
+                float d0 = lerp(at(ix, iy, iz), at(ix + 1, iy, iz), fx);
+                float d1 = lerp(at(ix, iy, iz + 1), at(ix + 1, iy, iz + 1), fx);
+                return lerp(d0, d1, fz);
+            };
             int32_t highest = bottom - 1;
-            for (int32_t y = bottom; y < top; ++y) {
-                const int32_t iy = (y - bottom) / up;
-                const float fy = static_cast<float>((y - bottom) % up) / static_cast<float>(up);
-                auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
-                float d00 = lerp(at(ix, iy, iz), at(ix + 1, iy, iz), fx);
-                float d10 = lerp(at(ix, iy, iz + 1), at(ix + 1, iy, iz + 1), fx);
-                float d01 = lerp(at(ix, iy + 1, iz), at(ix + 1, iy + 1, iz), fx);
-                float d11 = lerp(at(ix, iy + 1, iz + 1), at(ix + 1, iy + 1, iz + 1), fx);
-                float d = lerp(lerp(d00, d10, fz), lerp(d01, d11, fz), fy);
+            int32_t curChunkY = std::numeric_limits<int32_t>::min();
+            SubChunk* curSub = nullptr;
+            float dLow = sampleSlice(0);
+            for (int32_t iy = 0; iy < ny - 1; ++iy) {
+                float dHigh = sampleSlice(iy + 1);
+                int32_t y0 = bottom + iy * up;
+                int32_t y1 = std::min(top, y0 + up);
+                if (dLow <= 0.0f && dHigh <= 0.0f && (floor.isAir() || y0 - bottom >= g.floorDepth())) {
+                    dLow = dHigh;
+                    continue;
+                }
+                for (int32_t y = y0; y < y1; ++y) {
+                    const float fy = static_cast<float>(y - y0) / static_cast<float>(up);
+                    float d = lerp(dLow, dHigh, fy);
 
-                BlockTypeId block = d > 0.0f ? fill : BlockTypeId();
-                if (!block.isAir()) {
-                    for (const auto& [layerBlock, layer] : layers) {
-                        if (y >= layer->below + layer->blend) continue;
-                        bool in = y < layer->below;
-                        if (!in) {
-                            // Thinning upward through the blend: certain at the bottom of it
-                            uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed ^ 0x51u);
-                            in = static_cast<int32_t>(h % static_cast<uint32_t>(layer->blend)) >= y - layer->below;
-                        }
-                        if (in) {
-                            block = layerBlock;
-                            break;
+                    BlockTypeId block = d > 0.0f ? fill : BlockTypeId();
+                    if (!block.isAir()) {
+                        for (const auto& [layerBlock, layer] : layers) {
+                            if (y >= layer->below + layer->blend) continue;
+                            bool in = y < layer->below;
+                            if (!in) {
+                                // Thinning upward through the blend: certain at the bottom of it
+                                uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed ^ 0x51u);
+                                in = static_cast<int32_t>(h % static_cast<uint32_t>(layer->blend)) >= y - layer->below;
+                            }
+                            if (in) {
+                                block = layerBlock;
+                                break;
+                            }
                         }
                     }
+                    // A floor, solid at the bottom and ragged above it
+                    if (!floor.isAir() && y - bottom < g.floorDepth()) {
+                        uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed);
+                        if (static_cast<int32_t>(h % static_cast<uint32_t>(g.floorDepth())) >= y - bottom) block = floor;
+                    }
+                    if (!block.isAir()) {
+                        int32_t chunkY = ChunkColumn::worldYToChunkY(y);
+                        if (chunkY != curChunkY) {
+                            curSub = &ctx.column.getOrCreateSubChunk(chunkY);
+                            curChunkY = chunkY;
+                        }
+                        curSub->setBlock(lx, ChunkColumn::worldYToLocalY(y), lz, block);
+                        highest = y;
+                    }
                 }
-                // A floor, solid at the bottom and ragged above it
-                if (!floor.isAir() && y - bottom < g.floorDepth()) {
-                    uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed);
-                    if (static_cast<int32_t>(h % static_cast<uint32_t>(g.floorDepth())) >= y - bottom) block = floor;
-                }
-                if (!block.isAir()) {
-                    ctx.column.setBlock(lx, y, lz, block);
-                    highest = y;
-                }
+                dLow = dHigh;
             }
             const int32_t idx = GenerationContext::hmIndex(lx, lz);
             ctx.heightmap[idx] = highest;

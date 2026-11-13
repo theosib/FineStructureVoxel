@@ -742,3 +742,28 @@ TEST_F(ReplicationServerTest, AGameThatBindsNobodyStillShowsSomething) {
     ASSERT_TRUE(seat.has_value());
     EXPECT_EQ(seat->faction, runtime->manifest().viewerFaction);
 }
+
+TEST_F(ReplicationServerTest, LoadProgressTracksColumnsThroughPrepareAndSync) {
+    write("scripts/main.fsc", "");
+    auto progress = std::make_shared<LoadProgress>();
+    RuntimeOptions options;
+    options.gameRoot = root;
+    options.players = {{1, "One", true}};
+    options.progress = progress;
+    runtime = std::make_unique<GameRuntime>(options);
+    runtime->load();
+
+    int32_t r = progress->radius.load();
+    ASSERT_EQ(r, runtime->manifest().worldRadius);
+    EXPECT_EQ(progress->stage.load(), LoadProgress::Stage::Prepare);
+    for (int32_t cx = -r; cx < r; ++cx) {
+        for (int32_t cz = -r; cz < r; ++cz) {
+            EXPECT_EQ(progress->column(cx, cz), 3u);
+        }
+    }
+
+    Watcher one(*runtime, 1);
+    settle(*runtime, {&one}, 20);
+    EXPECT_TRUE(one.synced);
+    EXPECT_EQ(progress->column(0, 0), 4u);
+}

@@ -7,6 +7,7 @@
 #include <finescript/map_data.h>
 
 #include <algorithm>
+#include <utility>
 #include <iostream>
 
 namespace finevox::net {
@@ -672,6 +673,12 @@ void ClientSession::onBound(const Message& message) {
     }
     std::lock_guard lock(mutex_);
     binding_ = bound;
+    if (field(body, "moved").truthy()) pendingMove_ = bound.spawn;
+}
+
+std::optional<glm::dvec3> ClientSession::takeMove() {
+    std::lock_guard lock(mutex_);
+    return std::exchange(pendingMove_, std::nullopt);
 }
 
 void ClientSession::onEntitySpawn(const Message& message) {

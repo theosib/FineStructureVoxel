@@ -59,6 +59,7 @@ struct Seat {
     std::vector<uint8_t> settings;  ///< CBOR, from PlayerSeed
     EntityId body = INVALID_ENTITY_ID;
     glm::dvec3 spawn{0.0};
+    uint32_t moves = 0;             ///< Counts movePlayer calls, so the client hears of each
 };
 
 struct RuntimeOptions {
@@ -169,6 +170,9 @@ public:
     /// This player sees and acts as this faction, with a body at `spot` if it hasn't one yet.
     /// A body sees for its faction, so it matters where it stands. Game thread.
     void bindPlayer(int64_t player, uint16_t faction, std::optional<glm::dvec3> spot = std::nullopt);
+    /// Put a player's body somewhere, as for a respawn: here on the server at once, and on the
+    /// client, which otherwise keeps where it predicted
+    void movePlayer(int64_t player, const glm::dvec3& where);
     /// Someone new is here, once the game has started. Game thread.
     void playerJoined(int64_t player, const std::string& name, bool local);
     /// They've gone, at the next chance. Safe from any thread.

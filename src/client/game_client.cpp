@@ -984,6 +984,10 @@ void GameClient::Impl::setEmbodied(bool on) {
 
 void GameClient::Impl::updateStewardView(float dt) {
     auto& input = engine->inputManager();
+    if (auto moved = session->takeMove()) {
+        stewardBody->setPosition(Vec3(float(moved->x), float(moved->y), float(moved->z)));
+        stewardBody->setVelocity(Vec3(0.0f));
+    }
     steward.setMoveForward(panForward);
     steward.setMoveBack(panBack);
     steward.setMoveLeft(panLeft);

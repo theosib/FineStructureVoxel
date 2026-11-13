@@ -170,6 +170,8 @@ no ground.
 surface_y x z        is_standable x y z       world_get_block  world_set_block
 biome_at x z [y] -> the biome's name as a symbol, or nil
 player_body id -> the entity a player walks in     time_of_day -> 0 dawn .. 0.5 dusk .. 1
+player_move id x y z    put a player's body there, server and client both (a respawn): the client
+                        owns its body's position, so ent_set_pos on it doesn't reach them
 find_blocks x y z radius block_or_list [=max n] -> [[x y z]...], nearest first
 count_blocks x0 y0 z0 x1 y1 z1 [block ...] -> {=name count}
 claim_block scope x y z owner [ttl_ticks]     release_block scope x y z owner

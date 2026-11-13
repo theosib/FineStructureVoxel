@@ -191,9 +191,14 @@ void ReplicationServer::send(ClientView& view, finenet::ChannelId channel, uint3
 void ReplicationServer::sendBinding(ClientView& view) {
     auto seat = runtime_.seat(view.player());
     if (!seat || seat->faction == 0) return;
-    if (view.bound_ && view.faction_ == seat->faction && view.body_ == seat->body) return;
+    if (view.bound_ && view.faction_ == seat->faction && view.body_ == seat->body &&
+        view.moves_ == seat->moves) {
+        return;
+    }
 
     bool newFaction = !view.bound_ || view.faction_ != seat->faction;
+    bool moved = view.bound_ && view.moves_ != seat->moves;
+    view.moves_ = seat->moves;
     view.faction_ = seat->faction;
     view.body_ = seat->body;
     view.bound_ = true;
@@ -206,6 +211,7 @@ void ReplicationServer::sendBinding(ClientView& view) {
                                                                      Value::number(seat->spawn.y),
                                                                      Value::number(seat->spawn.z)}));
     }
+    if (moved) net::setField(body, "moved", Value::boolean(true));
     send(view, net::CH_WORLD, net::msg::Bound, net::encodeBody(body));
 
     if (newFaction) {

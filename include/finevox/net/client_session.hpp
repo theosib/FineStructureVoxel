@@ -160,6 +160,8 @@ public:
     [[nodiscard]] float timeOfDay() const;
     /// Whole days since the world began, as the server last said
     [[nodiscard]] int64_t day() const;
+    /// Where the server has put this player's body since last asked, if anywhere
+    [[nodiscard]] std::optional<glm::dvec3> takeMove();
     [[nodiscard]] size_t entitiesKnown() const;
     /// Every entity this client has been told about, as last told
     [[nodiscard]] std::vector<EntityState> entities() const;
@@ -242,6 +244,7 @@ private:
     std::filesystem::path contentRoot_;
     std::optional<WorldInfo> worldInfo_;
     std::optional<Binding> binding_;
+    std::optional<glm::dvec3> pendingMove_;
     std::vector<SessionEvent> events_;
     std::vector<uint8_t> vision_;
     std::vector<ProjectileView> projectiles_;

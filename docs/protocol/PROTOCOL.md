@@ -168,7 +168,7 @@ All of these are on channel 0 unless the table says otherwise.
 | 0x4012 | GameStart | S→C | `{tick: int}` |
 | 0x4013 | GameEnded | S→C | `{text?: text}`. The server is closing the game. |
 | 0x4014 | SyncDone | S→C, ch 5 | `{}`: everything the client needs for a first frame has been sent, on channel 5 |
-| 0x4015 | Bound | S→C, ch 5 | `{faction: int, body?: int, spawn?: [f64,f64,f64]}`: who this player is, in the world |
+| 0x4015 | Bound | S→C, ch 5 | `{faction: int, body?: int, spawn?: [f64,f64,f64], moved?: bool}`: who this player is, in the world. With `moved`, the server has put the body at `spawn`: the client moves its own there |
 
 ```
 Player    = {id: int, name: text, connected: bool, ready: bool, voted: bool, host: bool, local: bool,

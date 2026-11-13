@@ -78,6 +78,7 @@ private:
     uint16_t faction_ = 0;
     EntityId body_ = INVALID_ENTITY_ID;
     bool bound_ = false;
+    uint32_t moves_ = 0;
     bool syncSent_ = false;
     std::unordered_map<uint64_t, ChunkPos> dirty_;
     std::unordered_set<uint32_t> blockNames_;

@@ -347,6 +347,22 @@ void GameRuntime::bindPlayer(int64_t player, uint16_t faction, std::optional<glm
     seats_[player] = updated;
 }
 
+void GameRuntime::movePlayer(int64_t player, const glm::dvec3& where) {
+    EntityId body = INVALID_ENTITY_ID;
+    {
+        std::lock_guard lock(seatMutex_);
+        auto it = seats_.find(player);
+        if (it == seats_.end()) return;
+        it->second.spawn = where;
+        ++it->second.moves;
+        body = it->second.body;
+    }
+    if (MobEntity* mob = session_->entities().getMob(body)) {
+        mob->setPosition(Vec3(where));
+        mob->setVelocity(Vec3(0.0f));
+    }
+}
+
 finescript::Value GameRuntime::playerValue(const Seat& seat) const {
     using finescript::Value;
     auto& interner = StringInterner::global();
@@ -635,6 +651,15 @@ void GameRuntime::registerNatives() {
                 }
             }
             bindPlayer(static_cast<int64_t>(args[0].asNumber()), static_cast<uint16_t>(args[1].asNumber()), spot);
+            return finescript::Value::nil();
+        });
+
+    // player_move id x y z: put a player's body there, on the server and their client both
+    engine.registerFunction(
+        "player_move", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.size() < 4) return finescript::Value::nil();
+            movePlayer(static_cast<int64_t>(args[0].asNumber()),
+                       glm::dvec3(args[1].asNumber(), args[2].asNumber(), args[3].asNumber()));
             return finescript::Value::nil();
         });
 

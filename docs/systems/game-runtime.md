@@ -373,6 +373,38 @@ couldn't see shows nothing, and `despawnEntity` on a living one removes it at on
 defaulting to 1, and sky light falls past it. `blocks-sky-light: true` stops the sky light while
 letting the rest through, for leaves that shade the ground under them.
 
+Each cube face can have its own texture: `texture-north`, `-south`, `-east`, `-west`, `-up`,
+`-down`, over `texture-top`/`-bottom`/`-side`, over `texture`. A texture name ending `@90`, `@180`
+or `@270` is that texture turned clockwise. A `.geom` face names its own texture after the colon,
+`face:front: blocks/oven_front`, or `#name` for one the model fills in with `texture:name: path`;
+a face with none draws the block's texture for the side it's on. Words after the texture describe
+the face further and are ignored by a loader that doesn't know them. A geometry that is exactly a
+cube's six whole faces draws as a cube, with merged faces and ambient occlusion.
+
+**Properties.** A block can have properties, each combination its own block type:
+
+```
+state:facing: north east south west     # the first value is the default
+state:open: false true
+variant:facing=east: looks/door y=90     # the first rule that matches gives the look
+variant:facing=south|west: looks/door y=180 lock-uv
+part:open=true: looks/door_leaf          # or: every matching part, drawn together
+```
+
+The default state keeps the block's plain name; the others are named `door[facing=east,open=true]`,
+properties in declared order. Each is an ordinary block type, so nothing else needs to know.
+A look is another `.model`, by path from `blocks/` (keep looks in a subfolder, which isn't
+loaded as blocks), turned `x=` degrees about X then `y=` about the vertical, each clockwise seen
+from the positive end. The turn is baked in at load: geometry, collision and hit shapes, and the
+faces each is culled by. `lock-uv` keeps textures aligned with the world as the faces turn. The
+block's own keys (hardness, light, script…) apply to every state; the look gives shape and textures.
+A shared look can leave `#name` textures for each block to fill. Scripts move between states:
+
+```
+block_prop name :open -> :true       block_with name :open :false -> name
+block_family name -> the plain name
+```
+
 `connects: <group>` makes blocks of a group join up. A geometry face named
 `connect_<dir>_<anything>`, with dir one of `n ne e se s sw w nw`, shows only towards a
 neighbour of the same group at the same height. A diagonal joins only where neither straight

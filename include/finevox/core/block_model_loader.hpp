@@ -140,6 +140,7 @@ private:
      */
     /// Shared by both model entry points: per-face textures, walk speed, opacity
     void parseSurfaceProperties(const ConfigDocument& doc, BlockModel& model);
+    void parseStates(const ConfigDocument& doc, BlockModel& model);
 
     [[nodiscard]] std::optional<FaceGeometry> parseFaceEntry(
         const ConfigEntry& entry,

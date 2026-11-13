@@ -17,6 +17,7 @@
 #include "finevox/core/physics.hpp"
 #include "finevox/core/position.hpp"
 #include <glm/glm.hpp>
+#include <array>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -60,6 +61,14 @@ struct FaceGeometry {
                                          // 9 down, or -1
     bool whenOpen = false;               // Shown when nothing joins there, instead of when it does
 
+    /// What the face is drawn with: a texture under <root>/textures, or `#name` for one the
+    /// model fills in with `texture:name:`. Empty draws the block's texture for the face it
+    /// lies on, or its top texture if it's an extra face.
+    std::string textureRef;
+    std::string texture;                 // textureRef with any `#name` resolved by the model
+    glm::vec4 textureUV{0.0f};           // Where `texture` landed in the atlas (minU minV maxU maxV)
+    bool hasTextureUV = false;           // Set once a renderer has placed `texture`
+
     FaceGeometry() = default;
 
     /// Compute AABB from vertices (for collision fallback)
@@ -94,6 +103,10 @@ public:
 
     /// Get all faces
     [[nodiscard]] const std::vector<FaceGeometry>& faces() const { return faces_; }
+
+    /// For filling in what a face is drawn with once textures are placed. Positions and
+    /// names must not change through this: the lookup tables depend on them.
+    [[nodiscard]] std::vector<FaceGeometry>& mutableFaces() { return faces_; }
 
     /// Get face by name (returns nullptr if not found)
     [[nodiscard]] const FaceGeometry* getFace(const std::string& name) const;
@@ -162,6 +175,42 @@ enum class RotationSet {
 [[nodiscard]] RotationSet parseRotationSet(const std::string& str);
 
 // ============================================================================
+// Block states - a block whose look and behaviour vary with a few properties
+// ============================================================================
+
+/// A property a block can be in: `state:half: bottom top`. The first value is the default.
+struct BlockProperty {
+    std::string name;
+    std::vector<std::string> values;
+};
+
+/// Which states a rule applies to: for each property it names, the values that match. A
+/// property it doesn't name matches anything, and so does an empty condition.
+struct PropertyCondition {
+    std::vector<std::pair<std::string, std::vector<std::string>>> terms;
+
+    /// Parse `half=top,facing=east|west`, or `*` / empty for every state
+    static PropertyCondition parse(const std::string& text);
+    [[nodiscard]] bool matches(const std::vector<std::string>& propertyNames,
+                               const std::vector<std::string>& values) const;
+};
+
+/// A look for the states a condition picks: another .model drawn turned whole quarter turns.
+/// `x` turns first, about the X axis, then `y` about the vertical; each is clockwise looking
+/// from the positive end of its axis, so `y=90` turns a north face to the east.
+/// `lock-uv` keeps textures aligned with the world instead of turning with the faces.
+struct PropertyLook {
+    PropertyCondition when;
+    std::string model;  // .model path, resolved like `include:`
+    int x = 0;
+    int y = 0;
+    bool lockUV = false;
+
+    /// Parse `models/stairs_top y=90 lock-uv` (the part after `variant:<when>:`)
+    static PropertyLook parse(const std::string& when, const std::string& value);
+};
+
+// ============================================================================
 // BlockModel - Complete block definition
 // ============================================================================
 
@@ -207,6 +256,13 @@ public:
     /// Per-face texture overrides (empty = use texture()). Cube blocks only.
     BlockModel& setFaceTextures(const std::string& top, const std::string& bottom,
                                 const std::string& side);
+
+    /// One cube face's texture, overriding the top/bottom/side ones. A name may end in
+    /// `@90`, `@180` or `@270`: the texture turned clockwise that far.
+    BlockModel& setFaceTexture(Face face, const std::string& texture);
+
+    /// A texture a geometry face can name as `#name`
+    BlockModel& setTextureVariable(const std::string& name, const std::string& texture);
 
     /// Movement speed multiplier for entities walking on this block (1 = normal)
     BlockModel& setWalkSpeed(float multiplier);
@@ -281,6 +337,37 @@ public:
     [[nodiscard]] const std::string& textureBottom() const { return textureBottom_; }
     [[nodiscard]] const std::string& textureSide() const { return textureSide_; }
 
+    /// The texture a cube face is drawn with, after every override: the face's own, then
+    /// top/bottom/side, then texture(). Empty if none is set.
+    [[nodiscard]] std::string cubeFaceTexture(Face face) const;
+    [[nodiscard]] const std::array<std::string, 6>& faceTextureOverrides() const { return faceTextures_; }
+    [[nodiscard]] const std::unordered_map<std::string, std::string>& textureVariables() const {
+        return textureVariables_;
+    }
+
+    /// Fill in each geometry face's `texture` from its `textureRef`, through the variables.
+    /// Call again after variables change: an included model's faces resolve against the
+    /// model that includes it.
+    void resolveFaceTextures();
+
+    /// Replace geometry and cube textures with those of another model: for a block whose
+    /// look comes from elsewhere (a state's variant) and whose behaviour stays its own.
+    void takeAppearance(const BlockModel& look);
+
+    /// Drop the geometry, for a model found to be a plain cube that draws as one
+    void clearGeometry();
+
+    /// Block states (see BlockProperty). A model with properties stands for one block
+    /// type per combination of their values. `variant:` rules pick each state's look, the first
+    /// matching one winning; `part:` rules draw every matching look together.
+    BlockModel& addProperty(BlockProperty property);
+    BlockModel& addVariant(PropertyLook look);
+    BlockModel& addPart(PropertyLook look);
+    [[nodiscard]] const std::vector<BlockProperty>& properties() const { return properties_; }
+    [[nodiscard]] const std::vector<PropertyLook>& variants() const { return variants_; }
+    [[nodiscard]] const std::vector<PropertyLook>& parts() const { return parts_; }
+    [[nodiscard]] bool hasProperties() const { return !properties_.empty(); }
+
     [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
     [[nodiscard]] const std::string& connects() const { return connects_; }
@@ -332,6 +419,11 @@ private:
     std::string textureTop_;
     std::string textureBottom_;
     std::string textureSide_;
+    std::array<std::string, 6> faceTextures_;
+    std::vector<BlockProperty> properties_;
+    std::vector<PropertyLook> variants_;
+    std::vector<PropertyLook> parts_;
+    std::unordered_map<std::string, std::string> textureVariables_;
     float walkSpeed_ = 1.0f;
     bool hasOpaqueOverride_ = false;
     bool opaque_ = true;

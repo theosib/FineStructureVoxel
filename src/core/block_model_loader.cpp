@@ -147,7 +147,7 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
         model.setHardness(hardEntry->value.asFloat(1.0f));
     }
 
-    if (auto* texEntry = doc->get("texture")) {
+    if (auto* texEntry = doc->get("texture", "")) {
         model.setTexture(texEntry->value.asStringOwned());
     }
 
@@ -176,6 +176,8 @@ std::optional<BlockModel> BlockModelLoader::loadModel(const std::string& path) {
     }
 
     parseSurfaceProperties(*doc, model);
+    parseStates(*doc, model);
+    model.resolveFaceTextures();
 
     cleanup();
     return model;
@@ -344,7 +346,7 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
         model.setHardness(hardEntry->value.asFloat(1.0f));
     }
 
-    if (const ConfigEntry* texEntry = doc.get("texture")) {
+    if (const ConfigEntry* texEntry = doc.get("texture", "")) {
         model.setTexture(texEntry->value.asStringOwned());
     }
 
@@ -373,8 +375,28 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
     }
 
     parseSurfaceProperties(doc, model);
+    parseStates(doc, model);
+    model.resolveFaceTextures();
 
     return model;
+}
+
+void BlockModelLoader::parseStates(const ConfigDocument& doc, BlockModel& model) {
+    for (const ConfigEntry* entry : doc.getAll("state")) {
+        if (!entry->hasSuffix()) continue;
+        BlockProperty property;
+        property.name = entry->suffix;
+        std::istringstream iss(entry->value.asStringOwned());
+        std::string value;
+        while (iss >> value) property.values.push_back(value);
+        if (!property.values.empty()) model.addProperty(std::move(property));
+    }
+    for (const ConfigEntry* entry : doc.getAll("variant")) {
+        model.addVariant(PropertyLook::parse(entry->suffix, entry->value.asStringOwned()));
+    }
+    for (const ConfigEntry* entry : doc.getAll("part")) {
+        model.addPart(PropertyLook::parse(entry->suffix, entry->value.asStringOwned()));
+    }
 }
 
 void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockModel& model) {
@@ -382,8 +404,22 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
         const ConfigEntry* entry = doc.get(key);
         return entry ? entry->value.asStringOwned() : std::string{};
     };
-    model.setFaceTextures(faceTexture("texture-top"), faceTexture("texture-bottom"),
-                          faceTexture("texture-side"));
+    // Only what this file sets: an included model's textures stay otherwise
+    std::string top = faceTexture("texture-top");
+    std::string bottom = faceTexture("texture-bottom");
+    std::string side = faceTexture("texture-side");
+    model.setFaceTextures(top.empty() ? model.textureTop() : top,
+                          bottom.empty() ? model.textureBottom() : bottom,
+                          side.empty() ? model.textureSide() : side);
+    for (const char* name : {"north", "south", "east", "west", "up", "down"}) {
+        std::string key = std::string("texture-") + name;
+        if (const ConfigEntry* entry = doc.get(key)) {
+            model.setFaceTexture(static_cast<Face>(parseFaceName(name)), entry->value.asStringOwned());
+        }
+    }
+    for (const ConfigEntry* entry : doc.getAll("texture")) {
+        if (entry->hasSuffix()) model.setTextureVariable(entry->suffix, entry->value.asStringOwned());
+    }
 
     if (const ConfigEntry* speedEntry = doc.get("walk-speed")) {
         model.setWalkSpeed(speedEntry->value.asFloat(1.0f));
@@ -424,6 +460,12 @@ std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
     }
     face.connection = parseConnection(entry.suffix);
     face.whenOpen = isOpenConnection(entry.suffix);
+    // The first word is the texture; words after it describe the face further, and a
+    // loader that doesn't know one leaves it alone
+    {
+        std::istringstream words(entry.value.asStringOwned());
+        words >> face.textureRef;
+    }
 
     // Parse vertices from data lines
     for (const auto& dataLine : entry.dataLines) {

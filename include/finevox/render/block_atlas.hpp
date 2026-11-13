@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 #include <array>
 
 namespace finevox::render {
@@ -150,13 +151,17 @@ public:
      *
      * Loads <textureRoot>/<name>.png for each distinct name, packs them with
      * edge-extended borders, and maps every block's faces. A missing file logs
-     * and draws magenta so the gap is obvious in-game.
+     * and draws magenta so the gap is obvious in-game. `moreTextures` are placed too, for
+     * geometry faces that name their own (see textureUV). A name ending in `@90`, `@180` or
+     * `@270` is that texture turned clockwise. A strip of frames, taller than it is wide,
+     * shows its first frame.
      */
     void buildFromTextures(
         finevk::LogicalDevice* device,
         finevk::CommandPool* commandPool,
         const std::string& textureRoot,
-        const std::unordered_map<uint32_t, BlockTextureSet>& blocks
+        const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
+        const std::vector<std::string>& moreTextures = {}
     );
 
     // ========================================================================
@@ -201,6 +206,9 @@ public:
      * @return vec4(minU, minV, maxU, maxV)
      */
     [[nodiscard]] glm::vec4 getUV(BlockTypeId id, Face face) const;
+
+    /// Where a texture placed by buildFromTextures is, by name, or nothing if it wasn't
+    [[nodiscard]] std::optional<glm::vec4> textureUV(const std::string& name) const;
 
     /**
      * @brief Get full texture info for a block
@@ -255,6 +263,7 @@ private:
 
     // Block texture mappings
     std::unordered_map<uint32_t, BlockTextureInfo> blockTextures_;
+    std::unordered_map<std::string, BlockFaceTexture> namedTextures_;
 
     // Default texture for unmapped blocks
     BlockTextureInfo defaultTexture_;

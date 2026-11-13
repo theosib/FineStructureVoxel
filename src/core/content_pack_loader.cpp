@@ -2,6 +2,8 @@
 
 #include "finevox/audio/sound_loader.hpp"
 #include "finevox/core/block_model_loader.hpp"
+#include "finevox/core/block_model_transform.hpp"
+#include "finevox/core/block_properties.hpp"
 #include "finevox/core/entity_type_loader.hpp"
 #include "finevox/core/fluid_loader.hpp"
 #include "finevox/core/label_registry.hpp"
@@ -15,6 +17,9 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iostream>
+#include <set>
+#include <optional>
 
 namespace finevox {
 
@@ -89,7 +94,8 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
     fs::path blocksDir = rootDir / "blocks";
 
     BlockModelLoader modelLoader;
-    modelLoader.setFileResolver([rootDir, blocksDir](const std::string& relPath) -> std::string {
+    const std::function<std::string(const std::string&)> resolveBlockFile =
+        [rootDir, blocksDir](const std::string& relPath) -> std::string {
         // 1. Direct under <rootDir>/blocks/ (for includes like "base/solid_cube.model")
         fs::path candidate = blocksDir / relPath;
         if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
@@ -120,7 +126,8 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             return candidate.string();
         }
         return "";
-    });
+    };
+    modelLoader.setFileResolver(resolveBlockFile);
 
     struct BlockFileEntry {
         std::string name;
@@ -158,134 +165,203 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
     auto& registry = BlockRegistry::global();
     size_t loadedCount = 0;
 
+    // One block type, with this name, behaving and drawn as `m`
+    auto registerBlock = [&](const std::string& name, const BlockModel& m) {
+            BlockType blockType;
+            blockType.setHardness(m.hardness());
+
+            if (m.hasExplicitCollision() || m.hasCustomGeometry()) {
+                const auto& coll = m.resolvedCollision();
+                if (coll.isEmpty()) {
+                    blockType.setNoCollision();
+                } else {
+                    blockType.setCollisionShape(coll);
+                }
+            }
+
+            if (m.hasExplicitHit()) {
+                const auto& hit = m.resolvedHit();
+                if (hit.isEmpty()) {
+                    blockType.setNoHit();
+                } else {
+                    blockType.setHitShape(hit);
+                }
+            }
+
+            if (m.lightEmission() > 0) {
+                blockType.setLightEmission(m.lightEmission());
+            }
+            blockType.setLightAttenuation(m.lightAttenuation());
+
+            blockType.setWalkSpeed(m.walkSpeed());
+            if (m.hasOpaqueOverride()) {
+                blockType.setOpaque(m.opaque());
+                if (!m.opaque()) {
+                    blockType.setTransparent(true);
+                    blockType.setBlocksSkyLight(false);
+                    // BlockModel defaults to blocking all light, which would turn the
+                    // ground under every see-through block black. An explicit
+                    // light-attenuation below 15 still applies.
+                    if (m.lightAttenuation() >= 15) blockType.setLightAttenuation(1);
+                }
+            }
+            if (m.hasBlocksSkyLightOverride()) blockType.setBlocksSkyLight(m.blocksSkyLight());
+
+            if (m.hasCustomGeometry()) {
+                blockType.setHasCustomMesh(true);
+            }
+
+            if (!m.sounds().empty()) {
+                blockType.setSoundSet(SoundSetId::fromName(m.sounds()));
+            }
+
+            if (m.hasLoot()) {
+                blockType.setLootTable(LootTableId::fromName(m.loot()));
+            }
+
+            if (m.hasParticle()) {
+                blockType.setParticleEmitter(EmitterPresetId::fromName(m.particle()));
+            }
+
+            // Determine both bare ("stone") and qualified ("finevox:stone") names
+            std::string bareName = name;
+            std::string qualifiedName = name;
+            if (name.find(':') == std::string::npos) {
+                if (!defaultNamespace_.empty()) {
+                    qualifiedName = defaultNamespace_ + ":" + name;
+                }
+            } else if (!defaultNamespace_.empty() &&
+                       name.rfind(defaultNamespace_ + ":", 0) == 0 &&
+                       name.size() > defaultNamespace_.size() + 1) {
+                bareName = name.substr(defaultNamespace_.size() + 1);
+            }
+
+            BlockTypeId bareId = BlockTypeId::fromName(bareName);
+            BlockTypeId qualifiedId = BlockTypeId::fromName(qualifiedName);
+
+            registry.registerOrUpdateType(bareId, blockType);
+            if (qualifiedId != bareId) {
+                registry.registerOrUpdateType(qualifiedId, blockType);
+            }
+
+            BlockTextureSet textures;
+            bool anyTexture = false;
+            for (int f = 0; f < 6; ++f) {
+                textures.faces[f] = m.cubeFaceTexture(static_cast<Face>(f));
+                anyTexture = anyTexture || !textures.faces[f].empty();
+            }
+            if (anyTexture) {
+                textures.top = textures.faces[static_cast<int>(Face::PosY)];
+                textures.bottom = textures.faces[static_cast<int>(Face::NegY)];
+                textures.side = textures.faces[static_cast<int>(Face::NegZ)];
+                blockTextures_[bareId.id] = textures;
+                if (qualifiedId != bareId) {
+                    blockTextures_[qualifiedId.id] = std::move(textures);
+                }
+            }
+
+            if (!m.connects().empty()) {
+                const uint32_t group = StringInterner::global().intern(m.connects());
+                blockConnects_[bareId.id] = group;
+                blockConnects_[qualifiedId.id] = group;
+            }
+
+            if (m.hasCustomGeometry()) {
+                blockGeometries_[bareId.id] = m.geometry();
+                if (qualifiedId != bareId) {
+                    blockGeometries_[qualifiedId.id] = m.geometry();
+                }
+                ++customGeometryModelCount_;
+            }
+            if (m.hasFarGeometry()) {
+                blockFarGeometries_[bareId.id] = m.farGeometry();
+                blockFarGeometries_[qualifiedId.id] = m.farGeometry();
+            }
+
+            if (m.hasScript()) {
+                std::string resolvedScript = resolveScriptPath(rootDir, m.script());
+                auto existingIt = std::find_if(
+                    scriptedBlocks_.begin(), scriptedBlocks_.end(),
+                    [&bareName](const ScriptedBlockEntry& e) { return e.blockName == bareName; });
+                if (existingIt != scriptedBlocks_.end()) {
+                    existingIt->qualifiedName = qualifiedName;
+                    existingIt->scriptPath = std::move(resolvedScript);
+                } else {
+                    scriptedBlocks_.push_back(
+                        ScriptedBlockEntry{bareName, qualifiedName, std::move(resolvedScript)});
+                }
+            }
+
+    };
+
+    // A state's look, turned as its rule says, loaded once however many states share it
+    std::unordered_map<std::string, std::optional<BlockModel>> looks;
+    auto lookFor = [&](const PropertyLook& rule) -> const std::optional<BlockModel>& {
+        std::string key = rule.model + " " + std::to_string(rule.x) + " " +
+                          std::to_string(rule.y) + (rule.lockUV ? " u" : "");
+        auto it = looks.find(key);
+        if (it != looks.end()) return it->second;
+        std::optional<BlockModel> look;
+        std::string path = resolveBlockFile(rule.model + ".model");
+        if (path.empty()) path = resolveBlockFile(rule.model);
+        if (!path.empty()) {
+            if (auto loaded = modelLoader.loadModel(path)) {
+                look = turnedModel(*loaded, rule.x, rule.y, rule.lockUV);
+            }
+        }
+        if (!look) std::cerr << "[ContentPackLoader] no look " << rule.model << "\n";
+        return looks.emplace(key, std::move(look)).first->second;
+    };
+
     for (const auto& item : entries) {
         auto model = modelLoader.loadModel(item.path.string());
         if (!model) {
             continue;
         }
+        if (!model->hasProperties()) {
+            BlockModel look = *model;
+            drawAsCubeIfPlain(look);
+            registerBlock(item.name, look);
+            ++loadedCount;
+            continue;
+        }
 
-        BlockType blockType;
-        blockType.setHardness(model->hardness());
+        const auto& props = model->properties();
+        std::vector<std::string> propNames;
+        for (const auto& p : props) propNames.push_back(p.name);
+        std::string family = item.name.substr(item.name.find(':') == std::string::npos ? 0 : item.name.find(':') + 1);
+        BlockPropertyRegistry::global().addFamily(family, props);
 
-        if (model->hasExplicitCollision() || model->hasCustomGeometry()) {
-            const auto& coll = model->resolvedCollision();
-            if (coll.isEmpty()) {
-                blockType.setNoCollision();
-            } else {
-                blockType.setCollisionShape(coll);
+        // Every combination of values, the last property changing fastest
+        std::vector<size_t> at(props.size(), 0);
+        while (true) {
+            std::vector<std::string> values;
+            for (size_t i = 0; i < props.size(); ++i) values.push_back(props[i].values[at[i]]);
+
+            BlockModel state = *model;
+            if (!model->variants().empty()) {
+                for (const auto& rule : model->variants()) {
+                    if (!rule.when.matches(propNames, values)) continue;
+                    if (const auto& look = lookFor(rule)) state.takeAppearance(*look);
+                    break;
+                }
+            } else if (!model->parts().empty()) {
+                std::vector<BlockModel> drawn;
+                for (const auto& rule : model->parts()) {
+                    if (!rule.when.matches(propNames, values)) continue;
+                    if (const auto& look = lookFor(rule)) drawn.push_back(*look);
+                }
+                if (!drawn.empty()) state.takeAppearance(combinedLook(drawn));
             }
-        }
+            state.resolveFaceTextures();
+            drawAsCubeIfPlain(state);
+            registerBlock(BlockPropertyRegistry::global().stateName(item.name, values), state);
+            ++loadedCount;
 
-        if (model->hasExplicitHit()) {
-            const auto& hit = model->resolvedHit();
-            if (hit.isEmpty()) {
-                blockType.setNoHit();
-            } else {
-                blockType.setHitShape(hit);
-            }
+            size_t i = props.size();
+            while (i > 0 && ++at[i - 1] == props[i - 1].values.size()) at[--i] = 0;
+            if (i == 0) break;
         }
-
-        if (model->lightEmission() > 0) {
-            blockType.setLightEmission(model->lightEmission());
-        }
-        blockType.setLightAttenuation(model->lightAttenuation());
-
-        blockType.setWalkSpeed(model->walkSpeed());
-        if (model->hasOpaqueOverride()) {
-            blockType.setOpaque(model->opaque());
-            if (!model->opaque()) {
-                blockType.setTransparent(true);
-                blockType.setBlocksSkyLight(false);
-                // BlockModel defaults to blocking all light, which would turn the
-                // ground under every see-through block black. An explicit
-                // light-attenuation below 15 still applies.
-                if (model->lightAttenuation() >= 15) blockType.setLightAttenuation(1);
-            }
-        }
-        if (model->hasBlocksSkyLightOverride()) blockType.setBlocksSkyLight(model->blocksSkyLight());
-
-        if (model->hasCustomGeometry()) {
-            blockType.setHasCustomMesh(true);
-        }
-
-        if (!model->sounds().empty()) {
-            blockType.setSoundSet(SoundSetId::fromName(model->sounds()));
-        }
-
-        if (model->hasLoot()) {
-            blockType.setLootTable(LootTableId::fromName(model->loot()));
-        }
-
-        if (model->hasParticle()) {
-            blockType.setParticleEmitter(EmitterPresetId::fromName(model->particle()));
-        }
-
-        // Determine both bare ("stone") and qualified ("finevox:stone") names
-        std::string bareName = item.name;
-        std::string qualifiedName = item.name;
-        if (item.name.find(':') == std::string::npos) {
-            if (!defaultNamespace_.empty()) {
-                qualifiedName = defaultNamespace_ + ":" + item.name;
-            }
-        } else if (!defaultNamespace_.empty() &&
-                   item.name.rfind(defaultNamespace_ + ":", 0) == 0 &&
-                   item.name.size() > defaultNamespace_.size() + 1) {
-            bareName = item.name.substr(defaultNamespace_.size() + 1);
-        }
-
-        BlockTypeId bareId = BlockTypeId::fromName(bareName);
-        BlockTypeId qualifiedId = BlockTypeId::fromName(qualifiedName);
-
-        registry.registerOrUpdateType(bareId, blockType);
-        if (qualifiedId != bareId) {
-            registry.registerOrUpdateType(qualifiedId, blockType);
-        }
-
-        if (!model->texture().empty() || !model->textureTop().empty()) {
-            BlockTextureSet textures;
-            textures.top = model->textureTop().empty() ? model->texture() : model->textureTop();
-            textures.bottom =
-                model->textureBottom().empty() ? model->texture() : model->textureBottom();
-            textures.side = model->textureSide().empty() ? model->texture() : model->textureSide();
-            blockTextures_[bareId.id] = textures;
-            if (qualifiedId != bareId) {
-                blockTextures_[qualifiedId.id] = std::move(textures);
-            }
-        }
-
-        if (!model->connects().empty()) {
-            const uint32_t group = StringInterner::global().intern(model->connects());
-            blockConnects_[bareId.id] = group;
-            blockConnects_[qualifiedId.id] = group;
-        }
-
-        if (model->hasCustomGeometry()) {
-            blockGeometries_[bareId.id] = model->geometry();
-            if (qualifiedId != bareId) {
-                blockGeometries_[qualifiedId.id] = model->geometry();
-            }
-            ++customGeometryModelCount_;
-        }
-        if (model->hasFarGeometry()) {
-            blockFarGeometries_[bareId.id] = model->farGeometry();
-            blockFarGeometries_[qualifiedId.id] = model->farGeometry();
-        }
-
-        if (model->hasScript()) {
-            std::string resolvedScript = resolveScriptPath(rootDir, model->script());
-            auto existingIt = std::find_if(
-                scriptedBlocks_.begin(), scriptedBlocks_.end(),
-                [&bareName](const ScriptedBlockEntry& e) { return e.blockName == bareName; });
-            if (existingIt != scriptedBlocks_.end()) {
-                existingIt->qualifiedName = qualifiedName;
-                existingIt->scriptPath = std::move(resolvedScript);
-            } else {
-                scriptedBlocks_.push_back(
-                    ScriptedBlockEntry{bareName, qualifiedName, std::move(resolvedScript)});
-            }
-        }
-
-        ++loadedCount;
     }
 
     return loadedCount;
@@ -427,6 +503,34 @@ bool ContentPackLoader::loadSkyConfig(const fs::path& rootDir) {
     hasCustomSkyConfig_ = !skyConfig_.colorKeyframes.empty() &&
                           !skyConfig_.brightnessKeyframes.empty();
     return hasCustomSkyConfig_;
+}
+
+std::vector<std::string> ContentPackLoader::faceTextureNames() const {
+    std::set<std::string> names;
+    for (const auto* map : {&blockGeometries_, &blockFarGeometries_}) {
+        for (const auto& [id, geometry] : *map) {
+            for (const auto& face : geometry.faces()) {
+                if (!face.texture.empty() && face.texture[0] != '#') names.insert(face.texture);
+            }
+        }
+    }
+    return {names.begin(), names.end()};
+}
+
+void ContentPackLoader::placeFaceTextures(
+    const std::function<std::optional<glm::vec4>(const std::string&)>& uvOf) {
+    for (auto* map : {&blockGeometries_, &blockFarGeometries_}) {
+        for (auto& [id, geometry] : *map) {
+            for (auto& face : geometry.mutableFaces()) {
+                face.hasTextureUV = false;
+                if (face.texture.empty()) continue;
+                if (auto uv = uvOf(face.texture)) {
+                    face.textureUV = *uv;
+                    face.hasTextureUV = true;
+                }
+            }
+        }
+    }
 }
 
 const BlockGeometry* ContentPackLoader::getGeometry(BlockTypeId type) const {

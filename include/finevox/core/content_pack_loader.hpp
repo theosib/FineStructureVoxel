@@ -13,7 +13,9 @@
 #include "finevox/core/sky.hpp"
 #include "finevox/core/string_interner.hpp"
 
+#include <array>
 #include <cstddef>
+#include <optional>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -26,11 +28,22 @@ namespace finevox {
 
 class World;
 
-/// Texture names for a block's faces, relative to <root>/textures, no extension.
+/// Texture names for a block's faces, relative to <root>/textures, no extension. A name may
+/// end in `@90`, `@180` or `@270`: the texture turned clockwise that far.
 struct BlockTextureSet {
     std::string top;
     std::string bottom;
     std::string side;
+    /// Each face's own, by Face. The loader fills all six; empty ones fall back to the above.
+    std::array<std::string, 6> faces;
+
+    [[nodiscard]] const std::string& forFace(Face face) const {
+        const std::string& own = faces[static_cast<size_t>(face)];
+        if (!own.empty()) return own;
+        if (face == Face::PosY) return top;
+        if (face == Face::NegY) return bottom;
+        return side;
+    }
 };
 
 /// Summary statistics from loading a content pack directory
@@ -163,6 +176,14 @@ public:
     [[nodiscard]] const std::unordered_map<uint32_t, BlockTextureSet>& blockTextures() const {
         return blockTextures_;
     }
+
+    /// Every texture a geometry face names, for a renderer to place in its atlas
+    [[nodiscard]] std::vector<std::string> faceTextureNames() const;
+
+    /// Tell each geometry face where its texture is, once a renderer has placed them. `uvOf`
+    /// gives minU minV maxU maxV, or nothing for a texture it doesn't have; such faces keep
+    /// drawing with the block's own texture.
+    void placeFaceTextures(const std::function<std::optional<glm::vec4>(const std::string&)>& uvOf);
 
     /// Look up custom geometry for a block type (returns nullptr for standard cubes)
     [[nodiscard]] const BlockGeometry* getGeometry(BlockTypeId type) const;

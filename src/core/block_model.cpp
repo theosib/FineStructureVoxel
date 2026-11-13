@@ -1,5 +1,6 @@
 #include "finevox/core/block_model.hpp"
 #include <algorithm>
+#include <sstream>
 #include <array>
 #include <cctype>
 #include <string_view>
@@ -282,6 +283,150 @@ BlockModel& BlockModel::setFaceTextures(const std::string& top, const std::strin
     textureBottom_ = bottom;
     textureSide_ = side;
     return *this;
+}
+
+BlockModel& BlockModel::setFaceTexture(Face face, const std::string& texture) {
+    faceTextures_[static_cast<size_t>(face)] = texture;
+    return *this;
+}
+
+BlockModel& BlockModel::setTextureVariable(const std::string& name, const std::string& texture) {
+    textureVariables_[name] = texture;
+    return *this;
+}
+
+std::string BlockModel::cubeFaceTexture(Face face) const {
+    const std::string& own = faceTextures_[static_cast<size_t>(face)];
+    if (!own.empty()) return own;
+    const std::string* general = &textureSide_;
+    if (face == Face::PosY) general = &textureTop_;
+    if (face == Face::NegY) general = &textureBottom_;
+    return general->empty() ? texture_ : *general;
+}
+
+void BlockModel::resolveFaceTextures() {
+    auto resolve = [this](BlockGeometry& geometry) {
+        for (auto& face : geometry.mutableFaces()) {
+            std::string ref = face.textureRef;
+            // A variable may name another; a few steps is plenty, and stops a cycle
+            for (int step = 0; step < 8 && !ref.empty() && ref[0] == '#'; ++step) {
+                auto it = textureVariables_.find(ref.substr(1));
+                if (it == textureVariables_.end()) break;
+                ref = it->second;
+            }
+            // A name no variable here fills keeps what it was given before: a look whose faces
+            // were resolved by the model that made them
+            if (ref.empty() || ref[0] != '#' || face.texture.empty() || face.texture[0] == '#') {
+                face.texture = ref;
+            }
+            face.hasTextureUV = false;
+        }
+    };
+    resolve(geometry_);
+    resolve(farGeometry_);
+}
+
+void BlockModel::takeAppearance(const BlockModel& look) {
+    geometry_ = look.geometry_;
+    farGeometry_ = look.farGeometry_;
+    texture_ = look.texture_;
+    textureTop_ = look.textureTop_;
+    textureBottom_ = look.textureBottom_;
+    textureSide_ = look.textureSide_;
+    faceTextures_ = look.faceTextures_;
+    // The block's own variables win: a shared look can leave `#name` for each block to fill
+    for (const auto& [name, texture] : look.textureVariables_) textureVariables_.try_emplace(name, texture);
+    if (look.hasExplicitCollision_) setCollision(look.collision_);
+    if (look.hasExplicitHit_) setHit(look.hit_);
+    collisionResolved_ = false;
+    hitResolved_ = false;
+}
+
+BlockModel& BlockModel::addProperty(BlockProperty property) {
+    for (auto& existing : properties_) {
+        if (existing.name == property.name) {
+            existing = std::move(property);
+            return *this;
+        }
+    }
+    properties_.push_back(std::move(property));
+    return *this;
+}
+
+BlockModel& BlockModel::addVariant(PropertyLook look) {
+    variants_.push_back(std::move(look));
+    return *this;
+}
+
+BlockModel& BlockModel::addPart(PropertyLook look) {
+    parts_.push_back(std::move(look));
+    return *this;
+}
+
+namespace {
+
+std::vector<std::string> splitOn(const std::string& text, char sep) {
+    std::vector<std::string> out;
+    std::string current;
+    for (char c : text) {
+        if (c == sep) {
+            out.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    out.push_back(current);
+    return out;
+}
+
+}  // namespace
+
+PropertyCondition PropertyCondition::parse(const std::string& text) {
+    PropertyCondition cond;
+    if (text.empty() || text == "*") return cond;
+    for (const auto& term : splitOn(text, ',')) {
+        auto eq = term.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        cond.terms.emplace_back(term.substr(0, eq), splitOn(term.substr(eq + 1), '|'));
+    }
+    return cond;
+}
+
+bool PropertyCondition::matches(const std::vector<std::string>& propertyNames,
+                                  const std::vector<std::string>& values) const {
+    for (const auto& [name, allowed] : terms) {
+        auto it = std::find(propertyNames.begin(), propertyNames.end(), name);
+        if (it == propertyNames.end()) return false;  // names a property the block lacks
+        const std::string& value = values[static_cast<size_t>(it - propertyNames.begin())];
+        if (std::find(allowed.begin(), allowed.end(), value) == allowed.end()) return false;
+    }
+    return true;
+}
+
+PropertyLook PropertyLook::parse(const std::string& when, const std::string& value) {
+    PropertyLook look;
+    look.when = PropertyCondition::parse(when);
+    std::istringstream iss(value);
+    std::string token;
+    while (iss >> token) {
+        if (token == "lock-uv") {
+            look.lockUV = true;
+        } else if (token.rfind("x=", 0) == 0) {
+            look.x = std::stoi(token.substr(2));
+        } else if (token.rfind("y=", 0) == 0) {
+            look.y = std::stoi(token.substr(2));
+        } else if (look.model.empty()) {
+            look.model = token;
+        }
+    }
+    return look;
+}
+
+void BlockModel::clearGeometry() {
+    geometry_ = BlockGeometry{};
+    collisionResolved_ = false;
+    hitResolved_ = false;
 }
 
 BlockModel& BlockModel::setWalkSpeed(float multiplier) {

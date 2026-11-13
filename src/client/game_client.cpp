@@ -601,7 +601,8 @@ void GameClient::Impl::enterWorld() {
 
     atlas = std::make_unique<render::BlockAtlas>();
     atlas->buildFromTextures(&device, renderer.commandPool(), (contentRoot / "textures").string(),
-                             content->blockTextures());
+                             content->blockTextures(), content->faceTextureNames());
+    content->placeFaceTextures([this](const std::string& name) { return atlas->textureUV(name); });
     worldRenderer->setBlockAtlas(atlas->texture());
     worldRenderer->setTextureProvider(atlas->createProvider());
     worldRenderer->setGeometryProvider(content->geometryProvider());

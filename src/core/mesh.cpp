@@ -309,7 +309,7 @@ void MeshBuilder::buildSimpleMesh(
                         Face texFace = faceGeom.isStandardFace()
                             ? static_cast<Face>(faceGeom.faceIndex)
                             : Face::PosY;
-                        glm::vec4 uvBounds = textureProvider(blockType, texFace);
+                        glm::vec4 uvBounds = faceGeom.hasTextureUV ? faceGeom.textureUV : textureProvider(blockType, texFace);
 
                         // Calculate lighting for this face
                         float faceSkyLight = baseSkyLight;
@@ -483,7 +483,7 @@ void MeshBuilder::buildGreedyMesh(
                         Face texFace = faceGeom.isStandardFace()
                             ? static_cast<Face>(faceGeom.faceIndex)
                             : Face::PosY;
-                        glm::vec4 uvBounds = textureProvider(blockType, texFace);
+                        glm::vec4 uvBounds = faceGeom.hasTextureUV ? faceGeom.textureUV : textureProvider(blockType, texFace);
 
                         // Calculate lighting for this face
                         float faceSkyLight = baseSkyLight;

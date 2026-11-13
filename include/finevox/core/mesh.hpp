@@ -232,6 +232,15 @@ public:
     void setGreedyMeshing(bool enabled) { greedyMeshing_ = enabled; }
     [[nodiscard]] bool greedyMeshing() const { return greedyMeshing_; }
 
+    // Face vertex data (positions relative to block corner, normals, and UV corners). Public so
+    // that loaders can tell a model that is a plain cube, and draw it as one.
+    struct FaceData {
+        std::array<glm::vec3, 4> positions;  // CCW winding
+        glm::vec3 normal;
+        std::array<glm::vec2, 4> uvOffsets;  // Relative UV offsets (0 or 1)
+    };
+    static const std::array<FaceData, 6> FACE_DATA;
+
     // DEBUG: Disable hidden face removal (renders all faces)
     void setDisableFaceCulling(bool disabled) { disableFaceCulling_ = disabled; }
     [[nodiscard]] bool disableFaceCulling() const { return disableFaceCulling_; }
@@ -413,14 +422,6 @@ private:
         const BlockCoord& blockWorldPos,
         Face face
     ) const;
-
-    // Face vertex data (positions relative to block corner, normals, and UV corners)
-    struct FaceData {
-        std::array<glm::vec3, 4> positions;  // CCW winding
-        glm::vec3 normal;
-        std::array<glm::vec2, 4> uvOffsets;  // Relative UV offsets (0 or 1)
-    };
-    static const std::array<FaceData, 6> FACE_DATA;
 
     // ========================================================================
     // Greedy Meshing

@@ -1,5 +1,7 @@
 #include "finevox/render/block_atlas.hpp"
 
+#include "finevox/core/block_model_transform.hpp"
+
 #include <finevk/device/logical_device.hpp>
 
 // finevk's texture.cpp provides the implementation
@@ -142,17 +144,26 @@ void magenta(std::vector<uint8_t>& pixels) {
     }
 }
 
-bool loadTile(const std::string& path, std::vector<uint8_t>& pixels) {
+bool loadTile(const std::string& path, std::vector<uint8_t>& pixels, int turns) {
     int width = 0, height = 0, channels = 0;
     unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
     if (!data) return false;
+    // A vertical strip of square frames: the first one
+    if (height > width && width > 0 && height % width == 0) height = width;
 
     // Nearest-neighbour resample, so a stray size can't corrupt the grid
     pixels.resize(ATLAS_TILE * ATLAS_TILE * 4);
     for (int y = 0; y < ATLAS_TILE; ++y) {
         for (int x = 0; x < ATLAS_TILE; ++x) {
-            int sx = x * width / ATLAS_TILE;
-            int sy = y * height / ATLAS_TILE;
+            // Turned clockwise: what shows at (x, y) comes from (y, N-1-x), once per turn
+            int tx = x, ty = y;
+            for (int t = 0; t < turns; ++t) {
+                int nx = ty;
+                ty = ATLAS_TILE - 1 - tx;
+                tx = nx;
+            }
+            int sx = tx * width / ATLAS_TILE;
+            int sy = ty * height / ATLAS_TILE;
             std::memcpy(&pixels[(y * ATLAS_TILE + x) * 4], &data[(sy * width + sx) * 4], 4);
         }
     }
@@ -164,14 +175,14 @@ bool loadTile(const std::string& path, std::vector<uint8_t>& pixels) {
 
 void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::CommandPool* commandPool,
                                    const std::string& textureRoot,
-                                   const std::unordered_map<uint32_t, BlockTextureSet>& blocks) {
+                                   const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
+                                   const std::vector<std::string>& moreTextures) {
     // std::map: stable tile order regardless of registry iteration
     std::map<std::string, uint32_t> tiles;
     for (const auto& [id, set] : blocks) {
-        tiles.try_emplace(set.top, 0);
-        tiles.try_emplace(set.bottom, 0);
-        tiles.try_emplace(set.side, 0);
+        for (int f = 0; f < 6; ++f) tiles.try_emplace(set.forFace(static_cast<Face>(f)), 0);
     }
+    for (const auto& name : moreTextures) tiles.try_emplace(name, 0);
     uint32_t index = 0;
     for (auto& [name, tile] : tiles) tile = index++;
 
@@ -190,8 +201,11 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
     std::vector<uint8_t> atlas(static_cast<size_t>(atlasWidth_) * atlasHeight_ * 4, 0);
     std::vector<uint8_t> pixels;
     for (const auto& [name, tile] : tiles) {
-        std::string path = (std::filesystem::path(textureRoot) / (name + ".png")).string();
-        if (!loadTile(path, pixels)) {
+        std::string base;
+        int degrees = 0;
+        splitTextureTurn(name, base, degrees);
+        std::string path = (std::filesystem::path(textureRoot) / (base + ".png")).string();
+        if (!loadTile(path, pixels, degrees / 90)) {
             std::cerr << "[BlockAtlas] missing texture: " << path << "\n";
             magenta(pixels);
         }
@@ -219,9 +233,11 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
             return gridToUV(tile % grid, tile / grid);
         };
         BlockTextureInfo info;
-        info.setTopBottom(face(set.top), face(set.bottom), face(set.side));
+        for (int f = 0; f < 6; ++f) info.faces[f] = face(set.forFace(static_cast<Face>(f)));
         blockTextures_[id] = info;
     }
+    namedTextures_.clear();
+    for (const auto& [name, tile] : tiles) namedTextures_[name] = gridToUV(tile % grid, tile / grid);
 
     // Unmapped blocks stay obvious rather than picking up tile 0
     defaultTexture_.setAll(gridToUV(0, 0));
@@ -306,6 +322,12 @@ const BlockTextureInfo* BlockAtlas::getTextureInfo(BlockTypeId id) const {
         return &it->second;
     }
     return &defaultTexture_;
+}
+
+std::optional<glm::vec4> BlockAtlas::textureUV(const std::string& name) const {
+    auto it = namedTextures_.find(name);
+    if (it == namedTextures_.end()) return std::nullopt;
+    return it->second.bounds();
 }
 
 BlockTextureProvider BlockAtlas::createProvider() const {

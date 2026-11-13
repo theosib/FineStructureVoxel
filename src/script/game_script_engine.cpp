@@ -1,4 +1,5 @@
 #include "finevox/script/game_script_engine.hpp"
+#include "finevox/core/block_properties.hpp"
 #include "finevox/script/entity_context_proxy.hpp"
 #include "finevox/script/data_container_proxy.hpp"
 #include "finevox/core/world.hpp"
@@ -398,6 +399,36 @@ void GameScriptEngine::registerNativeFunctions() {
     };
     engine_->registerFunction("world.set_block", setBlockFn);
     engine_->registerFunction("world_set_block", setBlockFn);
+
+    // Block states: `block_prop :door :open` -> :false, `block_with :door :open :true` ->
+    // the block named for that state, `block_family` -> the name without its properties.
+    // Names and values are symbols or strings; nil where the block has no such property.
+    auto nameOf = [](const finescript::Value& v) -> std::string {
+        if (v.isSymbol()) return std::string(StringInterner::global().lookup(v.asSymbol()));
+        if (v.isString()) return std::string(v.asString());
+        return {};
+    };
+    engine_->registerFunction("block_prop",
+        [nameOf](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.size() < 2) return finescript::Value::nil();
+            auto value = BlockPropertyRegistry::global().property(nameOf(args[0]), nameOf(args[1]));
+            if (!value) return finescript::Value::nil();
+            return finescript::Value::symbol(StringInterner::global().intern(*value));
+        });
+    engine_->registerFunction("block_with",
+        [nameOf](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.size() < 3) return finescript::Value::nil();
+            auto state = BlockPropertyRegistry::global().withProperty(nameOf(args[0]), nameOf(args[1]),
+                                                                  nameOf(args[2]));
+            if (!state) return finescript::Value::nil();
+            return finescript::Value::symbol(StringInterner::global().intern(*state));
+        });
+    engine_->registerFunction("block_family",
+        [nameOf](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.empty()) return finescript::Value::nil();
+            return finescript::Value::symbol(
+                StringInterner::global().intern(BlockPropertyRegistry::familyOf(nameOf(args[0]))));
+        });
 
     auto isAirFn = [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
         -> finescript::Value

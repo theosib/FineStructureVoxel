@@ -96,6 +96,8 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/block_type.cpp
     src/core/block_model.cpp
     src/core/block_model_loader.cpp
+    src/core/block_model_transform.cpp
+    src/core/block_properties.cpp
     src/core/block_handler.cpp
     src/core/block_event.cpp
     src/core/module.cpp
@@ -702,6 +704,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_mesh.cpp
         tests/test_block_type.cpp
         tests/test_block_model.cpp
+        tests/test_block_properties.cpp
         tests/test_config_parser.cpp
         tests/test_config_file.cpp
         tests/test_unified_queue.cpp

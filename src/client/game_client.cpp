@@ -1669,6 +1669,71 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // ui_fill x0 y0 x1 y1 r g b a: a filled rectangle over everything, this frame only
+    e.registerFunction("ui_fill", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 8) return Value::nil();
+        ImU32 color = ImGui::GetColorU32(ImVec4(float(number(args[4])), float(number(args[5])),
+                                                float(number(args[6])), float(number(args[7]))));
+        ImGui::GetForegroundDrawList()->AddRectFilled(
+            ImVec2(float(number(args[0])), float(number(args[1]))),
+            ImVec2(float(number(args[2])), float(number(args[3]))), color);
+        return Value::nil();
+    });
+
+    // ui_image name x0 y0 x1 y1 [u0 v0 u1 v1] [=tint [r g b a]]: a texture loaded by ui_texture,
+    // drawn over everything this frame, as a HUD draws hearts or a hotbar
+    e.registerFunction("ui_image", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 5) return Value::nil();
+        finegui::TextureHandle handle = textureRegistry->get(args[0].toString());
+        if (!handle.valid()) return Value::nil();
+        ImVec2 uv0(0, 0), uv1(1, 1);
+        if (args.size() >= 9 && args[5].isNumeric()) {
+            uv0 = ImVec2(float(number(args[5])), float(number(args[6])));
+            uv1 = ImVec2(float(number(args[7])), float(number(args[8])));
+        }
+        ImU32 tint = IM_COL32_WHITE;
+        if (args.back().isMap()) {
+            auto t = const_cast<Value&>(args.back()).asMap().get(StringInterner::global().intern("tint"));
+            if (t.isArray() && t.asArray().size() >= 4) {
+                const auto& c = t.asArray();
+                tint = ImGui::GetColorU32(ImVec4(float(c[0].asNumber()), float(c[1].asNumber()),
+                                                 float(c[2].asNumber()), float(c[3].asNumber())));
+            }
+        }
+        ImGui::GetForegroundDrawList()->AddImage(
+            ImTextureRef(static_cast<ImTextureID>(handle)),
+            ImVec2(float(number(args[1])), float(number(args[2]))),
+            ImVec2(float(number(args[3])), float(number(args[4]))), uv0, uv1, tint);
+        return Value::nil();
+    });
+
+    // ui_text x y text [=color [r g b a]] [=size px]: words over everything, this frame
+    e.registerFunction("ui_text", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3) return Value::nil();
+        ImU32 color = IM_COL32_WHITE;
+        float size = 0.0f;
+        if (args.back().isMap()) {
+            auto& map = const_cast<Value&>(args.back()).asMap();
+            auto c = map.get(StringInterner::global().intern("color"));
+            if (c.isArray() && c.asArray().size() >= 4) {
+                const auto& v = c.asArray();
+                color = ImGui::GetColorU32(ImVec4(float(v[0].asNumber()), float(v[1].asNumber()),
+                                                  float(v[2].asNumber()), float(v[3].asNumber())));
+            }
+            auto s = map.get(StringInterner::global().intern("size"));
+            if (s.isNumeric()) size = float(s.asNumber());
+        }
+        std::string text = args[2].toString();
+        auto* list = ImGui::GetForegroundDrawList();
+        ImVec2 at(float(number(args[0])), float(number(args[1])));
+        if (size > 0.0f) {
+            list->AddText(nullptr, size, at, color, text.c_str());
+        } else {
+            list->AddText(at, color, text.c_str());
+        }
+        return Value::nil();
+    });
+
     e.registerFunction("request_screenshot", [this](ExecutionContext&, const Args& args) -> Value {
         // Only a game's own script gets to name a place outside the game: this one could be a server's
         std::string path = args.empty() ? "screenshots/shot.png" : args[0].toString();

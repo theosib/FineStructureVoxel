@@ -76,6 +76,10 @@ struct BiomeProperties {
     std::string stoneBlock = "stone";
     std::string underwaterBlock = "sand";
 
+    /// Where a terrain's fields must fall for this biome (`range:<field>: lo hi`), for a
+    /// terrain that chooses biomes by them (DensityTerrainPass)
+    std::vector<std::pair<std::string, std::pair<float, float>>> ranges;
+
     // ---- Feature density multipliers ----
     float treeDensity = 0.0f;
     float oreDensity = 1.0f;
@@ -102,6 +106,9 @@ public:
 
     /// Get all registered biome IDs
     [[nodiscard]] std::vector<BiomeId> allBiomes() const;
+
+    /// The biomes a world may use: those setAllowed named, or every one if it named none
+    [[nodiscard]] std::vector<BiomeId> allowedBiomes() const;
 
     /// Number of registered biomes
     [[nodiscard]] size_t size() const;

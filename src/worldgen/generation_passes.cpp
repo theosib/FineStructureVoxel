@@ -16,6 +16,8 @@
 #include "finevox/core/fluid_type_id.hpp"
 
 #include <cmath>
+#include <limits>
+#include "finevox/worldgen/noise.hpp"
 
 namespace finevox::worldgen {
 
@@ -74,6 +76,139 @@ void TerrainPass::generate(GenerationContext& ctx) {
 }
 
 // ============================================================================
+// DensityTerrainPass
+// ============================================================================
+
+DensityTerrainPass::DensityTerrainPass(std::shared_ptr<const DensityGraph> graph)
+    : graph_(std::move(graph)) {
+    const auto& registry = BiomeRegistry::global();
+    for (BiomeId id : registry.allowedBiomes()) {
+        const BiomeProperties* props = registry.getBiome(id);
+        if (!props || props->ranges.empty()) continue;
+        Candidate c;
+        c.id = id;
+        for (const auto& [field, range] : props->ranges) {
+            for (const auto& [name, node] : graph_->fields()) {
+                if (name == field) c.ranges.emplace_back(node, range);
+            }
+        }
+        candidates_.push_back(std::move(c));
+    }
+}
+
+BiomeId DensityTerrainPass::chooseBiome(const std::vector<float>& values) const {
+    BiomeId best{};
+    float bestOutside = std::numeric_limits<float>::max();
+    float bestCentre = std::numeric_limits<float>::max();
+    for (const auto& c : candidates_) {
+        // How far outside its ranges, then how far from their middles: inside all of them
+        // beats near, and of those inside, the one this is most typical of
+        float outside = 0.0f, centre = 0.0f;
+        for (const auto& [node, range] : c.ranges) {
+            float v = values[static_cast<size_t>(node)];
+            float lo = range.first, hi = range.second;
+            if (v < lo) outside += lo - v;
+            if (v > hi) outside += v - hi;
+            float half = std::max((hi - lo) * 0.5f, 1e-6f);
+            centre += std::fabs(v - (lo + hi) * 0.5f) / half;
+        }
+        if (outside < bestOutside || (outside == bestOutside && centre < bestCentre)) {
+            best = c.id;
+            bestOutside = outside;
+            bestCentre = centre;
+        }
+    }
+    return best;
+}
+
+void DensityTerrainPass::generate(GenerationContext& ctx) {
+    const DensityGraph& g = *graph_;
+    const BlockTypeId fill = BlockTypeId::fromName(g.fillBlock());
+    const BlockTypeId floor = g.floorBlock().empty() ? BlockTypeId() : BlockTypeId::fromName(g.floorBlock());
+    const int32_t across = g.cellAcross(), up = g.cellUp();
+    const int32_t bottom = g.bottom(), top = g.top();
+    const int32_t nx = 16 / across + 1;
+    const int32_t ny = (top - bottom + up - 1) / up + 1;
+    const int32_t baseX = ctx.pos.x * 16, baseZ = ctx.pos.z * 16;
+    const size_t terrain = static_cast<size_t>(g.terrainNode());
+    std::vector<std::pair<BlockTypeId, const DensityGraph::Layer*>> layers;
+    for (const auto& layer : g.layers()) layers.emplace_back(BlockTypeId::fromName(layer.block), &layer);
+
+    // Density at the corners of the cells, blended within them
+    std::vector<float> corners(static_cast<size_t>(nx * nx * ny));
+    std::vector<float> values;
+    auto at = [&](int32_t ix, int32_t iy, int32_t iz) -> float& {
+        return corners[static_cast<size_t>((iy * nx + iz) * nx + ix)];
+    };
+    for (int32_t iz = 0; iz < nx; ++iz) {
+        for (int32_t ix = 0; ix < nx; ++ix) {
+            float wx = static_cast<float>(baseX + ix * across), wz = static_cast<float>(baseZ + iz * across);
+            g.evaluateColumn(wx, wz, values);
+            for (int32_t iy = 0; iy < ny; ++iy) {
+                g.evaluateHeight(wx, static_cast<float>(bottom + iy * up), wz, values);
+                at(ix, iy, iz) = values[terrain];
+            }
+        }
+    }
+
+    const bool byFields = !candidates_.empty();
+    for (int32_t lz = 0; lz < 16; ++lz) {
+        for (int32_t lx = 0; lx < 16; ++lx) {
+            const int32_t ix = lx / across, iz = lz / across;
+            const float fx = static_cast<float>(lx % across) / static_cast<float>(across);
+            const float fz = static_cast<float>(lz % across) / static_cast<float>(across);
+            int32_t highest = bottom - 1;
+            for (int32_t y = bottom; y < top; ++y) {
+                const int32_t iy = (y - bottom) / up;
+                const float fy = static_cast<float>((y - bottom) % up) / static_cast<float>(up);
+                auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+                float d00 = lerp(at(ix, iy, iz), at(ix + 1, iy, iz), fx);
+                float d10 = lerp(at(ix, iy, iz + 1), at(ix + 1, iy, iz + 1), fx);
+                float d01 = lerp(at(ix, iy + 1, iz), at(ix + 1, iy + 1, iz), fx);
+                float d11 = lerp(at(ix, iy + 1, iz + 1), at(ix + 1, iy + 1, iz + 1), fx);
+                float d = lerp(lerp(d00, d10, fz), lerp(d01, d11, fz), fy);
+
+                BlockTypeId block = d > 0.0f ? fill : BlockTypeId();
+                if (!block.isAir()) {
+                    for (const auto& [layerBlock, layer] : layers) {
+                        if (y >= layer->below + layer->blend) continue;
+                        bool in = y < layer->below;
+                        if (!in) {
+                            // Thinning upward through the blend: certain at the bottom of it
+                            uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed ^ 0x51u);
+                            in = static_cast<int32_t>(h % static_cast<uint32_t>(layer->blend)) >= y - layer->below;
+                        }
+                        if (in) {
+                            block = layerBlock;
+                            break;
+                        }
+                    }
+                }
+                // A floor, solid at the bottom and ragged above it
+                if (!floor.isAir() && y - bottom < g.floorDepth()) {
+                    uint32_t h = NoiseHash::hash3D(baseX + lx, y, baseZ + lz, ctx.worldSeed);
+                    if (static_cast<int32_t>(h % static_cast<uint32_t>(g.floorDepth())) >= y - bottom) block = floor;
+                }
+                if (!block.isAir()) {
+                    ctx.column.setBlock(lx, y, lz, block);
+                    highest = y;
+                }
+            }
+            const int32_t idx = GenerationContext::hmIndex(lx, lz);
+            ctx.heightmap[idx] = highest;
+
+            const float wx = static_cast<float>(baseX + lx), wz = static_cast<float>(baseZ + lz);
+            if (byFields) {
+                g.evaluateColumn(wx, wz, values);
+                ctx.biomes[idx] = chooseBiome(values);
+            } else {
+                ctx.biomes[idx] = ctx.biomeMap.getBiome(wx, wz);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // SurfacePass
 // ============================================================================
 
@@ -91,6 +226,9 @@ void SurfacePass::generate(GenerationContext& ctx) {
 
             BlockTypeId surfaceBlock = BlockTypeId::fromName(props->surfaceBlock);
             BlockTypeId fillerBlock = BlockTypeId::fromName(props->fillerBlock);
+            if (seaLevel_ && surfaceY < *seaLevel_ - 1) {
+                surfaceBlock = fillerBlock = BlockTypeId::fromName(props->underwaterBlock);
+            }
             BlockTypeId stoneBlock = BlockTypeId::fromName(props->stoneBlock);
 
             // Surface block at top
@@ -217,9 +355,15 @@ void OrePass::generate(GenerationContext& ctx) {
                 static_cast<int32_t>(placement.featureName.size()),
                 static_cast<int32_t>(placement.featureName[0])));
 
-        int32_t veinCount = static_cast<int32_t>(
-            placement.density * 256.0f * densityMul);  // density per 16x16 area
-        if (veinCount < 1) veinCount = 1;
+        // density per 16x16 area; what's left over is the chance of one more, so a rare ore
+        // can average less than a vein a column
+        float expected = placement.density * 256.0f * densityMul;
+        int32_t veinCount = static_cast<int32_t>(expected);
+        float leftover = expected - static_cast<float>(veinCount);
+        if (leftover > 0.0f && static_cast<float>(NoiseHash::hash2D(ctx.pos.x, ctx.pos.z, static_cast<uint32_t>(rng)) % 10000) <
+                                   leftover * 10000.0f) {
+            ++veinCount;
+        }
 
         for (int32_t v = 0; v < veinCount; ++v) {
             // Advance RNG
@@ -231,9 +375,13 @@ void OrePass::generate(GenerationContext& ctx) {
 
             int32_t lx = static_cast<int32_t>(z % 16);
             int32_t lz = static_cast<int32_t>((z >> 8) % 16);
-            int32_t ly = placement.minHeight +
-                static_cast<int32_t>((z >> 16) %
-                    static_cast<uint64_t>(placement.maxHeight - placement.minHeight + 1));
+            const uint64_t span = static_cast<uint64_t>(placement.maxHeight - placement.minHeight + 1);
+            int32_t ly = placement.minHeight + static_cast<int32_t>((z >> 16) % span);
+            if (placement.peaked) {
+                // The sum of two even draws over half the range: likeliest in the middle
+                uint64_t half = span / 2 + 1;
+                ly = placement.minHeight + static_cast<int32_t>(((z >> 16) % half) + ((z >> 40) % half));
+            }
 
             FeaturePlacementContext fctx{
                 ctx.world,

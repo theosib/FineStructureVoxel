@@ -130,7 +130,7 @@ BlockGeometry cubeGeometry(const BlockModel& model) {
         face.isSolid = true;
         face.textureRef = model.cubeFaceTexture(static_cast<Face>(f));
         face.texture = face.textureRef;
-        face.tintIndex = model.faceTint(static_cast<Face>(f));
+        face.tintSlot = model.faceTint(static_cast<Face>(f));
         for (int i = 0; i < 4; ++i) face.vertices.emplace_back(data.positions[i], data.uvOffsets[i]);
         geometry.addFace(std::move(face));
     }
@@ -192,7 +192,7 @@ bool drawAsCubeIfPlain(BlockModel& model) {
         if (turns < 0) return false;
         seen[f] = true;
         textures[f] = turnedTextureName(face.texture, turns * 90);
-        tints[f] = face.tintIndex;
+        tints[f] = face.tintSlot;
     }
 
     for (int f = 0; f < 6; ++f) {

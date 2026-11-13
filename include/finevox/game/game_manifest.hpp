@@ -30,6 +30,7 @@ struct GameManifest {
     int32_t worldRadius = 16;   ///< Columns generated in each direction from the origin
     int32_t seaLevel = 62;
     bool caves = false;
+    std::string terrain;  ///< A .terrain file (density_graph.hpp) in place of the built-in terrain
     std::vector<std::string> worldBiomes;  ///< Only these biomes. Empty means all of them.
 
     uint32_t tickRate = 30;

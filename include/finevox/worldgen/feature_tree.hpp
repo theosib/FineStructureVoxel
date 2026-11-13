@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <vector>
 #include "finevox/worldgen/feature.hpp"
 #include "finevox/core/string_interner.hpp"
 
@@ -22,6 +23,16 @@ struct TreeConfig {
     int32_t maxTrunkHeight = 7;
     int32_t leafRadius = 2;
     bool requiresSoil = true;       ///< Require solid block below origin
+
+    /// A crown given layer by layer, bottom to top, in place of the default box: each a radius,
+    /// with `~` dropping its corners at random or `+` cutting them (a plus at radius 1). The
+    /// top layer sits crownTop blocks above the trunk's last block, so 1 caps it.
+    struct CrownLayer {
+        int32_t radius = 1;
+        enum class Corners : uint8_t { Keep, Random, Cut } corners = Corners::Keep;
+    };
+    std::vector<CrownLayer> crown;
+    int32_t crownTop = 1;
 };
 
 /// Generates simple trees with configurable trunk height and leaf canopy

@@ -37,6 +37,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.worldRadius = doc->getInt("world_radius", m.worldRadius);
     m.seaLevel = doc->getInt("sea_level", m.seaLevel);
     m.caves = doc->getBool("caves", m.caves);
+    m.terrain = std::string(doc->getString("terrain", m.terrain));
     m.tickRate = static_cast<uint32_t>(doc->getInt("tick_rate", static_cast<int>(m.tickRate)));
     m.randomTicks = static_cast<uint32_t>(doc->getInt("random_ticks", static_cast<int>(m.randomTicks)));
     m.gravity = doc->getFloat("gravity", m.gravity);
@@ -65,6 +66,10 @@ bool GameManifest::applyOverride(std::string_view key, std::string_view value) {
     if (key == "world_seed") return number(worldSeed);
     if (key == "world_radius") return number(worldRadius);
     if (key == "sea_level") return number(seaLevel);
+    if (key == "terrain") {
+        terrain = std::string(value);
+        return true;
+    }
     if (key == "caves") {
         caves = value == "true";
         return true;

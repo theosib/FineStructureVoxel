@@ -358,7 +358,7 @@ private:
         return tintProvider_ ? tintProvider_(type, static_cast<int>(face), -1, pos) : TINT_NONE;
     }
     [[nodiscard]] uint32_t faceTint(BlockTypeId type, const FaceGeometry& face, const BlockCoord& pos) const {
-        return (tintProvider_ && face.tintIndex >= 0) ? tintProvider_(type, -1, face.tintIndex, pos) : TINT_NONE;
+        return (tintProvider_ && face.tintSlot >= 0) ? tintProvider_(type, -1, face.tintSlot, pos) : TINT_NONE;
     }
 
     // Light for a custom face. `sky` and `block` come in as the block's own cell.

@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <vector>
 #include "finevox/worldgen/feature.hpp"
 #include "finevox/core/string_interner.hpp"
 
@@ -22,6 +23,9 @@ struct OreConfig {
     int32_t minHeight = 0;
     int32_t maxHeight = 64;
     int32_t veinsPerChunk = 8;      ///< Used by placement rules, not by Feature itself
+    /// More rock it runs through, each with the ore it becomes there (`host:<rock>: <ore>`):
+    /// one vein crossing from stone into a darker stone below changes as it goes
+    std::vector<std::pair<BlockTypeId, BlockTypeId>> hosts;
 };
 
 /// Places ore veins using random walk from a center point

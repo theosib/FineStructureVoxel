@@ -282,6 +282,36 @@ feature finevox:tall_grass 0.2
 
 ---
 
+## Terrain from a Graph
+
+A game can describe its land in a `.terrain` file and name it in `game.conf` (`terrain:`), in
+place of `TerrainPass` (and of `CavePass`, which a graph does itself). `DensityGraph`
+(`density_graph.hpp`) reads it: named nodes, each an operation on numbers or earlier nodes, and a
+`terrain:` node that is solid where it's above zero. The full list of operations and settings is in
+the header. `DensityTerrainPass` samples it every `cell` blocks (4 across, 8 up by default) and
+blends between, working out a node that doesn't depend on height once per column.
+
+```
+fill: stone
+bottom: -64
+top: 256
+floor: basement 4
+node:land: noise scale=0.002 octaves=5 seed=1
+node:height: curve land -1:40 0:64 1:110
+node:ground: sub height y
+node:hollow: noise 3d scale=0.01 seed=6
+node:open: sub 0.5 hollow             # caves, overhangs: any shape the numbers make
+node:shape: min ground open
+terrain: shape
+field:wet: noise scale=0.001 seed=7
+```
+
+`field:` nodes are columns' values that biomes are chosen by: a `.biome` says where it belongs
+with `range:<field>: lo hi`, and a column takes the biome whose ranges it falls in, the most
+typical one if several, or the nearest if none. With no biome giving ranges, the `BiomeMap`
+chooses as before. The pipeline's `SurfacePass` then gets the sea level, and ground under water
+takes the biome's `underwater` block.
+
 ## Biomes in the World
 
 After the passes, every subchunk the column has gets the column's biome ids (`SubChunk::biomeData`,

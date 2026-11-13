@@ -9,6 +9,7 @@
 #include "finevox/core/config_parser.hpp"
 
 #include <filesystem>
+#include <sstream>
 
 namespace finevox::worldgen {
 
@@ -52,6 +53,13 @@ std::optional<BiomeProperties> BiomeLoader::loadFromConfig(
     if (auto* e = doc.get("filler_depth")) props.fillerDepth = e->value.asInt();
     if (auto* e = doc.get("stone")) props.stoneBlock = e->value.asStringOwned();
     if (auto* e = doc.get("underwater")) props.underwaterBlock = e->value.asStringOwned();
+
+    for (const auto* e : doc.getAll("range")) {
+        if (!e->hasSuffix()) continue;
+        std::istringstream iss(e->value.asStringOwned());
+        float lo = 0, hi = 0;
+        if (iss >> lo >> hi) props.ranges.emplace_back(e->suffix, std::make_pair(lo, hi));
+    }
 
     // Feature densities
     if (auto* e = doc.get("tree_density")) props.treeDensity = e->value.asFloat();

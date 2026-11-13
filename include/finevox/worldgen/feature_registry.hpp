@@ -37,6 +37,9 @@ struct FeaturePlacement {
     std::vector<BiomeId> biomes;        ///< Empty = all biomes
     bool requiresSurface = true;
     BlockTypeId requiredSurface;        ///< Default (air) = any solid block
+    /// Heights for features placed underground (ores): even over the range, or most often in
+    /// its middle and thinning to nothing at the ends
+    bool peaked = false;
 };
 
 // ============================================================================

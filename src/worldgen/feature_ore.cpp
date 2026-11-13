@@ -37,6 +37,13 @@ FeatureResult OreFeature::place(FeaturePlacementContext& ctx) {
         if (current == config_.replaceBlock) {
             ctx.world.setBlock(cx, cy, cz, config_.oreBlock);
             ++placed;
+        } else {
+            for (const auto& [host, ore] : config_.hosts) {
+                if (current != host) continue;
+                ctx.world.setBlock(cx, cy, cz, ore);
+                ++placed;
+                break;
+            }
         }
 
         // Random walk to next position

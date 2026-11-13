@@ -68,7 +68,7 @@ struct FaceGeometry {
     std::string texture;                 // textureRef with any `#name` resolved by the model
     glm::vec4 textureUV{0.0f};           // Where `texture` landed in the atlas (minU minV maxU maxV)
     bool hasTextureUV = false;           // Set once a renderer has placed `texture`
-    int tintIndex = -1;                  // Coloured by the block's tint (`tint=0`), or -1
+    int tintSlot = -1;                  // Coloured by the block's tint (`tint=0`), or -1
 
     FaceGeometry() = default;
 
@@ -375,6 +375,18 @@ public:
     BlockModel& addProperty(BlockProperty property);
     BlockModel& addVariant(PropertyLook look);
     BlockModel& addPart(PropertyLook look);
+
+    /// Behaviour that differs by state: `set:lit=true: light-emission=13`. Every matching
+    /// line applies, in order. Keys: light-emission, light-attenuation, hardness, opaque,
+    /// collision (none or full), walk-speed.
+    struct StateSetting {
+        PropertyCondition when;
+        std::vector<std::pair<std::string, std::string>> values;
+    };
+    BlockModel& addStateSetting(StateSetting setting);
+    [[nodiscard]] const std::vector<StateSetting>& stateSettings() const { return stateSettings_; }
+    /// Apply one setting's values to this model
+    void applySetting(const StateSetting& setting);
     [[nodiscard]] const std::vector<BlockProperty>& properties() const { return properties_; }
     [[nodiscard]] const std::vector<PropertyLook>& variants() const { return variants_; }
     [[nodiscard]] const std::vector<PropertyLook>& parts() const { return parts_; }
@@ -438,6 +450,7 @@ private:
     std::vector<BlockProperty> properties_;
     std::vector<PropertyLook> variants_;
     std::vector<PropertyLook> parts_;
+    std::vector<StateSetting> stateSettings_;
     std::unordered_map<std::string, std::string> textureVariables_;
     float walkSpeed_ = 1.0f;
     bool hasOpaqueOverride_ = false;

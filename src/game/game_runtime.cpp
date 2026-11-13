@@ -663,16 +663,6 @@ void GameRuntime::generateWorld() {
     World& world = session_->world();
 
     uint64_t seed = manifest_.worldSeed;
-    worldgen::GenerationPipeline pipeline;
-    pipeline.setWorldSeed(seed);
-    pipeline.addPass(std::make_unique<worldgen::TerrainPass>(seed));
-    pipeline.addPass(std::make_unique<worldgen::SurfacePass>());
-    if (manifest_.caves) pipeline.addPass(std::make_unique<worldgen::CavePass>(seed));
-    pipeline.addPass(std::make_unique<worldgen::OrePass>());
-    pipeline.addPass(std::make_unique<worldgen::StructurePass>());
-    pipeline.addPass(std::make_unique<worldgen::DecorationPass>());
-    pipeline.addPass(std::make_unique<worldgen::FluidPass>(manifest_.seaLevel));
-
     std::vector<worldgen::BiomeId> allowed;
     for (const std::string& name : manifest_.worldBiomes) {
         allowed.push_back(worldgen::BiomeId::fromName(name.find(':') == std::string::npos
@@ -680,6 +670,30 @@ void GameRuntime::generateWorld() {
                                                           : name));
     }
     worldgen::BiomeRegistry::global().setAllowed(std::move(allowed));
+    worldgen::GenerationPipeline pipeline;
+    pipeline.setWorldSeed(seed);
+    std::shared_ptr<const worldgen::DensityGraph> graph;
+    if (!manifest_.terrain.empty()) {
+        std::string error;
+        if (auto loaded = worldgen::DensityGraph::load((options_.gameRoot / manifest_.terrain).string(), seed, &error)) {
+            graph = std::make_shared<const worldgen::DensityGraph>(std::move(*loaded));
+        } else {
+            std::cerr << "[worldgen] " << manifest_.terrain << ": " << error << "; using the built-in terrain\n";
+        }
+    }
+    if (graph) {
+        pipeline.addPass(std::make_unique<worldgen::DensityTerrainPass>(graph));
+        pipeline.addPass(std::make_unique<worldgen::SurfacePass>(manifest_.seaLevel));
+    } else {
+        pipeline.addPass(std::make_unique<worldgen::TerrainPass>(seed));
+        pipeline.addPass(std::make_unique<worldgen::SurfacePass>());
+    }
+    if (manifest_.caves) pipeline.addPass(std::make_unique<worldgen::CavePass>(seed));
+    pipeline.addPass(std::make_unique<worldgen::OrePass>());
+    pipeline.addPass(std::make_unique<worldgen::StructurePass>());
+    pipeline.addPass(std::make_unique<worldgen::DecorationPass>());
+    pipeline.addPass(std::make_unique<worldgen::FluidPass>(manifest_.seaLevel));
+
 
     worldgen::BiomeMap biomeMap(seed, worldgen::BiomeRegistry::global());
 

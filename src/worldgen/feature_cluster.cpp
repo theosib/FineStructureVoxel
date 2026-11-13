@@ -64,7 +64,8 @@ FeatureResult ClusterFeature::place(FeaturePlacementContext& ctx) {
         for (int32_t y = 0; y < height; ++y) {
             BlockCoord cell(pos.x, pos.y + y, pos.z);
             if (!isOpen(ctx.world, cell)) break;
-            ctx.world.setBlock(cell, config_.block);
+            bool top = y == height - 1 && height > 1 && !config_.topBlock.isAir();
+            ctx.world.setBlock(cell, top ? config_.topBlock : config_.block);
             ++placed;
         }
     }

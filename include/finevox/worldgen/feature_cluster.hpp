@@ -17,6 +17,9 @@
 namespace finevox::worldgen {
 
 struct ClusterConfig {
+    /// A different block at the top of a stack of two or more (`top:`), for a plant whose
+    /// upper half isn't its lower
+    BlockTypeId topBlock;
     BlockTypeId block;
     BlockTypeId requiredBelow;   ///< Default (air) = any solid block
     int32_t attempts = 12;       ///< Columns tried around the origin

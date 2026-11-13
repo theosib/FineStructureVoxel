@@ -38,6 +38,30 @@ FeatureResult TreeFeature::place(FeaturePlacementContext& ctx) {
 
     // Place leaf canopy
     // Leaves form a sphere-ish shape around the top of the trunk
+    if (!config_.crown.empty()) {
+        const int32_t n = static_cast<int32_t>(config_.crown.size());
+        const int32_t topY = height - 1 + config_.crownTop;
+        for (int32_t i = 0; i < n; ++i) {
+            const auto& layer = config_.crown[static_cast<size_t>(i)];
+            const int32_t dy = topY - (n - 1 - i);
+            const int32_t r = layer.radius;
+            for (int32_t dx = -r; dx <= r; ++dx) {
+                for (int32_t dz = -r; dz <= r; ++dz) {
+                    bool corner = r > 0 && std::abs(dx) == r && std::abs(dz) == r;
+                    if (corner && layer.corners == TreeConfig::CrownLayer::Corners::Cut) continue;
+                    if (corner && layer.corners == TreeConfig::CrownLayer::Corners::Random &&
+                        NoiseHash::hash3D(ctx.origin.x + dx, ctx.origin.y + dy, ctx.origin.z + dz, ctx.seed) % 2) {
+                        continue;
+                    }
+                    if (dx == 0 && dz == 0 && dy < height) continue;
+                    int32_t wx = ctx.origin.x + dx, wy = ctx.origin.y + dy, wz = ctx.origin.z + dz;
+                    if (ctx.world.getBlock(wx, wy, wz).isAir()) ctx.world.setBlock(wx, wy, wz, config_.leavesBlock);
+                }
+            }
+        }
+        return FeatureResult::Placed;
+    }
+
     int32_t leafBase = height - config_.leafRadius - 1;
     if (leafBase < 1) leafBase = 1;
     int32_t leafTop = height + 1;
@@ -80,6 +104,7 @@ FeatureResult TreeFeature::place(FeaturePlacementContext& ctx) {
 
 BlockCoord TreeFeature::maxExtent() const {
     int32_t r = config_.leafRadius;
+    for (const auto& layer : config_.crown) r = std::max(r, layer.radius);
     return BlockCoord(r, config_.maxTrunkHeight + 2, r);
 }
 

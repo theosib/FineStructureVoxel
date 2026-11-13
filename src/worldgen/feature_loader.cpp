@@ -13,6 +13,7 @@
 #include "finevox/core/config_parser.hpp"
 
 #include <filesystem>
+#include <sstream>
 
 namespace finevox::worldgen {
 
@@ -66,6 +67,18 @@ std::optional<TreeConfig> FeatureLoader::parseTreeConfig(const ConfigDocument& d
     config.maxTrunkHeight = doc.getInt("max_trunk_height", config.maxTrunkHeight);
     config.leafRadius = doc.getInt("leaf_radius", config.leafRadius);
     config.requiresSoil = doc.getBool("requires_soil", config.requiresSoil);
+    config.crownTop = doc.getInt("crown_top", config.crownTop);
+    {
+        std::istringstream crown{std::string(doc.getString("crown"))};
+        std::string word;
+        while (crown >> word) {
+            TreeConfig::CrownLayer layer;
+            if (word.back() == '~') layer.corners = TreeConfig::CrownLayer::Corners::Random;
+            if (word.back() == '+') layer.corners = TreeConfig::CrownLayer::Corners::Cut;
+            layer.radius = std::atoi(word.c_str());
+            config.crown.push_back(layer);
+        }
+    }
 
     return config;
 }
@@ -85,6 +98,11 @@ std::optional<OreConfig> FeatureLoader::parseOreConfig(const ConfigDocument& doc
     config.minHeight = doc.getInt("min_height", config.minHeight);
     config.maxHeight = doc.getInt("max_height", config.maxHeight);
     config.veinsPerChunk = doc.getInt("veins_per_chunk", config.veinsPerChunk);
+    for (const ConfigEntry* host : doc.getAll("host")) {
+        if (!host->hasSuffix()) continue;
+        config.hosts.emplace_back(BlockTypeId::fromName(host->suffix),
+                                  BlockTypeId::fromName(host->value.asStringOwned()));
+    }
 
     return config;
 }
@@ -95,6 +113,9 @@ std::optional<ClusterConfig> FeatureLoader::parseClusterConfig(const ConfigDocum
     auto blockStr = doc.getString("block");
     if (blockStr.empty()) return std::nullopt;
     config.block = BlockTypeId::fromName(blockStr);
+
+    auto topStr = doc.getString("top");
+    if (!topStr.empty()) config.topBlock = BlockTypeId::fromName(topStr);
 
     auto belowStr = doc.getString("on");
     if (!belowStr.empty()) config.requiredBelow = BlockTypeId::fromName(belowStr);
@@ -120,6 +141,16 @@ std::optional<FeaturePlacement> FeatureLoader::parsePlacement(const ConfigDocume
 
     auto surfaceStr = doc.getString("surface");
     if (!surfaceStr.empty()) placement.requiredSurface = BlockTypeId::fromName(surfaceStr);
+    placement.peaked = doc.getString("height_shape") == "peaked";
+
+    // biomes: names, in the feature's namespace unless they give their own
+    auto colon = featureName.find(':');
+    std::string ns = colon == std::string_view::npos ? "" : std::string(featureName.substr(0, colon + 1));
+    std::istringstream biomes{std::string(doc.getString("biomes"))};
+    std::string biome;
+    while (biomes >> biome) {
+        placement.biomes.push_back(BiomeId::fromName(biome.find(':') == std::string::npos ? ns + biome : biome));
+    }
 
     return placement;
 }

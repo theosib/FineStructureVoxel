@@ -397,6 +397,17 @@ void BlockModelLoader::parseStates(const ConfigDocument& doc, BlockModel& model)
     for (const ConfigEntry* entry : doc.getAll("part")) {
         model.addPart(PropertyLook::parse(entry->suffix, entry->value.asStringOwned()));
     }
+    for (const ConfigEntry* entry : doc.getAll("set")) {
+        BlockModel::StateSetting setting;
+        setting.when = PropertyCondition::parse(entry->suffix);
+        std::istringstream iss(entry->value.asStringOwned());
+        std::string word;
+        while (iss >> word) {
+            auto eq = word.find('=');
+            if (eq != std::string::npos) setting.values.emplace_back(word.substr(0, eq), word.substr(eq + 1));
+        }
+        model.addStateSetting(std::move(setting));
+    }
 }
 
 void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockModel& model) {
@@ -486,7 +497,7 @@ std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(
         words >> face.textureRef;
         std::string word;
         while (words >> word) {
-            if (word.rfind("tint=", 0) == 0) face.tintIndex = std::atoi(word.c_str() + 5);
+            if (word.rfind("tint=", 0) == 0) face.tintSlot = std::atoi(word.c_str() + 5);
         }
     }
 

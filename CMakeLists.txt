@@ -287,6 +287,7 @@ add_library(finevox_worldgen ${FINEVOX_LIB_TYPE}
     src/worldgen/noise_simplex.cpp
     src/worldgen/noise_voronoi.cpp
     src/worldgen/noise_ops.cpp
+    src/worldgen/density_graph.cpp
     src/worldgen/schematic.cpp
     src/worldgen/schematic_io.cpp
     src/worldgen/clipboard_manager.cpp
@@ -706,6 +707,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_block_model.cpp
         tests/test_block_properties.cpp
         tests/test_biome_tint.cpp
+        tests/test_density_graph.cpp
         tests/test_config_parser.cpp
         tests/test_config_file.cpp
         tests/test_unified_queue.cpp

@@ -26,6 +26,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <unordered_map>
 
 namespace finevox::script {
@@ -481,6 +482,27 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             if (!ud->world->getBlock(x, y, z).isAir()) return Value::integer(y);
         }
         return Value::nil();
+    });
+
+    // biome_at x z [y] -> the biome a column is in, as a symbol, or nil where nothing says.
+    // With y, the subchunk at that height if it knows, as caves could differ from the land.
+    e.registerFunction("biome_at", [](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        if (!ud || !ud->world || args.size() < 2) return Value::nil();
+        int32_t x = static_cast<int32_t>(std::floor(number(args[0])));
+        int32_t z = static_cast<int32_t>(std::floor(number(args[1])));
+        const ChunkColumn* column = ud->world->getColumn(ColumnPos(x >> 4, z >> 4));
+        if (!column) return Value::nil();
+        uint32_t found = 0;
+        std::optional<int32_t> wanted;
+        if (args.size() >= 3 && args[2].isNumeric()) {
+            wanted = static_cast<int32_t>(std::floor(number(args[2]))) >> 4;
+        }
+        column->forEachSubChunk([&](int32_t chunkY, const SubChunk& sub) {
+            if (!sub.hasBiomes()) return;
+            if (found == 0 || (wanted && chunkY == *wanted)) found = sub.biome(x & 15, z & 15);
+        });
+        return found ? Value::symbol(found) : Value::nil();
     });
 
     // is_standable x y z -> can a 2-high body stand with feet here?

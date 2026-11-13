@@ -63,6 +63,14 @@ std::vector<BiomeId> BiomeRegistry::allBiomes() const {
     return result;
 }
 
+std::vector<BiomeId> BiomeRegistry::allowedBiomes() const {
+    {
+        std::shared_lock lock(mutex_);
+        if (!allowed_.empty()) return allowed_;
+    }
+    return allBiomes();
+}
+
 size_t BiomeRegistry::size() const {
     std::shared_lock lock(mutex_);
     return biomes_.size();

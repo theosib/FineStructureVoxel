@@ -167,6 +167,7 @@ no ground.
 
 ```
 surface_y x z        is_standable x y z       world_get_block  world_set_block
+biome_at x z [y] -> the biome's name as a symbol, or nil
 find_blocks x y z radius block_or_list [=max n] -> [[x y z]...], nearest first
 count_blocks x0 y0 z0 x1 y1 z1 [block ...] -> {=name count}
 claim_block scope x y z owner [ttl_ticks]     release_block scope x y z owner
@@ -256,7 +257,9 @@ ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
 entity_type id -> :militia, or nil if not known
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
-marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a
+marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a   (an outline)
+ui_fill x0 y0 x1 y1 r g b a            ui_text x y text [=color [r g b a]] [=size px]
+ui_image name x0 y0 x1 y1 [u0 v0 u1 v1] [=tint [r g b a]]   a ui_texture, for a HUD
 marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
@@ -393,6 +396,8 @@ part:open=true: looks/door_leaf          # or: every matching part, drawn togeth
 
 The default state keeps the block's plain name; the others are named `door[facing=east,open=true]`,
 properties in declared order. Each is an ordinary block type, so nothing else needs to know.
+Behaviour can differ by state too: `set:lit=true: light-emission=13` (also `light-attenuation`,
+`hardness`, `opaque`, `walk-speed`, `collision=none|full`); every matching line applies, in order.
 A look is another `.model`, by path from `blocks/` (keep looks in a subfolder, which isn't
 loaded as blocks), turned `x=` degrees about X then `y=` about the vertical, each clockwise seen
 from the positive end. The turn is baked in at load: geometry, collision and hit shapes, and the
@@ -428,8 +433,13 @@ game runs: `detail_pixels n` sets it and gives back the distance, in blocks.
 ### .feature additions
 
 Any feature with `density` registers its own placement: `density`, `surface`,
-`place_min_height`, `place_max_height`. `type: cluster` scatters a block: `block`, `on`,
-`attempts`, `radius`, `min_stack`, `max_stack`.
+`place_min_height`, `place_max_height`. A tree can give its crown layer by layer, bottom to top, `crown: 2~ 2~ 1 1+`: radii, `~` dropping
+corners at random, `+` cutting them; `crown_top: 1` puts the top layer that far above the trunk.
+`type: cluster` scatters a block: `block`, `on`,
+`attempts`, `radius`, `min_stack`, `max_stack`, and `top` for a different block at the top of a
+stack. `biomes:` limits any placed feature to those biomes. An ore (`.ore`) can name more rock it
+runs through with `host:<rock>: <ore>`, and `height_shape: peaked` makes its veins likeliest in the
+middle of their heights; a density under one vein a column is a chance of one.
 
 ---
 

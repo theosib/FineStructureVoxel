@@ -374,6 +374,31 @@ BlockModel& BlockModel::addVariant(PropertyLook look) {
     return *this;
 }
 
+BlockModel& BlockModel::addStateSetting(StateSetting setting) {
+    stateSettings_.push_back(std::move(setting));
+    return *this;
+}
+
+void BlockModel::applySetting(const StateSetting& setting) {
+    for (const auto& [key, value] : setting.values) {
+        float number = std::strtof(value.c_str(), nullptr);
+        if (key == "light-emission") {
+            setLightEmission(static_cast<uint8_t>(std::clamp(number, 0.0f, 15.0f)));
+        } else if (key == "light-attenuation") {
+            setLightAttenuation(static_cast<uint8_t>(std::clamp(number, 0.0f, 15.0f)));
+        } else if (key == "hardness") {
+            setHardness(number);
+        } else if (key == "opaque") {
+            setOpaque(value == "true");
+        } else if (key == "collision") {
+            if (value == "none") setCollision(CollisionShape::NONE);
+            if (value == "full") setCollision(CollisionShape::FULL_BLOCK);
+        } else if (key == "walk-speed") {
+            setWalkSpeed(number);
+        }
+    }
+}
+
 BlockModel& BlockModel::addPart(PropertyLook look) {
     parts_.push_back(std::move(look));
     return *this;

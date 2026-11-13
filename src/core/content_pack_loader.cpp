@@ -270,7 +270,7 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
                 if (m.faceTint(static_cast<Face>(f)) >= 0) cubeMask |= static_cast<uint8_t>(1 << f);
             }
             bool geometryTinted = false;
-            for (const auto& face : m.geometry().faces()) geometryTinted = geometryTinted || face.tintIndex >= 0;
+            for (const auto& face : m.geometry().faces()) geometryTinted = geometryTinted || face.tintSlot >= 0;
             if (cubeMask || geometryTinted || !m.tintSource().empty() || m.tintColor()) {
                 BlockTint tint;
                 tint.source = m.tintSource().empty() ? 0 : StringInterner::global().intern(m.tintSource());
@@ -376,6 +376,9 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
                     if (const auto& look = lookFor(rule)) drawn.push_back(*look);
                 }
                 if (!drawn.empty()) state.takeAppearance(combinedLook(drawn));
+            }
+            for (const auto& setting : model->stateSettings()) {
+                if (setting.when.matches(propNames, values)) state.applySetting(setting);
             }
             state.resolveFaceTextures();
             drawAsCubeIfPlain(state);

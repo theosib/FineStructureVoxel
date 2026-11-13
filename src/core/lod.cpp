@@ -1,4 +1,5 @@
 #include "finevox/core/lod.hpp"
+#include "finevox/core/block_type.hpp"
 #include <unordered_map>
 #include <algorithm>
 
@@ -135,6 +136,8 @@ LODBlockInfo LODSubChunk::selectRepresentativeBlock(
             for (int dx = 0; dx < g && startX + dx < 16; ++dx) {
                 BlockTypeId type = source.getBlock(startX + dx, startY + dy, startZ + dz);
                 if (type != AIR_BLOCK_TYPE) {
+                    const BlockType& bt = BlockRegistry::global().getType(type);
+                    if (!bt.isOpaque() || bt.hasCustomMesh()) continue;
                     ++counts[type.id];
                     // Track topmost block (for surface preservation)
                     if (dy > topY) {

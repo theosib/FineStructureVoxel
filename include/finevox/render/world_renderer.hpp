@@ -80,6 +80,9 @@ struct WorldRendererConfig {
     // Cells a region tint may have, across the map: see setRegionTint. 0 means none.
     size_t regionTintCells = 0;
 
+    // Sample block textures with nearest-neighbour filtering (sharp pixel art)
+    bool nearestFilter = false;
+
     // Debug: offset the render camera backwards from the cull camera
     // This reveals frustum culling edges for testing purposes.
     // When enabled, culling uses the real camera position, but rendering

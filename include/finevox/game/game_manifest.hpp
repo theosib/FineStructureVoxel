@@ -41,6 +41,7 @@ struct GameManifest {
     /// horizon. An overhead camera keeps most of the map in the transition zone, where
     /// meshes visibly swap as it moves, so such games turn this off.
     bool lod = true;
+    bool nearestFilter = false;   ///< Sample block textures with nearest-neighbour filtering
     /// Draw a block's far form, where it has one, once it's under this many pixels tall on screen.
     /// 0 draws everything in full.
     float detailPixels = 0.0f;

@@ -116,18 +116,27 @@ void WorldRenderer::initialize() {
     // exactly so window rendering is unchanged: linear min/mag filter, linear
     // mipmaps, repeat addressing, and anisotropy when the device supports it.
     {
-        auto builder = finevk::Sampler::create(device_)
-            .filter(VK_FILTER_LINEAR, VK_FILTER_LINEAR)
-            .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
-            .addressMode(VK_SAMPLER_ADDRESS_MODE_REPEAT)
-            .mipLod(0.0f, VK_LOD_CLAMP_NONE);
-        auto* physDevice = device_->physicalDevice();
-        if (physDevice && physDevice->capabilities().supportsAnisotropy()) {
-            float maxAnisotropy =
-                physDevice->capabilities().properties.limits.maxSamplerAnisotropy;
-            builder.anisotropy(maxAnisotropy);
+        if (config_.nearestFilter) {
+            blockSampler_ = finevk::Sampler::create(device_)
+                .filter(VK_FILTER_NEAREST, VK_FILTER_NEAREST)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                .addressMode(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                .mipLod(0.0f, 0.0f)
+                .build();
+        } else {
+            auto builder = finevk::Sampler::create(device_)
+                .filter(VK_FILTER_LINEAR, VK_FILTER_LINEAR)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                .addressMode(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                .mipLod(0.0f, VK_LOD_CLAMP_NONE);
+            auto* physDevice = device_->physicalDevice();
+            if (physDevice && physDevice->capabilities().supportsAnisotropy()) {
+                float maxAnisotropy =
+                    physDevice->capabilities().properties.limits.maxSamplerAnisotropy;
+                builder.anisotropy(maxAnisotropy);
+            }
+            blockSampler_ = builder.build();
         }
-        blockSampler_ = builder.build();
     }
 
     // A mapped buffer per frame, so a tint can change every frame with no upload to wait on.
@@ -258,6 +267,7 @@ void WorldRenderer::createPipeline() {
         fluidPipeline_ = fluidBuilder
             .enableDepth()
             .depthWrite(false)  // Test against opaque depth, don't write fluid depth
+            .depthBias(2.0f, 0.0f, 2.0f)
             .alphaBlending()    // SRC_ALPHA, ONE_MINUS_SRC_ALPHA
             .cullNone()         // See fluid from both sides (underwater)
             .frontFace(VK_FRONT_FACE_CLOCKWISE)
@@ -357,7 +367,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             if (mesh) renderer_->deferDelete(std::move(mesh));
         };
 
-        if (uploadData->mesh.isEmpty()) {
+        if (uploadData->mesh.isEmpty() && uploadData->fluidMesh.isEmpty()) {
             retire(view->takeMesh());
             retire(view->takeFluidMesh());
             view->release();
@@ -367,7 +377,9 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
             continue;
         }
 
-        if (view->canUpdateInPlace(uploadData->mesh)) {
+        if (uploadData->mesh.isEmpty()) {
+            retire(view->takeMesh());
+        } else if (view->canUpdateInPlace(uploadData->mesh)) {
             view->update(*renderer_->commandPool(), uploadData->mesh);
         } else {
             retire(view->takeMesh());

@@ -6,6 +6,7 @@
  */
 
 #include "finevox/worldgen/generation_passes.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/worldgen/noise_ops.hpp"
@@ -17,6 +18,7 @@
 
 #include <cmath>
 #include <limits>
+#include <queue>
 #include "finevox/worldgen/noise.hpp"
 
 namespace finevox::worldgen {
@@ -244,7 +246,7 @@ void SurfacePass::generate(GenerationContext& ctx) {
 
             BlockTypeId surfaceBlock = BlockTypeId::fromName(props->surfaceBlock);
             BlockTypeId fillerBlock = BlockTypeId::fromName(props->fillerBlock);
-            if (seaLevel_ && surfaceY < *seaLevel_ - 1) {
+            if (seaLevel_ && surfaceY < *seaLevel_) {
                 surfaceBlock = fillerBlock = BlockTypeId::fromName(props->underwaterBlock);
             }
             BlockTypeId stoneBlock = BlockTypeId::fromName(props->stoneBlock);
@@ -520,24 +522,71 @@ void FluidPass::generate(GenerationContext& ctx) {
     if (waterId.isEmpty()) return;  // No water type registered
 
     const int32_t FLUID_SOURCE_LEVEL = 15;
+    const int32_t baseX = ctx.pos.x * 16;
+    const int32_t baseZ = ctx.pos.z * 16;
+    std::queue<BlockCoord> flood;
+
+    auto canFill = [&](ChunkColumn& col, int32_t lx, int32_t y, int32_t lz) {
+        BlockTypeId existing = col.getBlock(lx, y, lz);
+        if (!existing.isAir()) {
+            if (BlockRegistry::global().getType(existing).isOpaque()) return false;
+            col.setBlock(lx, y, lz, AIR_BLOCK_TYPE);
+        }
+        int32_t chunkY = ChunkColumn::worldYToChunkY(y);
+        int32_t localY = ChunkColumn::worldYToLocalY(y);
+        SubChunk& sc = col.getOrCreateSubChunk(chunkY);
+        if (!sc.getFluid(lx, localY, lz).isEmpty()) return false;
+        sc.setFluid(lx, localY, lz, waterId, FLUID_SOURCE_LEVEL);
+        return true;
+    };
 
     for (int32_t lx = 0; lx < 16; ++lx) {
         for (int32_t lz = 0; lz < 16; ++lz) {
-            int32_t idx = GenerationContext::hmIndex(lx, lz);
-            int32_t surfaceY = ctx.heightmap[idx];
+            // Walk down from sea level through open air to the sea floor, then flood sideways
+            // and down under overhangs and coastal arches while leaving sealed caves dry.
+            for (int32_t y = seaLevel_; y >= 0; --y) {
+                if (!canFill(ctx.column, lx, y, lz)) break;
+                flood.emplace(baseX + lx, y, baseZ + lz);
+            }
+        }
+    }
 
-            // Fill water from surface+1 up to sea level (inclusive)
-            if (surfaceY < seaLevel_) {
-                for (int32_t y = surfaceY + 1; y <= seaLevel_; ++y) {
-                    // Only place water in air blocks (caves may exist)
-                    BlockTypeId existing = ctx.column.getBlock(lx, y, lz);
-                    if (existing.isAir()) {
-                        int32_t chunkY = ChunkColumn::worldYToChunkY(y);
-                        int32_t localY = ChunkColumn::worldYToLocalY(y);
-                        SubChunk& sc = ctx.column.getOrCreateSubChunk(chunkY);
-                        sc.setFluid(lx, localY, lz, waterId, FLUID_SOURCE_LEVEL);
-                    }
+    // Also seed from water already placed along the borders of adjacent columns
+    for (int32_t i = 0; i < 16; ++i) {
+        const BlockCoord borders[4] = {
+            {baseX - 1, 0, baseZ + i},
+            {baseX + 16, 0, baseZ + i},
+            {baseX + i, 0, baseZ - 1},
+            {baseX + i, 0, baseZ + 16},
+        };
+        for (const BlockCoord& b : borders) {
+            ChunkColumn* adj = ctx.world.getColumn(ColumnPos::fromBlock(b));
+            if (!adj) continue;
+            int32_t alx = b.x & 15, alz = b.z & 15;
+            for (int32_t y = seaLevel_; y >= 0; --y) {
+                const SubChunk* sc = adj->getSubChunk(ChunkColumn::worldYToChunkY(y));
+                if (sc && sc->getFluid(alx, ChunkColumn::worldYToLocalY(y), alz) == waterId) {
+                    flood.emplace(b.x, y, b.z);
                 }
+            }
+        }
+    }
+
+    static constexpr int32_t kDirs[5][3] = {
+        {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1}, {0, -1, 0}
+    };
+    while (!flood.empty()) {
+        BlockCoord p = flood.front();
+        flood.pop();
+        for (const auto& d : kDirs) {
+            BlockCoord n(p.x + d[0], p.y + d[1], p.z + d[2]);
+            if (n.y < 0 || n.y > seaLevel_) continue;
+            if (std::abs(n.x - (baseX + 8)) > 32 || std::abs(n.z - (baseZ + 8)) > 32) continue;
+            ColumnPos cpos = ColumnPos::fromBlock(n);
+            ChunkColumn* col = (cpos == ctx.pos) ? &ctx.column : ctx.world.getColumn(cpos);
+            if (!col) continue;
+            if (canFill(*col, n.x & 15, n.y, n.z & 15)) {
+                flood.push(n);
             }
         }
     }

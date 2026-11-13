@@ -65,7 +65,7 @@ float FluidMeshBuilder::surfaceHeight(uint8_t level, int32_t maxLevel) {
 bool FluidMeshBuilder::shouldCullFace(
     Face face,
     FluidTypeId type,
-    uint8_t level,
+    uint8_t /*level*/,
     FluidTypeId neighborFluidType,
     uint8_t neighborFluidLevel,
     bool neighborIsSolid

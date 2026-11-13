@@ -190,8 +190,8 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             BlockOpaqueProvider alwaysTransparent = [](const BlockCoord&) { return false; };
             meshData = builder.buildLODMesh(lodData, pos, alwaysTransparent, textureProvider, lodMergeMode_);
         }
-        // Build fluid mesh if subchunk has fluid data (LOD0 only)
-        if (buildLOD == LODLevel::LOD0 && subchunk->hasFluidLayer()) {
+        // Build fluid mesh if subchunk has fluid data
+        if (subchunk->hasFluidLayer()) {
             const FluidLayer* fl = subchunk->fluidLayer();
             if (fl && !fl->isEmpty()) {
                 FluidMeshBuilder fluidBuilder;
@@ -207,11 +207,12 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
                     BlockTypeId bt = world_.getBlock(p);
                     if (bt.isAir()) return false;
                     const auto& blockType = BlockRegistry::global().getType(bt);
-                    const auto& shape = blockType.collisionShape();
-                    if (shape.boxes().size() == 1) {
-                        const auto& box = shape.boxes()[0];
-                        return box.min.x <= 0.001f && box.min.y <= 0.001f && box.min.z <= 0.001f &&
-                               box.max.x >= 0.999f && box.max.y >= 0.999f && box.max.z >= 0.999f;
+                    if (blockType.isOpaque() && !blockType.hasCustomMesh()) return true;
+                    for (const auto& box : blockType.collisionShape().boxes()) {
+                        if (box.min.x <= 0.001f && box.min.y <= 0.001f && box.min.z <= 0.001f &&
+                            box.max.x >= 0.999f && box.max.y >= 0.999f && box.max.z >= 0.999f) {
+                            return true;
+                        }
                     }
                     return false;
                 };

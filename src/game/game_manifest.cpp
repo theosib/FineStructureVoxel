@@ -43,6 +43,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.gravity = doc->getFloat("gravity", m.gravity);
     m.viewDistance = doc->getFloat("view_distance", m.viewDistance);
     m.lod = doc->getBool("lod", m.lod);
+    m.nearestFilter = doc->getBool("nearest_filter", m.nearestFilter);
     m.detailPixels = doc->getFloat("detail_pixels", m.detailPixels);
     m.skySun = std::string(doc->getString("sky_sun", m.skySun));
     m.skyMoon = splitWords(doc->getString("sky_moon", ""));

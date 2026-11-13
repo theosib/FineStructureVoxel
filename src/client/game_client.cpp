@@ -697,6 +697,7 @@ void GameClient::Impl::enterWorld() {
 
     render::WorldRendererConfig worldConfig;
     worldConfig.viewDistance = worldInfo.viewDistance;
+    worldConfig.nearestFilter = manifest.nearestFilter;
     if (worldInfo.fog) {
         fog = std::make_unique<RegionTint>(worldInfo.visionCellsX, worldInfo.visionCellsZ);
         worldConfig.regionTintCells = fog->cells().size();
@@ -1104,6 +1105,7 @@ void GameClient::Impl::updateStewardView(float dt) {
     steward.setMoveBack(panBack);
     steward.setMoveLeft(panLeft);
     steward.setMoveRight(panRight);
+    if (jumpHeld) steward.requestJump();
 
     glm::vec2 delta = input.mouseDelta();
     if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward.look(delta.x, delta.y);

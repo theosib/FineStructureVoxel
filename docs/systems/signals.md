@@ -148,6 +148,7 @@ lists comma-separated (`set:powered=true: signal-level=15`).
 | `signal-in:` `signal-side:` `signal-hold:` | component: faces feeding ports A, B and Hold. A sink reads `signal-in`. |
 | `signal-in-from:` (and `-side-`, `-hold-`) | which neighbours a port reads: `conductor source component relay` (all) |
 | `signal-out:` | faces it drives. A conductor drives only sinks this way. |
+| `signal-offer:` | source: faces where component ports can read its level, though it drives nothing (a container's fill for a comparing component) |
 | `signal-power:<class>:` | faces whose relay block it powers, as that class |
 | `signal-reads:` | relay classes it reads (all) |
 | `signal-show:` | property that shows its level: a number property gets the level (or the highest value under it), any other gets `true` or `false` |
@@ -181,7 +182,7 @@ and for conductors `points`.
 ### Scripts
 
 `signal_level x y z` is a block's level (0 out of circuit); `signal_set x y z level` sets a
-source's level until its block changes. `on :signal` hears `signal-notify` blocks change.
+source's level until its block changes (it holds for a block the binding hasn't taken in yet). `on :signal` hears `signal-notify` blocks change.
 `world_move_blocks x y z dx dy dz n` moves a line of n blocks one cell (`World::moveBlocks`, with
 rotation and block data), for things a signal pushes or pulls.
 

@@ -527,3 +527,25 @@ TEST(SignalBinding, AWatcherPulsesWhenItsBlockChanges) {
     r.run(3);
     EXPECT_EQ(r.at(1, 1, 0), 0);
 }
+
+TEST(SignalBinding, ABoxOffersItsLevelOnlyToComponents) {
+    static bool defined = false;
+    if (!defined) {
+        defined = true;
+        defineAll();
+        defineBlock("box", {}, {{"signal", "source"}, {"signal-offer", "all"}}, true);
+    }
+    World world;
+    for (int x = -1; x <= 5; ++x) world.setBlock(BlockCoord(x, 0, 0), block("stone"));
+    world.setBlock(BlockCoord(0, 1, 0), block("box"));
+    world.setBlock(BlockCoord(1, 1, 0), block(state("delay", {{"facing", "west"}})));  // reads the box
+    world.setBlock(BlockCoord(2, 1, 0), block("wire"));
+    world.setBlock(BlockCoord(0, 1, 1), block("wire"));  // beside the box
+    SignalBinding signals(world, MAX);
+    signals.setSourceLevel(BlockCoord(0, 1, 0), 6);  // before it's taken in, as a game loading does
+    signals.attach();
+    for (int i = 0; i < 4; ++i) signals.step();
+    EXPECT_EQ(signals.levelAt(BlockCoord(0, 1, 0)), 6);
+    EXPECT_EQ(signals.levelAt(BlockCoord(2, 1, 0)), 15) << "the component read it";
+    EXPECT_EQ(signals.levelAt(BlockCoord(0, 1, 1)), 0) << "the wire beside it didn't";
+}

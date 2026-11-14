@@ -159,6 +159,7 @@ private:
     ChangeCallback changeCallback_;
     std::unordered_map<BlockCoord, SignalComponentState> toRestore_;
     std::unordered_map<BlockCoord, uint64_t> watchersOn_;  // pulsing watchers: step they end
+    std::unordered_map<BlockCoord, SignalLevel> sourceLevels_;  // set by scripts
 
     // (type id, property, value) -> type id, and property values by family
     std::unordered_map<std::string, BlockTypeId> withCache_;

@@ -80,6 +80,8 @@ struct SignalBlockSpec {
 
     /// Faces it drives: conductors, components' ports and sinks there read it
     SignalFaces out = 0;
+    /// Faces where only components' ports read it (a container's fill, say): it drives nothing
+    SignalFaces offer = 0;
     /// Sink: faces on which it joins sinks of its group, so two blocks act as one
     SignalFaces joinFaces = 0;
     /// Faces whose relay block it powers, by relay class

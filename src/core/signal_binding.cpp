@@ -147,6 +147,8 @@ SignalLevel SignalBinding::relayLevelAt(BlockCoord pos, InternedId cls) const {
 }
 
 void SignalBinding::setSourceLevel(BlockCoord pos, SignalLevel level) {
+    // Kept by position, so it holds for a block not taken in yet (a world just loaded)
+    sourceLevels_[pos] = level;
     Entry* e = entryAt(pos);
     if (e && e->spec && e->spec->role == SignalRole::Source) solver_.setSource(e->node, level);
 }
@@ -287,6 +289,8 @@ void SignalBinding::consider(BlockCoord pos, CoordSet& toRefresh) {
     const SignalBlockSpec* spec = specOf(type);
     Entry* e = entryAt(pos);
     if (e && e->type == type) return;
+    // A script's level holds until the block changes
+    if (e && !ownWrites_.count(pos)) sourceLevels_.erase(pos);
     // Its own showing, coming back: nothing to do but note the type
     if (auto own = ownWrites_.find(pos); own != ownWrites_.end()) {
         bool mine = own->second == type;
@@ -379,7 +383,11 @@ bool SignalBinding::rebuildEntry(BlockCoord pos) {
         made.type = type;
         made.spec = spec;
         switch (spec->role) {
-            case SignalRole::Source: made.node = solver_.addSource(spec->level); break;
+            case SignalRole::Source: {
+                auto set = sourceLevels_.find(pos);
+                made.node = solver_.addSource(set != sourceLevels_.end() ? set->second : spec->level);
+                break;
+            }
             case SignalRole::Conductor:
             case SignalRole::Sink: made.node = solver_.addConductor(); break;
             case SignalRole::Component: made.node = solver_.addComponent(spec->component); break;
@@ -531,9 +539,10 @@ void SignalBinding::linkFrom(BlockCoord a, BlockCoord b) {
         case SignalRole::Component: {
             const std::pair<const SignalPortSpec*, SignalPort> ports[] = {
                 {&bs->in, SignalPort::A}, {&bs->side, SignalPort::B}, {&bs->hold, SignalPort::Hold}};
+            const bool aOffers = isDriver(as) && hasSignalFace(as->offer, d);
             for (const auto& [port, which] : ports) {
                 if (!hasSignalFace(port->faces, back) || !(port->from & fromKind(as))) continue;
-                if (aConductor || aDrives) {
+                if (aConductor || aDrives || aOffers) {
                     solver_.connect(A->node, B->node, which);
                 } else if (aRelay) {
                     for (size_t i = 0; i < classes.size() && i < A->relays.size(); ++i) {

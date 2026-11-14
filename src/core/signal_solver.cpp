@@ -100,8 +100,7 @@ void SignalSolver::setSpec(SignalNodeId id, const SignalComponentSpec& spec) {
     markEvaluate(id);
 }
 
-void SignalSolver::removeNode(SignalNodeId id) {
-    if (!exists(id)) return;
+void SignalSolver::dropConnections(SignalNodeId id) {
     Node& n = node(id);
     const bool conductor = n.op == SignalOp::Conductor;
 
@@ -128,6 +127,39 @@ void SignalSolver::removeNode(SignalNodeId id) {
             if (exists(src)) eraseFirst(node(src).readers, [id](SignalNodeId x) { return x == id; });
         }
     }
+    n.in.clear();
+    n.out.clear();
+    n.readers.clear();
+    for (auto& port : n.ports) port.clear();
+    if (conductor) markAffected(id);
+    else if (isSignalComponent(n.op)) markEvaluate(id);
+}
+
+void SignalSolver::isolate(SignalNodeId id) {
+    if (!exists(id)) return;
+    dropConnections(id);
+}
+
+void SignalSolver::presetLevel(SignalNodeId id, SignalLevel level) {
+    if (!exists(id) || node(id).op == SignalOp::Conductor) return;
+    Node& n = node(id);
+    level = std::min(level, maxLevel_);
+    n.level = level;
+    if (isSignalComponent(n.op)) {
+        n.pending.clear();
+        n.lineLevel = level;
+        n.lastTarget = level;
+        n.state = level > 0;
+        markEvaluate(id);
+    }
+    for (const Link& l : n.out) markRegionDirty(l.node);
+}
+
+void SignalSolver::removeNode(SignalNodeId id) {
+    if (!exists(id)) return;
+    Node& n = node(id);
+    const bool conductor = n.op == SignalOp::Conductor;
+    dropConnections(id);
     if (conductor && n.region != NO_REGION && regions_[n.region].alive) {
         Region& r = regions_[n.region];
         eraseFirst(r.members, [id](SignalNodeId x) { return x == id; });

@@ -105,6 +105,14 @@ public:
     /// Remove a node and every link and port connection it has
     void removeNode(SignalNodeId id);
 
+    /// Drop every link and port connection a node has, both ways, and keep the node with its
+    /// state (what's on its way out of a component, a latch's state)
+    void isolate(SignalNodeId id);
+
+    /// Start a source or component at a level, as if it had been there all along: no change
+    /// is reported for it. For bringing back a circuit whose levels the world still shows.
+    void presetLevel(SignalNodeId id, SignalLevel level);
+
     /// Feed a conductor from any node, losing `loss` on the way. Linking the same pair again
     /// replaces the loss.
     void link(SignalNodeId from, SignalNodeId toConductor, SignalLevel loss);
@@ -182,6 +190,7 @@ private:
     };
 
     SignalNodeId allocate(SignalOp op);
+    void dropConnections(SignalNodeId id);
     Node& node(SignalNodeId id);
     const Node& node(SignalNodeId id) const;
 

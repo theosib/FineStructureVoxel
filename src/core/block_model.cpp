@@ -395,6 +395,17 @@ void BlockModel::applySetting(const StateSetting& setting) {
             if (value == "full") setCollision(CollisionShape::FULL_BLOCK);
         } else if (key == "walk-speed") {
             setWalkSpeed(number);
+        } else if (key == "tint-color") {
+            glm::vec3 c(1.0f);
+            std::string rgb = value;
+            std::replace(rgb.begin(), rgb.end(), ',', ' ');
+            std::istringstream iss(rgb);
+            iss >> c.r >> c.g >> c.b;
+            setTintColor(c);
+        } else if (key.rfind("signal", 0) == 0) {
+            std::string list = value;
+            std::replace(list.begin(), list.end(), ',', ' ');
+            setSignalKey(key, list);
         }
     }
 }

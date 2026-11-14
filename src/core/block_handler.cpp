@@ -191,6 +191,7 @@ void BlockContext::setBlock(BlockTypeId type) {
         if (auto* ftm = world_.fluidTickManager()) {
             ftm->notifyBlockChanged(pos_);
         }
+        world_.notifyBlockChanged(pos_);
     }
 }
 

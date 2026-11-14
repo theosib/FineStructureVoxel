@@ -13,6 +13,7 @@
 #include "finevox/core/particle_registry.hpp"
 #include "finevox/core/recipe_loader.hpp"
 #include "finevox/core/resource_locator.hpp"
+#include "finevox/core/signal_block.hpp"
 #include "finevox/core/tag_registry.hpp"
 #include "finevox/core/unification.hpp"
 #include "finevox/core/world.hpp"
@@ -179,7 +180,8 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
     size_t loadedCount = 0;
 
     // One block type, with this name, behaving and drawn as `m`
-    auto registerBlock = [&](const std::string& name, const BlockModel& m) {
+    using PropertyLookup = std::function<std::optional<std::string>(std::string_view)>;
+    auto registerBlock = [&](const std::string& name, const BlockModel& m, const PropertyLookup& property) {
             BlockType blockType;
             blockType.setHardness(m.hardness());
 
@@ -293,6 +295,15 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             }
         }
 
+        if (!m.signalKeys().empty()) {
+            std::string error;
+            if (auto spec = parseSignalSpec(m.signalKeys(), property, &error)) {
+                SignalBlockRegistry::global().set(bareId, *spec);
+                if (qualifiedId != bareId) SignalBlockRegistry::global().set(qualifiedId, std::move(*spec));
+            }
+            if (!error.empty()) std::cerr << "[ContentPackLoader] " << name << ": " << error << "\n";
+        }
+
         if (!m.connects().empty()) {
                 const uint32_t group = StringInterner::global().intern(m.connects());
                 blockConnects_[bareId.id] = group;
@@ -358,7 +369,7 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
         if (!model->hasProperties()) {
             BlockModel look = *model;
             drawAsCubeIfPlain(look);
-            registerBlock(item.name, look);
+            registerBlock(item.name, look, {});
             ++loadedCount;
             continue;
         }
@@ -395,7 +406,13 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             }
             state.resolveFaceTextures();
             drawAsCubeIfPlain(state);
-            registerBlock(BlockPropertyRegistry::global().stateName(item.name, values), state);
+            auto property = [&propNames, &values](std::string_view prop) -> std::optional<std::string> {
+                for (size_t i = 0; i < propNames.size(); ++i) {
+                    if (propNames[i] == prop) return values[i];
+                }
+                return std::nullopt;
+            };
+            registerBlock(BlockPropertyRegistry::global().stateName(item.name, values), state, property);
             ++loadedCount;
 
             size_t i = props.size();

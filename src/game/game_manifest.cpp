@@ -1,6 +1,7 @@
 #include "finevox/game/game_manifest.hpp"
 #include "finevox/core/config_parser.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <sstream>
 
@@ -40,6 +41,8 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.terrain = std::string(doc->getString("terrain", m.terrain));
     m.tickRate = static_cast<uint32_t>(doc->getInt("tick_rate", static_cast<int>(m.tickRate)));
     m.randomTicks = static_cast<uint32_t>(doc->getInt("random_ticks", static_cast<int>(m.randomTicks)));
+    m.signalMaxLevel = static_cast<uint32_t>(std::clamp(doc->getInt("signal_max_level", 0), 0, 255));
+    if (const auto* relays = doc->get("signal_relays")) m.signalOpaqueRelays = relays->value.asStringOwned() != "none";
     m.gravity = doc->getFloat("gravity", m.gravity);
     m.viewDistance = doc->getFloat("view_distance", m.viewDistance);
     m.lod = doc->getBool("lod", m.lod);

@@ -424,6 +424,11 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
 }
 
 void BlockModelLoader::parseStates(const ConfigDocument& doc, BlockModel& model) {
+    for (const ConfigEntry& entry : doc) {
+        if (entry.key != "signal" && entry.key.rfind("signal-", 0) != 0) continue;
+        model.setSignalKey(entry.hasSuffix() ? entry.key + ":" + entry.suffix : entry.key,
+                           entry.value.asStringOwned());
+    }
     for (const ConfigEntry* entry : doc.getAll("state")) {
         if (!entry->hasSuffix()) continue;
         BlockProperty property;

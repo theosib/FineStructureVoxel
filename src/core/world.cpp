@@ -41,6 +41,7 @@ ChunkColumn& World::addColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column
     columns_.emplace(pos.pack(), std::move(column));
     columnIndex_.set(pos.pack(), &added);
     if (updateScheduler_) updateScheduler_->noteColumnAdded(pos);
+    for (const auto& o : observers_) o->columnAdded(pos);
     return added;
 }
 
@@ -50,6 +51,7 @@ void World::retireColumn(uint64_t key) {
     columnIndex_.erase(key);
     removedColumns_.push_back(std::move(it->second));
     columns_.erase(it);
+    for (const auto& o : observers_) o->columnRemoved(ColumnPos::unpack(key));
 }
 
 BlockTypeId World::getBlock(int32_t x, int32_t y, int32_t z) const {
@@ -72,6 +74,7 @@ void World::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
             if (auto* mc = columnManager_->get(colPos); mc && mc->column) {
                 mc->column->setBlock(x, y, z, type);
                 columnManager_->markDirty(colPos);
+                notifyLocked(BlockCoord(x, y, z));
                 return;
             }
         }
@@ -88,6 +91,7 @@ void World::setBlock(int32_t x, int32_t y, int32_t z, BlockTypeId type) {
     if (columnManager_) {
         columnManager_->markDirty(colPos);
     }
+    notifyLocked(BlockCoord(x, y, z));
 }
 
 size_t World::setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> changes) {
@@ -156,6 +160,11 @@ size_t World::setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> chan
                 sub->setBlock(lc.lx, lc.ly, lc.lz, lc.type);
                 ++changedCount;
                 columnChanged = true;
+                if (!observers_.empty()) {
+                    notifyLocked(BlockCoord(chunkPos.x * SubChunk::SIZE + lc.lx,
+                                            chunkPos.y * SubChunk::SIZE + lc.ly,
+                                            chunkPos.z * SubChunk::SIZE + lc.lz));
+                }
             }
         }
 
@@ -227,6 +236,7 @@ std::unique_ptr<ChunkColumn> World::extractColumn(ColumnPos pos) {
     auto col = std::move(it->second);
     columns_.erase(it);
     columnIndex_.erase(pos.pack());
+    for (const auto& o : observers_) o->columnRemoved(pos);
     return col;
 }
 
@@ -563,6 +573,22 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
 // ============================================================================
 // Event System Integration
 // ============================================================================
+
+void World::addBlockObserver(std::shared_ptr<BlockObserver> observer) {
+    if (!observer) return;
+    std::unique_lock lock(columnMutex_);
+    observers_.push_back(std::move(observer));
+}
+
+void World::removeBlockObserver(const BlockObserver* observer) {
+    std::unique_lock lock(columnMutex_);
+    std::erase_if(observers_, [observer](const auto& o) { return o.get() == observer; });
+}
+
+void World::notifyBlockChanged(BlockCoord pos) {
+    std::shared_lock lock(columnMutex_);
+    notifyLocked(pos);
+}
 
 void World::setUpdateScheduler(UpdateScheduler* scheduler) {
     std::unique_lock lock(columnMutex_);

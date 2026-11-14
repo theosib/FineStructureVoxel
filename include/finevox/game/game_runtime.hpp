@@ -15,6 +15,7 @@
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/navigation.hpp"
 #include "finevox/core/projectile_system.hpp"
+#include "finevox/core/signal_binding.hpp"
 #include "finevox/core/queue.hpp"
 #include "finevox/core/work_claims.hpp"
 #include "finevox/core/world_replica.hpp"
@@ -199,6 +200,8 @@ public:
     [[nodiscard]] script::GameScriptEngine& scripts() { return *scripts_; }
     [[nodiscard]] script::ScriptGameSubsystem& gameScript() { return *gameScript_; }
     [[nodiscard]] NavigationSystem& navigation() { return *navigation_; }
+    /// The game's circuits, or null for a game without signals
+    [[nodiscard]] SignalBinding* signals() { return signals_.get(); }
     [[nodiscard]] WorkClaimRegistry& workClaims() { return workClaims_; }
     [[nodiscard]] worldgen::BlueprintLibrary& blueprints() { return blueprints_; }
     [[nodiscard]] FactionVision& vision() { return *vision_; }
@@ -276,6 +279,7 @@ private:
     std::unique_ptr<script::GameScriptEngine> scripts_;
     std::shared_ptr<script::ScriptGameSubsystem> gameScript_;
     std::shared_ptr<NavigationSystem> navigation_;
+    std::shared_ptr<SignalBinding> signals_;  // null unless the game has signals
     std::shared_ptr<FactionVision> vision_;
     std::shared_ptr<ProjectileSystem> projectiles_;
     WorldReplica* replica_ = nullptr;

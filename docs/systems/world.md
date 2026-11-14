@@ -185,7 +185,16 @@ bool canUnload = world.canUnloadChunk(chunkPos);
 
 // Non-copyable — use unique_ptr
 static std::unique_ptr<World> create(config);
+
+// Watching changes: blockChanged / columnAdded / columnRemoved
+world.addBlockObserver(std::make_shared<MyObserver>());
+world.notifyBlockChanged(pos);      // after writing a subchunk directly
 ```
+
+A `BlockObserver` hears of every block type change World makes (`setBlock`, `setBlocks`,
+`BlockContext::setBlock`) and every column added or removed, from whichever thread made it and
+often under World's writer lock: it should record and act later, never call back into World.
+`SignalBinding` is one.
 
 ---
 

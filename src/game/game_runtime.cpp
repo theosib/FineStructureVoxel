@@ -232,6 +232,12 @@ void GameRuntime::load() {
     session_->addSubsystem(navigation_);
     session_->addSubsystem(std::make_shared<WorkClaimClock>(workClaims_));
 
+    if (manifest_.signalMaxLevel > 0) {
+        signals_ = std::make_shared<SignalBinding>(world, static_cast<SignalLevel>(manifest_.signalMaxLevel));
+        signals_->setOpaqueRelays(manifest_.signalOpaqueRelays);
+        session_->addSubsystem(signals_);
+    }
+
     int32_t half = manifest_.worldRadius * 16;
     VisionBounds bounds{-half, -half, half, half};
     vision_ = std::make_shared<FactionVision>(world, session_->entities(), bounds);
@@ -622,6 +628,25 @@ void GameRuntime::registerNatives() {
                 line += traceText(arg, ctx.engine().interner());
             }
             writeTrace(line);
+            return finescript::Value::nil();
+        });
+
+    // signal_level x y z -> the level of a block in a circuit (0 for one that isn't)
+    engine.registerFunction(
+        "signal_level", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (!signals_ || args.size() < 3) return finescript::Value::integer(0);
+            BlockCoord pos(static_cast<int32_t>(args[0].asNumber()), static_cast<int32_t>(args[1].asNumber()),
+                           static_cast<int32_t>(args[2].asNumber()));
+            return finescript::Value::integer(signals_->levelAt(pos));
+        });
+
+    // signal_set x y z level: a source block puts out this level until the block changes
+    engine.registerFunction(
+        "signal_set", [this](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (!signals_ || args.size() < 4) return finescript::Value::nil();
+            BlockCoord pos(static_cast<int32_t>(args[0].asNumber()), static_cast<int32_t>(args[1].asNumber()),
+                           static_cast<int32_t>(args[2].asNumber()));
+            signals_->setSourceLevel(pos, static_cast<SignalLevel>(std::clamp<double>(args[3].asNumber(), 0, 255)));
             return finescript::Value::nil();
         });
 

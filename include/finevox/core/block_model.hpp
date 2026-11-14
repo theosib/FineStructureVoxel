@@ -18,6 +18,7 @@
 #include "finevox/core/position.hpp"
 #include <glm/glm.hpp>
 #include <array>
+#include <map>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -378,7 +379,8 @@ public:
 
     /// Behaviour that differs by state: `set:lit=true: light-emission=13`. Every matching
     /// line applies, in order. Keys: light-emission, light-attenuation, hardness, opaque,
-    /// collision (none or full), walk-speed.
+    /// collision (none or full), walk-speed, tint-color (r,g,b), and any signal key
+    /// (`signal-level=15`, lists comma-separated: `signal-out=north,up`).
     struct StateSetting {
         PropertyCondition when;
         std::vector<std::pair<std::string, std::string>> values;
@@ -388,6 +390,11 @@ public:
     /// Apply one setting's values to this model
     void applySetting(const StateSetting& setting);
     [[nodiscard]] const std::vector<BlockProperty>& properties() const { return properties_; }
+
+    /// The block's `signal` and `signal-*` keys, "key" or "key:suffix" to value
+    /// (see signal_block.hpp)
+    [[nodiscard]] const std::map<std::string, std::string>& signalKeys() const { return signalKeys_; }
+    void setSignalKey(const std::string& key, std::string value) { signalKeys_[key] = std::move(value); }
     [[nodiscard]] const std::vector<PropertyLook>& variants() const { return variants_; }
     [[nodiscard]] const std::vector<PropertyLook>& parts() const { return parts_; }
     [[nodiscard]] bool hasProperties() const { return !properties_.empty(); }
@@ -451,6 +458,7 @@ private:
     std::vector<PropertyLook> variants_;
     std::vector<PropertyLook> parts_;
     std::vector<StateSetting> stateSettings_;
+    std::map<std::string, std::string> signalKeys_;
     std::unordered_map<std::string, std::string> textureVariables_;
     float walkSpeed_ = 1.0f;
     bool hasOpaqueOverride_ = false;

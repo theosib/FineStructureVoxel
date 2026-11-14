@@ -1,8 +1,8 @@
 # System: Signals
 
 **Library:** `finevox` core (`finevox::`)
-**Headers:** `include/finevox/core/signal_solver.hpp`
-**Tests:** `tests/test_signal_solver.cpp`
+**Headers:** `include/finevox/core/signal_solver.hpp`, `signal_block.hpp`, `signal_binding.hpp`
+**Tests:** `tests/test_signal_solver.cpp`, `tests/test_signal_binding.cpp`
 
 ---
 
@@ -14,8 +14,8 @@ block to block. `SignalSolver` holds the circuit as a graph and advances it one 
 one step per game tick. Blocks give it configuration (what they are and how they connect) and get
 results back (which levels changed).
 
-The solver knows nothing about blocks, positions or the world. A binding layer turns blocks into
-nodes and results into block states. It's the next piece of work: [Binding (planned)](#binding-planned).
+The solver knows nothing about blocks, positions or the world. `SignalBinding` turns blocks into
+nodes and results into block states: [Binding](#binding-blocks-as-a-circuit).
 
 ## The model
 
@@ -31,6 +31,10 @@ default).
 **Links** feed conductors: `link(from, conductor, loss)`. The `from` end can be any node. Links
 are one-way, so a wire is linked both ways between neighbours and a one-way conductor is linked
 once. Conductors joined by links form a **region**, and a region settles as a whole.
+
+`isolate(id)` drops a node's links and keeps it with its state, for relinking it;
+`presetLevel(id, level)` starts a source or component at a level without reporting a change, for
+bringing back a circuit the world still shows.
 
 **Ports** are what a component reads: `connect(from, component, port)`. A port can take any
 number of nodes of any kind, and most ops use the strongest of them.
@@ -113,28 +117,77 @@ changes. To keep that move invisible to a game, the binding applies step n's cha
 of tick n+1 even when it steps inline. Node ids are handed out at once and reused
 last-freed-first, so a wrapper can allocate them on the game thread.
 
-## Binding (planned)
+## Binding: blocks as a circuit
 
-The binding turns blocks into nodes and results into block states. Proposed shape:
+`SignalBinding` (`signal_binding.hpp`, a game-thread subsystem) keeps a node for every block with a
+signal role, and for every relay block next to one, links them by the rules below, and steps the
+solver once a tick. A game turns it on with `signal_max_level: N` in `game.conf` (N is the
+strongest level; without it signal keys do nothing). It learns of block changes from `World`
+through a `BlockObserver`, so whoever changes a block needn't know about it: `World::setBlock`,
+`setBlocks`, `BlockContext::setBlock`, columns joining and leaving.
 
-- **Declared in `.model`.** A block says what it is to the solver: source, conductor (with a
-  group, a loss per block, and the faces it joins on), component (op, delay, which faces feed
-  ports A, B and Hold, which face it drives), or a block that only shows a level. Values can
-  depend on state through `set:` lines, so a block with a `delay` property can have a delay per
-  state.
-- **Relays.** A block can pass a signal driven into it on to its neighbours without being a wire.
-  A game can declare more than one kind of relay, each feeding a different set of neighbours.
-- **Results as state.** A node's level can set a property (`powered=true`, or the level itself),
-  coalesced to one block change per node per step. Changing the shown state doesn't change what
-  the block is to the solver, so it causes no graph edit.
-- **Sources from scripts** (`signal_set pos level`) and **consumers to scripts** (an `on :signal`
-  hook), for anything the declarations can't express.
-- **Saving.** Conductor levels are recomputed on load. What's on its way out of a component, and
-  latch and toggle state, are saved per position, as `TickJournal` saves pending ticks.
-- **Unloaded columns.** A circuit that reaches into a column that isn't loaded is frozen as a
-  whole until it is ("network quiescence" in the ROADMAP).
-- **Showing levels.** Every distinct shown level is a block state, so a fast clock remeshes its
-  subchunks every step. A per-state `tint-color` is needed so a conductor can show its level.
+Each tick: show the levels the last step made (as block states), take in the block changes
+since, step. A change between two states of the same shape (the binding showing a level, a
+player changing a delay) changes the node's level or spec and keeps its links and state. Any
+other change rebuilds the nodes in the block's neighbourhood (its faces and edges).
+
+### Declaring a block
+
+In `.model`, applying to every state; a `set:` line overrides any of them per state, with
+lists comma-separated (`set:powered=true: signal-level=15`).
+
+| Key | Meaning |
+|-----|---------|
+| `signal:` | `source`, `conductor`, `component` or `sink` |
+| `signal-group:` | conductor: joins conductors of the same group beside it |
+| `signal-loss:` | conductor: level lost to each neighbour (1) |
+| `signal-climb: true` | conductor: also joins its group one block up or down beside it, unless an opaque cube cuts the step (over the lower one going up, beside it going down) |
+| `signal-level:` | source: the level it puts out (0) |
+| `signal-op:` `signal-delay:` `signal-min-pulse:` `signal-full:` | component: as `SignalComponentSpec` |
+| `signal-in:` `signal-side:` `signal-hold:` | component: faces feeding ports A, B and Hold. A sink reads `signal-in`. |
+| `signal-in-from:` (and `-side-`, `-hold-`) | which neighbours a port reads: `conductor source component relay` (all) |
+| `signal-out:` | faces it drives. A conductor drives only sinks this way. |
+| `signal-power:<class>:` | faces whose relay block it powers, as that class |
+| `signal-reads:` | relay classes it reads (all) |
+| `signal-show:` | property that shows its level: a number property gets the level (or the highest value under it), any other gets `true` or `false` |
+| `signal-joins:` `signal-join-values:` | conductor: four properties (north east south west) showing where it joins, and their three values: not joined, joined, joined one block up |
+| `signal-facing:` | property that gives `front` (`facing`) |
+
+Faces are `north south east west up down`, `sides` (the four around), `all`, `front back left
+right` (relative to the facing; left and right as seen looking out of the front, from above),
+and for conductors `points`.
+
+### How neighbours connect
+
+- **Conductor to conductor**, same group, beside each other: linked both ways with the loss.
+- **A driver** (source or component) to the conductor, sink or component port its `signal-out`
+  faces: linked or connected at its full level.
+- **A conductor to a component port** facing it: always. **To a sink**: only through its
+  `signal-out` faces.
+- **Relays.** An opaque full cube with no role, next to any signal block, gets a node per relay
+  class (a game turns this off with `signal_relays: none`). A block powers it through
+  `signal-power:<class>` faces; it feeds every neighbour that reads that class (`signal-reads`)
+  and has a port or sink input facing it. Two classes are enough for "a signal into a block
+  passes on to wires" against "it passes on only to components".
+- **Joins** (what a conductor shows): conductors of its group beside it or a step up or down,
+  and drivers whose output or ports face it. **`points`**: a conductor joined on nothing points
+  all four ways; joined along one line, both ways along it; otherwise nowhere.
+
+### Scripts
+
+`signal_level x y z` is a block's level (0 out of circuit); `signal_set x y z level` sets a
+source's level until its block changes.
+
+### Not yet
+
+- **Saving.** Conductor levels come back from the blocks. A component the world shows as on
+  (its `signal-show` property) starts on; what was on its way out of it, and latch and toggle
+  state, is lost.
+- **Unloaded columns.** A column leaving the world drops its nodes; links into it from its
+  neighbours go with them, and come back when it returns. Circuits aren't frozen as a whole.
+- **Columns from a `ColumnManager`** don't reach the binding: it sees the columns `World` holds.
+- **Showing levels** costs a block change (and a remesh) per shown change, so a fast clock
+  remeshes its subchunks every step.
 
 ## Gotchas
 

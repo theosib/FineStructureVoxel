@@ -35,6 +35,11 @@ struct GameManifest {
 
     uint32_t tickRate = 30;
     uint32_t randomTicks = 4;     ///< Per subchunk per tick; 0 if no block wants them
+    /// Strongest signal level. Above 0, blocks with `signal` keys form circuits
+    /// (docs/systems/signals.md); 0 leaves them inert.
+    uint32_t signalMaxLevel = 0;
+    /// Opaque full cubes without a signal role carry signals between their neighbours
+    bool signalOpaqueRelays = true;
     float gravity = -14.0f;
     float viewDistance = 256.0f;
     /// Merge distant blocks into coarser meshes. Suits a first-person view of a far

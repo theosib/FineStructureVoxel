@@ -34,6 +34,24 @@ class FluidTickManager;
 struct LightingUpdate;
 struct BlockChange;  // Defined in batch_builder.hpp
 
+/**
+ * @brief Told when blocks change, so a system that keeps its own picture of some blocks
+ * (a circuit, say) can catch up
+ *
+ * Called from whichever thread made the change, often with World's writer lock held: record
+ * what changed and act on it later, on your own thread. Never call back into World from here.
+ */
+class BlockObserver {
+public:
+    virtual ~BlockObserver() = default;
+    /// A block's type changed (not its light or fluid)
+    virtual void blockChanged(BlockCoord pos) = 0;
+    /// A column joined the world, blocks and all
+    virtual void columnAdded(ColumnPos pos) { (void)pos; }
+    /// A column left the world
+    virtual void columnRemoved(ColumnPos pos) { (void)pos; }
+};
+
 // World contains all chunk columns and provides block access
 // Thread-safe for concurrent read access; writes require exclusive access
 //
@@ -274,6 +292,14 @@ public:
     [[nodiscard]] UpdateScheduler* updateScheduler() { return updateScheduler_; }
     [[nodiscard]] const UpdateScheduler* updateScheduler() const { return updateScheduler_; }
 
+    /// Watch block and column changes. The world shares ownership until it's removed.
+    void addBlockObserver(std::shared_ptr<BlockObserver> observer);
+    void removeBlockObserver(const BlockObserver* observer);
+
+    /// Tell the observers a block changed. World's own writes do this; call it after writing a
+    /// subchunk directly.
+    void notifyBlockChanged(BlockCoord pos);
+
     /// Attach optional FluidTickManager for fluid notifications on direct/script mutations
     void setFluidTickManager(FluidTickManager* ftm) { fluidTickManager_ = ftm; }
     [[nodiscard]] FluidTickManager* fluidTickManager() { return fluidTickManager_; }
@@ -321,6 +347,12 @@ private:
 
     // Optional column manager for column lifecycle / persistence (not owned)
     ColumnManager* columnManager_ = nullptr;
+
+    // Changed under columnMutex_ held exclusively; read with it held either way
+    std::vector<std::shared_ptr<BlockObserver>> observers_;
+    void notifyLocked(BlockCoord pos) {
+        for (const auto& o : observers_) o->blockChanged(pos);
+    }
 
     // Optional fluid tick manager for fluid simulation notifications (not owned)
     FluidTickManager* fluidTickManager_ = nullptr;

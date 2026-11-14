@@ -524,6 +524,19 @@ TEST_P(SignalSolverRandom, MatchesTheReference) {
                 live.push_back(id);
             } else if (what < 18) {
                 size_t i = static_cast<size_t>(pick(static_cast<int>(live.size())));
+                if (pick(3) == 0) {
+                    // Cut loose but kept, state and all
+                    SignalNodeId id = live[i];
+                    s.isolate(id);
+                    for (auto& [_, n] : ref.nodes) {
+                        n.in.erase(id);
+                        for (auto& p : n.ports) p.erase(std::remove(p.begin(), p.end(), id), p.end());
+                    }
+                    auto& n = ref.nodes.at(id);
+                    n.in.clear();
+                    for (auto& p : n.ports) p.clear();
+                    continue;
+                }
                 s.removeNode(live[i]);
                 ref.remove(live[i]);
                 live.erase(live.begin() + static_cast<std::ptrdiff_t>(i));

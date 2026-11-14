@@ -808,3 +808,42 @@ TEST_F(ReplicationServerTest, LoadProgressTracksColumnsThroughPrepareAndSync) {
     EXPECT_TRUE(one.synced);
     EXPECT_EQ(progress->column(0, 0), 4u);
 }
+
+TEST_F(GameRuntimeTest, SavePreservesCustomSeedAndWorldTitle) {
+    write("game.conf",
+          "name: Test Game\nnamespace: testgame\nworld_seed: 7\nworld_radius: 1\n"
+          "sea_level: 20\nsaves: true\n");
+    write("scripts/main.fsc", R"(
+set saved_seed 0
+on :resume do
+    set saved_seed WORLD_SEED
+end
+)");
+
+    fs::path slotPath = root / "saves" / "custom_world";
+    {
+        RuntimeOptions options;
+        options.gameRoot = root;
+        options.savePath = slotPath;
+        options.worldTitle = "Mountain Kingdom";
+        options.seedOverride = 424242;
+        options.newGame = true;
+        GameRuntime first(options);
+        first.load();
+        EXPECT_EQ(first.manifest().worldSeed, 424242u);
+        std::string error;
+        ASSERT_TRUE(first.saveGame(error)) << error;
+    }
+
+    {
+        RuntimeOptions options;
+        options.gameRoot = root;
+        options.savePath = slotPath;
+        GameRuntime resumed(options);
+        resumed.load();
+        EXPECT_TRUE(resumed.resumed());
+        EXPECT_EQ(resumed.manifest().worldSeed, 424242u);
+        EXPECT_EQ(resumed.gameScript().context().get("saved_seed").asInt(), 424242);
+    }
+}
+

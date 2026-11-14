@@ -19,6 +19,7 @@
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/region_file.hpp"
 #include "finevox/core/world_time.hpp"
+#include "finevox/script/finevox_interner.hpp"
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/script_game_subsystem.hpp"
 #include "finevox/script/value_graph.hpp"
@@ -27,6 +28,7 @@
 #include <finescript/map_data.h>
 #include <finescript/script_engine.h>
 
+#include <ctime>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -232,6 +234,9 @@ bool GameRuntime::saveGame(std::string& error) {
             map.set(scripts_->engine().intern(name), std::move(value));
         };
         set("version", integer(SAVE_VERSION));
+        set("seed", integer(static_cast<int64_t>(manifest_.worldSeed)));
+        set("title", Value::string(options_.worldTitle.empty() ? target.filename().string() : options_.worldTitle));
+        set("saved_at", integer(static_cast<int64_t>(std::time(nullptr))));
         set("tick", integer(static_cast<int64_t>(gameScript_->tickCount())));
         set("world_time", integer(session_->worldTime().totalTicks()));
         set("next_entity", integer(static_cast<int64_t>(highest) + 1));
@@ -278,6 +283,21 @@ bool GameRuntime::saveGame(std::string& error) {
         std::error_code ignored;
         fs::remove_all(partial, ignored);
         return false;
+    }
+}
+
+void GameRuntime::loadSavedHeader() {
+    fs::path path = savePath();
+    script::FineVoxInterner interner;
+    Value game = finescript::cborDecode(readFile(path / "game.cbor"), interner);
+    if (!game.isMap()) return;
+    auto& map = game.asMap();
+    auto get = [&](const char* name) { return map.get(interner.intern(name)); };
+    if (Value seed = get("seed"); seed.isInt() && !options_.seedOverride) {
+        manifest_.worldSeed = static_cast<uint64_t>(seed.asInt());
+    }
+    if (Value title = get("title"); title.isString() && options_.worldTitle.empty()) {
+        options_.worldTitle = std::string(title.asString());
     }
 }
 

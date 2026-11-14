@@ -64,10 +64,13 @@
 #include <finenet/discovery.hpp>
 #include <finenet/endpoint.hpp>
 
+#include <cctype>
 #include <cmath>
+#include <ctime>
 #include <fstream>
 #include <map>
 #include <iostream>
+#include <random>
 #include <unordered_set>
 
 namespace finevox::client {
@@ -88,6 +91,92 @@ fs::path freshPath(const fs::path& path) {
                     (path.stem().string() + "-" + std::to_string(n) + path.extension().string());
     }
     return candidate;
+}
+
+bool isSafeSaveSlot(std::string_view slot) {
+    if (slot.empty() || slot.size() > 64) return false;
+    if (slot.size() >= 4 && (slot.substr(slot.size() - 4) == ".tmp" || slot.substr(slot.size() - 4) == ".bak")) {
+        return false;
+    }
+    for (char c : slot) {
+        unsigned char u = static_cast<unsigned char>(c);
+        if (!std::isalnum(u) && c != '_' && c != '-') return false;
+    }
+    return true;
+}
+
+std::string makeSaveSlot(const fs::path& savesDir, std::string_view title) {
+    std::string base;
+    for (char c : title) {
+        unsigned char u = static_cast<unsigned char>(c);
+        if (std::isalnum(u)) {
+            base.push_back(static_cast<char>(std::tolower(u)));
+        } else if ((c == ' ' || c == '_' || c == '-') && !base.empty() && base.back() != '_') {
+            base.push_back('_');
+        }
+        if (base.size() >= 40) break;
+    }
+    while (!base.empty() && base.back() == '_') base.pop_back();
+    if (base.empty() || base == "autosave") base = "world";
+
+    std::error_code ignored;
+    std::string candidate = base;
+    for (int n = 2; fs::exists(savesDir / candidate, ignored); ++n) {
+        candidate = base + "_" + std::to_string(n);
+    }
+    return candidate;
+}
+
+uint64_t randomWorldSeed() {
+    std::random_device rd;
+    uint64_t a = static_cast<uint64_t>(rd());
+    uint64_t b = static_cast<uint64_t>(rd());
+    return 100000000ULL + ((a << 32 ^ b) % 900000000ULL);
+}
+
+uint64_t parseSeedValue(const Value& v) {
+    if (v.isInt()) return static_cast<uint64_t>(v.asInt());
+    if (v.isNumeric()) return static_cast<uint64_t>(static_cast<int64_t>(v.asNumber()));
+    std::string text = v.toString();
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+    if (text.empty()) return randomWorldSeed();
+
+    bool numeric = true;
+    size_t start = (text[0] == '-' || text[0] == '+') ? 1 : 0;
+    if (start >= text.size()) numeric = false;
+    for (size_t i = start; i < text.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(text[i]))) {
+            numeric = false;
+            break;
+        }
+    }
+    if (numeric) {
+        try {
+            return static_cast<uint64_t>(std::stoll(text));
+        } catch (const std::exception&) {}
+    }
+
+    uint64_t hash = 1469598103934665603ULL;
+    for (unsigned char c : text) {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    return hash & 0x7FFFFFFFFFFFULL;
+}
+
+std::string formatSaveDate(int64_t unixSeconds) {
+    if (unixSeconds <= 0) return "";
+    std::time_t t = static_cast<std::time_t>(unixSeconds);
+    std::tm tmBuf{};
+#ifdef _WIN32
+    localtime_s(&tmBuf, &t);
+#else
+    localtime_r(&t, &tmBuf);
+#endif
+    char buf[32]{};
+    if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tmBuf) == 0) return "";
+    return std::string(buf);
 }
 
 constexpr float FOV_DEGREES = 55.0f;
@@ -251,6 +340,7 @@ struct GameClient::Impl {
     void enterWorld();
     void beginSession(const std::string& name, const std::string& password);
     void startLocal(bool newGame);
+    void startLocal(HostRequest request);
     void pumpSession();
     void fireNet(std::string_view phase, std::string_view failure);
     void shutdown();
@@ -559,12 +649,16 @@ void GameClient::Impl::beginSession(const std::string& name, const std::string& 
 }
 
 void GameClient::Impl::startLocal(bool newGame) {
+    HostRequest request;
+    request.newGame = newGame;
+    startLocal(std::move(request));
+}
+
+void GameClient::Impl::startLocal(HostRequest request) {
     if (!options.hostFactory) {
         std::cerr << "[client] this client can't host a game\n";
         return;
     }
-    HostRequest request;
-    request.newGame = newGame;
     request.autoLaunch = true;
     std::string error;
     host = options.hostFactory(request, error);
@@ -2152,7 +2246,117 @@ void GameClient::Impl::registerNetNatives() {
 
     // has_save -> whether there's a game to continue
     e.registerFunction("has_save", [this](ExecutionContext&, const Args&) -> Value {
-        return Value::boolean(fs::is_directory(options.userRoot / "saves" / "autosave"));
+        std::error_code ignored;
+        fs::path savesDir = options.userRoot / "saves";
+        if (fs::is_regular_file(savesDir / "autosave" / "game.cbor", ignored)) return Value::boolean(true);
+        if (!fs::is_directory(savesDir, ignored)) return Value::boolean(false);
+        for (const auto& entry : fs::directory_iterator(savesDir, ignored)) {
+            if (!entry.is_directory(ignored)) continue;
+            std::string slot = entry.path().filename().string();
+            if (isSafeSaveSlot(slot) && fs::is_regular_file(entry.path() / "game.cbor", ignored)) {
+                return Value::boolean(true);
+            }
+        }
+        return Value::boolean(false);
+    });
+
+    // save_list -> [{=slot s =title t =seed n =saved_at ts =date str =world_time ticks} ...], newest first
+    e.registerFunction("save_list", [this](ExecutionContext&, const Args&) -> Value {
+        struct Entry {
+            std::string slot;
+            std::string title;
+            int64_t seed = 0;
+            int64_t savedAt = 0;
+            int64_t worldTime = 0;
+        };
+        std::vector<Entry> entries;
+        std::error_code ignored;
+        fs::path savesDir = options.userRoot / "saves";
+        if (fs::is_directory(savesDir, ignored)) {
+            for (const auto& dir : fs::directory_iterator(savesDir, ignored)) {
+                if (!dir.is_directory(ignored)) continue;
+                std::string slot = dir.path().filename().string();
+                if (!isSafeSaveSlot(slot)) continue;
+                fs::path cborPath = dir.path() / "game.cbor";
+                if (!fs::is_regular_file(cborPath, ignored)) continue;
+
+                Entry info;
+                info.slot = slot;
+                info.title = (slot == "autosave") ? "Autosave" : slot;
+                info.seed = static_cast<int64_t>(manifest.worldSeed);
+
+                if (auto ftime = fs::last_write_time(cborPath, ignored); !ignored) {
+                    auto sysTime = std::chrono::time_point_cast<std::chrono::seconds>(
+                        std::chrono::file_clock::to_sys(ftime));
+                    info.savedAt = sysTime.time_since_epoch().count();
+                }
+
+                try {
+                    std::ifstream in(cborPath, std::ios::binary);
+                    if (in) {
+                        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                                   std::istreambuf_iterator<char>());
+                        Value decoded = finescript::cborDecode(bytes, interner);
+                        if (decoded.isMap()) {
+                            auto& map = decoded.asMap();
+                            if (Value t = map.get(interner.intern("title")); t.isString() && !t.asString().empty()) {
+                                info.title = std::string(t.asString());
+                            }
+                            if (Value s = map.get(interner.intern("seed")); s.isInt()) {
+                                info.seed = s.asInt();
+                            }
+                            if (Value sa = map.get(interner.intern("saved_at")); sa.isInt() && sa.asInt() > 0) {
+                                info.savedAt = sa.asInt();
+                            }
+                            if (Value wt = map.get(interner.intern("world_time")); wt.isInt()) {
+                                info.worldTime = wt.asInt();
+                            }
+                        }
+                    }
+                } catch (const std::exception&) {}
+
+                entries.push_back(std::move(info));
+            }
+        }
+
+        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+            if (a.savedAt != b.savedAt) return a.savedAt > b.savedAt;
+            return a.slot < b.slot;
+        });
+
+        std::vector<Value> out;
+        out.reserve(entries.size());
+        for (const Entry& info : entries) {
+            Value row = Value::map();
+            net::setField(row, "slot", Value::string(info.slot));
+            net::setField(row, "title", Value::string(info.title));
+            net::setField(row, "seed", Value::integer(info.seed));
+            net::setField(row, "saved_at", Value::integer(info.savedAt));
+            net::setField(row, "date", Value::string(formatSaveDate(info.savedAt)));
+            net::setField(row, "world_time", Value::integer(info.worldTime));
+            out.push_back(std::move(row));
+        }
+        return Value::array(std::move(out));
+    });
+
+    // save_delete slot -> true if removed
+    e.registerFunction("save_delete", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::boolean(false);
+        std::string slot = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+                                              : args[0].toString();
+        if (!isSafeSaveSlot(slot)) return Value::boolean(false);
+        fs::path savesDir = options.userRoot / "saves";
+        std::error_code ignored;
+        bool existed = fs::exists(savesDir / slot, ignored);
+        fs::remove_all(savesDir / slot, ignored);
+        fs::remove_all(savesDir / (slot + ".bak"), ignored);
+        fs::remove_all(savesDir / (slot + ".tmp"), ignored);
+        return Value::boolean(existed && !fs::exists(savesDir / slot, ignored));
+    });
+
+    // random_seed -> a fresh positive seed suitable for typing or display
+    e.registerFunction("random_seed", [](ExecutionContext&, const Args&) -> Value {
+        return Value::integer(static_cast<int64_t>(randomWorldSeed()));
     });
 
     e.registerFunction("player_name", [this](ExecutionContext&, const Args&) -> Value {
@@ -2164,9 +2368,21 @@ void GameClient::Impl::registerNetNatives() {
         return Value::nil();
     });
 
-    // game_start [=new true]: a game for one, with no lobby
+    // game_start [=new true] [=slot s] [=title t] [=seed s]: a game for one, with no lobby
     e.registerFunction("game_start", [this, option](ExecutionContext&, const Args& args) -> Value {
-        startLocal(option(args, "new").truthy());
+        HostRequest request;
+        request.newGame = option(args, "new").truthy();
+        request.title = net::textField(args.empty() ? Value::nil() : args.back(), "title");
+        request.saveSlot = net::textField(args.empty() ? Value::nil() : args.back(), "slot");
+        if (!request.saveSlot.empty() && !isSafeSaveSlot(request.saveSlot)) {
+            request.saveSlot = makeSaveSlot(options.userRoot / "saves", request.saveSlot);
+        } else if (request.saveSlot.empty() && request.newGame && !request.title.empty()) {
+            request.saveSlot = makeSaveSlot(options.userRoot / "saves", request.title);
+        }
+        if (Value seedOpt = option(args, "seed"); !seedOpt.isNil()) {
+            request.seed = parseSeedValue(seedOpt);
+        }
+        startLocal(std::move(request));
         return Value::nil();
     });
 
@@ -2179,6 +2395,13 @@ void GameClient::Impl::registerNetNatives() {
         request.newGame = option(args, "new").truthy();
         request.title = net::textField(args.empty() ? Value::nil() : args.back(), "title");
         request.password = net::textField(args.empty() ? Value::nil() : args.back(), "password");
+        request.saveSlot = net::textField(args.empty() ? Value::nil() : args.back(), "slot");
+        if (!request.saveSlot.empty() && !isSafeSaveSlot(request.saveSlot)) {
+            request.saveSlot = makeSaveSlot(options.userRoot / "saves", request.saveSlot);
+        }
+        if (Value seedOpt = option(args, "seed"); !seedOpt.isNil()) {
+            request.seed = parseSeedValue(seedOpt);
+        }
         if (Value port = option(args, "port"); port.isNumeric()) {
             request.port = static_cast<uint16_t>(port.asNumber());
         } else {

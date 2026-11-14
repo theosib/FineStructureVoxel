@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace finenet {
@@ -58,6 +59,8 @@ struct HostRequest {
     uint16_t port = 0;
     std::string title;
     std::string password;
+    std::string saveSlot;
+    std::optional<uint64_t> seed;
 };
 
 using HostFactory = std::function<std::unique_ptr<LocalHost>(const HostRequest&, std::string& error)>;

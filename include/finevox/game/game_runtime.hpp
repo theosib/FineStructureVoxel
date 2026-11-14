@@ -121,6 +121,8 @@ struct RuntimeOptions {
     std::vector<std::pair<std::string, std::string>> scriptDefines;
     /// Where to save and resume from. Empty means the game's own slot, if it uses saves.
     std::filesystem::path savePath;
+    /// Display name stored in game.cbor for world selection menus
+    std::string worldTitle;
     /// Start over even if there's a save. The old one stays until the next save replaces it.
     bool newGame = false;
     /// Neither read nor write saves: for automation, which must not touch the player's game
@@ -253,6 +255,7 @@ private:
     void generateWorld();
     void lightWorld();
     void registerNatives();
+    void loadSavedHeader();
     void loadSavedWorld();
     void loadSavedState();
     [[nodiscard]] finescript::Value saveSites();

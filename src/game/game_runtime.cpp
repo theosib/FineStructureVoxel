@@ -191,6 +191,9 @@ void GameRuntime::load() {
 
     resumed_ = saveExists() && !options_.newGame;
     if (prog) prog->resuming.store(resumed_, std::memory_order_relaxed);
+    if (resumed_) {
+        loadSavedHeader();
+    }
     loadWorldContent();
     if (resumed_) {
         loadSavedWorld();

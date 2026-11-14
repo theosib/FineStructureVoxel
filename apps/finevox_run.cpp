@@ -304,9 +304,17 @@ int main(int argc, char* argv[]) {
         game::HostConfig config;
         config.runtime = runtimeOptions;
         config.runtime.newGame = request.newGame;
-        // A hosted game has a slot of its own: it's no reason to lose the one you were playing
-        if (!request.autoLaunch && !config.runtime.noSaves) {
+        if (!request.saveSlot.empty() && !config.runtime.noSaves) {
+            config.runtime.savePath = config.runtime.saveRoot() / request.saveSlot;
+        } else if (!request.autoLaunch && !config.runtime.noSaves) {
+            // A hosted game has a slot of its own: it's no reason to lose the one you were playing
             config.runtime.savePath = config.runtime.saveRoot() / "hosted";
+        }
+        if (!request.title.empty()) {
+            config.runtime.worldTitle = request.title;
+        }
+        if (request.seed) {
+            config.runtime.seedOverride = *request.seed;
         }
         config.autoLaunch = request.autoLaunch;
         config.listen = request.listen;

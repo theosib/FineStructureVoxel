@@ -1055,13 +1055,13 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
     if (!result.matched()) return false;
 
     const std::string& action = result.actionName;
-    if (action == "begin_pan_left") panLeft = true;
+    if (action == "begin_pan_left") { if (!mouseFree) panLeft = true; }
     else if (action == "end_pan_left") panLeft = false;
-    else if (action == "begin_pan_right") panRight = true;
+    else if (action == "begin_pan_right") { if (!mouseFree) panRight = true; }
     else if (action == "end_pan_right") panRight = false;
-    else if (action == "begin_pan_forward") panForward = true;
+    else if (action == "begin_pan_forward") { if (!mouseFree) panForward = true; }
     else if (action == "end_pan_forward") panForward = false;
-    else if (action == "begin_pan_back") panBack = true;
+    else if (action == "begin_pan_back") { if (!mouseFree) panBack = true; }
     else if (action == "end_pan_back") panBack = false;
     else if (action == "begin_grab") {
         if (grabHeld++ == 0) grabCursor = mouse;
@@ -1070,11 +1070,13 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
     else if (action == "toggle_view") setEmbodied(!embodied);
     else if (action == "toggle_fullscreen") engine->window().toggleFullscreen();
     else if (action == "begin_jump" && embodied) {
-        jumpHeld = true;
-        steward.requestJump();
+        if (!mouseFree) {
+            jumpHeld = true;
+            steward.requestJump();
+        }
     }
     else if (action == "end_jump") jumpHeld = false;
-    else if (action == "begin_sneak") sneakHeld = true;
+    else if (action == "begin_sneak") { if (!mouseFree) sneakHeld = true; }
     else if (action == "end_sneak") sneakHeld = false;
     else if (action == "begin_orbit_left") orbitLeft = true;
     else if (action == "end_orbit_left") orbitLeft = false;
@@ -1136,12 +1138,12 @@ void GameClient::Impl::updateStewardView(float dt) {
         stewardBody->setPosition(Vec3(float(moved->x), float(moved->y), float(moved->z)));
         stewardBody->setVelocity(Vec3(0.0f));
     }
-    steward.setMoveForward(panForward);
-    steward.setMoveBack(panBack);
-    steward.setMoveLeft(panLeft);
-    steward.setMoveRight(panRight);
-    steward.setJumpHeld(jumpHeld);
-    steward.setSneak(sneakHeld);
+    steward.setMoveForward(!mouseFree && panForward);
+    steward.setMoveBack(!mouseFree && panBack);
+    steward.setMoveLeft(!mouseFree && panLeft);
+    steward.setMoveRight(!mouseFree && panRight);
+    steward.setJumpHeld(!mouseFree && jumpHeld);
+    steward.setSneak(!mouseFree && sneakHeld);
 
     glm::vec2 delta = input.mouseDelta();
     if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward.look(delta.x, delta.y);
@@ -1966,6 +1968,11 @@ void GameClient::Impl::registerNatives() {
     e.registerFunction("mouse_free", [this](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty()) {
             mouseFree = args[0].truthy();
+            if (mouseFree) {
+                panLeft = panRight = panForward = panBack = false;
+                jumpHeld = sneakHeld = false;
+                steward.clearInput();
+            }
             if (embodied) {
                 ImGuiIO& io = ImGui::GetIO();
                 if (mouseFree) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;

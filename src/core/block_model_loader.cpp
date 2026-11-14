@@ -342,6 +342,25 @@ std::optional<BlockModel> BlockModelLoader::parseModelFromString(const std::stri
         }
     }
 
+    // Load hit shape if specified ("inherit", or none given, uses the collision shape)
+    if (const ConfigEntry* hitEntry = doc.get("hit")) {
+        std::string value = hitEntry->value.asStringOwned();
+
+        if (value == "none") {
+            model.setHit(CollisionShape::NONE);
+        } else if (value == "full") {
+            model.setHit(CollisionShape::FULL_BLOCK);
+        } else if (value != "inherit" && resolver_) {
+            std::string hitPath = ensureExtension(value, ".collision");
+            std::string resolvedContent = resolver_(hitPath);
+            if (!resolvedContent.empty()) {
+                if (auto hit = parseCollisionFromString(resolvedContent)) {
+                    model.setHit(std::move(*hit));
+                }
+            }
+        }
+    }
+
     // Parse rotation constraint
     if (const ConfigEntry* rotEntry = doc.get("rotations")) {
         std::string value = rotEntry->value.asStringOwned();

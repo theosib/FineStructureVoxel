@@ -186,9 +186,11 @@ rotation and block data), for things a signal pushes or pulls.
 
 ### Not yet
 
-- **Saving.** Conductor levels come back from the blocks. A component the world shows as on
-  (its `signal-show` property) starts on; what was on its way out of it, and latch and toggle
-  state, is lost.
+- **Saving.** Conductor levels come back from the blocks, and a component the world shows as
+  on starts on. What a component has in flight (its delay line, minimum pulse, latch or toggle
+  state) is `SignalBinding::saveComponents()`, which `GameRuntime` keeps in `game.cbor` as
+  `signals` and gives back with `restoreComponents()`; times count from the step about to run,
+  so they carry over to any clock.
 - **Unloaded columns.** A column leaving the world drops its nodes; links into it from its
   neighbours go with them, and come back when it returns. Circuits aren't frozen as a whole.
 - **Columns from a `ColumnManager`** don't reach the binding: it sees the columns `World` holds.

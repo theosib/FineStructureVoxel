@@ -465,3 +465,38 @@ TEST(SignalBinding, AHeldComponentShowsIt) {
     r.run(2);
     EXPECT_EQ(r.at(1, 1, 0), 15) << "let go: it reads the lever";
 }
+
+TEST(SignalBinding, WhatsInFlightSurvivesASave) {
+    defineAll();
+    auto build = [](World& w) {
+        for (int x = -1; x <= 4; ++x) w.setBlock(BlockCoord(x, 0, 0), block("stone"));
+        w.setBlock(BlockCoord(0, 1, 0), block("lever"));
+        w.setBlock(BlockCoord(1, 1, 0), block(state("delay", {{"facing", "west"}, {"ticks", "4"}})));
+        w.setBlock(BlockCoord(2, 1, 0), block("wire"));
+    };
+    World a;
+    build(a);
+    SignalBinding sa(a, MAX);
+    sa.attach();
+    sa.step();
+    a.setBlock(BlockCoord(0, 1, 0), block("lever[powered=true]"));
+    sa.step();  // the delay reads it: out 4 steps on
+    sa.step();
+    auto saved = sa.saveComponents();
+    ASSERT_EQ(saved.size(), 1u);
+
+    World b;
+    build(b);
+    b.setBlock(BlockCoord(0, 1, 0), block("lever[powered=true]"));
+    SignalBinding sb(b, MAX);
+    sb.attach();
+    sb.restoreComponents(saved);
+    std::vector<int> ta, tb;
+    for (int i = 0; i < 5; ++i) {
+        sa.step();
+        sb.step();
+        ta.push_back(sa.levelAt(BlockCoord(2, 1, 0)));
+        tb.push_back(sb.levelAt(BlockCoord(2, 1, 0)));
+    }
+    EXPECT_EQ(ta, tb);
+}

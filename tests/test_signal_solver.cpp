@@ -656,3 +656,42 @@ TEST(SignalSolver, LargeGridCost) {
     EXPECT_EQ(settled, static_cast<uint64_t>(N * N) * STEPS) << "the clock turns every step";
     EXPECT_LT(us / STEPS, 20000.0);
 }
+
+TEST(SignalSolver, AComponentsStateCarriesOver) {
+    // A pulse half way down a delay line, saved and given to a new solver, comes out on time
+    auto build = [](SignalSolver& s, SignalNodeId& src, SignalNodeId& buf) {
+        src = s.addSource();
+        buf = s.addComponent({SignalOp::Buffer, 10, 0, false});
+        s.connect(src, buf, SignalPort::A);
+    };
+    SignalSolver a(MAX);
+    SignalNodeId srcA, bufA;
+    build(a, srcA, bufA);
+    a.step();
+    a.setSource(srcA, 9);
+    a.step();  // read here: out 10 steps on
+    a.setSource(srcA, 0);
+    a.step();  // and off: out 10 steps after that
+    for (int i = 0; i < 3; ++i) a.step();
+    SignalComponentState saved = a.componentState(bufA);
+    EXPECT_FALSE(saved.settled());
+    ASSERT_EQ(saved.pending.size(), 2u);
+
+    SignalSolver b(MAX);
+    SignalNodeId srcB, bufB;
+    build(b, srcB, bufB);
+    for (int i = 0; i < 17; ++i) b.step();  // its own clock is elsewhere
+    b.setComponentState(bufB, saved);
+    std::vector<SignalLevel> ta, tb;
+    for (int i = 0; i < 8; ++i) {
+        a.step();
+        b.step();
+        ta.push_back(a.level(bufA));
+        tb.push_back(b.level(bufB));
+    }
+    EXPECT_EQ(ta, tb);
+    // Read at step 2, so out at 12 (the 6th of these, steps 7 to 14), off at 13
+    EXPECT_EQ(ta[4], 0);
+    EXPECT_EQ(ta[5], 9) << "on 10 steps after it was read";
+    EXPECT_EQ(ta[6], 0);
+}

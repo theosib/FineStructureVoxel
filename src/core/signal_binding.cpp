@@ -197,6 +197,34 @@ void SignalBinding::takeChanges() {
     CoordSet toRefresh;
     for (BlockCoord pos : changed) consider(pos, toRefresh);
     if (!toRefresh.empty()) refresh(toRefresh);
+
+    for (auto it = toRestore_.begin(); it != toRestore_.end();) {
+        const Entry* e = entryAt(it->first);
+        if (e && e->spec && e->spec->role == SignalRole::Component) {
+            solver_.setComponentState(e->node, it->second);
+            newlyMade_.erase(it->first);
+            it = toRestore_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+std::vector<SignalBinding::SavedComponent> SignalBinding::saveComponents() const {
+    std::vector<SavedComponent> out;
+    for (const auto& [pos, e] : entries_) {
+        if (!e.spec || e.spec->role != SignalRole::Component) continue;
+        SignalComponentState s = solver_.componentState(e.node);
+        if (!s.settled()) out.push_back({pos, std::move(s)});
+    }
+    // Not yet taken in: keep them for next time
+    for (const auto& [pos, s] : toRestore_) out.push_back({pos, s});
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return CoordLess{}(a.pos, b.pos); });
+    return out;
+}
+
+void SignalBinding::restoreComponents(std::vector<SavedComponent> saved) {
+    for (auto& s : saved) toRestore_[s.pos] = std::move(s.state);
 }
 
 void SignalBinding::scanColumn(ColumnPos colPos, CoordSet& changed) {

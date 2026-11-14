@@ -164,6 +164,41 @@ void SignalSolver::presetLevel(SignalNodeId id, SignalLevel level) {
     for (const Link& l : n.out) markRegionDirty(l.node);
 }
 
+SignalComponentState SignalSolver::componentState(SignalNodeId id) const {
+    SignalComponentState out;
+    if (!exists(id) || !isSignalComponent(node(id).op)) return out;
+    const Node& n = node(id);
+    const uint64_t next = step_ + 1;
+    out.level = n.level;
+    out.lineLevel = n.lineLevel;
+    out.lastTarget = n.lastTarget;
+    out.prevA = n.prevA;
+    out.state = n.state;
+    out.holdFor = n.holdUntil > next ? static_cast<uint32_t>(n.holdUntil - next) : 0;
+    for (const Pending& p : n.pending) out.pending.emplace_back(static_cast<uint32_t>(p.due - next), p.level);
+    return out;
+}
+
+void SignalSolver::setComponentState(SignalNodeId id, const SignalComponentState& s) {
+    if (!exists(id) || !isSignalComponent(node(id).op)) return;
+    Node& n = node(id);
+    const uint64_t next = step_ + 1;
+    n.level = std::min(s.level, maxLevel_);
+    n.lineLevel = s.lineLevel;
+    n.lastTarget = s.lastTarget;
+    n.prevA = s.prevA;
+    n.state = s.state;
+    n.holdUntil = s.holdFor > 0 ? next + s.holdFor : 0;
+    n.pending.clear();
+    for (const auto& [in, level] : s.pending) {
+        n.pending.push_back({next + in, level});
+        wake(id, next + in);
+    }
+    if (n.holdUntil > 0) wake(id, n.holdUntil);
+    markEvaluate(id);
+    for (const Link& l : n.out) markRegionDirty(l.node);
+}
+
 void SignalSolver::removeNode(SignalNodeId id) {
     if (!exists(id)) return;
     Node& n = node(id);

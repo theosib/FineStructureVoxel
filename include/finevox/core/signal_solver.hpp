@@ -81,6 +81,22 @@ struct SignalChange {
     SignalLevel level;
 };
 
+/// What a component has in flight, for saving. Times count steps from the one about to run.
+struct SignalComponentState {
+    SignalLevel level = 0;       ///< its output
+    SignalLevel lineLevel = 0;   ///< what its delay line puts out
+    SignalLevel lastTarget = 0;  ///< the level most recently sent on its way
+    SignalLevel prevA = 0;
+    bool state = false;          ///< latch or toggle
+    uint32_t holdFor = 0;        ///< minPulse: steps it stays on whatever the line says
+    std::vector<std::pair<uint32_t, SignalLevel>> pending;  ///< (steps from now, level)
+
+    /// Nothing a component's inputs wouldn't give it again
+    [[nodiscard]] bool settled() const {
+        return pending.empty() && !state && holdFor == 0 && lineLevel == level && lastTarget == level;
+    }
+};
+
 /// Work a step did, for tests and profiling
 struct SignalStepStats {
     uint32_t regionsSettled = 0;
@@ -108,6 +124,11 @@ public:
     /// Drop every link and port connection a node has, both ways, and keep the node with its
     /// state (what's on its way out of a component, a latch's state)
     void isolate(SignalNodeId id);
+
+    /// A component's state, to save; and back, after it's been made again (no change is
+    /// reported for the level it comes back with)
+    [[nodiscard]] SignalComponentState componentState(SignalNodeId component) const;
+    void setComponentState(SignalNodeId component, const SignalComponentState& state);
 
     /// Start a source or component at a level, as if it had been there all along: no change
     /// is reported for it. For bringing back a circuit whose levels the world still shows.

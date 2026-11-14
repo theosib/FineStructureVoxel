@@ -73,6 +73,16 @@ public:
     using ChangeCallback = std::function<void(BlockCoord, SignalLevel)>;
     void setChangeCallback(ChangeCallback callback) { changeCallback_ = std::move(callback); }
 
+    /// Components with something in flight, by position, for saving
+    struct SavedComponent {
+        BlockCoord pos;
+        SignalComponentState state;
+    };
+    [[nodiscard]] std::vector<SavedComponent> saveComponents() const;
+    /// Give them back: each applies once its block has been taken in (on the next tick for a
+    /// world that's loaded)
+    void restoreComponents(std::vector<SavedComponent> saved);
+
     [[nodiscard]] SignalSolver& solver() { return solver_; }
     [[nodiscard]] const SignalSolver& solver() const { return solver_; }
     [[nodiscard]] size_t blockCount() const { return entries_.size(); }
@@ -145,6 +155,7 @@ private:
     CoordSet newlyMade_;                                   // show these whatever the results
     std::unordered_map<BlockCoord, BlockTypeId> ownWrites_;  // shown states on their way back
     ChangeCallback changeCallback_;
+    std::unordered_map<BlockCoord, SignalComponentState> toRestore_;
 
     // (type id, property, value) -> type id, and property values by family
     std::unordered_map<std::string, BlockTypeId> withCache_;

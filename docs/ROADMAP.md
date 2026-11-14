@@ -147,8 +147,8 @@ Signals are solved by `SignalSolver` ([systems/signals.md](systems/signals.md)),
 ticks and neighbour updates: blocks declare what they are to the solver, which steps once per game
 tick and reports the levels that changed. Only conductors are instant and every component delays at
 least one step, so circuits are deterministic and can't form instant loops. The solver and the
-binding from blocks (`.model` declarations, relays, results as block states) are done; saving
-what's in flight and freezing at unloaded columns are left. The block types above are one game's
+binding from blocks (`.model` declarations, relays, results as block states, saving what's in
+flight) are done; freezing at unloaded columns is left. The block types above are one game's
 vocabulary on top of it.
 
 #### Phase 30: Item Transport + Power

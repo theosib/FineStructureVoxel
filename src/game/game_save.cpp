@@ -246,6 +246,22 @@ bool GameRuntime::saveGame(std::string& error) {
         set("entities", Value::array(std::move(entities)));
         set("vision", Value::array(std::move(factions)));
         set("lookouts", Value::array(std::move(lookouts)));
+        if (signals_) {
+            // [x y z level line last prevA state holdFor [in level ...]] per component in flight
+            std::vector<Value> saved;
+            for (const auto& c : signals_->saveComponents()) {
+                std::vector<Value> pending;
+                for (const auto& [in, level] : c.state.pending) {
+                    pending.push_back(integer(in));
+                    pending.push_back(integer(level));
+                }
+                saved.push_back(Value::array(std::vector<Value>{
+                    integer(c.pos.x), integer(c.pos.y), integer(c.pos.z), integer(c.state.level),
+                    integer(c.state.lineLevel), integer(c.state.lastTarget), integer(c.state.prevA),
+                    integer(c.state.state ? 1 : 0), integer(c.state.holdFor), Value::array(std::move(pending))}));
+            }
+            set("signals", Value::array(std::move(saved)));
+        }
         ClientSave client = clientSaveCopy();
         for (const Seat& seat : everyone) {
             if (!seat.local || seat.body == INVALID_ENTITY_ID) continue;
@@ -338,6 +354,30 @@ void GameRuntime::loadSavedState() {
         for (const auto& [faction, replica] : replicas_) replica->refreshLight();
     }
     loadSites(get("sites"), get("next_site").asInt());
+
+    if (signals_ && get("signals").isArray()) {
+        std::vector<SignalBinding::SavedComponent> saved;
+        for (const Value& entry : get("signals").asArray()) {
+            const auto& f = entry.asArray();
+            if (f.size() < 10) continue;
+            SignalBinding::SavedComponent c;
+            c.pos = BlockCoord(static_cast<int32_t>(f[0].asInt()), static_cast<int32_t>(f[1].asInt()),
+                               static_cast<int32_t>(f[2].asInt()));
+            c.state.level = static_cast<SignalLevel>(f[3].asInt());
+            c.state.lineLevel = static_cast<SignalLevel>(f[4].asInt());
+            c.state.lastTarget = static_cast<SignalLevel>(f[5].asInt());
+            c.state.prevA = static_cast<SignalLevel>(f[6].asInt());
+            c.state.state = f[7].asInt() != 0;
+            c.state.holdFor = static_cast<uint32_t>(f[8].asInt());
+            const auto& pending = f[9].asArray();
+            for (size_t i = 0; i + 1 < pending.size(); i += 2) {
+                c.state.pending.emplace_back(static_cast<uint32_t>(pending[i].asInt()),
+                                             static_cast<SignalLevel>(pending[i + 1].asInt()));
+            }
+            saved.push_back(std::move(c));
+        }
+        signals_->restoreComponents(std::move(saved));
+    }
 
     EntityManager& entities = session_->entities();
     for (const Value& entry : get("entities").asArray()) {

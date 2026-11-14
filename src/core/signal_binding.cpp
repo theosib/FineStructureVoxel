@@ -315,7 +315,7 @@ bool SignalBinding::rebuildEntry(BlockCoord pos) {
             }
         }
         nodeAt_[made.node] = pos;
-        newlyMade_.insert(pos);
+        if (!spec->showEdges) newlyMade_.insert(pos);
         entries_[pos] = std::move(made);
         return true;
     }
@@ -427,6 +427,12 @@ void SignalBinding::linkFrom(BlockCoord a, BlockCoord b) {
             }
             break;
         case SignalRole::Sink: {
+            if (as && as->role == SignalRole::Sink) {
+                if (as->group == bs->group && hasSignalFace(as->joinFaces, d) && hasSignalFace(bs->joinFaces, back)) {
+                    solver_.link(A->node, B->node, 0);
+                }
+                break;
+            }
             if (!hasSignalFace(bs->in.faces, back) || !(bs->in.from & fromKind(as))) break;
             if (aConductor) {
                 if (hasSignalFace(effectiveOut(*A, as->out), d)) solver_.link(A->node, B->node, 0);

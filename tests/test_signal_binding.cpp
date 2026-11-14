@@ -281,3 +281,30 @@ TEST(SignalBinding, ALoadedDelayShownOnStartsOn) {
     EXPECT_EQ(signals.levelAt(BlockCoord(2, 1, 0)), 15) << "no wait for a delay already on";
 }
 
+
+TEST(SignalBinding, TwoJoinedSinksActAsOne) {
+    static bool defined = false;
+    if (!defined) {
+        defined = true;
+        defineAll();
+        defineBlock("gate", {{"half", {"lower", "upper"}}, {"open", BOOL}},
+                    {{"signal", "sink"}, {"signal-group", "gate"}, {"signal-in", "all"},
+                     {"signal-show", "open"}, {"signal-show-edges", "true"}},
+                    false, [](const std::vector<std::string>& v, SignalKeys& k) {
+                        k["signal-join-faces"] = v[0] == "lower" ? "up" : "down";
+                    });
+    }
+    Rig r;
+    r.set(3, 1, 0, "gate");
+    r.set(3, 2, 0, state("gate", {{"half", "upper"}, {"open", "true"}}));  // opened by hand
+    r.run(2);
+    EXPECT_EQ(prop(r.world, BlockCoord(3, 2, 0), "open"), "true") << "found open, stays open";
+    r.set(2, 2, 0, "lever[powered=true]");  // beside the upper half only
+    r.run(2);
+    EXPECT_EQ(r.at(3, 1, 0), 15) << "the lower half takes the upper's level";
+    EXPECT_EQ(prop(r.world, BlockCoord(3, 1, 0), "open"), "true");
+    r.set(2, 2, 0, "lever");
+    r.run(2);
+    EXPECT_EQ(prop(r.world, BlockCoord(3, 1, 0), "open"), "false");
+    EXPECT_EQ(prop(r.world, BlockCoord(3, 2, 0), "open"), "false");
+}

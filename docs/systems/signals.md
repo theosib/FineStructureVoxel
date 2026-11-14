@@ -152,6 +152,8 @@ lists comma-separated (`set:powered=true: signal-level=15`).
 | `signal-show:` | property that shows its level: a number property gets the level (or the highest value under it), any other gets `true` or `false` |
 | `signal-joins:` `signal-join-values:` | conductor: four properties (north east south west) showing where it joins, and their three values: not joined, joined, joined one block up |
 | `signal-facing:` | property that gives `front` (`facing`) |
+| `signal-join-faces:` | sink: faces on which it joins sinks of its group, so the halves of a two-block thing act as one |
+| `signal-show-edges: true` | only a change of level changes the shown property, so it can also be set by hand, and a block found with it set keeps it (a door) |
 
 Faces are `north south east west up down`, `sides` (the four around), `all`, `front back left
 right` (relative to the facing; left and right as seen looking out of the front, from above),

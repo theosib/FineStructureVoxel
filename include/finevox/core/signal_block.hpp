@@ -75,6 +75,8 @@ struct SignalBlockSpec {
 
     /// Faces it drives: conductors, components' ports and sinks there read it
     SignalFaces out = 0;
+    /// Sink: faces on which it joins sinks of its group, so two blocks act as one
+    SignalFaces joinFaces = 0;
     /// Faces whose relay block it powers, by relay class
     std::vector<std::pair<InternedId, SignalFaces>> power;
     /// Relay classes it reads from relay blocks; empty means all of them
@@ -82,6 +84,9 @@ struct SignalBlockSpec {
 
     // Showing
     std::string show;                      ///< property that shows its level
+    /// Only a change of level changes what's shown: the property is free to be set otherwise
+    /// (a door opened by hand), and a block found with it set keeps it
+    bool showEdges = false;
     std::array<std::string, 4> joins;      ///< properties showing its joins, north east south west
     std::array<std::string, 3> joinValues; ///< not joined, joined, joined one block up
 

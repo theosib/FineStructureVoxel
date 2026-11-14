@@ -149,7 +149,7 @@ SignalFaces SignalBlockSpec::powers(InternedId cls) const {
 bool SignalBlockSpec::sameShape(const SignalBlockSpec& o) const {
     return role == o.role && group == o.group && loss == o.loss && climb == o.climb &&
            in == o.in && side == o.side && hold == o.hold && out == o.out && power == o.power &&
-           reads == o.reads;
+           reads == o.reads && joinFaces == o.joinFaces;
 }
 
 std::optional<SignalBlockSpec> parseSignalSpec(
@@ -193,6 +193,8 @@ std::optional<SignalBlockSpec> parseSignalSpec(
     spec.side = {p.faces("signal-side"), p.from("signal-side-from")};
     spec.hold = {p.faces("signal-hold"), p.from("signal-hold-from")};
     spec.out = p.faces("signal-out");
+    spec.joinFaces = p.faces("signal-join-faces");
+    spec.showEdges = p.flag("signal-show-edges");
 
     for (const auto& [key, value] : keys) {
         if (key.rfind("signal-power:", 0) == 0) {

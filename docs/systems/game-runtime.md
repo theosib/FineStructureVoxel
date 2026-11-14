@@ -138,6 +138,10 @@ item_drop item count x y z [=velocity [vx vy vz]] [=delay s] -> id   an item lyi
 item_stack id -> [item count]   what an item lying in the world is (nil for other entities)
 items_near x y z radius -> ids   items lying in the world within radius, nearest first (ent_find
     finds only creatures)
+explode x y z radius [=damage d] [=push p] -> [[x y z block] ...]   breaks blocks whose hardness is
+    under the radius less their distance (a fixed jitter by position makes the edge ragged;
+    hardness below 0 never breaks), hurts and throws creatures within twice the radius, less
+    with distance, and returns what broke for the game to drop
 ent_pos id   ent_set_pos id x y z           ent_type id       ent_faction id
 ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id

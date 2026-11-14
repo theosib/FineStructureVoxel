@@ -93,6 +93,47 @@ TEST_F(GameRuntimeTest, GeneratesTheWorldTheManifestAsksFor) {
 }
 
 // A lobby always sends a seed, a random one by default, and --seed has to win over it
+// A blast breaks what's soft enough near it and leaves what's hard or far, says what broke, and
+// hurts and throws what's alive near it
+TEST_F(GameRuntimeTest, AnExplosionBreaksSoftBlocksNearIt) {
+    write("blocks/soft.model", "include: base/solid_cube\nhardness: 0.5\n");
+    write("blocks/tough.model", "include: base/solid_cube\nhardness: 50\n");
+    write("blocks/forever.model", "include: base/solid_cube\nhardness: -1\n");
+    auto& game = boot(R"(
+set broken nil
+set unit nil
+set hp nil
+on :start do
+    world_set_block 0 50 0 :soft
+    world_set_block 1 50 0 :tough
+    world_set_block 0 50 1 :forever
+    world_set_block 6 50 0 :soft
+    set unit {ent_spawn :walker 2.5 50 2.5 =faction 2}
+    set hp {ent_health unit}
+    set broken {explode 0.5 50.5 0.5 3 =damage 6 =push 4}
+end
+)");
+    game.runTicks(1);
+    World& world = game.session().world();
+    EXPECT_TRUE(world.getBlock(0, 50, 0).isAir()) << "soft, at the middle";
+    EXPECT_FALSE(world.getBlock(1, 50, 0).isAir()) << "too hard";
+    EXPECT_FALSE(world.getBlock(0, 50, 1).isAir()) << "unbreakable";
+    EXPECT_FALSE(world.getBlock(6, 50, 0).isAir()) << "out of reach";
+    const auto& broken = game.gameScript().context().get("broken").asArray();
+    bool sawSoft = false;
+    for (const auto& b : broken) {
+        const auto& f = b.asArray();
+        if (f[0].asInt() == 0 && f[1].asInt() == 50 && f[2].asInt() == 0) {
+            sawSoft = StringInterner::global().lookup(f[3].asSymbol()).find("soft") != std::string_view::npos;
+        }
+    }
+    EXPECT_TRUE(sawSoft) << "what broke is reported";
+    auto* mob = game.session().entities().getMob(
+        static_cast<EntityId>(game.gameScript().context().get("unit").asInt()));
+    ASSERT_NE(mob, nullptr);
+    EXPECT_LT(mob->health(), static_cast<float>(game.gameScript().context().get("hp").asNumber()));
+}
+
 TEST_F(GameRuntimeTest, TheCommandLineBeatsTheLobby) {
     write("scripts/main.fsc", "");
     RuntimeOptions options;

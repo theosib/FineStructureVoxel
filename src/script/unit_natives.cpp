@@ -12,6 +12,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/navigation.hpp"
@@ -201,6 +202,79 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         Value delay = option(options, keyDelay);
         if (delay.isNumeric()) drop->setPickupDelay(static_cast<float>(delay.asNumber()));
         return Value::integer(static_cast<int64_t>(ud->entityManager->spawnEntity(std::move(drop))));
+    });
+
+    // explode x y z radius [=damage d] [=push p] -> [[x y z block] ...] broken. A block breaks if
+    // its hardness is under what's left of the blast where it is (the radius less its distance),
+    // give or take a fixed jitter by position for a ragged edge; unbreakable blocks (hardness
+    // below 0) stay. Creatures within twice the radius take up to `damage` and are thrown by up to
+    // `push`, less with distance. What drops is the caller's business.
+    const uint32_t keyDamage = si.intern("damage");
+    const uint32_t keyPush = si.intern("push");
+    e.registerFunction("explode", [=](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        double cx, cy, cz;
+        if (!ud || !ud->world || args.size() < 4 || !positionArg(args, 0, cx, cy, cz)) return emptyArray();
+        const double radius = std::max(0.0, number(args[3]));
+        Value options = optionsArg(args, 4);
+        Value damageOpt = option(options, keyDamage);
+        Value pushOpt = option(options, keyPush);
+        const float damage = damageOpt.isNumeric() ? static_cast<float>(damageOpt.asNumber()) : 0.0f;
+        const float push = pushOpt.isNumeric() ? static_cast<float>(pushOpt.asNumber()) : 0.0f;
+        World& world = *ud->world;
+
+        std::vector<Value> broken;
+        const int r = static_cast<int>(std::ceil(radius));
+        const int bx = static_cast<int>(std::floor(cx)), by = static_cast<int>(std::floor(cy)),
+                  bz = static_cast<int>(std::floor(cz));
+        for (int x = bx - r; x <= bx + r; ++x) {
+            for (int y = by - r; y <= by + r; ++y) {
+                for (int z = bz - r; z <= bz + r; ++z) {
+                    BlockCoord p{x, y, z};
+                    BlockTypeId type = world.getBlock(p);
+                    if (type.isAir()) continue;
+                    double dx = x + 0.5 - cx, dy = y + 0.5 - cy, dz = z + 0.5 - cz;
+                    double left = radius - std::sqrt(dx * dx + dy * dy + dz * dz);
+                    if (left <= 0) continue;
+                    float hardness = BlockRegistry::global().getType(type).hardness();
+                    if (hardness < 0) continue;
+                    // 0 to 0.5 by position, the same every time
+                    uint32_t h = static_cast<uint32_t>(x) * 73856093u ^ static_cast<uint32_t>(y) * 19349663u ^
+                                 static_cast<uint32_t>(z) * 83492791u;
+                    double jitter = static_cast<double>((h >> 8) & 0xFF) / 512.0;
+                    if (hardness * (1.0 + jitter) >= left) continue;
+                    world.setBlock(p, AIR_BLOCK_TYPE);
+                    if (world.lightEngine()) world.enqueueLightingUpdateWithRemesh(p, type, AIR_BLOCK_TYPE);
+                    if (auto* mq = world.meshRebuildQueue()) {
+                        for (const ChunkPos& affected : world.getAffectedSubChunks(p)) {
+                            mq->push(affected, MeshRebuildRequest::immediate());
+                        }
+                    }
+                    if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : world.fluidTickManager()) ftm->notifyBlockChanged(p);
+                    broken.push_back(Value::array(std::vector<Value>{
+                        Value::integer(x), Value::integer(y), Value::integer(z), Value::symbol(type.id)}));
+                }
+            }
+        }
+
+        if (ud->entityManager && (damage > 0 || push > 0) && radius > 0) {
+            const float reach = static_cast<float>(radius * 2);
+            Vec3 center(static_cast<float>(cx), static_cast<float>(cy), static_cast<float>(cz));
+            for (EntityId id : ud->entityManager->spatialIndex().queryRadius(center, reach)) {
+                MobEntity* mob = ud->entityManager->getMob(id);
+                if (!mob || !mob->isAlive() || mob->isDead()) continue;
+                Vec3 d = mob->position() - center;
+                float dist = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+                if (dist >= reach) continue;
+                float share = 1.0f - dist / reach;
+                if (damage > 0) mob->damage(damage * share, INVALID_ENTITY_ID);
+                if (push > 0) {
+                    Vec3 dir = dist > 0.01f ? d * (1.0f / dist) : Vec3(0, 1, 0);
+                    mob->setVelocity(mob->velocity() + dir * (push * share) + Vec3(0, push * share * 0.5f, 0));
+                }
+            }
+        }
+        return Value::array(std::move(broken));
     });
 
     // items_near x y z radius -> ids of items lying in the world within radius, nearest first

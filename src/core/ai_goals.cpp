@@ -101,7 +101,7 @@ bool ChaseGoal::canStart(MobEntity& mob) {
 void ChaseGoal::start(MobEntity& mob) {
     const auto* def = mob.typeDef();
     if (def && def->aiType == AIType::Hostile) {
-        auto* player = mob.senses().nearestPlayer();
+        auto player = mob.senses().nearestPlayer();
         targetId_ = player ? player->id() : INVALID_ENTITY_ID;
     } else {
         targetId_ = mob.lastAttacker();
@@ -118,15 +118,15 @@ void ChaseGoal::tick(MobEntity& mob, float dt) {
     if (targetId_ == INVALID_ENTITY_ID) return;
 
     // Find target entity through senses (or entityManager)
-    Entity* target = nullptr;
-    for (auto* e : mob.senses().visibleEntities()) {
+    std::shared_ptr<Entity> target;
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (e->id() == targetId_) {
             target = e;
             break;
         }
     }
     if (!target && mob.entityManager()) {
-        target = mob.entityManager()->getEntity(targetId_);
+        target = mob.entityManager()->getEntityShared(targetId_);
     }
 
     if (!target) return;
@@ -177,7 +177,7 @@ bool ChaseGoal::isComplete(MobEntity& mob) {
 
     // Lost sight of target
     bool targetVisible = false;
-    for (auto* e : mob.senses().visibleEntities()) {
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (e->id() == targetId_) {
             targetVisible = true;
             break;
@@ -210,7 +210,7 @@ bool AttackGoal::canStart(MobEntity& mob) {
     if (!def || def->attackDamage <= 0.0f) return false;
 
     // Need a target in range
-    for (auto* e : mob.senses().visibleEntities()) {
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (!isPlayer(*e)) continue;
 
         auto diff = e->position() - mob.position();
@@ -232,7 +232,7 @@ void AttackGoal::start(MobEntity& mob) {
     float bestDist = def ? def->attackRange : 1.5f;
     targetId_ = INVALID_ENTITY_ID;
 
-    for (auto* e : mob.senses().visibleEntities()) {
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (!isPlayer(*e)) continue;
         auto diff = e->position() - mob.position();
         float dist = static_cast<float>(std::sqrt(
@@ -255,7 +255,7 @@ void AttackGoal::tick(MobEntity& mob, float dt) {
     float damage = def ? def->attackDamage : 1.0f;
 
     // Find target and deal damage
-    for (auto* e : mob.senses().visibleEntities()) {
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (e->id() != targetId_) continue;
 
         auto diff = e->position() - mob.position();
@@ -265,8 +265,7 @@ void AttackGoal::tick(MobEntity& mob, float dt) {
         float range = def ? def->attackRange : 1.5f;
         if (dist <= range) {
             // Deal damage to target (if it's a MobEntity)
-            auto* targetMob = dynamic_cast<MobEntity*>(e);
-            if (targetMob) {
+            if (auto targetMob = std::dynamic_pointer_cast<MobEntity>(e)) {
                 targetMob->damage(damage, mob.id());
             }
             cooldownTimer_ = cooldown;
@@ -284,7 +283,7 @@ bool AttackGoal::isComplete(MobEntity& mob) {
     const auto* def = mob.typeDef();
     float range = def ? def->attackRange : 1.5f;
 
-    for (auto* e : mob.senses().visibleEntities()) {
+    for (const auto& e : mob.senses().visibleEntities()) {
         if (e->id() != targetId_) continue;
         auto diff = e->position() - mob.position();
         float dist = static_cast<float>(std::sqrt(
@@ -318,13 +317,13 @@ void FleeGoal::start(MobEntity& mob) {
     auto pos = mob.position();
 
     // Locate threat entity (lastAttacker first, then nearest visible player)
-    const Entity* threat = nullptr;
+    std::shared_ptr<const Entity> threat;
     if (mob.lastAttacker() != INVALID_ENTITY_ID) {
         if (mob.entityManager()) {
-            threat = mob.entityManager()->getEntity(mob.lastAttacker());
+            threat = mob.entityManager()->getEntityShared(mob.lastAttacker());
         }
         if (!threat) {
-            for (auto* e : mob.senses().visibleEntities()) {
+            for (const auto& e : mob.senses().visibleEntities()) {
                 if (e->id() == mob.lastAttacker()) {
                     threat = e;
                     break;
@@ -378,7 +377,7 @@ void FleeGoal::stop(MobEntity& mob) {
 // ============================================================================
 
 bool LookAtPlayerGoal::canStart(MobEntity& mob) {
-    auto* player = mob.senses().nearestPlayer();
+    auto player = mob.senses().nearestPlayer();
     if (!player) return false;
 
     auto diff = player->position() - mob.position();
@@ -394,7 +393,7 @@ void LookAtPlayerGoal::start(MobEntity& /*mob*/) {
 
 void LookAtPlayerGoal::tick(MobEntity& mob, float dt) {
     lookTimer_ += dt;
-    auto* player = mob.senses().nearestPlayer();
+    auto player = mob.senses().nearestPlayer();
     if (player) {
         mob.lookAt(glm::dvec3(player->position()));
     }

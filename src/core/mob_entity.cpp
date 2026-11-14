@@ -102,6 +102,26 @@ void MobEntity::tick(float dt, World& world) {
         }
     }
 
+    // Check for death before running AI or movement.  The hook fires
+    // exactly once per death (latch reset by heal()/setHealth when HP
+    // climbs back above zero so respawn works).  Players are NOT
+    // auto-despawned — gameplay code owns the respawn decision.
+    auto checkDeath = [this]() {
+        if (isDead() && !deathHookFired_) {
+            deathHookFired_ = true;
+            if (eventHooks_) {
+                eventHooks_->onDeath(*this, lastAttacker_);
+            }
+            if (!isPlayerEntity()) {
+                markForRemoval();
+            }
+        }
+    };
+    checkDeath();
+    if (isDead()) {
+        return;
+    }
+
     // Update senses
     if (entityManager_) {
         senses_.update(*this, *entityManager_, dt);
@@ -118,20 +138,7 @@ void MobEntity::tick(float dt, World& world) {
     updateMovement(dt);
     updateLocomotionAnimation();
 
-    // Check for death.  The hook fires exactly once per death (latch reset
-    // by heal()/setHealth when HP climbs back above zero so respawn works).
-    // Players are NOT auto-despawned — gameplay code owns the respawn
-    // decision.  For other entities, the default is the historical
-    // behaviour: drop a corpse-event and markForRemoval.
-    if (isDead() && !deathHookFired_) {
-        deathHookFired_ = true;
-        if (eventHooks_) {
-            eventHooks_->onDeath(*this, lastAttacker_);
-        }
-        if (!isPlayerEntity()) {
-            markForRemoval();
-        }
-    }
+    checkDeath();
 }
 
 void MobEntity::updateMovement(float dt) {

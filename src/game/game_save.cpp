@@ -241,6 +241,15 @@ bool GameRuntime::saveGame(std::string& error) {
         set("vision", Value::array(std::move(factions)));
         set("lookouts", Value::array(std::move(lookouts)));
         ClientSave client = clientSaveCopy();
+        for (const Seat& seat : everyone) {
+            if (!seat.local || seat.body == INVALID_ENTITY_ID) continue;
+            if (const Entity* body = session_->entities().getEntity(seat.body)) {
+                Vec3 pos = body->position();
+                client.steward = glm::dvec3(pos.x, pos.y, pos.z);
+                if (client.pivot == glm::dvec3(0.0)) client.pivot = client.steward;
+            }
+            break;
+        }
         set("pivot", Value::array(std::vector<Value>{number(client.pivot.x), number(client.pivot.y),
                                                      number(client.pivot.z)}));
         set("steward", Value::array(std::vector<Value>{number(client.steward.x), number(client.steward.y),

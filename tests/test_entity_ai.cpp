@@ -471,6 +471,54 @@ TEST_F(EntityAITest, SensesDetectsNothing) {
     EXPECT_EQ(mob->senses().nearestPlayer(), nullptr);
 }
 
+TEST_F(EntityAITest, SensesPurgesDespawnedEntitiesBetweenScanIntervals) {
+    EntityTypeDef hostileDef;
+    hostileDef.name = "test_ai_hostile";
+    hostileDef.aiType = AIType::Hostile;
+    hostileDef.maxHealth = 20.0f;
+    hostileDef.maxSpeed = 4.0f;
+    hostileDef.attackDamage = 3.0f;
+    hostileDef.attackRange = 1.5f;
+    hostileDef.followRange = 16.0f;
+    EntityTypeRegistry::global().registerType("test_ai_hostile", std::move(hostileDef));
+
+    World world;
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+
+    EntityId playerId = em.spawnPlayer(Vec3(4.0f, 1.0f, 0.0f));
+    auto mob1 = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_ai_hostile"));
+    mob1->setPosition(Vec3(0.0f, 1.0f, 0.0f));
+    EntityId m1Id = em.spawnEntity(std::move(mob1));
+
+    auto mob2 = std::make_unique<MobEntity>(INVALID_ENTITY_ID, EntityTypeId::fromName("test_ai_hostile"));
+    mob2->setPosition(Vec3(2.0f, 1.0f, 0.0f));
+    EntityId m2Id = em.spawnEntity(std::move(mob2));
+
+    // Initial tick populates senses (scanInterval = 0.5s)
+    em.tick(0.05f);
+    MobEntity* m1 = em.getMob(m1Id);
+    ASSERT_NE(m1, nullptr);
+    EXPECT_EQ(m1->senses().visibleCount(), 2u);
+    EXPECT_NE(m1->senses().nearestPlayer(), nullptr);
+
+    // Kill mob2; on the next tick it is despawned while m1's scan timer has not expired
+    MobEntity* m2 = em.getMob(m2Id);
+    ASSERT_NE(m2, nullptr);
+    m2->damage(100.0f);
+
+    // Tick several times inside the 0.5s scan window — AttackGoal::canStart iterates visibleEntities()
+    for (int i = 0; i < 5; ++i) {
+        em.tick(0.05f);
+        EXPECT_EQ(m1->senses().visibleCount(), 1u);
+    }
+
+    // Despawning the player also clears nearestPlayer immediately
+    ASSERT_TRUE(em.despawnEntity(playerId));
+    EXPECT_EQ(m1->senses().visibleCount(), 0u);
+    EXPECT_EQ(m1->senses().nearestPlayer(), nullptr);
+}
+
 TEST_F(EntityAITest, EntityLookDirectionMatchesLookAtInRadians) {
     auto mob = std::make_unique<MobEntity>(1, EntityTypeId::fromName("test_ai_zombie"));
     mob->setPosition(Vec3(0.0f, 0.0f, 0.0f));

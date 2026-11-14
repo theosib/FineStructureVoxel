@@ -60,6 +60,19 @@ std::vector<EntityId> EntitySpatialIndex::queryRadius(const Vec3& center, float 
 
     // Determine cell range to scan
     int cellRadius = static_cast<int>(std::ceil(radius / CELL_SIZE));
+    double side = 2.0 * static_cast<double>(cellRadius) + 1.0;
+    if (side * side * side >= static_cast<double>(entityPositions_.size())) {
+        for (const auto& [id, p] : entityPositions_) {
+            float dx = p.x - center.x;
+            float dy = p.y - center.y;
+            float dz = p.z - center.z;
+            if (dx * dx + dy * dy + dz * dz <= radiusSq) {
+                result.push_back(id);
+            }
+        }
+        return result;
+    }
+
     auto centerCell = toCell(center);
 
     for (int cx = centerCell.x - cellRadius; cx <= centerCell.x + cellRadius; ++cx) {
@@ -91,6 +104,19 @@ std::vector<EntityId> EntitySpatialIndex::queryAABB(const Vec3& min, const Vec3&
 
     auto minCell = toCell(min);
     auto maxCell = toCell(max);
+    double vol = static_cast<double>(maxCell.x - minCell.x + 1) *
+                 static_cast<double>(maxCell.y - minCell.y + 1) *
+                 static_cast<double>(maxCell.z - minCell.z + 1);
+    if (vol >= static_cast<double>(entityPositions_.size())) {
+        for (const auto& [id, p] : entityPositions_) {
+            if (p.x >= min.x && p.x <= max.x &&
+                p.y >= min.y && p.y <= max.y &&
+                p.z >= min.z && p.z <= max.z) {
+                result.push_back(id);
+            }
+        }
+        return result;
+    }
 
     for (int cx = minCell.x; cx <= maxCell.x; ++cx) {
         for (int cy = minCell.y; cy <= maxCell.y; ++cy) {
@@ -123,6 +149,22 @@ EntityId EntitySpatialIndex::findNearest(const Vec3& center, float radius,
     float radiusSq = radius * radius;
 
     int cellRadius = static_cast<int>(std::ceil(radius / CELL_SIZE));
+    double side = 2.0 * static_cast<double>(cellRadius) + 1.0;
+    if (side * side * side >= static_cast<double>(entityPositions_.size())) {
+        for (const auto& [id, p] : entityPositions_) {
+            if (filter && !filter(id)) continue;
+            float dx = p.x - center.x;
+            float dy = p.y - center.y;
+            float dz = p.z - center.z;
+            float distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq <= radiusSq && distSq < bestDistSq) {
+                bestDistSq = distSq;
+                nearest = id;
+            }
+        }
+        return nearest;
+    }
+
     auto centerCell = toCell(center);
 
     for (int cx = centerCell.x - cellRadius; cx <= centerCell.x + cellRadius; ++cx) {

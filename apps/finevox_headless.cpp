@@ -114,6 +114,7 @@ int main(int argc, char* argv[]) {
                   << runtime.worldgenSeconds() << "s\n";
 
         auto started = std::chrono::steady_clock::now();
+        uint64_t startTick = runtime.gameScript().tickCount();
         if (runtime.mcp()) {
             runtime.startThreads();
             while (!runtime.exitRequested()) {
@@ -129,7 +130,7 @@ int main(int argc, char* argv[]) {
         double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 
-        uint64_t ran = runtime.gameScript().tickCount();
+        uint64_t ran = runtime.gameScript().tickCount() - startTick;
         std::cout << "[headless] " << ran << " ticks in " << seconds << "s ("
                   << (ran > 0 ? seconds * 1000.0 / ran : 0.0) << " ms/tick)\n";
 

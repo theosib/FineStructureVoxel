@@ -22,7 +22,7 @@ void ClientWorld::remesh(ChunkPos chunk, bool neighbours) {
     // Their border faces were drawn against what used to be here
     for (Face face : {Face::PosX, Face::NegX, Face::PosZ, Face::NegZ, Face::PosY, Face::NegY}) {
         auto n = faceNormal(face);
-        queue->push(ChunkPos(chunk.x + n[0], chunk.y + n[1], chunk.z + n[2]), MeshRebuildRequest::normal());
+        queue->push(ChunkPos(chunk.x + n[0], chunk.y + n[1], chunk.z + n[2]), MeshRebuildRequest(1));
     }
 }
 

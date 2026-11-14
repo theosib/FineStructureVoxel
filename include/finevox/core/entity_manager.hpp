@@ -138,12 +138,16 @@ public:
      */
     Entity* getEntity(EntityId id);
     const Entity* getEntity(EntityId id) const;
+    std::shared_ptr<Entity> getEntityShared(EntityId id);
+    std::shared_ptr<const Entity> getEntityShared(EntityId id) const;
 
     /**
      * @brief Get a MobEntity by ID (returns nullptr if not found or not a MobEntity)
      */
     MobEntity* getMob(EntityId id);
     const MobEntity* getMob(EntityId id) const;
+    std::shared_ptr<MobEntity> getMobShared(EntityId id);
+    std::shared_ptr<const MobEntity> getMobShared(EntityId id) const;
 
     /**
      * @brief Check if entity exists
@@ -153,7 +157,7 @@ public:
     /**
      * @brief Get all entities (for debugging/rendering)
      */
-    const std::unordered_map<EntityId, std::unique_ptr<Entity>>& entities() const {
+    const std::unordered_map<EntityId, std::shared_ptr<Entity>>& entities() const {
         return entities_;
     }
 
@@ -377,7 +381,7 @@ private:
     Alliances alliances_;
     SnapshotFilter snapshotFilter_;
     bool snapshotsEnabled_ = true;
-    std::unordered_map<EntityId, std::unique_ptr<Entity>> entities_;
+    std::unordered_map<EntityId, std::shared_ptr<Entity>> entities_;
     EntityId nextEntityId_ = 1;
     uint64_t currentTick_ = 0;
 

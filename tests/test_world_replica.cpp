@@ -182,6 +182,24 @@ TEST_F(WorldReplicaTest, ClearedFluidClearsInTheCopy) {
     EXPECT_TRUE(replica->world().getSubChunk(ChunkPos(1, 1, 1))->getFluid(2, 2, 2).isEmpty());
 }
 
+TEST_F(WorldReplicaTest, EmptiedSubchunkClearsInTheCopy) {
+    lookFrom(16);
+    // Place a single block in subchunk (1, 4, 1) and sync
+    world.setBlock(16, 64, 16, marker);
+    replica->syncAll();
+    (void)replica->takeChanges();
+    EXPECT_EQ(replica->world().getBlock(16, 64, 16), marker);
+
+    // Breaking the last block removes the subchunk from source via takeOut(chunkY)
+    world.setBlock(16, 64, 16, AIR_BLOCK_TYPE);
+    ASSERT_EQ(world.getSubChunk(ChunkPos(1, 4, 1)), nullptr);
+
+    replica->syncAll();
+    EXPECT_TRUE(replica->world().getBlock(16, 64, 16).isAir());
+    auto changed = replica->takeChanges();
+    EXPECT_NE(std::find(changed.begin(), changed.end(), ChunkPos(1, 4, 1)), changed.end());
+}
+
 TEST_F(WorldReplicaTest, TickingEventuallyCoversTheMap) {
     vision->addSource(VIEWER, glm::dvec3(100.5, GROUND_Y + 2.0, 16.5), 20.0f);
     vision->refresh(VIEWER);

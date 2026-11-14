@@ -73,17 +73,17 @@ EntityId EntityManager::spawnEntity(std::unique_ptr<Entity> entity) {
                                       entity->position(), entity->yaw(), entity->pitch(),
                                       entity->typeName())));
 
-    Entity* rawPtr = entity.get();
-    spatialIndex_.insert(id, rawPtr->position());
-    entities_[id] = std::move(entity);
+    std::shared_ptr<Entity> sharedEntity = std::move(entity);
+    spatialIndex_.insert(id, sharedEntity->position());
+    entities_[id] = sharedEntity;
 
     // ItemDropEntity needs the EntityManager for pickup/magnetism queries
-    if (auto* drop = dynamic_cast<ItemDropEntity*>(rawPtr)) {
+    if (auto drop = std::dynamic_pointer_cast<ItemDropEntity>(sharedEntity)) {
         drop->setEntityManager(this);
     }
 
     // Wire up MobEntity-specific hooks and AI presets
-    if (auto* mob = dynamic_cast<MobEntity*>(rawPtr)) {
+    if (auto mob = std::dynamic_pointer_cast<MobEntity>(sharedEntity)) {
         mob->setEntityManager(this);
         mob->setWorld(&world_);
 
@@ -150,6 +150,16 @@ const Entity* EntityManager::getEntity(EntityId id) const {
     return it != entities_.end() ? it->second.get() : nullptr;
 }
 
+std::shared_ptr<Entity> EntityManager::getEntityShared(EntityId id) {
+    auto it = entities_.find(id);
+    return it != entities_.end() ? it->second : nullptr;
+}
+
+std::shared_ptr<const Entity> EntityManager::getEntityShared(EntityId id) const {
+    auto it = entities_.find(id);
+    return it != entities_.end() ? it->second : nullptr;
+}
+
 MobEntity* EntityManager::getMob(EntityId id) {
     auto* e = getEntity(id);
     return e ? dynamic_cast<MobEntity*>(e) : nullptr;
@@ -158,6 +168,14 @@ MobEntity* EntityManager::getMob(EntityId id) {
 const MobEntity* EntityManager::getMob(EntityId id) const {
     auto* e = getEntity(id);
     return e ? dynamic_cast<const MobEntity*>(e) : nullptr;
+}
+
+std::shared_ptr<MobEntity> EntityManager::getMobShared(EntityId id) {
+    return std::dynamic_pointer_cast<MobEntity>(getEntityShared(id));
+}
+
+std::shared_ptr<const MobEntity> EntityManager::getMobShared(EntityId id) const {
+    return std::dynamic_pointer_cast<const MobEntity>(getEntityShared(id));
 }
 
 bool EntityManager::hasEntity(EntityId id) const {
@@ -225,16 +243,26 @@ void EntityManager::tick(float tickDt) {
     std::lock_guard<std::recursive_mutex> guard(mutex_);
     ++currentTick_;
 
-    // 1. Update all entities (AI, animations, timers)
-    for (auto& [id, entity] : entities_) {
+    // 1. Update all entities (AI, animations, timers).
+    // Snapshot IDs first so script hooks (onTick/onDeath/onDamage) that spawn or
+    // despawn entities cannot invalidate the map iterator mid-pass.
+    std::vector<EntityId> tickIds;
+    tickIds.reserve(entities_.size());
+    for (const auto& [id, entity] : entities_) {
         if (entity->isAlive()) {
-            entity->tick(tickDt, world_);
-            entity->advanceAnimation(tickDt);
+            tickIds.push_back(id);
+        }
+    }
+    for (EntityId id : tickIds) {
+        std::shared_ptr<Entity> entity = getEntityShared(id);
+        if (!entity || !entity->isAlive()) continue;
+        entity->tick(tickDt, world_);
+        if (!hasEntity(id)) continue;
+        entity->advanceAnimation(tickDt);
 
-            // Fire script onTick after built-in AI
-            if (auto* mob = dynamic_cast<MobEntity*>(entity.get()); mob && mob->eventHooks()) {
-                mob->eventHooks()->onTick(*mob, tickDt);
-            }
+        // Fire script onTick after built-in AI
+        if (auto mob = std::dynamic_pointer_cast<MobEntity>(entity); mob && mob->isAlive() && mob->eventHooks()) {
+            mob->eventHooks()->onTick(*mob, tickDt);
         }
     }
 

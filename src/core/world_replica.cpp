@@ -53,6 +53,22 @@ void WorldReplica::syncColumn(ColumnPos pos) {
     ChunkColumn* column = source_.getColumn(pos);
     if (!column) return;
 
+    if (ChunkColumn* replicaCol = replica_.getColumn(pos)) {
+        replicaCol->forEachSubChunk([&](int32_t chunkY, SubChunk& copy) {
+            if (column->hasSubChunk(chunkY)) return;
+            if (copy.isAirOnly() && !copy.fluidLayer()) return;
+            ChunkPos chunk(pos.x, chunkY, pos.z);
+            copy.clear();
+            if (copy.fluidLayer()) {
+                for (int32_t i = 0; i < SubChunk::VOLUME; ++i) {
+                    if (!copy.getFluid(i).isEmpty()) copy.removeFluid(i);
+                }
+            }
+            versions_.erase(subchunkKey(chunk));
+            noteChanged(chunk);
+        });
+    }
+
     column->forEachSubChunk([&](int32_t chunkY, const SubChunk& subchunk) {
         ChunkPos chunk(pos.x, chunkY, pos.z);
         uint64_t key = subchunkKey(chunk);

@@ -151,3 +151,14 @@ TEST(EntitySpatialIndexTest, UpdateNonexistent) {
     index.update(999, Vec3(10.0f, 64.0f, 10.0f));
     EXPECT_EQ(index.size(), 0u);
 }
+
+TEST(EntitySpatialIndexTest, LargeRadiusQueryIsFastAndExact) {
+    EntitySpatialIndex index;
+    index.insert(1, Vec3(10.0f, 64.0f, -20.0f));
+    index.insert(2, Vec3(500.0f, 70.0f, 500.0f));
+    index.insert(3, Vec3(5000.0f, 64.0f, 0.0f));
+
+    auto found = index.queryRadius(Vec3(0.0f, 64.0f, 0.0f), 4000.0f);
+    EXPECT_EQ(found.size(), 2u);
+    EXPECT_EQ(index.findNearest(Vec3(0.0f, 64.0f, 0.0f), 4000.0f), 1u);
+}

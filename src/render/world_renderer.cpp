@@ -172,7 +172,10 @@ void WorldRenderer::initialize() {
     createPipeline();
 
     // Create the mesh rebuild queue and worker pool (always active)
-    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(mergeMeshRebuildRequest);
+    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(
+        mergeMeshRebuildRequest,
+        [](const MeshRebuildRequest& r) { return static_cast<int>(r.priority); }
+    );
 
     meshWorkerPool_ = std::make_unique<MeshWorkerPool>(world_, 0);
     meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());

@@ -9,6 +9,7 @@
  */
 
 #include "finevox/core/entity_state.hpp"
+#include <memory>
 #include <vector>
 
 namespace finevox {
@@ -27,14 +28,14 @@ public:
     /// Force an immediate re-scan
     void refresh(const MobEntity& self, EntityManager& em);
 
-    /// Get nearest player entity (or nullptr)
-    [[nodiscard]] Entity* nearestPlayer() const { return nearestPlayer_; }
+    /// Get nearest player entity (or nullptr if none / expired / marked for removal)
+    [[nodiscard]] std::shared_ptr<Entity> nearestPlayer() const;
 
-    /// Get all visible entities
-    [[nodiscard]] const std::vector<Entity*>& visibleEntities() const { return visible_; }
+    /// Get all visible entities that are still alive in the world
+    [[nodiscard]] std::vector<std::shared_ptr<Entity>> visibleEntities() const;
 
     /// Get number of visible entities
-    [[nodiscard]] size_t visibleCount() const { return visible_.size(); }
+    [[nodiscard]] size_t visibleCount() const;
 
     /// Set scan range (defaults to follow range from EntityTypeDef)
     void setScanRange(float range) { scanRange_ = range; }
@@ -44,8 +45,8 @@ public:
     void setScanInterval(float interval) { scanInterval_ = interval; }
 
 private:
-    std::vector<Entity*> visible_;
-    Entity* nearestPlayer_ = nullptr;
+    std::vector<std::weak_ptr<Entity>> visible_;
+    std::weak_ptr<Entity> nearestPlayer_;
     float updateTimer_ = 0.0f;
     float scanInterval_ = 0.5f;  // Re-scan every 0.5s
     float scanRange_ = 16.0f;

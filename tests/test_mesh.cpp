@@ -519,6 +519,91 @@ TEST_F(MeshTest, AOValuesWithOccluders) {
 // MeshBuilder tests - Index validity
 // ============================================================================
 
+// Every face, every corner: a shadow cast at one corner lands on the vertex at that corner and no
+// other, for both AO and smooth light, simple and greedy. Which vertex is "at the corner" comes
+// from vertex positions, not from the mesher's corner order. The quad is also split through the
+// shaded corner, so its shade fans out instead of filling one triangle.
+TEST_F(MeshTest, CornerShadeLandsOnItsOwnVertexForEveryFace) {
+    const BlockTypeId stone = BlockTypeId::fromName("stone");
+    const glm::ivec3 block(8, 8, 8);
+    const Face faces[] = {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ};
+
+    for (bool greedy : {false, true}) {
+        for (Face face : faces) {
+            const glm::vec3 normal = MeshBuilder::FACE_DATA[static_cast<int>(face)].normal;
+            const glm::ivec3 n(normal);
+            // Two directions across the face, chosen independently of the mesher
+            glm::ivec3 a = n.x != 0 ? glm::ivec3(0, 1, 0) : glm::ivec3(1, 0, 0);
+            glm::ivec3 b = glm::ivec3(glm::cross(glm::vec3(n), glm::vec3(a)));
+            for (int sa : {-1, 1}) {
+                for (int sb : {-1, 1}) {
+                    for (bool byLight : {false, true}) {
+                        // The cell diagonally out from one corner, in the layer the face looks into
+                        const glm::ivec3 shade = block + n + a * sa + b * sb;
+                        SubChunk subChunk;
+                        subChunk.setBlock(block.x, block.y, block.z, stone);
+                        if (!byLight) subChunk.setBlock(shade.x, shade.y, shade.z, stone);
+
+                        MeshBuilder mb;
+                        mb.setGreedyMeshing(greedy);
+                        mb.setCalculateAO(true);
+                        if (byLight) {
+                            mb.setSmoothLighting(true);
+                            mb.setLightProvider([shade](const BlockCoord& p) -> uint8_t {
+                                return glm::ivec3(p.x, p.y, p.z) == shade ? 0x00 : 0xF0;
+                            });
+                        }
+                        BlockOpaqueProvider opaque = [&subChunk](const BlockCoord& p) {
+                            if (p.x < 0 || p.x >= 16 || p.y < 0 || p.y >= 16 || p.z < 0 || p.z >= 16) return false;
+                            return subChunk.getBlock(p.x, p.y, p.z) != AIR_BLOCK_TYPE;
+                        };
+                        MeshData mesh = mb.buildSubChunkMesh(subChunk, ChunkPos(0, 0, 0), opaque,
+                                                             simpleTextureProvider);
+
+                        // The corner of the face nearest the shading cell
+                        const glm::vec3 centre = glm::vec3(block) + 0.5f + 0.5f * normal;
+                        const glm::vec3 corner = centre + 0.5f * glm::vec3(a * sa + b * sb);
+                        bool found = false;
+                        for (size_t q = 0; q + 3 < mesh.vertices.size(); q += 4) {
+                            if (mesh.vertices[q].normal != normal) continue;
+                            const glm::vec3 mid = (mesh.vertices[q].position + mesh.vertices[q + 2].position) * 0.5f;
+                            if (glm::length(mid - centre) > 1e-4f) continue;  // the shading block's own faces
+                            found = true;
+                            uint32_t dark = 4;
+                            for (uint32_t i = 0; i < 4; ++i) {
+                                const ChunkVertex& v = mesh.vertices[q + i];
+                                const bool atCorner = glm::length(v.position - corner) < 1e-4f;
+                                const float value = byLight ? v.skyLight : v.ao;
+                                SCOPED_TRACE(::testing::Message() << "face " << int(face) << " corner "
+                                             << sa << "," << sb << (byLight ? " light" : " ao")
+                                             << (greedy ? " greedy" : " simple") << " vertex " << i);
+                                if (atCorner) {
+                                    dark = i;
+                                    EXPECT_LT(value, 0.99f);
+                                } else {
+                                    EXPECT_FLOAT_EQ(value, 1.0f);
+                                }
+                            }
+                            ASSERT_LT(dark, 4u);
+                            // Both triangles touch the shaded vertex
+                            const size_t firstIndex = q / 4 * 6;
+                            ASSERT_LE(firstIndex + 6, mesh.indices.size());
+                            for (int t = 0; t < 2; ++t) {
+                                bool touches = false;
+                                for (int k = 0; k < 3; ++k) {
+                                    touches |= mesh.indices[firstIndex + t * 3 + k] == q + dark;
+                                }
+                                EXPECT_TRUE(touches) << "face " << int(face) << " triangle " << t;
+                            }
+                        }
+                        EXPECT_TRUE(found) << "face " << int(face);
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST_F(MeshTest, IndicesAreValid) {
     SubChunk subChunk;
     BlockTypeId stone = BlockTypeId::fromName("finevox:stone");

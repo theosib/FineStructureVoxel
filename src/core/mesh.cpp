@@ -684,6 +684,20 @@ void MeshBuilder::greedyMeshFace(
     }
 }
 
+namespace {
+// Two triangles for a quad of vertices base..base+3, split along the diagonal through the darker
+// pair of corners. Split the other way, one dark corner shades a single triangle and leaves a
+// crease down the middle of the face; through it, the shade fans out evenly.
+void pushQuadIndices(MeshData& mesh, uint32_t base, const std::array<float, 4>& ao,
+                     const std::array<float, 4>& sky, const std::array<float, 4>& block) {
+    auto bright = [&](int i) { return ao[i] * std::max(sky[i], block[i]) + ao[i]; };
+    bool flip = bright(0) + bright(2) > bright(1) + bright(3) + 1e-4f;
+    static constexpr uint32_t STRAIGHT[6] = {0, 1, 2, 0, 2, 3};
+    static constexpr uint32_t FLIPPED[6] = {1, 2, 3, 1, 3, 0};
+    for (uint32_t i : flip ? FLIPPED : STRAIGHT) mesh.indices.push_back(base + i);
+}
+}  // namespace
+
 void MeshBuilder::addGreedyQuad(
     MeshData& mesh,
     Face face,
@@ -818,13 +832,7 @@ void MeshBuilder::addGreedyQuad(
         mesh.vertices.push_back(vertex);
     }
 
-    // Add indices (two triangles)
-    mesh.indices.push_back(baseVertex + 0);
-    mesh.indices.push_back(baseVertex + 1);
-    mesh.indices.push_back(baseVertex + 2);
-    mesh.indices.push_back(baseVertex + 0);
-    mesh.indices.push_back(baseVertex + 2);
-    mesh.indices.push_back(baseVertex + 3);
+    pushQuadIndices(mesh, baseVertex, aoValues, skyLightValues, blockLightValues);
 }
 
 MeshData MeshBuilder::buildSubChunkMesh(
@@ -879,15 +887,7 @@ void MeshBuilder::addFace(
         mesh.vertices.push_back(vertex);
     }
 
-    // Add 6 indices for 2 triangles
-    // Vertices are in order: v0, v1, v2, v3 forming a quad
-    // Standard quad triangulation: 0-1-2 and 0-2-3
-    mesh.indices.push_back(baseVertex + 0);
-    mesh.indices.push_back(baseVertex + 1);
-    mesh.indices.push_back(baseVertex + 2);
-    mesh.indices.push_back(baseVertex + 0);
-    mesh.indices.push_back(baseVertex + 2);
-    mesh.indices.push_back(baseVertex + 3);
+    pushQuadIndices(mesh, baseVertex, aoValues, skyLightValues, blockLightValues);
 }
 
 // A diagonal only joins where neither straight neighbour beside it does: three blocks in an L
@@ -1068,102 +1068,70 @@ float MeshBuilder::calculateCornerAO(bool side1, bool side2, bool corner) const 
     }
 }
 
+// The two directions across a face, and for each of its corners (in FACE_DATA order) which way
+// that corner lies from the face's middle along each: -1 or +1. Taken from FACE_DATA itself, so
+// AO and light always land on the vertex they were worked out for.
+namespace {
+struct FaceCorners {
+    glm::ivec3 across;   // first tangent
+    glm::ivec3 up;       // second tangent
+    std::array<glm::ivec2, 4> side;
+};
+
+FaceCorners faceCorners(Face face, const std::array<MeshBuilder::FaceData, 6>& data) {
+    FaceCorners c;
+    switch (face) {
+        case Face::PosX:
+        case Face::NegX:
+            c.across = {0, 0, 1};
+            c.up = {0, 1, 0};
+            break;
+        case Face::PosY:
+        case Face::NegY:
+            c.across = {1, 0, 0};
+            c.up = {0, 0, 1};
+            break;
+        default:
+            c.across = {1, 0, 0};
+            c.up = {0, 1, 0};
+            break;
+    }
+    const auto& positions = data[static_cast<int>(face)].positions;
+    for (int i = 0; i < 4; ++i) {
+        glm::vec3 offset = positions[i] - glm::vec3(0.5f);
+        float a = glm::dot(offset, glm::vec3(c.across));
+        float b = glm::dot(offset, glm::vec3(c.up));
+        c.side[i] = glm::ivec2(a > 0.0f ? 1 : -1, b > 0.0f ? 1 : -1);
+    }
+    return c;
+}
+}  // namespace
+
 std::array<float, 4> MeshBuilder::getFaceAO(
     const BlockCoord& blockWorldPos,
     Face face,
     const BlockOpaqueProvider& opaqueProvider
 ) const {
-    std::array<float, 4> aoValues;
+    // Each corner is darkened by the blocks touching it in the layer the face looks into: the
+    // two beside it along the face's edges, and the one diagonally out from the corner
+    FaceCorners c = faceCorners(face, FACE_DATA);
+    BlockCoord facePos = blockWorldPos.neighbor(face);
 
-    // For each face, we need to check blocks around the face to calculate AO
-    // The pattern depends on which face we're rendering
-
-    // Get the tangent directions for this face
-    // These define "right" and "up" relative to the face normal
-    glm::ivec3 tangent1, tangent2;
-
-    switch (face) {
-        case Face::PosX:
-        case Face::NegX:
-            tangent1 = {0, 0, 1};  // Z direction
-            tangent2 = {0, 1, 0};  // Y direction
-            break;
-        case Face::PosY:
-        case Face::NegY:
-            tangent1 = {1, 0, 0};  // X direction
-            tangent2 = {0, 0, 1};  // Z direction
-            break;
-        case Face::PosZ:
-        case Face::NegZ:
-            tangent1 = {1, 0, 0};  // X direction
-            tangent2 = {0, 1, 0};  // Y direction
-            break;
-    }
-
-    // Adjust tangent directions based on face direction (for consistent winding)
-    if (face == Face::NegX || face == Face::PosY || face == Face::NegZ) {
-        tangent1 = -tangent1;
-    }
-
-    // Get the face normal as offset
-    BlockCoord normalOffset = faceOffset(face);
-
-    // The face is one block in the normal direction from the block position
-    BlockCoord facePos(
-        blockWorldPos.x + normalOffset.x,
-        blockWorldPos.y + normalOffset.y,
-        blockWorldPos.z + normalOffset.z
-    );
-
-    // Check the 8 blocks around the face (at the same level as the face)
-    // These are used for AO calculation
-    // Layout (looking at face from outside):
-    //   6 7 8
-    //   3 X 5    (X = face center, not a block)
-    //   0 1 2
-
-    auto isOpaqueAt = [&](int dx, int dy) -> bool {
+    auto isOpaqueAt = [&](int da, int db) -> bool {
         BlockCoord checkPos(
-            facePos.x + tangent1.x * dx + tangent2.x * dy,
-            facePos.y + tangent1.y * dx + tangent2.y * dy,
-            facePos.z + tangent1.z * dx + tangent2.z * dy
+            facePos.x + c.across.x * da + c.up.x * db,
+            facePos.y + c.across.y * da + c.up.y * db,
+            facePos.z + c.across.z * da + c.up.z * db
         );
         return opaqueProvider(checkPos);
     };
 
-    // Get opacity of neighboring blocks
-    bool b0 = isOpaqueAt(-1, -1);  // bottom-left corner
-    bool b1 = isOpaqueAt( 0, -1);  // bottom side
-    bool b2 = isOpaqueAt( 1, -1);  // bottom-right corner
-    bool b3 = isOpaqueAt(-1,  0);  // left side
-    bool b5 = isOpaqueAt( 1,  0);  // right side
-    bool b6 = isOpaqueAt(-1,  1);  // top-left corner
-    bool b7 = isOpaqueAt( 0,  1);  // top side
-    bool b8 = isOpaqueAt( 1,  1);  // top-right corner
-
-    // Calculate AO for each corner of the face
-    // Corners are in CCW order: bottom-left, bottom-right, top-right, top-left
-    //
-    // The tangent1 negation for NegX/PosY/NegZ faces means the sampling grid
-    // is mirrored in the U direction for those faces. We need to account for this
-    // when mapping samples to vertex corners (same as getFaceSkyBlockLight).
-    bool mirroredU = (face == Face::NegX || face == Face::PosY || face == Face::NegZ);
-
-    if (mirroredU) {
-        // Grid is mirrored: what we sampled as "left" is actually "right" in vertex space
-        // Swap b3↔b5 (left↔right sides) and b0↔b2, b6↔b8 (corners)
-        aoValues[0] = calculateCornerAO(b5, b1, b2);  // vertex 0 (uv 0,0) from right side
-        aoValues[1] = calculateCornerAO(b1, b3, b0);  // vertex 1 (uv 1,0) from left side
-        aoValues[2] = calculateCornerAO(b3, b7, b6);  // vertex 2 (uv 1,1) from left side
-        aoValues[3] = calculateCornerAO(b7, b5, b8);  // vertex 3 (uv 0,1) from right side
-    } else {
-        // Normal mapping
-        aoValues[0] = calculateCornerAO(b3, b1, b0);  // bottom-left
-        aoValues[1] = calculateCornerAO(b1, b5, b2);  // bottom-right
-        aoValues[2] = calculateCornerAO(b5, b7, b8);  // top-right
-        aoValues[3] = calculateCornerAO(b7, b3, b6);  // top-left
+    std::array<float, 4> aoValues;
+    for (int i = 0; i < 4; ++i) {
+        int a = c.side[i].x;
+        int b = c.side[i].y;
+        aoValues[i] = calculateCornerAO(isOpaqueAt(a, 0), isOpaqueAt(0, b), isOpaqueAt(a, b));
     }
-
     return aoValues;
 }
 
@@ -1177,116 +1145,33 @@ MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
         return result;
     }
 
-    // Get tangent directions for this face (same as AO calculation)
-    glm::ivec3 tangent1, tangent2;
+    // Each corner averages the light of the four cells around it in the layer the face looks
+    // into: the face's own cell, the two beside the corner, and the one diagonally out
+    FaceCorners c = faceCorners(face, FACE_DATA);
+    BlockCoord facePos = blockWorldPos.neighbor(face);
 
-    switch (face) {
-        case Face::PosX:
-        case Face::NegX:
-            tangent1 = {0, 0, 1};  // Z direction
-            tangent2 = {0, 1, 0};  // Y direction
-            break;
-        case Face::PosY:
-        case Face::NegY:
-            tangent1 = {1, 0, 0};  // X direction
-            tangent2 = {0, 0, 1};  // Z direction
-            break;
-        case Face::PosZ:
-        case Face::NegZ:
-            tangent1 = {1, 0, 0};  // X direction
-            tangent2 = {0, 1, 0};  // Y direction
-            break;
-    }
-
-    // Match AO tangent adjustment for consistent corner mapping
-    if (face == Face::NegX || face == Face::PosY || face == Face::NegZ) {
-        tangent1 = -tangent1;
-    }
-
-    // Get the face normal as offset
-    BlockCoord normalOffset = faceOffset(face);
-
-    // The face is one block in the normal direction from the block position
-    BlockCoord facePos(
-        blockWorldPos.x + normalOffset.x,
-        blockWorldPos.y + normalOffset.y,
-        blockWorldPos.z + normalOffset.z
-    );
-
-    // For smooth lighting, sample light from 4 blocks around each corner
-    // and average them for smooth lighting.
-    //
-    // The light sampling grid is:
-    //   (-1,1)  (0,1)  (1,1)
-    //   (-1,0)  (0,0)  (1,0)
-    //   (-1,-1) (0,-1) (1,-1)
-    //
-    // Each vertex corner averages the 4 samples around it:
-    // - Vertex 0 (bottom-left): (-1,-1), (0,-1), (-1,0), (0,0)
-    // - Vertex 1 (bottom-right): (0,-1), (1,-1), (0,0), (1,0)
-    // - etc.
-
-    // Sample packed light and unpack into separate sky/block arrays
-    struct LightSample {
-        float sky;
-        float block;
-    };
-
-    auto getLightAt = [&](int dx, int dy) -> LightSample {
+    auto lightAt = [&](int da, int db) -> uint8_t {
         BlockCoord checkPos(
-            facePos.x + tangent1.x * dx + tangent2.x * dy,
-            facePos.y + tangent1.y * dx + tangent2.y * dy,
-            facePos.z + tangent1.z * dx + tangent2.z * dy
+            facePos.x + c.across.x * da + c.up.x * db,
+            facePos.y + c.across.y * da + c.up.y * db,
+            facePos.z + c.across.z * da + c.up.z * db
         );
-        uint8_t packed = lightProvider_(checkPos);
-        float skyVal = static_cast<float>(packed >> 4) / 15.0f;
-        float blockVal = static_cast<float>(packed & 0x0F) / 15.0f;
-        return {skyVal, blockVal};
+        return lightProvider_(checkPos);
     };
 
-    // Sample light at the 9 positions (3x3 grid centered on face)
-    LightSample l00 = getLightAt(-1, -1);
-    LightSample l10 = getLightAt( 0, -1);
-    LightSample l20 = getLightAt( 1, -1);
-    LightSample l01 = getLightAt(-1,  0);
-    LightSample l11 = getLightAt( 0,  0);  // Face center
-    LightSample l21 = getLightAt( 1,  0);
-    LightSample l02 = getLightAt(-1,  1);
-    LightSample l12 = getLightAt( 0,  1);
-    LightSample l22 = getLightAt( 1,  1);
-
-    // Average light for each corner (sky and block separately)
-    // Vertex indices match FACE_DATA: 0=bottom-left (uv 0,0), 1=bottom-right (uv 1,0),
-    // 2=top-right (uv 1,1), 3=top-left (uv 0,1)
-    //
-    // The tangent1 negation for NegX/PosY/NegZ faces means the sampling grid
-    // is mirrored in the U direction for those faces. We need to account for this
-    // when mapping samples to vertex corners.
-
-    bool mirroredU = (face == Face::NegX || face == Face::PosY || face == Face::NegZ);
-
-    if (mirroredU) {
-        // Grid is mirrored: what we sampled as "left" is actually "right" in vertex space
-        result.sky[0] = (l20.sky + l10.sky + l21.sky + l11.sky) * 0.25f;
-        result.sky[1] = (l10.sky + l00.sky + l11.sky + l01.sky) * 0.25f;
-        result.sky[2] = (l11.sky + l01.sky + l12.sky + l02.sky) * 0.25f;
-        result.sky[3] = (l21.sky + l11.sky + l22.sky + l12.sky) * 0.25f;
-
-        result.block[0] = (l20.block + l10.block + l21.block + l11.block) * 0.25f;
-        result.block[1] = (l10.block + l00.block + l11.block + l01.block) * 0.25f;
-        result.block[2] = (l11.block + l01.block + l12.block + l02.block) * 0.25f;
-        result.block[3] = (l21.block + l11.block + l22.block + l12.block) * 0.25f;
-    } else {
-        // Normal mapping
-        result.sky[0] = (l00.sky + l10.sky + l01.sky + l11.sky) * 0.25f;
-        result.sky[1] = (l10.sky + l20.sky + l11.sky + l21.sky) * 0.25f;
-        result.sky[2] = (l11.sky + l21.sky + l12.sky + l22.sky) * 0.25f;
-        result.sky[3] = (l01.sky + l11.sky + l02.sky + l12.sky) * 0.25f;
-
-        result.block[0] = (l00.block + l10.block + l01.block + l11.block) * 0.25f;
-        result.block[1] = (l10.block + l20.block + l11.block + l21.block) * 0.25f;
-        result.block[2] = (l11.block + l21.block + l12.block + l22.block) * 0.25f;
-        result.block[3] = (l01.block + l11.block + l02.block + l12.block) * 0.25f;
+    uint8_t middle = lightAt(0, 0);
+    for (int i = 0; i < 4; ++i) {
+        int a = c.side[i].x;
+        int b = c.side[i].y;
+        uint8_t samples[4] = {middle, lightAt(a, 0), lightAt(0, b), lightAt(a, b)};
+        float sky = 0.0f;
+        float block = 0.0f;
+        for (uint8_t packed : samples) {
+            sky += static_cast<float>(packed >> 4) / 15.0f;
+            block += static_cast<float>(packed & 0x0F) / 15.0f;
+        }
+        result.sky[i] = sky * 0.25f;
+        result.block[i] = block * 0.25f;
     }
 
     return result;

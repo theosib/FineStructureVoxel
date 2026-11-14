@@ -841,3 +841,16 @@ TEST(WorldFluidTest, NegativeCoordinates) {
     EXPECT_EQ(world.getFluid(pos), water);
     EXPECT_EQ(world.getFluidLevel(pos), 7);
 }
+
+// The only cell of a fluid changing level keeps its type: dropping the old reference first would
+// free the palette slot the new level points at
+TEST(FluidLayerTest, TheOnlyCellOfAFluidKeepsItsTypeWhenItsLevelChanges) {
+    FluidLayer layer;
+    FluidTypeId water = FluidTypeId::fromName("test:level_change");
+    ASSERT_TRUE(layer.setFluid(3, water, 7));
+    ASSERT_TRUE(layer.setFluid(3, water, 6));
+    EXPECT_EQ(layer.getFluidType(3), water);
+    EXPECT_EQ(layer.getLevel(3), 6);
+    ASSERT_TRUE(layer.setFluid(3, water, 2));
+    EXPECT_EQ(layer.getFluidType(3), water);
+}

@@ -129,14 +129,14 @@ bool FluidLayer::setFluid(int32_t index, FluidTypeId type, uint8_t level) {
         return false;  // No change
     }
 
-    // Update reference counts
+    // Update reference counts: the new one first, or a cell keeping its type but changing level,
+    // the only one of its type, would free the palette slot it's about to use
+    refCounts_[newPaletteIndex]++;
     if (!oldCell.isEmpty()) {
         decrementPaletteRef(oldCell.paletteIndex);
     } else {
         nonEmptyCount_.fetch_add(1, std::memory_order_relaxed);
     }
-
-    refCounts_[newPaletteIndex]++;
     sharedStore(data_[index], newCell.pack());
     bumpVersion();
     return true;

@@ -146,9 +146,10 @@ Automation and logic — the "factory floor endgame."
 Signals are solved by `SignalSolver` ([systems/signals.md](systems/signals.md)), not by scheduled
 ticks and neighbour updates: blocks declare what they are to the solver, which steps once per game
 tick and reports the levels that changed. Only conductors are instant and every component delays at
-least one step, so circuits are deterministic and can't form instant loops. The solver is done; the
-binding from blocks (`.model` declarations, results as block states, saving, unloaded columns) is
-next. The block types above are one game's vocabulary on top of it.
+least one step, so circuits are deterministic and can't form instant loops. The solver and the
+binding from blocks (`.model` declarations, relays, results as block states) are done; saving
+what's in flight and freezing at unloaded columns are left. The block types above are one game's
+vocabulary on top of it.
 
 #### Phase 30: Item Transport + Power
 **Priority: Medium**

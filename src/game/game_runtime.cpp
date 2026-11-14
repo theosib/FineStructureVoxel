@@ -265,6 +265,12 @@ void GameRuntime::load() {
     replication_ = std::make_shared<ReplicationServer>(*this);
     session_->addSubsystem(replication_);
 
+    if (signals_) {
+        signals_->setChangeCallback([this](BlockCoord pos, SignalLevel level) {
+            if (gameScript_) gameScript_->deliverSignal(pos.x, pos.y, pos.z, level);
+        });
+    }
+
     registerNatives();
 
     session_->setGameCommandHandler([this](const finescript::Value& command, int64_t player) {

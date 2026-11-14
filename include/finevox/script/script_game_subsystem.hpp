@@ -70,6 +70,9 @@ public:
     /// Deliver a client command to `on :command` handlers
     void deliverCommand(const finescript::Value& command, int64_t sender = 0);
 
+    /// A block in a circuit changed level: `on :signal` sees `signal`, a map of =x =y =z =level
+    void deliverSignal(int32_t x, int32_t y, int32_t z, int level);
+
     /// Where ui_publish goes. Payloads are CBOR, safe to hand across threads.
     void setMessageSink(MessageSink sink) { sink_ = std::move(sink); }
     void publish(const finescript::Value& message, Audience audience);

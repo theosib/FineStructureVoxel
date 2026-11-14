@@ -27,6 +27,7 @@
 #include "finevox/core/signal_solver.hpp"
 #include "finevox/core/world.hpp"
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -66,6 +67,11 @@ public:
     [[nodiscard]] SignalLevel relayLevelAt(BlockCoord pos, InternedId cls) const;
     /// Set a source block's level until its block changes (for sources driven by scripts)
     void setSourceLevel(BlockCoord pos, SignalLevel level);
+
+    /// Called with the block and its new level whenever a `signal-notify` block's level
+    /// changes, during the tick's showing. Blocks it changes are taken in the same tick.
+    using ChangeCallback = std::function<void(BlockCoord, SignalLevel)>;
+    void setChangeCallback(ChangeCallback callback) { changeCallback_ = std::move(callback); }
 
     [[nodiscard]] SignalSolver& solver() { return solver_; }
     [[nodiscard]] const SignalSolver& solver() const { return solver_; }
@@ -137,6 +143,7 @@ private:
     std::vector<SignalChange> results_;                    // from the last step, to show
     CoordSet newlyMade_;                                   // show these whatever the results
     std::unordered_map<BlockCoord, BlockTypeId> ownWrites_;  // shown states on their way back
+    ChangeCallback changeCallback_;
 
     // (type id, property, value) -> type id, and property values by family
     std::unordered_map<std::string, BlockTypeId> withCache_;

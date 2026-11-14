@@ -103,6 +103,18 @@ int ScriptGameSubsystem::deliverPickup(int64_t player, std::string_view item, in
     return std::clamp(taken, 0, count);
 }
 
+void ScriptGameSubsystem::deliverSignal(int32_t x, int32_t y, int32_t z, int level) {
+    auto& e = scripts_.engine();
+    auto signal = finescript::Value::map();
+    auto& m = signal.asMap();
+    m.set(e.intern("x"), finescript::Value::integer(x));
+    m.set(e.intern("y"), finescript::Value::integer(y));
+    m.set(e.intern("z"), finescript::Value::integer(z));
+    m.set(e.intern("level"), finescript::Value::integer(level));
+    ctx_->set("signal", signal);
+    fire("signal");
+}
+
 void ScriptGameSubsystem::deliverCommand(const finescript::Value& command, int64_t sender) {
     ctx_->set("cmd", command);
     ctx_->set("sender", finescript::Value::integer(sender));

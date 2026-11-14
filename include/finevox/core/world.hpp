@@ -90,6 +90,12 @@ public:
     /// @return Number of blocks whose type actually changed
     size_t setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> changes);
 
+    /// Move `count` blocks in a line, from `start` along `dir`, one cell along, with their
+    /// rotation and block data; `start` becomes air. The cell past the last must be air, or
+    /// nothing moves and this returns false. Every cell that changed goes into `changed`
+    /// (count + 1 of them), for lighting and meshing.
+    bool moveBlocks(BlockCoord start, Face dir, int32_t count, std::vector<BlockCoord>* changed = nullptr);
+
     // ========================================================================
     // External Block API (Event-Driven)
     // ========================================================================

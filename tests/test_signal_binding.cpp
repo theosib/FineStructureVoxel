@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "finevox/core/block_properties.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/data_container.hpp"
 #include "finevox/core/signal_binding.hpp"
 #include "finevox/core/world.hpp"
 
@@ -397,3 +398,51 @@ TEST_P(SignalBindingRandom, IncrementalMatchesFresh) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Seeds, SignalBindingRandom, ::testing::Range(1u, 21u));
+
+TEST(SignalBinding, NotifyingBlocksReportTheirChanges) {
+    static bool defined = false;
+    if (!defined) {
+        defined = true;
+        defineAll();
+        defineBlock("pusher", {}, {{"signal", "sink"}, {"signal-in", "all"}, {"signal-notify", "true"}}, true);
+    }
+    Rig r;
+    std::vector<std::pair<BlockCoord, SignalLevel>> heard;
+    r.signals.setChangeCallback([&](BlockCoord p, SignalLevel l) { heard.emplace_back(p, l); });
+    r.set(3, 1, 0, "pusher");
+    r.set(2, 1, 0, "lever[powered=true]");
+    r.run(2);
+    ASSERT_EQ(heard.size(), 1u);
+    EXPECT_EQ(heard[0].first, BlockCoord(3, 1, 0));
+    EXPECT_EQ(heard[0].second, 15);
+    r.set(2, 1, 0, "lever");
+    r.run(2);
+    ASSERT_EQ(heard.size(), 2u);
+    EXPECT_EQ(heard[1].second, 0);
+}
+
+TEST(WorldMoveBlocks, MovesALineWithRotationAndData) {
+    defineAll();
+    World world;
+    world.setBlock(BlockCoord(0, 5, 0), block("stone"));
+    world.setBlock(BlockCoord(1, 5, 0), block("glass"));
+    world.getSubChunk(ChunkPos(0, 0, 0))->setRotationIndex(BlockCoord(1, 5, 0).localIndex(), 5);
+    world.getSubChunk(ChunkPos(0, 0, 0))->getOrCreateBlockData(BlockCoord(0, 5, 0).localIndex()).set("k", 7);
+
+    std::vector<BlockCoord> changed;
+    ASSERT_TRUE(world.moveBlocks(BlockCoord(0, 5, 0), Face::PosX, 2, &changed));
+    EXPECT_EQ(changed.size(), 3u);
+    EXPECT_TRUE(world.getBlock(BlockCoord(0, 5, 0)).isAir());
+    EXPECT_EQ(world.getBlock(BlockCoord(1, 5, 0)), block("stone"));
+    EXPECT_EQ(world.getBlock(BlockCoord(2, 5, 0)), block("glass"));
+    auto* sc = world.getSubChunk(ChunkPos(0, 0, 0));
+    EXPECT_EQ(sc->getRotationIndex(BlockCoord(2, 5, 0).localIndex()), 5);
+    EXPECT_EQ(sc->getRotationIndex(BlockCoord(1, 5, 0).localIndex()), 0);
+    ASSERT_NE(sc->blockData(BlockCoord(1, 5, 0).localIndex()), nullptr);
+    EXPECT_EQ(sc->blockData(BlockCoord(1, 5, 0).localIndex())->get<int64_t>("k", 0), 7);
+    EXPECT_EQ(sc->blockData(BlockCoord(0, 5, 0).localIndex()), nullptr);
+
+    world.setBlock(BlockCoord(3, 5, 0), block("stone"));
+    EXPECT_FALSE(world.moveBlocks(BlockCoord(1, 5, 0), Face::PosX, 2)) << "blocked: nothing moves";
+    EXPECT_EQ(world.getBlock(BlockCoord(1, 5, 0)), block("stone"));
+}

@@ -5,6 +5,7 @@
 #include "finevox/core/block_event.hpp"
 #include "finevox/core/batch_builder.hpp"  // For BlockChange
 #include "finevox/core/mesh_rebuild_queue.hpp"
+#include "finevox/core/data_container.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -178,6 +179,37 @@ size_t World::setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> chan
     }
 
     return changedCount;
+}
+
+bool World::moveBlocks(BlockCoord start, Face dir, int32_t count, std::vector<BlockCoord>* changed) {
+    if (count < 0) return false;
+    const auto n = faceNormal(dir);
+    auto at = [&](int32_t i) { return BlockCoord(start.x + n[0] * i, start.y + n[1] * i, start.z + n[2] * i); };
+    if (!getBlock(at(count)).isAir()) return false;
+    if (count == 0) return true;
+
+    // From the far end back, so nothing is written over before it moves
+    for (int32_t i = count - 1; i >= 0; --i) {
+        BlockCoord from = at(i), to = at(i + 1);
+        setBlock(to, getBlock(from));
+        SubChunk* src = getSubChunk(ChunkPos::fromBlock(from));
+        SubChunk* dst = getSubChunk(ChunkPos::fromBlock(to));
+        if (!src || !dst) continue;
+        const int32_t fi = from.localIndex(), ti = to.localIndex();
+        dst->setRotationIndex(ti, src->getRotationIndex(fi));
+        src->setRotationIndex(fi, 0);
+        dst->removeBlockData(ti);
+        auto& data = src->allBlockData();
+        if (auto it = data.find(fi); it != data.end()) {
+            dst->allBlockData()[ti] = std::move(it->second);
+            data.erase(it);
+        }
+    }
+    setBlock(start, AIR_BLOCK_TYPE);
+    if (changed) {
+        for (int32_t i = 0; i <= count; ++i) changed->push_back(at(i));
+    }
+    return true;
 }
 
 ChunkColumn* World::getColumn(ColumnPos pos) {

@@ -543,13 +543,23 @@ void SignalBinding::refresh(const CoordSet& positions) {
 // ============================================================================
 
 void SignalBinding::showResults() {
+    std::vector<std::pair<BlockCoord, SignalLevel>> notices;
     for (const SignalChange& c : results_) {
         auto it = nodeAt_.find(c.node);
         if (it == nodeAt_.end()) continue;
         newlyMade_.erase(it->second);
-        if (const Entry* e = entryAt(it->second)) showLevel(it->second, *e);
+        if (const Entry* e = entryAt(it->second)) {
+            showLevel(it->second, *e);
+            if (e->spec && e->spec->notify) notices.emplace_back(it->second, c.level);
+        }
     }
     results_.clear();
+    // After the showing, so what the game sees is up to date; in position order, the same every run
+    if (changeCallback_) {
+        std::sort(notices.begin(), notices.end(),
+                  [](const auto& a, const auto& b) { return CoordLess{}(a.first, b.first); });
+        for (const auto& [pos, level] : notices) changeCallback_(pos, level);
+    }
     for (BlockCoord pos : newlyMade_) {
         if (const Entry* e = entryAt(pos)) showLevel(pos, *e);
     }

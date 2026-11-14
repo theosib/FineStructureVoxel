@@ -195,6 +195,7 @@ std::optional<SignalBlockSpec> parseSignalSpec(
     spec.out = p.faces("signal-out");
     spec.joinFaces = p.faces("signal-join-faces");
     spec.showEdges = p.flag("signal-show-edges");
+    spec.notify = p.flag("signal-notify");
 
     for (const auto& [key, value] : keys) {
         if (key.rfind("signal-power:", 0) == 0) {

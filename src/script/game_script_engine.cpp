@@ -398,6 +398,50 @@ void GameScriptEngine::registerNativeFunctions() {
         return finescript::Value::nil();
     };
     engine_->registerFunction("world.set_block", setBlockFn);
+
+    // world_move_blocks x y z dx dy dz n -> true if it moved: n blocks in a line from x y z, one
+    // cell along the unit step dx dy dz, with their rotation and data; x y z becomes air. The
+    // cell past the last must be air.
+    engine_->registerFunction("world_move_blocks", [](finescript::ExecutionContext& ctx,
+                                                      const std::vector<finescript::Value>& args) {
+        auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+        if (!ud || !ud->world || args.size() < 7) return finescript::Value::boolean(false);
+        int x, y, z;
+        if (!extractPos(args, 0, x, y, z)) return finescript::Value::boolean(false);
+        int dx = static_cast<int>(args[3].asNumber()), dy = static_cast<int>(args[4].asNumber()),
+            dz = static_cast<int>(args[5].asNumber());
+        int n = static_cast<int>(args[6].asNumber());
+        std::optional<Face> dir;
+        if (dx == -1 && dy == 0 && dz == 0) dir = Face::NegX;
+        else if (dx == 1 && dy == 0 && dz == 0) dir = Face::PosX;
+        else if (dx == 0 && dy == -1 && dz == 0) dir = Face::NegY;
+        else if (dx == 0 && dy == 1 && dz == 0) dir = Face::PosY;
+        else if (dx == 0 && dy == 0 && dz == -1) dir = Face::NegZ;
+        else if (dx == 0 && dy == 0 && dz == 1) dir = Face::PosZ;
+        if (!dir || n < 0) return finescript::Value::boolean(false);
+
+        World& world = *ud->world;
+        BlockCoord start{x, y, z};
+        std::vector<std::pair<BlockCoord, BlockTypeId>> before;
+        for (int i = 0; i <= n; ++i) {
+            BlockCoord p{x + dx * i, y + dy * i, z + dz * i};
+            before.emplace_back(p, world.getBlock(p));
+        }
+        std::vector<BlockCoord> changed;
+        if (!world.moveBlocks(start, *dir, n, &changed)) return finescript::Value::boolean(false);
+        for (const auto& [pos, oldType] : before) {
+            BlockTypeId newType = world.getBlock(pos);
+            if (oldType == newType) continue;
+            if (world.lightEngine()) world.enqueueLightingUpdateWithRemesh(pos, oldType, newType);
+            if (auto* mq = world.meshRebuildQueue()) {
+                for (const ChunkPos& affected : world.getAffectedSubChunks(pos)) {
+                    mq->push(affected, MeshRebuildRequest::immediate());
+                }
+            }
+            if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : world.fluidTickManager()) ftm->notifyBlockChanged(pos);
+        }
+        return finescript::Value::boolean(true);
+    });
     engine_->registerFunction("world_set_block", setBlockFn);
 
     // Block states: `block_prop :door :open` -> :false, `block_with :door :open :true` ->

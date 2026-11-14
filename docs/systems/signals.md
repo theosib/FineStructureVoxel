@@ -154,6 +154,7 @@ lists comma-separated (`set:powered=true: signal-level=15`).
 | `signal-facing:` | property that gives `front` (`facing`) |
 | `signal-join-faces:` | sink: faces on which it joins sinks of its group, so the halves of a two-block thing act as one |
 | `signal-show-edges: true` | only a change of level changes the shown property, so it can also be set by hand, and a block found with it set keeps it (a door) |
+| `signal-notify: true` | report its level changes: `SignalBinding::setChangeCallback`, which a game runtime turns into `on :signal` (`signal.x y z level`). Blocks the handler changes are taken in that same tick. |
 
 Faces are `north south east west up down`, `sides` (the four around), `all`, `front back left
 right` (relative to the facing; left and right as seen looking out of the front, from above),
@@ -178,7 +179,9 @@ and for conductors `points`.
 ### Scripts
 
 `signal_level x y z` is a block's level (0 out of circuit); `signal_set x y z level` sets a
-source's level until its block changes.
+source's level until its block changes. `on :signal` hears `signal-notify` blocks change.
+`world_move_blocks x y z dx dy dz n` moves a line of n blocks one cell (`World::moveBlocks`, with
+rotation and block data), for things a signal pushes or pulls.
 
 ### Not yet
 

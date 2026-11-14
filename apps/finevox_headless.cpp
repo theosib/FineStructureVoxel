@@ -149,6 +149,7 @@ int main(int argc, char* argv[]) {
         size_t errors = runtime.gameScript().errorCount();
         if (errors > 0) {
             std::cerr << "[headless] " << errors << " script error(s)\n";
+            for (const auto& text : runtime.gameScript().errors()) std::cerr << "[headless]   " << text << "\n";
             return runtime.exitCode() != 0 ? runtime.exitCode() : 1;
         }
         return runtime.exitCode();

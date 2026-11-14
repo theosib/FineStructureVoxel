@@ -345,3 +345,53 @@ TEST(VisualScene, DeterministicAcrossRuns) {
         << "world-render rerun produced " << mismatches
         << " mismatched bytes — scene is not deterministic";
 }
+
+TEST(VisualScene, ViewDistanceIsHorizontal) {
+    HeadlessCtx ctx = makeHeadlessContext();
+    registerSceneBlocks();
+
+    World world;
+    buildScene(world);
+
+    WorldRendererConfig cfg;
+    cfg.viewDistance = 64.0f;
+    cfg.fog.enabled = false;
+    cfg.disableFrustumCulling = true;
+
+    WorldRenderer renderer(ctx.device.get(), ctx.surface.get(), world, cfg);
+    renderer.loadShaders(std::string(FINEVOX_SHADER_DIR) + "/chunk.vert.spv",
+                         std::string(FINEVOX_SHADER_DIR) + "/chunk.frag.spv");
+
+    BlockAtlas atlas;
+    atlas.createPlaceholderAtlas(ctx.device.get(), ctx.device->defaultCommandPool(), 16, 16);
+    atlas.setBlockTexture(BlockTypeId::fromName("scene_test:stone"), 0, 0);
+    atlas.setBlockTexture(BlockTypeId::fromName("scene_test:dirt"), 1, 0);
+    atlas.setBlockTexture(BlockTypeId::fromName("scene_test:grass"), 2, 0);
+    atlas.setBlockTexture(BlockTypeId::fromName("scene_test:cobble"), 3, 0);
+    renderer.setBlockAtlas(atlas.texture());
+    renderer.setTextureProvider(atlas.createProvider());
+    renderer.initialize();
+
+    finevk::CameraState camState = makeCamera();
+    renderer.updateCamera(camState, glm::dvec3(8.0, 200.0, 8.0));
+    pumpMeshesToQuiescence(renderer, world);
+
+    // High altitude (dy = 200 > viewDistance = 64), but directly overhead in XZ: still drawn
+    renderer.updateCamera(camState, glm::dvec3(8.0, 200.0, 8.0));
+    ctx.surface->beginFrame();
+    ctx.surface->beginRenderPass({0.02f, 0.02f, 0.05f, 1.0f}, 1.0f);
+    renderer.render(*ctx.surface->currentCommandBuffer());
+    ctx.surface->endRenderPass();
+    ctx.surface->endFrame();
+    EXPECT_EQ(renderer.renderedChunkCount(), 1u);
+
+    // Horizontally beyond viewDistance (dx = 200 > 64): culled
+    renderer.updateCamera(camState, glm::dvec3(208.0, 8.0, 8.0));
+    ctx.surface->beginFrame();
+    ctx.surface->beginRenderPass({0.02f, 0.02f, 0.05f, 1.0f}, 1.0f);
+    renderer.render(*ctx.surface->currentCommandBuffer());
+    ctx.surface->endRenderPass();
+    ctx.surface->endFrame();
+    EXPECT_EQ(renderer.renderedChunkCount(), 0u);
+}
+

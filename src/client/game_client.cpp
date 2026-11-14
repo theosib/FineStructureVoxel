@@ -702,6 +702,8 @@ void GameClient::Impl::enterWorld() {
 
     render::WorldRendererConfig worldConfig;
     worldConfig.viewDistance = worldInfo.viewDistance;
+    worldConfig.fog.startDistance = worldInfo.viewDistance * 0.8f;
+    worldConfig.fog.endDistance = worldInfo.viewDistance;
     worldConfig.nearestFilter = manifest.nearestFilter;
     if (worldInfo.fog) {
         fog = std::make_unique<RegionTint>(worldInfo.visionCellsX, worldInfo.visionCellsZ);
@@ -1337,7 +1339,7 @@ void GameClient::Impl::buildScene() {
         const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId);
         float alpha = state.interpolationAlpha(tickRate);
         glm::dvec3 pos = state.interpolatedPosition(alpha);
-        if (glm::length(pos - cameraPos) > worldInfo.viewDistance) continue;
+        if (glm::length(glm::dvec2(pos.x - cameraPos.x, pos.z - cameraPos.z)) > worldInfo.viewDistance) continue;
 
         BlockCoord cell(static_cast<int32_t>(std::floor(pos.x)),
                         static_cast<int32_t>(std::floor(pos.y)) + 1,

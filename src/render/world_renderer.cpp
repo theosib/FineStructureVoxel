@@ -655,8 +655,8 @@ SubChunkView* WorldRenderer::getOrCreateView(ChunkPos pos) {
 
 bool WorldRenderer::isInViewDistance(ChunkPos pos) const {
     float viewDistChunks = config_.viewDistance / 16.0f;
-    glm::vec3 chunkCenter(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
-    float dist = glm::length(chunkCenter - cameraChunkPos_);
+    glm::vec2 chunkCenter(pos.x + 0.5f, pos.z + 0.5f);
+    float dist = glm::length(chunkCenter - glm::vec2(cameraChunkPos_.x, cameraChunkPos_.z));
     return dist <= viewDistChunks;
 }
 
@@ -722,9 +722,9 @@ uint32_t WorldRenderer::unloadDistantChunks() {
     while (it != views_.end()) {
         if (unloaded >= config_.maxUnloadsPerFrame) break;
 
-        // Calculate distance to camera in chunk coordinates
-        glm::vec3 chunkCenter(it->first.x + 0.5f, it->first.y + 0.5f, it->first.z + 0.5f);
-        float dist = glm::length(chunkCenter - cameraChunkPos_);
+        // Calculate horizontal distance to camera in chunk coordinates
+        glm::vec2 chunkCenter(it->first.x + 0.5f, it->first.z + 0.5f);
+        float dist = glm::length(chunkCenter - glm::vec2(cameraChunkPos_.x, cameraChunkPos_.z));
 
         if (dist > unloadDistChunks) {
             it = views_.erase(it);
@@ -765,8 +765,8 @@ uint32_t WorldRenderer::enforceMemoryBudget() {
     float viewDistChunks = config_.viewDistance / 16.0f;
 
     for (const auto& [pos, view] : views_) {
-        glm::vec3 chunkCenter(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
-        float dist = glm::length(chunkCenter - cameraChunkPos_);
+        glm::vec2 chunkCenter(pos.x + 0.5f, pos.z + 0.5f);
+        float dist = glm::length(chunkCenter - glm::vec2(cameraChunkPos_.x, cameraChunkPos_.z));
 
         // Only consider chunks beyond view distance for unloading
         // (won't unload visible chunks even if over budget)

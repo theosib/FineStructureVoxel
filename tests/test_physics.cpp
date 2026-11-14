@@ -1749,6 +1749,26 @@ TEST(CameraClearance, StaysClearOfSolidsAtEveryStandingSpot) {
     }
 }
 
+TEST(CameraClearance, DoesNotDuckUnderTwoOrThreeBlockCeilings) {
+    SolidCells ceiling3 = floorScene();
+    SolidCells ceiling2 = floorScene();
+    for (int x = -2; x <= 2; ++x) {
+        for (int z = -2; z <= 2; ++z) {
+            ceiling3.add(x, 4, z);  // 3 blocks of headroom (y = 1, 2, 3)
+            ceiling2.add(x, 3, z);  // 2 blocks of headroom (y = 1, 2)
+        }
+    }
+    Vec3 safe(0.5f, 1.9f, 0.5f);
+    Vec3 eye(0.5f, 1.0f + CLEARANCE_EYE, 0.5f);
+    EXPECT_FLOAT_EQ(adjustCameraForWallCollision(safe, eye, ceiling3.provider()).y, eye.y);
+    EXPECT_FLOAT_EQ(adjustCameraForWallCollision(safe, eye, ceiling2.provider()).y, eye.y);
+
+    // Crouched eye (1.30 above floor) under a 2-block ceiling also stays put
+    Vec3 crouchedEye(0.5f, 1.0f + 1.30f, 0.5f);
+    EXPECT_FLOAT_EQ(adjustCameraForWallCollision(safe, crouchedEye, ceiling2.provider()).y, crouchedEye.y);
+}
+
+
 TEST(EscapeOverlap, PushesABodyOutOfAWallTheShortWay) {
     SolidCells scene = floorScene();
     for (int z = -5; z <= 5; ++z) {

@@ -527,7 +527,7 @@ constexpr float CAMERA_COLLISION_RADIUS = 0.4f;
     const BlockShapeProvider& shapeProvider
 ) {
     Vec3 toCamera = desiredCameraPos - safeOrigin;
-    float distance = toCamera.length();
+    float distance = glm::length(toCamera);
 
     Vec3 adjustedPos = desiredCameraPos;
 
@@ -568,8 +568,9 @@ constexpr float CAMERA_COLLISION_RADIUS = 0.4f;
     for (const Vec3& dir : probeDirections) {
         RaycastResult hit = raycastBlocks(adjustedPos, dir, cameraRadius, RaycastMode::Collision, shapeProvider);
         if (hit.hit) {
-            // Wall is closer than cameraRadius - need to push back
-            float penetration = cameraRadius - hit.distance;
+            // The body's own top already stops 0.15 above the eye; don't duck the camera under low ceilings
+            float effectiveRadius = (hit.face == Face::NegY) ? std::min(cameraRadius, 0.15f) : cameraRadius;
+            float penetration = effectiveRadius - hit.distance;
             if (penetration > 0.0f) {
                 pushback = pushback - dir * penetration;
             }

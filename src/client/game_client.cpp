@@ -1672,6 +1672,12 @@ void GameClient::Impl::registerNatives() {
         return pickResult(pickBlock(glm::vec2(number(args[0]), number(args[1])), RaycastMode::Collision));
     });
 
+    // avatar_pos -> [x y z] of the embodied avatar's feet
+    e.registerFunction("avatar_pos", [this](ExecutionContext&, const Args&) -> Value {
+        Vec3 pos = stewardBody ? stewardBody->position() : Vec3(0.0f);
+        return Value::array(std::vector<Value>{Value::number(pos.x), Value::number(pos.y), Value::number(pos.z)});
+    });
+
     // avatar_overlaps x y z -> whether a block in that cell would stand in the avatar's body
     e.registerFunction("avatar_overlaps", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 3) return Value::boolean(false);

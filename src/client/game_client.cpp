@@ -1817,6 +1817,12 @@ void GameClient::Impl::registerNatives() {
         if (args.empty()) return Value::nil();
         return Value::symbol(StringInterner::global().intern(BlockPropertyRegistry::familyOf(nameOf(args[0]))));
     });
+    e.registerFunction("block_collides", [nameOf](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::boolean(false);
+        std::string n = nameOf(args[0]);
+        if (n.empty() || n == "air") return Value::boolean(false);
+        return Value::boolean(BlockRegistry::global().getType(BlockTypeId::fromName(n)).hasCollision());
+    });
 
     e.registerFunction("expect_change", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 3) return Value::nil();

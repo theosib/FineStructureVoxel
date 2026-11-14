@@ -429,6 +429,14 @@ void GameScriptEngine::registerNativeFunctions() {
             return finescript::Value::symbol(
                 StringInterner::global().intern(BlockPropertyRegistry::familyOf(nameOf(args[0]))));
         });
+    engine_->registerFunction("block_collides",
+        [nameOf](finescript::ExecutionContext&, const std::vector<finescript::Value>& args) {
+            if (args.empty()) return finescript::Value::boolean(false);
+            std::string n = nameOf(args[0]);
+            if (n.empty() || n == "air") return finescript::Value::boolean(false);
+            return finescript::Value::boolean(
+                BlockRegistry::global().getType(BlockTypeId::fromName(n)).hasCollision());
+        });
 
     auto isAirFn = [](finescript::ExecutionContext& ctx, const std::vector<finescript::Value>& args)
         -> finescript::Value

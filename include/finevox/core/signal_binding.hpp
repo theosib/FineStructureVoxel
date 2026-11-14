@@ -45,11 +45,14 @@ public:
     [[nodiscard]] TickPhase phase() const override { return TickPhase::Tick; }
     [[nodiscard]] int32_t priority() const override { return 50; }
     void onAttach(GameSession& session, EventBus& eventBus) override;
+    void onDetach() override;
     void tick(float dt) override;
 
     /// Start watching the world, and take in every signal block already in it. onAttach does
     /// this; call it directly when there's no session.
     void attach();
+    /// Stop watching the world (onDetach does this). The world must still be there.
+    void detach();
     /// One tick's work: show, take in changes, step
     void step();
 

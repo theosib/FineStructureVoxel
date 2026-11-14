@@ -76,13 +76,24 @@ SignalBinding::SignalBinding(World& world, SignalLevel maxLevel)
     : world_(world), solver_(maxLevel), inbox_(std::make_shared<Inbox>()) {}
 
 SignalBinding::~SignalBinding() {
-    if (attached_) world_.removeBlockObserver(inbox_.get());
+    detach();
 }
 
 void SignalBinding::onAttach(GameSession& session, EventBus& eventBus) {
     (void)session;
     (void)eventBus;
     attach();
+}
+
+void SignalBinding::onDetach() {
+    // The session's world goes before whoever holds this, so let go of it now
+    detach();
+}
+
+void SignalBinding::detach() {
+    if (!attached_) return;
+    attached_ = false;
+    world_.removeBlockObserver(inbox_.get());
 }
 
 void SignalBinding::attach() {

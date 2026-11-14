@@ -1126,8 +1126,36 @@ void GameClient::Impl::bindInput() {
                     }
                     return finevk::ListenerResult::Consumed;
                 }
+                case finevk::InputEventType::CharInput: {
+                    if (e.character >= 0x20 && e.character < 0x7F) {
+                        uiCtx->set("key_event", Value::symbol(uiEngine->intern("char")));
+                        uiCtx->set("key_char", Value::string(std::string(1, static_cast<char>(e.character))));
+                        uiCtx->set("key_name", Value::string(""));
+                        uiCtx->set("key_consumed", Value::boolean(false));
+                        fireUi(symKey);
+                        if (uiCtx->get("key_consumed").truthy()) return finevk::ListenerResult::Consumed;
+                    }
+                    return finevk::ListenerResult::Reject;
+                }
+                case finevk::InputEventType::KeyRepeat: {
+                    uiCtx->set("key_event", Value::symbol(uiEngine->intern("repeat")));
+                    uiCtx->set("key_name", Value::string(InputActionSystem::keyCodeToName(e.key)));
+                    uiCtx->set("key_char", Value::string(""));
+                    uiCtx->set("key_consumed", Value::boolean(false));
+                    fireUi(symKey);
+                    return uiCtx->get("key_consumed").truthy() ? finevk::ListenerResult::Consumed
+                                                               : finevk::ListenerResult::Reject;
+                }
                 case finevk::InputEventType::KeyPress:
                 case finevk::InputEventType::KeyRelease: {
+                    uiCtx->set("key_event", Value::symbol(uiEngine->intern(
+                        e.type == finevk::InputEventType::KeyPress ? "down" : "up")));
+                    uiCtx->set("key_name", Value::string(InputActionSystem::keyCodeToName(e.key)));
+                    uiCtx->set("key_char", Value::string(""));
+                    uiCtx->set("key_consumed", Value::boolean(false));
+                    fireUi(symKey);
+                    if (uiCtx->get("key_consumed").truthy()) return finevk::ListenerResult::Consumed;
+
                     RawInputEvent raw;
                     raw.type = e.type == finevk::InputEventType::KeyPress ? RawEventType::KeyPress
                                                                           : RawEventType::KeyRelease;

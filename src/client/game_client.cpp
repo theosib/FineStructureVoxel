@@ -1013,7 +1013,8 @@ void GameClient::Impl::bindInput() {
                     return finevk::ListenerResult::Consumed;
                 }
                 case finevk::InputEventType::MouseScroll: {
-                    float notch = e.state.scrollDelta.y;
+                    // Holding Shift on macOS turns vertical wheel ticks into horizontal scroll events
+                    float notch = e.state.scrollDelta.y != 0.0f ? e.state.scrollDelta.y : e.state.scrollDelta.x;
                     if (notch == 0.0f) return finevk::ListenerResult::Consumed;
                     // A `scroll` binding takes it, with the amount as `action_amount`; the
                     // overhead camera zooms otherwise

@@ -30,6 +30,15 @@ void ItemDropEntity::tick(float dt, World& /*world*/) {
         return;
     }
 
+    // On the ground it comes to rest rather than sliding on forever
+    if (isOnGround()) {
+        Vec3 vel = velocity();
+        float keep = std::exp(-groundFriction_ * dt);
+        vel.x *= keep;
+        vel.z *= keep;
+        setVelocity(vel);
+    }
+
     if (!entityManager_ || item_.isEmpty()) return;
 
     // Cheapest: check local player first (single-player fast path).

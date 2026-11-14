@@ -84,6 +84,7 @@ void PlayerController::update(float dt) {
     if (flyMode_) {
         updateFlyMovement(dt);
     } else if (body_ && physics_) {
+        updateCrouch();
         if (flying_) {
             updateBodyFlight(dt);
         } else {
@@ -92,6 +93,26 @@ void PlayerController::update(float dt) {
     }
     // A press is for this update only: one made in the air doesn't jump on landing
     jumpRequested_ = false;
+}
+
+void PlayerController::updateCrouch() {
+    bool want = sneak_ && !flying_;
+    if (want == crouched_) return;
+    Vec3 he = body_->halfExtents();
+    float change = crouchShrink_ * 0.5f;
+    if (want) {
+        body_->setHalfExtents(Vec3(he.x, he.y - change, he.z));
+        crouched_ = true;
+        return;
+    }
+    // Stand up only where the full height fits
+    Vec3 standing(he.x, he.y + change, he.z);
+    Vec3 pos = body_->position();
+    AABB full(pos.x - standing.x, pos.y, pos.z - standing.z,
+              pos.x + standing.x, pos.y + standing.y * 2.0f, pos.z + standing.z);
+    if (!physics_->isClear(full)) return;
+    body_->setHalfExtents(standing);
+    crouched_ = false;
 }
 
 Vec3 PlayerController::guardEdge(Vec3 move) const {
@@ -180,7 +201,7 @@ void PlayerController::updatePhysicsMovement(float dt) {
     }
 
     float speed = contact.inFluid ? moveSpeed_ * 0.65f : moveSpeed_;
-    if (sneak_ && !contact.inFluid) speed *= sneakSpeed_;
+    if (crouched_ && !contact.inFluid) speed *= sneakSpeed_;
     bool wantUp = jumpHeld_ || jumpRequested_;
     Vec3 vel = body_->velocity();
     if (glm::length(moveDir) > 0.0f) {

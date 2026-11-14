@@ -40,6 +40,7 @@ struct EntityState {
     glm::dvec3 position{0.0};
     glm::dvec3 velocity{0.0};
     bool onGround = false;
+    bool crouching = false;            // A player's body is crouched (shorter)
 
     // Look direction
     float yaw = 0.0f;

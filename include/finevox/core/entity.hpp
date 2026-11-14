@@ -117,7 +117,7 @@ public:
     }
 
     [[nodiscard]] Vec3 halfExtents() const override { return halfExtents_; }
-    void setHalfExtents(const Vec3& he) { halfExtents_ = he; }
+    void setHalfExtents(const Vec3& he) override { halfExtents_ = he; }
 
     [[nodiscard]] bool isOnGround() const override { return onGround_; }
     void setOnGround(bool onGround) override { onGround_ = onGround; }

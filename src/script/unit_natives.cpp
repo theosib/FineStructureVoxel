@@ -12,6 +12,7 @@
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/navigation.hpp"
 #include "finevox/core/physics.hpp"
@@ -27,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <random>
 #include <unordered_map>
 
 namespace finevox::script {
@@ -165,6 +167,40 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         if (faction.isNumeric()) mob->setFaction(static_cast<uint16_t>(faction.asNumber()));
         EntityId id = ud->entityManager->spawnEntity(std::move(mob));
         return Value::integer(static_cast<int64_t>(id));
+    });
+
+    // item_drop item count x y z [=velocity [vx vy vz]] [=delay seconds] -> id: an item lying in
+    // the world. Without a velocity it's tossed a little way at random. A player who comes
+    // near takes it if the game's `on :pickup` says so.
+    const uint32_t keyVelocity = si.intern("velocity");
+    const uint32_t keyDelay = si.intern("delay");
+    e.registerFunction("item_drop", [=](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        if (!ud || !ud->entityManager || args.size() < 3) return Value::nil();
+        uint32_t itemSym = blockSymbol(args[0]);
+        int count = static_cast<int>(number(args[1]));
+        double x, y, z;
+        if (itemSym == 0 || count <= 0 || !positionArg(args, 2, x, y, z)) return Value::nil();
+
+        ItemStack stack;
+        stack.type = ItemTypeId(itemSym);
+        stack.count = count;
+        auto drop = std::make_unique<ItemDropEntity>(INVALID_ENTITY_ID, std::move(stack));
+        drop->setPosition(Vec3(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
+        Value options = optionsArg(args, 4);
+        Value velocity = option(options, keyVelocity);
+        if (velocity.isArray() && velocity.asArray().size() >= 3) {
+            const auto& v = velocity.asArray();
+            drop->setVelocity(Vec3(float(number(v[0])), float(number(v[1])), float(number(v[2]))));
+        } else {
+            static std::mt19937 rng{std::random_device{}()};
+            std::uniform_real_distribution<float> angle(0.0f, 6.2831853f), speed(0.5f, 2.0f);
+            float a = angle(rng), s = speed(rng);
+            drop->setVelocity(Vec3(std::cos(a) * s, 3.0f, std::sin(a) * s));
+        }
+        Value delay = option(options, keyDelay);
+        if (delay.isNumeric()) drop->setPickupDelay(static_cast<float>(delay.asNumber()));
+        return Value::integer(static_cast<int64_t>(ud->entityManager->spawnEntity(std::move(drop))));
     });
 
     e.registerFunction("ent_remove", [](ExecutionContext& ctx, const Args& args) -> Value {

@@ -61,6 +61,12 @@ public:
     /// Fire an event at every handler registered for it
     void fire(std::string_view event);
 
+    /// An item lying in the world has reached a player: `on :pickup` sees `pickup`, a map of
+    /// =player =item =count =entity, and returns how many it took. Nothing is taken with no
+    /// handler, or one that returns nothing.
+    int deliverPickup(int64_t player, std::string_view item, int count, uint64_t entity);
+    [[nodiscard]] bool handles(std::string_view event) const;
+
     /// Deliver a client command to `on :command` handlers
     void deliverCommand(const finescript::Value& command, int64_t sender = 0);
 

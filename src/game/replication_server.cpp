@@ -3,6 +3,7 @@
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/fluid_layer.hpp"
+#include "finevox/core/item_drop_entity.hpp"
 #include "finevox/core/mob_entity.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/projectile_system.hpp"
@@ -352,6 +353,9 @@ void ReplicationServer::sendEntities(ClientView& view) {
             spawn.yaw = state.yaw;
             spawn.pitch = state.pitch;
             spawn.health = now.health;
+            if (const auto* drop = dynamic_cast<const ItemDropEntity*>(entity.get())) {
+                spawn.item = std::string(drop->item().type.name());
+            }
             send(view, net::CH_ENTITIES, net::msg::EntitySpawn, net::encodeEntitySpawn(spawn));
             view.known_.emplace(id, now);
             continue;

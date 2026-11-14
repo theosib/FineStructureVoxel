@@ -272,6 +272,7 @@ void ClientSession::sendPlayerState(const EntityState& state) {
     wire.yaw = state.yaw;
     wire.pitch = state.pitch;
     wire.onGround = state.onGround;
+    wire.crouch = state.crouching;
     send(CH_INPUT, msg::PlayerState, encodePlayerState(wire));
 }
 
@@ -700,7 +701,8 @@ void ClientSession::onEntitySpawn(const Message& message) {
 
     auto name = entityTypeNames_.find(type);
     graphics_.push(GraphicsMessage::fromEvent(script::makeEntitySpawnValue(
-        state.id, 0, state.position, state.yaw, state.pitch, name == entityTypeNames_.end() ? "" : name->second)));
+        state.id, 0, state.position, state.yaw, state.pitch, name == entityTypeNames_.end() ? "" : name->second,
+        spawn->item)));
 
     // A first snapshot, so that it's drawn before anything's moved
     EntitySnapshot snapshot;

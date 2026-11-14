@@ -58,9 +58,14 @@ public:
     /// The jump key is held: jumps again on every landing, swims up, flies up
     void setJumpHeld(bool held) { jumpHeld_ = held; }
 
-    /// Sneaking: slower, won't walk off an edge, flies down
+    /// Sneaking: crouched, slower, won't walk off an edge, flies down
     void setSneak(bool sneak) { sneak_ = sneak; }
     [[nodiscard]] bool sneaking() const { return sneak_; }
+
+    /// Crouched: the body shorter by crouchShrink. Sneaking on foot crouches; letting go stands
+    /// up only where there's room, so a body under a low ceiling stays crouched (and slow).
+    [[nodiscard]] bool crouched() const { return crouched_; }
+    void setCrouchShrink(float blocks) { crouchShrink_ = blocks; }
 
     /// Apply mouse look delta (raw pixel delta)
     void look(float dx, float dy);
@@ -175,6 +180,8 @@ private:
     bool jumpRequested_ = false;
     bool jumpHeld_ = false;
     bool sneak_ = false;
+    bool crouched_ = false;
+    float crouchShrink_ = 0.25f;
 
     // Look state
     float yaw_ = 0.0f;
@@ -209,6 +216,8 @@ private:
     glm::dvec3 flyPositionDelta_{0.0, 0.0, 0.0};
 
     void updatePhysicsMovement(float dt);
+    /// Crouch or stand to match the sneak key, where there's room
+    void updateCrouch();
     void updateBodyFlight(float dt);
     /// Cut a horizontal move short where it would leave the body with nothing under it
     [[nodiscard]] Vec3 guardEdge(Vec3 move) const;

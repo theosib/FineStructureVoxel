@@ -297,6 +297,8 @@ public:
 
     // Half-extents of the bounding box (fixed size, not affected by position)
     [[nodiscard]] virtual Vec3 halfExtents() const = 0;
+    /// Resize, keeping the feet where they are. Bodies of fixed size ignore it.
+    virtual void setHalfExtents(const Vec3& /*he*/) {}
 
     // Ground state
     [[nodiscard]] virtual bool isOnGround() const = 0;
@@ -343,6 +345,7 @@ public:
     }
 
     [[nodiscard]] Vec3 halfExtents() const override { return halfExtents_; }
+    void setHalfExtents(const Vec3& he) override { halfExtents_ = he; }
 
     [[nodiscard]] bool isOnGround() const override { return onGround_; }
     void setOnGround(bool onGround) override { onGround_ = onGround; }
@@ -384,6 +387,9 @@ public:
     [[nodiscard]] RaycastResult raycast(const Vec3& origin, const Vec3& direction,
                                          float maxDistance,
                                          RaycastMode mode = RaycastMode::Interaction) const;
+
+    // Is this box clear of every block, touching aside?
+    [[nodiscard]] bool isClear(const AABB& box) const;
 
     // Is there anything to stand on under this box, within `depth` below its bottom?
     [[nodiscard]] bool hasFooting(const AABB& box, float depth) const;

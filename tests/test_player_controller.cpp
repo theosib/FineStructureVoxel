@@ -504,13 +504,22 @@ TEST(KeyBindingsTest, LoadDefaultsWhenNoConfig) {
 
 namespace {
 
-// Solid cubes at the given cells, nothing elsewhere
+// Solid cubes at the given cells, the top half of a cell at others, nothing elsewhere
 struct BlockWorld {
     std::vector<BlockCoord> cells;
+    std::vector<BlockCoord> upperHalves;
     BlockShapeProvider shapes() const {
+        static const CollisionShape upper = [] {
+            CollisionShape shape;
+            shape.addBox(AABB(0.0f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f));
+            return shape;
+        }();
         return [this](const BlockCoord& pos, RaycastMode) -> const CollisionShape* {
             for (const auto& c : cells) {
                 if (c.x == pos.x && c.y == pos.y && c.z == pos.z) return &CollisionShape::FULL_BLOCK;
+            }
+            for (const auto& c : upperHalves) {
+                if (c.x == pos.x && c.y == pos.y && c.z == pos.z) return &upper;
             }
             return nullptr;
         };
@@ -544,7 +553,7 @@ TEST(PlayerControllerTest, JumpPressedInTheAirIsForgotten) {
     BlockWorld world = floorWorld();
     PhysicsSystem physics(world.shapes());
     const Vec3 start(0.5f, 2.0f, 0.5f);
-    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.95f, 0.35f));
     PlayerController pc;
     pc.setPhysics(&body, &physics);
     pc.setFlyMode(false);  // which moves the body to the fly position: put it back
@@ -559,7 +568,7 @@ TEST(PlayerControllerTest, ATapJumpsOnceAndAHoldKeepsJumping) {
     BlockWorld world = floorWorld();
     PhysicsSystem physics(world.shapes());
     const Vec3 start(0.5f, 0.0f, 0.5f);
-    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.95f, 0.35f));
     PlayerController pc;
     pc.setPhysics(&body, &physics);
     pc.setFlyMode(false);  // which moves the body to the fly position: put it back
@@ -587,7 +596,7 @@ TEST(PlayerControllerTest, SneakingNeverWalksOffAPillar) {
     PhysicsSystem physics(world.shapes());
     for (int heading = 0; heading < 8; ++heading) {
         for (bool sneak : {true, false}) {
-            SimplePhysicsBody body(Vec3(0.5f, 1.0f, 0.5f), Vec3(0.35f, 0.9f, 0.35f));
+            SimplePhysicsBody body(Vec3(0.5f, 1.0f, 0.5f), Vec3(0.35f, 0.95f, 0.35f));
             body.setOnGround(true);
             PlayerController pc;
             pc.setPhysics(&body, &physics);
@@ -618,7 +627,7 @@ TEST(PlayerControllerTest, DoubleTapStartsFlightOnlyWhereAllowedAndQuickEnough) 
     BlockWorld world = floorWorld();
     PhysicsSystem physics(world.shapes());
     auto tryDoubleTap = [&](bool allowed, int framesBetween) {
-        SimplePhysicsBody body(Vec3(0.5f, 0.0f, 0.5f), Vec3(0.35f, 0.9f, 0.35f));
+        SimplePhysicsBody body(Vec3(0.5f, 0.0f, 0.5f), Vec3(0.35f, 0.95f, 0.35f));
         PlayerController pc;
         pc.setPhysics(&body, &physics);
         pc.setFlyMode(false);  // which moves the body to the fly position: put it back
@@ -640,7 +649,7 @@ TEST(PlayerControllerTest, FlightHoversClimbsAndEndsOnLanding) {
     BlockWorld world = floorWorld();
     PhysicsSystem physics(world.shapes());
     const Vec3 start(0.5f, 3.0f, 0.5f);
-    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.95f, 0.35f));
     PlayerController pc;
     pc.setPhysics(&body, &physics);
     pc.setFlyMode(false);  // which moves the body to the fly position: put it back
@@ -665,4 +674,44 @@ TEST(PlayerControllerTest, FlightHoversClimbsAndEndsOnLanding) {
     pc.setFlying(true);
     pc.setFlightAllowed(false);
     EXPECT_FALSE(pc.flying()) << "taking flight away lands the body";
+}
+
+TEST(PlayerControllerTest, CrouchingFitsUnderALowCeilingAndStandsOnlyWithRoom) {
+    // A floor, and a ceiling 1.5 above it over x = 2..3
+    BlockWorld world = floorWorld();
+    for (int x = 2; x <= 3; ++x) world.upperHalves.emplace_back(x, 1, 0);
+    PhysicsSystem physics(world.shapes());
+    // Resting a margin above the floor, as bodies do: a gap of exactly its height still fits
+    const Vec3 start(0.5f, COLLISION_MARGIN, 0.5f);
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.95f, 0.35f));
+    PlayerController pc;
+    pc.setPhysics(&body, &physics);
+    pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+    body.setPosition(start);
+    pc.setCrouchShrink(0.4f);
+    pc.setYaw(glm::half_pi<float>());  // facing +X
+
+    // Standing, the ceiling stops it
+    pc.setMoveForward(true);
+    for (int i = 0; i < 90; ++i) pc.update(FRAME);
+    EXPECT_LT(body.position().x, 2.0f);
+
+    // Crouched it goes under
+    pc.setSneak(true);
+    for (int i = 0; i < 120 && body.position().x < 2.8f; ++i) pc.update(FRAME);
+    EXPECT_TRUE(pc.crouched());
+    EXPECT_NEAR(body.halfExtents().y * 2.0f, 1.5f, 1e-5f);
+    EXPECT_GT(body.position().x, 2.4f);
+    pc.setMoveForward(false);
+
+    // Letting go under the ceiling stays crouched; out from under it, stands
+    pc.setSneak(false);
+    for (int i = 0; i < 10; ++i) pc.update(FRAME);
+    EXPECT_TRUE(pc.crouched()) << "no room to stand";
+    pc.setYaw(-glm::half_pi<float>());
+    pc.setMoveForward(true);
+    for (int i = 0; i < 120 && pc.crouched(); ++i) pc.update(FRAME);
+    EXPECT_FALSE(pc.crouched());
+    EXPECT_NEAR(body.halfExtents().y * 2.0f, 1.9f, 1e-5f);
+    EXPECT_LT(body.position().x, 2.0f + 0.35f + 0.01f);
 }

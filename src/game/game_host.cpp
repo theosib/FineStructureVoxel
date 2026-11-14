@@ -832,6 +832,7 @@ void GameHost::onPlayerState(Peer& peer, const Message& message) {
     state.yaw = wire->yaw;
     state.pitch = wire->pitch;
     state.onGround = wire->onGround;
+    state.crouching = wire->crouch;
     game->session().actions().sendPlayerState(seat->body, state);
 }
 

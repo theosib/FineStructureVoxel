@@ -12,12 +12,14 @@
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/animation_controller.hpp"
 #include <glm/glm.hpp>
+#include <string>
 
 namespace finevox {
 
 struct EntityRenderState {
     EntityId id = INVALID_ENTITY_ID;
     EntityTypeId typeId;
+    std::string item;  ///< An item lying in the world: which, drawn as its picture
 
     // Position interpolation (double precision for large worlds)
     glm::dvec3 prevPosition{0.0};

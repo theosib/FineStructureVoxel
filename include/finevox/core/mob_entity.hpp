@@ -81,6 +81,12 @@ public:
     void setIsPlayer(bool isPlayer) { isPlayer_ = isPlayer; }
     [[nodiscard]] bool isPlayerEntity() const override { return isPlayer_; }
 
+    /// A player's posture, as its client reports it: crouched makes the body `shrink` blocks
+    /// shorter, feet where they are. Plays the type's "crouch"/"crouch_walk" or "idle"/"walk"
+    /// animation, whichever it has, by whether the body is moving.
+    void setPosture(bool crouching, bool moving, float shrink);
+    [[nodiscard]] bool crouching() const { return crouching_; }
+
     // ========================================================================
     // Event Hooks (script/native callbacks)
     // ========================================================================
@@ -163,6 +169,7 @@ private:
     MobEventHooks* eventHooks_ = nullptr;
     bool deathHookFired_ = false;
     bool isPlayer_ = false;
+    bool crouching_ = false;
 
     // Landing detection (for fall damage)
     bool wasOnGround_ = true;

@@ -89,7 +89,7 @@ bool GameActions::removeFluid(BlockCoord pos) {
 void GameActions::sendPlayerState(EntityId id, const EntityState& state) {
     sendAction(makePlayerPositionValue(id, state.position, state.velocity,
                                         state.onGround, state.inputSequence,
-                                        state.yaw, state.pitch));
+                                        state.yaw, state.pitch, state.crouching));
 }
 
 void GameActions::setWorldTime(int64_t ticks) {
@@ -409,6 +409,7 @@ static void executeCommand(World& world, UpdateScheduler& scheduler,
         BlockEvent event = BlockEvent::playerPosition(id, pos, vel, onGround, seq);
         event.entityState.yaw = readFloat(cmd, s.yaw, 0.0f);
         event.entityState.pitch = readFloat(cmd, s.pitch, 0.0f);
+        event.entityState.crouching = readBool(cmd, s.crouching);
         entityManager.handlePlayerPosition(event);
         if (eventBus) eventBus->publish(PlayerPositionEvent{id, event.entityState});
     }

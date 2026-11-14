@@ -260,7 +260,7 @@ All on channel 3, in the order the server made them.
 
 | Type | Name | Body |
 |---|---|---|
-| 0x30 | EntitySpawn | `0 id: uint`, `1 type: uint` (EntityTypeName id), `2 faction?: uint = 0`, `3 x, 4 y, 5 z: float` (double, for precision far out), `6 yaw?, 7 pitch?: float = 0`, `8 health?: uint = 255` |
+| 0x30 | EntitySpawn | `0 id: uint`, `1 type: uint` (EntityTypeName id), `2 faction?: uint = 0`, `3 x, 4 y, 5 z: float` (double, for precision far out), `6 yaw?, 7 pitch?: float = 0`, `8 health?: uint = 255`, `9 item?: text` (an item lying in the world: which) |
 | 0x31 | EntityGone | `0 id: uint`, `1 died?: bool = false` |
 | 0x32 | EntityBatch | `0 tick: uint`, `1 entities: [Entity]` |
 | 0x33 | Projectiles | `0 shots: [Shot]`. Shot: `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?: float = 0` |
@@ -289,7 +289,7 @@ means it hasn't moved, and an entity that leaves the player's sight is `EntityGo
 
 | Type | Name | Channel | Direction | Body |
 |---|---|---|---|---|
-| 0x40 | PlayerState | 1 | C→S | `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?, 6 yaw?, 7 pitch?: float = 0`, `8 on_ground?: bool = false`. A server MUST drop one whose position isn't finite. |
+| 0x40 | PlayerState | 1 | C→S | `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?, 6 yaw?, 7 pitch?: float = 0`, `8 on_ground?: bool = false`, `9 crouch?: bool = false` (the body is crouched: shorter by the game's `sneak_shrink`). A server MUST drop one whose position isn't finite. |
 | 0x4020 | Command | 2 | C→S | CBOR. Any value: the game defines it. |
 | 0x41 | ExpectChange | 2 | C→S | `0 x, 1 y, 2 z: int`: look at this column soon |
 | 0x42 | ViewHint | 1 | C→S | `0 x, 1 z: float`: send what's near here first |

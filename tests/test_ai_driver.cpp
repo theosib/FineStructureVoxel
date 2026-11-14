@@ -357,3 +357,72 @@ TEST_F(AIDriverTest, CustomDriverTickAndPlayerEventsWiredThroughEntityManager) {
     EXPECT_FLOAT_EQ(playerMob->speedMultiplier(), 0.3f);
 }
 
+
+// ============================================================================
+// A player's posture: crouched is shorter, and picks its animations
+// ============================================================================
+
+TEST_F(AIDriverTest, CrouchedPlayerFitsUnderALowCeilingAndCrouchesForOthers) {
+    EntityTypeDef personDef;
+    personDef.name = "test_driver_person";
+    personDef.animationStates = {{"idle", 0}, {"walk", 1}, {"crouch", 2}, {"crouch_walk", 3}};
+    EntityTypeRegistry::global().registerType("test_driver_person", std::move(personDef));
+
+    World world;
+    auto stoneId = BlockTypeId::fromName("test_ground_stone");
+    BlockType stone;
+    stone.setShape(CollisionShape::FULL_BLOCK).setOpaque(true);
+    BlockRegistry::global().registerType(stoneId, stone);
+    // A ceiling 1.5 above the feet, over the cells at x = 2 and 3
+    for (int x = 2; x <= 3; ++x) world.setBlock({x, 65, 0}, stoneId);
+
+    GraphicsEventQueue queue;
+    EntityManager em(world, queue);
+    em.setCrouchShrink(0.4f);
+    EntityId id = em.spawnPlayer(Vec3(0.5f, 63.5f, 0.5f), "test_driver_person");
+    auto* mob = em.getMob(id);
+    ASSERT_NE(mob, nullptr);
+    const float standing = mob->halfExtents().y * 2.0f;
+    ASSERT_GT(63.5f + standing, 65.0f) << "standing must not fit under the ceiling";
+    const auto* def = mob->typeDef();
+
+    auto moveTo = [&](float x, bool crouching, float speed) {
+        BlockEvent e = BlockEvent::playerPosition(id, glm::dvec3(x, 63.5, 0.5), glm::dvec3(speed, 0, 0), true, 0);
+        e.entityState.crouching = crouching;
+        em.handlePlayerPosition(e);
+    };
+
+    // Standing, the move under the ceiling is refused
+    moveTo(1.5f, false, 4.0f);
+    moveTo(2.5f, false, 4.0f);
+    EXPECT_LT(mob->position().x, 2.0f);
+    EXPECT_EQ(mob->animationId(), def->animationStates.at("walk"));
+
+    // Crouched it fits, the body is shorter, and others see it crouch
+    moveTo(2.5f, true, 1.2f);
+    EXPECT_FLOAT_EQ(mob->position().x, 2.5f);
+    EXPECT_NEAR(mob->halfExtents().y * 2.0f, standing - 0.4f, 1e-5f);
+    EXPECT_EQ(mob->animationId(), def->animationStates.at("crouch_walk"));
+    EXPECT_TRUE(mob->crouching());
+    moveTo(2.5f, true, 0.0f);
+    EXPECT_EQ(mob->animationId(), def->animationStates.at("crouch"));
+
+    // Back out and standing: full height again
+    moveTo(1.5f, true, -1.2f);
+    moveTo(1.5f, false, 0.0f);
+    EXPECT_NEAR(mob->halfExtents().y * 2.0f, standing, 1e-5f);
+    EXPECT_EQ(mob->animationId(), def->animationStates.at("idle"));
+}
+
+TEST_F(AIDriverTest, PostureFallsBackToTheAnimationsATypeHas) {
+    EntityTypeDef def;
+    def.name = "test_driver_walker";
+    def.animationStates = {{"idle", 0}, {"walk", 1}};
+    EntityTypeRegistry::global().registerType("test_driver_walker", std::move(def));
+    MobEntity mob(1, EntityTypeId::fromName("test_driver_walker"));
+    mob.setIsPlayer(true);
+    mob.setPosture(true, true, 0.4f);
+    EXPECT_EQ(mob.animationId(), 1) << "crouched and moving, with no crouch animations: walk";
+    mob.setPosture(true, false, 0.4f);
+    EXPECT_EQ(mob.animationId(), 0);
+}

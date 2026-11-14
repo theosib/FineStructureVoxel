@@ -61,6 +61,8 @@ public:
     [[nodiscard]] float attractAccel() const { return attractAccel_; }
 
     void setMaxAttractSpeed(float s) { maxAttractSpeed_ = s; }
+    /// How fast it stops sliding on the ground: the share of its speed kept is exp(-this * dt)
+    void setGroundFriction(float f) { groundFriction_ = f; }
     [[nodiscard]] float maxAttractSpeed() const { return maxAttractSpeed_; }
 
     void tick(float dt, World& world) override;
@@ -77,6 +79,7 @@ private:
     float attractRadius_ = 3.0f;
     float attractAccel_ = 25.0f;    // m/s^2 toward player
     float maxAttractSpeed_ = 8.0f;  // clamp horizontal attract speed
+    float groundFriction_ = 8.0f;
 };
 
 }  // namespace finevox

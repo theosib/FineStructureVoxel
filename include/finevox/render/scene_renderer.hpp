@@ -50,12 +50,14 @@ public:
     /// Pack every model's texture into one, set each model's place in it, and use it. Pixel
     /// art stays sharp: sampled nearest. Returns how many textures it placed.
     size_t buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
-                            EntityModelRegistry& models, const std::vector<std::string>& more = {});
+                            EntityModelRegistry& models, const std::vector<std::string>& more = {},
+                            const std::string& pictureDir = {}, int pictureSize = 32);
 
     /// Read a cloud picture: a pixel is cloud where it isn't mostly clear. False if unreadable.
     static bool loadCloudMask(const std::string& path, CloudMask& mask);
 
-    /// Where buildEntityAtlas put one of `more`, or nothing
+    /// Where buildEntityAtlas put one of `more`, or a picture as "<pictureDir>/<name>", or nothing.
+    /// Every picture in pictureDir is packed, scaled to pictureSize square: items that drop.
     [[nodiscard]] std::optional<glm::vec4> atlasRect(const std::string& texture) const;
     void setSky(const glm::vec3& sunDirection, const glm::vec3& fogColor, float fogStart,
                 float fogEnd, float skyBrightness, float ambientLevel);

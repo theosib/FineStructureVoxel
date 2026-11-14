@@ -42,8 +42,10 @@ sky.conf
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
+| `item_pictures` | none | A folder under `textures/` with a picture per item, named for it: an item lying in the world is drawn as its picture, turning. Without one, as a small box |
+| `player_width`, `player_height` | `0.7`, `1.85` | A player's body, the same on the server and in its own client |
 | `walk_speed`, `jump_velocity` | `4.5`, `7` | On foot: blocks per second, and the upward speed a jump starts with |
-| `sneak_speed`, `sneak_eye_drop` | `0.4`, `0.25` | Sneaking (`begin_sneak`/`end_sneak`): a fraction of `walk_speed`, and how far the eye lowers. A sneaking body won't walk off a drop deeper than `step_height` |
+| `sneak_speed`, `sneak_eye_drop`, `sneak_shrink` | `0.4`, `0.25`, `0.25` | Sneaking (`begin_sneak`/`end_sneak`) crouches: a fraction of `walk_speed`, how far the eye lowers, and how much shorter the body is (on the server too, which tells others). Letting go stands up only where there's room. A sneaking body won't walk off a drop deeper than `step_height`. A player's entity type can have `crouch` and `crouch_walk` animations beside `idle` and `walk` |
 | `fly_speed`, `fly_climb` | `2`, `6` | Flight, where the UI script allows it (`can_fly`): a multiple of `walk_speed`, and blocks per second up (jump held) or down (sneak held) |
 | `player_entity` | `finevox:player` | Entity type of the player's body, as seen when they aren't in it. With no such type, or one without a model, it draws as a box in the viewer's faction colour |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
@@ -77,6 +79,7 @@ arrives over a connection. See [multiplayer.md](multiplayer.md).
 | `on :paused_tick` | `dt`. In place of `on :tick` while the game is paused |
 | `on :command` | `cmd`, and `sender`, the player's id, or 0 if it's nobody in particular |
 | `on :player_join`, `on :player_leave` | `player`: `{=id =name =local}` |
+| `on :pickup` | `pickup`: `{=player =item =count =entity}`, an item lying in the world (`item_drop`) that has reached a player. Returns how many it took; the rest stays. With no handler, nothing is ever picked up |
 
 A handler that throws is logged once per distinct message and the game continues.
 `finevox_headless` exits nonzero if any occurred.
@@ -128,6 +131,8 @@ walk cycles and effects by itself, and its body's physics are its own.
 
 ```
 ent_spawn type x y z [=faction n] -> id     ent_remove id     ent_alive id
+item_drop item count x y z [=velocity [vx vy vz]] [=delay s] -> id   an item lying in the world,
+    tossed a little way at random without a velocity; players take it through on :pickup
 ent_pos id   ent_set_pos id x y z           ent_type id       ent_faction id
 ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id

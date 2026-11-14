@@ -190,9 +190,32 @@ void MobEntity::updateMovement(float dt) {
     yaw_ = std::atan2(dirX, dirZ);
 }
 
+void MobEntity::setPosture(bool crouching, bool moving, float shrink) {
+    if (crouching != crouching_) {
+        Vec3 he = halfExtents();
+        float change = shrink * 0.5f;
+        setHalfExtents(Vec3(he.x, he.y + (crouching ? -change : change), he.z));
+        eyeHeight_ += crouching ? -shrink : shrink;
+        crouching_ = crouching;
+    }
+    const auto* def = typeDef();
+    if (!def) return;
+    auto slot = [&](const char* name) -> const uint8_t* {
+        auto it = def->animationStates.find(name);
+        return it == def->animationStates.end() ? nullptr : &it->second;
+    };
+    // Crouched falls back to standing, moving to still
+    const uint8_t* pick = nullptr;
+    if (crouching) pick = moving ? (slot("crouch_walk") ? slot("crouch_walk") : slot("crouch")) : slot("crouch");
+    if (!pick) pick = moving ? slot("walk") : nullptr;
+    if (!pick) pick = slot("idle");
+    if (pick) setAnimation(*pick);
+}
+
 void MobEntity::updateLocomotionAnimation() {
     // Types opt in by naming a "walk" state. Anything else playing (a scripted
-    // "work" swing) is left alone until it ends.
+    // "work" swing) is left alone until it ends. A player's comes from its posture.
+    if (isPlayer_) return;
     const auto* def = typeDef();
     if (!def) return;
     auto walk = def->animationStates.find("walk");

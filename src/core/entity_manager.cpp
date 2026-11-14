@@ -201,7 +201,7 @@ EntityId EntityManager::spawnPlayer(Vec3 position, std::string_view type) {
     }
 
     mob->setPosition(position);
-    mob->setHalfExtents(Vec3(0.35f, 0.925f, 0.35f));
+    mob->setHalfExtents(playerHalfExtents_);
     mob->setEyeHeight(1.65f);
     mob->setMaxStepHeight(0.6f);
     mob->setIsPlayer(true);
@@ -573,6 +573,12 @@ void EntityManager::handlePlayerPosition(const BlockEvent& event) {
     auth.lastReceivedOnGround = ground;
     auth.lastInputSequence = seq;
     auth.receivedUpdateThisTick = true;
+
+    // The body's height first: a crouched player fits where a standing one wouldn't
+    if (auto* mob = dynamic_cast<MobEntity*>(player); mob && mob->isPlayerEntity()) {
+        bool moving = vel.x * vel.x + vel.z * vel.z > 0.25f;
+        mob->setPosture(event.entityState.crouching, moving, crouchShrink_);
+    }
 
     // Validate and apply client-predicted movement step against world collision
     bool wasOnGround = player->isOnGround();

@@ -314,6 +314,13 @@ public:
      * @brief Set correction threshold (meters of drift before correction)
      */
     void setCorrectionThreshold(float threshold) { correctionThreshold_ = threshold; }
+
+    /// How much shorter a crouched player's body is, in blocks
+    void setCrouchShrink(float blocks) { crouchShrink_ = blocks; }
+
+    /// The size of the bodies spawnPlayer makes, in blocks. A client's own body must match, or
+    /// the server refuses moves into gaps the client thinks it fits.
+    void setPlayerSize(float width, float height) { playerHalfExtents_ = Vec3(width, height, width) * 0.5f; }
     float correctionThreshold() const { return correctionThreshold_; }
 
     /**
@@ -393,6 +400,8 @@ private:
 
     // Configuration
     float correctionThreshold_ = 0.1f;  // 10 cm
+    float crouchShrink_ = 0.25f;
+    Vec3 playerHalfExtents_{0.35f, 0.925f, 0.35f};
     bool validationEnabled_ = true;
 
     // Entities pending removal (cleaned up at end of tick)

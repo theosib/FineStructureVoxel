@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "finevox/render/scene_renderer.hpp"
 
 #include <finevk/device/command.hpp>
@@ -146,7 +147,8 @@ void SceneRenderer::writeTexture() {
 
 size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
                                        EntityModelRegistry& models,
-                                       const std::vector<std::string>& more) {
+                                       const std::vector<std::string>& more,
+                                       const std::string& pictureDir, int pictureSize) {
     struct Image {
         std::string model;
         int w = 0, h = 0;
@@ -187,6 +189,35 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
         add(model.texture);
     });
     for (const auto& texture : more) add(texture);
+
+    // Every picture in the folder, small: there can be thousands
+    std::vector<std::string> pictures;
+    if (!pictureDir.empty() && pictureSize > 0) {
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(textureRoot + "/" + pictureDir, ec)) {
+            if (entry.path().extension() != ".png") continue;
+            std::string key = pictureDir + "/" + entry.path().stem().string();
+            if (byTexture.count(key)) continue;
+            int w = 0, h = 0, n = 0;
+            unsigned char* data = stbi_load(entry.path().string().c_str(), &w, &h, &n, 4);
+            if (!data) continue;
+            Image img;
+            img.model = key;
+            img.w = img.h = pictureSize;
+            img.pixels.resize(static_cast<size_t>(pictureSize) * pictureSize * 4);
+            for (int row = 0; row < pictureSize; ++row) {
+                for (int col = 0; col < pictureSize; ++col) {
+                    int sx = col * w / pictureSize, sy = row * h / pictureSize;
+                    std::memcpy(&img.pixels[(static_cast<size_t>(row) * pictureSize + col) * 4],
+                                &data[(static_cast<size_t>(sy) * w + sx) * 4], 4);
+                }
+            }
+            stbi_image_free(data);
+            byTexture[key] = images.size();
+            images.push_back(std::move(img));
+            pictures.push_back(key);
+        }
+    }
     if (images.empty()) return 0;
 
     // Shelves, tallest first, in an atlas as wide as the widest skin and at least 512
@@ -233,7 +264,9 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
                                                        float(img.x + img.w) / width, float(img.y + img.h) / height));
     }
     extraRects_.clear();
-    for (const auto& texture : more) {
+    std::vector<std::string> named = more;
+    named.insert(named.end(), pictures.begin(), pictures.end());
+    for (const auto& texture : named) {
         auto it = byTexture.find(texture);
         if (it == byTexture.end()) continue;
         const auto& img = images[it->second];

@@ -16,7 +16,7 @@ namespace time_key { enum : uint32_t { TICKS = 0, HELD = 1, PAUSED = 2 }; }
 namespace ghosts_key { enum : uint32_t { GROUPS = 0 }; }
 namespace ghost_key { enum : uint32_t { BUILT = 0, CELLS = 1 }; }
 namespace spawn_key {
-enum : uint32_t { ID = 0, TYPE = 1, FACTION = 2, X = 3, Y = 4, Z = 5, YAW = 6, PITCH = 7, HEALTH = 8 };
+enum : uint32_t { ID = 0, TYPE = 1, FACTION = 2, X = 3, Y = 4, Z = 5, YAW = 6, PITCH = 7, HEALTH = 8, ITEM = 9 };
 }
 namespace gone_key { enum : uint32_t { ID = 0, DIED = 1 }; }
 namespace batch_key { enum : uint32_t { TICK = 0, ENTITIES = 1 }; }
@@ -29,7 +29,7 @@ enum : uint32_t {
 namespace shots_key { enum : uint32_t { SHOTS = 0 }; }
 namespace shot_key { enum : uint32_t { X = 0, Y = 1, Z = 2, VX = 3, VY = 4, VZ = 5 }; }
 namespace player_key {
-enum : uint32_t { X = 0, Y = 1, Z = 2, VX = 3, VY = 4, VZ = 5, YAW = 6, PITCH = 7, ON_GROUND = 8 };
+enum : uint32_t { X = 0, Y = 1, Z = 2, VX = 3, VY = 4, VZ = 5, YAW = 6, PITCH = 7, ON_GROUND = 8, CROUCH = 9 };
 }
 namespace change_key { enum : uint32_t { X = 0, Y = 1, Z = 2 }; }
 namespace hint_key { enum : uint32_t { X = 0, Z = 1 }; }
@@ -184,6 +184,7 @@ std::vector<uint8_t> encodeEntitySpawn(const EntitySpawnWire& spawn) {
     f32Unless0(w, spawn_key::YAW, spawn.yaw);
     f32Unless0(w, spawn_key::PITCH, spawn.pitch);
     if (spawn.health != FULL_HEALTH) w.uint(spawn_key::HEALTH, spawn.health);
+    if (!spawn.item.empty()) w.text(spawn_key::ITEM, spawn.item);
     return w.finish();
 }
 
@@ -202,6 +203,7 @@ std::optional<EntitySpawnWire> decodeEntitySpawn(std::span<const uint8_t> body) 
             case spawn_key::YAW: spawn.yaw = readF32(in); return true;
             case spawn_key::PITCH: spawn.pitch = readF32(in); return true;
             case spawn_key::HEALTH: spawn.health = static_cast<uint8_t>(in.uint()); return true;
+            case spawn_key::ITEM: spawn.item = in.text(); return true;
             default: return false;
         }
     });
@@ -349,6 +351,7 @@ std::vector<uint8_t> encodePlayerState(const PlayerStateWire& state) {
     f32Unless0(w, player_key::YAW, state.yaw);
     f32Unless0(w, player_key::PITCH, state.pitch);
     if (state.onGround) w.boolean(player_key::ON_GROUND, true);
+    if (state.crouch) w.boolean(player_key::CROUCH, true);
     return w.finish();
 }
 
@@ -367,6 +370,7 @@ std::optional<PlayerStateWire> decodePlayerState(std::span<const uint8_t> body) 
             case player_key::YAW: state.yaw = readF32(in); return true;
             case player_key::PITCH: state.pitch = readF32(in); return true;
             case player_key::ON_GROUND: state.onGround = in.boolean(); return true;
+            case player_key::CROUCH: state.crouch = in.boolean(); return true;
             default: return false;
         }
     });

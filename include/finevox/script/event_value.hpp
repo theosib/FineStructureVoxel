@@ -58,9 +58,10 @@ struct EventSymbols {
     uint32_t neighbor_face_mask;
 
     // Entity fields
-    uint32_t entity_id, player_id, entity_type, entity_type_name;
+    uint32_t entity_id, player_id, entity_type, entity_type_name, item;
     uint32_t vel_x, vel_y, vel_z;
     uint32_t on_ground;
+    uint32_t crouching;
     uint32_t yaw, pitch;
     uint32_t animation_id, animation_time;
     uint32_t input_sequence;
@@ -191,7 +192,8 @@ finescript::Value makePlayerHitValue(BlockCoord pos, Face face,
 /** Build a player position update. */
 finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
                                           bool onGround, uint64_t inputSequence,
-                                          float yaw = 0.0f, float pitch = 0.0f);
+                                          float yaw = 0.0f, float pitch = 0.0f,
+                                          bool crouching = false);
 
 /** Build a player look update. */
 finescript::Value makePlayerLookValue(EntityId id, float yaw, float pitch);
@@ -239,7 +241,8 @@ finescript::Value makeSoundEventValue(SoundSetId soundSet, std::string_view acti
 /** Build an entity-spawn event. */
 finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
                                        glm::dvec3 pos, float yaw, float pitch,
-                                       std::string_view entityTypeName = "");
+                                       std::string_view entityTypeName = "",
+                                       std::string_view item = "");
 
 /** Build an entity-despawn event. `died` tells a viewer it was killed, not just removed. */
 finescript::Value makeEntityDespawnValue(EntityId id, bool died = false);

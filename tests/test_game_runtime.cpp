@@ -566,6 +566,7 @@ public:
             auto spawn = net::decodeEntitySpawn(message.payload());
             ASSERT_TRUE(spawn.has_value());
             spawned.insert(spawn->id);
+            if (!spawn->item.empty()) items[spawn->id] = spawn->item;
         });
         client_->onMessage(net::msg::EntityGone, [this](const finenet::Message& message) {
             auto left = net::decodeEntityGone(message.payload());
@@ -589,6 +590,7 @@ public:
     }
 
     std::set<EntityId> spawned;
+    std::map<EntityId, std::string> items;  ///< What each item lying about was said to be
     std::map<EntityId, bool> gone;
     std::set<std::pair<int32_t, int32_t>> columns;
     int uiMessages = 0;
@@ -634,6 +636,45 @@ end
         return static_cast<EntityId>(runtime->gameScript().context().get(name).asInt());
     }
 };
+
+// An item dropped at a player's feet goes to the game script, which takes what it wants; what it
+// leaves lies there, and clients are told what it is
+TEST_F(ReplicationServerTest, ItemsLyingAboutArePickedUpThroughTheGameScript) {
+    auto& game = bootTwo(R"(
+set taken nil
+set left nil
+set offers []
+on :pickup do
+    offers.push [pickup.player pickup.item pickup.count]
+    if (pickup.item == :rock) { return 0 }
+    return pickup.count
+end
+on :start do
+    set taken {item_drop :gem 3 -24 40 -24 =velocity [0 0 0] =delay 0}
+    set left {item_drop :rock 2 -24 40 -24 =velocity [0 0 0] =delay 0}
+end
+)");
+    Watcher one(game, 1);
+    settle(game, {&one}, 10);
+
+    auto& entities = game.session().entities();
+    EXPECT_FALSE(entities.hasEntity(script("taken"))) << "taken, so gone";
+    EXPECT_TRUE(entities.hasEntity(script("left"))) << "refused, so still there";
+    const auto& offers = game.gameScript().context().get("offers").asArray();
+    ASSERT_GE(offers.size(), 2u);
+    bool sawGem = false;
+    for (const auto& offer : offers) {
+        const auto& o = offer.asArray();
+        EXPECT_EQ(o[0].asInt(), 1) << "offered to the player standing there";
+        if (StringInterner::global().lookup(o[1].asSymbol()) == "gem") {
+            sawGem = true;
+            EXPECT_EQ(o[2].asInt(), 3);
+        }
+    }
+    EXPECT_TRUE(sawGem);
+    ASSERT_TRUE(one.items.count(script("left")));
+    EXPECT_EQ(one.items[script("left")], "rock");
+}
 
 TEST_F(ReplicationServerTest, ACommandSaysWhoItCameFrom) {
     auto& game = bootTwo(R"(

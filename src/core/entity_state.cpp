@@ -19,6 +19,7 @@ EntityState::EntityState(const EntityState& other)
     , position(other.position)
     , velocity(other.velocity)
     , onGround(other.onGround)
+    , crouching(other.crouching)
     , yaw(other.yaw)
     , pitch(other.pitch)
     , animationId(other.animationId)
@@ -35,6 +36,7 @@ EntityState& EntityState::operator=(const EntityState& other) {
         position = other.position;
         velocity = other.velocity;
         onGround = other.onGround;
+        crouching = other.crouching;
         yaw = other.yaw;
         pitch = other.pitch;
         animationId = other.animationId;
@@ -109,6 +111,11 @@ std::vector<uint8_t> EntityState::toCBOR() const {
 
     cbor::encodeString(out, "on_ground");
     cbor::encodeBool(out, onGround);
+
+    if (crouching) {
+        cbor::encodeString(out, "crouching");
+        cbor::encodeBool(out, true);
+    }
 
     cbor::encodeString(out, "yaw");
     cbor::encodeDouble(out, yaw);
@@ -190,6 +197,9 @@ EntityState EntityState::fromCBOR(std::span<const uint8_t> data) {
         } else if (key == "on_ground") {
             auto [bMt, bVal] = dec.readHeader();
             state.onGround = (bMt == cbor::SIMPLE && bVal == cbor::TRUE_VALUE);
+        } else if (key == "crouching") {
+            auto [bMt, bVal] = dec.readHeader();
+            state.crouching = (bMt == cbor::SIMPLE && bVal == cbor::TRUE_VALUE);
         } else if (key == "yaw") {
             state.yaw = static_cast<float>(readDouble(dec));
         } else if (key == "pitch") {

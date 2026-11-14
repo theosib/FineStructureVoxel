@@ -2,8 +2,10 @@
 #include "finevox/script/game_script_engine.hpp"
 
 #include <finescript/cbor.h>
+#include <finescript/map_data.h>
 #include <finescript/script_engine.h>
 
+#include <algorithm>
 #include <iostream>
 
 namespace finevox::script {
@@ -66,6 +68,39 @@ void ScriptGameSubsystem::fire(std::string_view event) {
             reportError(e.what());
         }
     }
+}
+
+bool ScriptGameSubsystem::handles(std::string_view event) const {
+    uint32_t symbol = scripts_.engine().intern(event);
+    for (const auto& handler : ctx_->eventHandlers()) {
+        if (handler.eventSymbol == symbol) return true;
+    }
+    return false;
+}
+
+int ScriptGameSubsystem::deliverPickup(int64_t player, std::string_view item, int count, uint64_t entity) {
+    auto& e = scripts_.engine();
+    auto pickup = finescript::Value::map();
+    auto& m = pickup.asMap();
+    m.set(e.intern("player"), finescript::Value::integer(player));
+    m.set(e.intern("item"), finescript::Value::symbol(e.intern(item)));
+    m.set(e.intern("count"), finescript::Value::integer(count));
+    m.set(e.intern("entity"), finescript::Value::integer(static_cast<int64_t>(entity)));
+    ctx_->set("pickup", pickup);
+
+    uint32_t symbol = e.intern("pickup");
+    int taken = 0;
+    auto& handlers = ctx_->eventHandlers();
+    for (size_t i = 0; i < handlers.size(); ++i) {
+        if (handlers[i].eventSymbol != symbol) continue;
+        try {
+            finescript::Value result = e.callFunction(handlers[i].handlerFunction, {}, *ctx_);
+            if (result.isNumeric()) taken = static_cast<int>(result.asNumber());
+        } catch (const std::exception& error) {
+            reportError(error.what());
+        }
+    }
+    return std::clamp(taken, 0, count);
 }
 
 void ScriptGameSubsystem::deliverCommand(const finescript::Value& command, int64_t sender) {

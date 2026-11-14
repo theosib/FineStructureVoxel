@@ -31,10 +31,12 @@ const EventSymbols& EventSymbols::instance() {
         s.player_id       = si.intern("player_id");
         s.entity_type     = si.intern("entity_type");
         s.entity_type_name = si.intern("entity_type_name");
+        s.item            = si.intern("item");
         s.vel_x           = si.intern("vel_x");
         s.vel_y           = si.intern("vel_y");
         s.vel_z           = si.intern("vel_z");
         s.on_ground       = si.intern("on_ground");
+        s.crouching       = si.intern("crouching");
         s.yaw             = si.intern("yaw");
         s.pitch           = si.intern("pitch");
         s.animation_id    = si.intern("animation_id");
@@ -205,11 +207,12 @@ finescript::Value makePlayerHitValue(BlockCoord pos, Face face, EntityId actor) 
 
 finescript::Value makePlayerPositionValue(EntityId id, glm::dvec3 position, glm::dvec3 velocity,
                                           bool onGround, uint64_t inputSequence,
-                                          float yaw, float pitch) {
+                                          float yaw, float pitch, bool crouching) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
     setType(m, EVT_PLAYER_POSITION);
+    if (crouching) setBool(m, s.crouching, true);
     setInt(m, s.entity_id, static_cast<int64_t>(id));
     setFloat(m, s.pos_x, position.x);
     setFloat(m, s.pos_y, position.y);
@@ -348,7 +351,7 @@ finescript::Value makeSoundEventValue(SoundSetId soundSet, std::string_view acti
 
 finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
                                        glm::dvec3 pos, float yaw, float pitch,
-                                       std::string_view entityTypeName) {
+                                       std::string_view entityTypeName, std::string_view item) {
     const auto& s = EventSymbols::instance();
     auto v = makeMap();
     auto& m = v.asMap();
@@ -358,6 +361,7 @@ finescript::Value makeEntitySpawnValue(EntityId id, uint16_t entityType,
     if (!entityTypeName.empty()) {
         setStr(m, s.entity_type_name, entityTypeName);
     }
+    if (!item.empty()) setStr(m, s.item, item);
     setFloat(m, s.pos_x, pos.x);
     setFloat(m, s.pos_y, pos.y);
     setFloat(m, s.pos_z, pos.z);

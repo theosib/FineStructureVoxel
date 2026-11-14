@@ -68,6 +68,7 @@ struct EntitySpawnWire {
     float yaw = 0.0f;
     float pitch = 0.0f;
     uint8_t health = FULL_HEALTH;
+    std::string item;  ///< What an item lying in the world is; empty for anything else
 };
 [[nodiscard]] std::vector<uint8_t> encodeEntitySpawn(const EntitySpawnWire& spawn);
 [[nodiscard]] std::optional<EntitySpawnWire> decodeEntitySpawn(std::span<const uint8_t> body);
@@ -112,6 +113,7 @@ struct PlayerStateWire {
     float yaw = 0.0f;
     float pitch = 0.0f;
     bool onGround = false;
+    bool crouch = false;
 };
 [[nodiscard]] std::vector<uint8_t> encodePlayerState(const PlayerStateWire& state);
 /// Also nullopt for a position that isn't finite: it comes from a client

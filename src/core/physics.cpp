@@ -530,13 +530,16 @@ float PhysicsSystem::resolveAxisCollision(
     }
 
     float result = movement;
+    // A body rests this far off what it stands on, so a gap exactly its size reads as this much
+    // overlap: that's still a fit (escapeOverlap allows the same)
+    constexpr float FIT = COLLISION_MARGIN * 2.0f;
 
     for (const auto& collider : colliders) {
         // Check if we overlap on the other two axes
         bool overlapsOtherAxes = true;
         for (int i = 0; i < 3; ++i) {
             if (i != axis) {
-                if (entityBox.max[i] <= collider.min[i] || entityBox.min[i] >= collider.max[i]) {
+                if (entityBox.max[i] <= collider.min[i] + FIT || entityBox.min[i] >= collider.max[i] - FIT) {
                     overlapsOtherAxes = false;
                     break;
                 }
@@ -745,6 +748,12 @@ Vec3 PhysicsSystem::update(PhysicsBody& body, float deltaTime) {
     }
 
     return actualMovement;
+}
+
+bool PhysicsSystem::isClear(const AABB& box) const {
+    AABB inner(box.min.x + COLLISION_MARGIN, box.min.y + COLLISION_MARGIN, box.min.z + COLLISION_MARGIN,
+               box.max.x - COLLISION_MARGIN, box.max.y - COLLISION_MARGIN, box.max.z - COLLISION_MARGIN);
+    return collectColliders(inner).empty();
 }
 
 bool PhysicsSystem::hasFooting(const AABB& box, float depth) const {

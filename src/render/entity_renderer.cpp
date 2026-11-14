@@ -116,6 +116,7 @@ void EntityRenderer::handleEvent(const finescript::Value& event) {
         if (!typeName.empty()) {
             state.typeId = EntityTypeId::fromName(typeName);
         }
+        state.item = std::string(readString(event, s.item));
         state.prevPosition = pos;
         state.currentPosition = pos;
         state.prevYaw = yaw;

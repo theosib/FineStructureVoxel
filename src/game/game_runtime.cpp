@@ -205,6 +205,20 @@ void GameRuntime::load() {
     scripts_->setWorkClaims(&workClaims_);
     content_->bindScripts(*scripts_);
     session_->entities().setMobEventHooksProvider(scripts_->createHooksProvider());
+    session_->entities().setCrouchShrink(manifest_.sneakShrink);
+    session_->entities().setPlayerSize(manifest_.playerWidth, manifest_.playerHeight);
+    // Items lying about go to the game script, which keeps inventories its own way
+    session_->entities().setItemPickupCallback([this](EntityId body, ItemStack& stack) {
+        if (!gameScript_ || !gameScript_->handles("pickup")) return false;
+        int64_t player = 0;
+        for (const Seat& seat : seats()) {
+            if (seat.body == body) player = seat.id;
+        }
+        if (player == 0) return false;
+        int taken = gameScript_->deliverPickup(player, stack.type.name(), stack.count, body);
+        stack.count -= taken;
+        return taken > 0;
+    });
 
     resourceFinder_ = std::make_unique<GameRootFinder>(options_.gameRoot);
     scripts_->engine().setResourceFinder(resourceFinder_.get());

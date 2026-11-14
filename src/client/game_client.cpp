@@ -276,6 +276,7 @@ struct GameClient::Impl {
     void buildSkyBodies();
     render::CloudMask clouds;
     double cloudDrift = 0.0;
+    float clock = 0.0f;  ///< Seconds the world has run here, for things that turn and bob
     void applyDetail();
     std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
@@ -431,6 +432,7 @@ void GameClient::Impl::setupShell() {
         float worldDt = session->paused() ? 0.0f : dt;
         entityRenderer.update(worldDt, camera.positionD());
         cloudDrift += worldDt * manifest.cloudSpeed;
+        clock = std::fmod(clock + worldDt, 3600.0f);
         startDeathBursts();
         particles->tick(worldDt);
 
@@ -753,7 +755,7 @@ void GameClient::Impl::enterWorld() {
         std::vector<std::string> skyBodies = manifest.skyMoon;
         if (!manifest.skySun.empty()) skyBodies.push_back(manifest.skySun);
         sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models,
-                                        skyBodies);
+                                        skyBodies, manifest.itemPictures);
         if (!manifest.skyClouds.empty()) {
             render::SceneRenderer::loadCloudMask((contentRoot / "textures" / (manifest.skyClouds + ".png")).string(),
                                                  clouds);
@@ -791,7 +793,8 @@ void GameClient::Impl::enterWorld() {
     stewardShapes = createBlockShapeProvider(world);
     stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
     stewardBody = std::make_unique<SimplePhysicsBody>(
-        Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f), Vec3(0.35f, 0.9f, 0.35f));
+        Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f),
+        Vec3(manifest.playerWidth, manifest.playerHeight, manifest.playerWidth) * 0.5f);
     stewardBody->setMaxStepHeight(worldInfo.stepHeight);
     steward.setPhysics(stewardBody.get(), stewardPhysics.get());
     steward.setFluidQuery([&world](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
@@ -800,6 +803,7 @@ void GameClient::Impl::enterWorld() {
     steward.setMoveSpeed(manifest.walkSpeed);
     steward.setJumpVelocity(manifest.jumpVelocity);
     steward.setSneakSpeed(manifest.sneakSpeed);
+    steward.setCrouchShrink(manifest.sneakShrink);
     steward.setFlySpeed(manifest.flySpeed);
     steward.setFlyClimb(manifest.flyClimb);
     steward.setFlyMode(false);
@@ -1154,7 +1158,7 @@ void GameClient::Impl::updateStewardView(float dt) {
     stepLag *= std::exp(-EYE_RISE_RATE * dt);
 
     // Sneaking crouches: the eye eases down and back up
-    float crouch = steward.sneaking() && !steward.flying() ? manifest.sneakEyeDrop : 0.0f;
+    float crouch = steward.crouched() ? manifest.sneakEyeDrop : 0.0f;
     sneakDrop += (crouch - sneakDrop) * (1.0f - std::exp(-12.0f * dt));
 
     Vec3 eye(pos.x, pos.y + steward.eyeHeight() - stepLag - sneakDrop, pos.z);
@@ -1172,6 +1176,7 @@ void GameClient::Impl::updateStewardView(float dt) {
     state.position = glm::dvec3(pos.x, pos.y, pos.z);
     state.velocity = glm::dvec3(stewardBody->velocity());
     state.onGround = stewardBody->isOnGround();
+    state.crouching = steward.crouched();
     state.yaw = glm::degrees(steward.yaw());
     state.pitch = glm::degrees(steward.pitch());
     playerStateTimer -= dt;
@@ -1343,7 +1348,29 @@ void GameClient::Impl::buildScene() {
         const EntityModel* model =
             def && def->model != 0 ? models.find(StringInterner::global().lookup(def->model)) : nullptr;
         size_t first = opaque.size();
-        if (model) {
+        if (!state.item.empty()) {
+            // An item lying about: its picture, turning slowly and bobbing, seen from both sides
+            glm::vec3 center(pos - cameraPos);
+            float age = clock + static_cast<float>(id % 97);
+            center.y += 0.3f + 0.08f * std::sin(age * 2.0f);
+            float turn = age * 1.5f;
+            glm::vec3 side(std::cos(turn), 0.0f, std::sin(turn));
+            glm::vec4 shade(glm::vec3(std::min(brightness, 1.0f)), 1.0f);
+            constexpr float HALF = 0.22f;
+            auto rect = sceneRenderer->atlasRect(manifest.itemPictures + "/" + state.item);
+            if (rect) {
+                glm::vec3 a = center - side * HALF - glm::vec3(0, HALF, 0), b = center + side * HALF - glm::vec3(0, HALF, 0);
+                glm::vec3 c = center + side * HALF + glm::vec3(0, HALF, 0), d = center - side * HALF + glm::vec3(0, HALF, 0);
+                glm::vec2 ua(rect->x, rect->w), ub(rect->z, rect->w), uc(rect->z, rect->y), ud(rect->x, rect->y);
+                // Front and back, the back mirrored as a picture held up to the light is
+                for (auto [p, uv] : {std::pair{a, ua}, {b, ub}, {c, uc}, {a, ua}, {c, uc}, {d, ud},
+                                     {b, ub}, {a, ua}, {d, ud}, {b, ub}, {d, ud}, {c, uc}}) {
+                    opaque.push_back({p, glm::vec3(0.0f), shade, uv});
+                }
+            } else {
+                render::appendBox(opaque, center, glm::vec3(0.12f), glm::vec4(team * brightness, 1.0f));
+            }
+        } else if (model) {
             render::appendEntity(opaque, *model, state, cameraPos, team, brightness, tickRate,
                                  poseScratch);
         } else {

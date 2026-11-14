@@ -51,6 +51,12 @@ struct GameManifest {
     float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second
     float sneakSpeed = 0.4f;      ///< Walking speed while sneaking, as a fraction of walkSpeed
     float sneakEyeDrop = 0.25f;   ///< How far the eye lowers while sneaking, in blocks
+    float sneakShrink = 0.25f;    ///< How much shorter the body is while crouched, in blocks
+    /// Pictures of items, one per item named for it, in this folder under textures/: an item
+    /// lying in the world is drawn as its picture. Empty draws them as small boxes.
+    std::string itemPictures;
+    float playerWidth = 0.7f;     ///< A player's body, on the server and in its own client
+    float playerHeight = 1.85f;
     float flySpeed = 2.0f;        ///< Flying speed, as a multiple of walkSpeed
     float flyClimb = 6.0f;        ///< Rise and fall speed while flying, blocks/second
     std::string playerEntity = "finevox:player";  ///< Entity type of the player's body

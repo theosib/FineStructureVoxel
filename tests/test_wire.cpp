@@ -144,6 +144,19 @@ TEST(Wire, EachMessageRoundTrips) {
     ASSERT_TRUE(p.has_value());
     EXPECT_EQ(p->velocity.y, -9.5f);
     EXPECT_TRUE(p->onGround);
+    EXPECT_FALSE(p->crouch);
+    PlayerStateWire crouched;
+    crouched.crouch = true;
+    EntitySpawnWire lying;
+    lying.id = 5;
+    lying.type = 9;
+    lying.item = "gem";
+    auto lyingBack = decodeEntitySpawn(encodeEntitySpawn(lying));
+    ASSERT_TRUE(lyingBack.has_value());
+    EXPECT_EQ(lyingBack->item, "gem");
+    auto crouchedBack = decodePlayerState(encodePlayerState(crouched));
+    ASSERT_TRUE(crouchedBack.has_value());
+    EXPECT_TRUE(crouchedBack->crouch);
 
     auto change = decodeExpectChange(encodeExpectChange({-1, -70, 5}));
     ASSERT_TRUE(change.has_value());

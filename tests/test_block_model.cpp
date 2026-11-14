@@ -872,3 +872,23 @@ TEST_F(BlockModelFileLoadTest, LoadStoneModelWithInheritance) {
     std::cout << "BlockType collision isEmpty: " << btCollision.isEmpty() << std::endl;
     std::cout << "BlockType collision boxes: " << btCollision.boxes().size() << std::endl;
 }
+
+TEST(BlockModelToBlockTypeTest, TakeAppearancePreservesBlockNoCollisionWhileTakingLookHitShape) {
+    BlockModel block;
+    block.setCollision(CollisionShape::NONE);
+
+    CollisionShape hitBox;
+    hitBox.addBox(AABB(0.0f, 0.0f, 0.0f, 1.0f, 0.125f, 1.0f));
+
+    BlockModel look;
+    look.setCollision(CollisionShape::FULL_BLOCK);
+    look.setHit(hitBox);
+
+    block.takeAppearance(look);
+
+    EXPECT_TRUE(block.hasExplicitCollision());
+    EXPECT_TRUE(block.resolvedCollision().isEmpty()) << "block-level collision: none must win over variant look collision";
+    EXPECT_TRUE(block.hasExplicitHit());
+    EXPECT_FALSE(block.resolvedHit().isEmpty()) << "variant look hit shape should still apply";
+}
+

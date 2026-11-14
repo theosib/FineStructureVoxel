@@ -352,8 +352,8 @@ void BlockModel::takeAppearance(const BlockModel& look) {
     faceTint_ = look.faceTint_;
     // The block's own variables win: a shared look can leave `#name` for each block to fill
     for (const auto& [name, texture] : look.textureVariables_) textureVariables_.try_emplace(name, texture);
-    if (look.hasExplicitCollision_) setCollision(look.collision_);
-    if (look.hasExplicitHit_) setHit(look.hit_);
+    if (!hasExplicitCollision_ && look.hasExplicitCollision_) setCollision(look.collision_);
+    if (!hasExplicitHit_ && look.hasExplicitHit_) setHit(look.hit_);
     collisionResolved_ = false;
     hitResolved_ = false;
 }

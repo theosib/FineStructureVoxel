@@ -5,6 +5,7 @@
 #include "finevox/core/world.hpp"
 
 #include <functional>
+#include <random>
 
 using namespace finevox;
 
@@ -308,3 +309,91 @@ TEST(SignalBinding, TwoJoinedSinksActAsOne) {
     EXPECT_EQ(prop(r.world, BlockCoord(3, 1, 0), "open"), "false");
     EXPECT_EQ(prop(r.world, BlockCoord(3, 2, 0), "open"), "false");
 }
+
+// ============================================================================
+// Incremental against from-scratch
+// ============================================================================
+
+namespace {
+
+constexpr int RX = 7, RY = 4, RZ = 7;
+
+void copyRegion(World& from, World& to) {
+    for (int x = -1; x <= RX; ++x) {
+        for (int y = 0; y <= RY; ++y) {
+            for (int z = -1; z <= RZ; ++z) to.setBlock(BlockCoord(x, y, z), from.getBlock(BlockCoord(x, y, z)));
+        }
+    }
+}
+
+}  // namespace
+
+class SignalBindingRandom : public ::testing::TestWithParam<uint32_t> {};
+
+// Without components a circuit's levels depend only on its blocks, so a binding that has followed
+// every edit must agree with one built afresh from the same blocks: levels, relays, and what's shown.
+TEST_P(SignalBindingRandom, IncrementalMatchesFresh) {
+    defineAll();
+    std::mt19937 rng(GetParam());
+    auto pick = [&](int n) { return static_cast<int>(rng() % static_cast<uint32_t>(n)); };
+    World world;
+    for (int x = -1; x <= RX; ++x) {
+        for (int z = -1; z <= RZ; ++z) world.setBlock(BlockCoord(x, 0, z), block("stone"));
+    }
+    SignalBinding signals(world, MAX);
+    signals.attach();
+    const InternedId strong = StringInterner::global().intern("strong");
+    const InternedId weak = StringInterner::global().intern("weak");
+
+    for (int round = 0; round < 60; ++round) {
+        int edits = 1 + pick(4);
+        for (int e = 0; e < edits; ++e) {
+            BlockCoord p(pick(RX), 1 + pick(RY - 1), pick(RZ));
+            int what = pick(20);
+            std::string name;
+            if (what < 9) name = "wire";
+            else if (what < 12) name = "stone";
+            else if (what < 13) name = "glass";
+            else if (what < 15) name = pick(2) ? "lever[powered=true]" : "lever";
+            else if (what < 16) name = "lamp";
+            if (name.empty()) world.setBlock(p, AIR_BLOCK_TYPE);
+            else world.setBlock(p, block(name));
+        }
+        signals.step();
+        signals.step();
+
+        World fresh;
+        copyRegion(world, fresh);
+        SignalBinding scratch(fresh, MAX);
+        scratch.attach();
+        scratch.step();
+        scratch.step();
+        for (int x = 0; x < RX; ++x) {
+            for (int y = 1; y < RY; ++y) {
+                for (int z = 0; z < RZ; ++z) {
+                    BlockCoord p(x, y, z);
+                    ASSERT_EQ(signals.levelAt(p), scratch.levelAt(p))
+                        << "seed " << GetParam() << " round " << round << " at " << x << "," << y << "," << z
+                        << " " << world.getBlock(p).name();
+                    ASSERT_EQ(signals.relayLevelAt(p, strong), scratch.relayLevelAt(p, strong));
+                    ASSERT_EQ(signals.relayLevelAt(p, weak), scratch.relayLevelAt(p, weak));
+                }
+            }
+        }
+        // And what they show, once both have shown their last step
+        signals.step();
+        scratch.step();
+        for (int x = 0; x < RX; ++x) {
+            for (int y = 1; y < RY; ++y) {
+                for (int z = 0; z < RZ; ++z) {
+                    BlockCoord p(x, y, z);
+                    ASSERT_EQ(world.getBlock(p), fresh.getBlock(p))
+                        << "seed " << GetParam() << " round " << round << " at " << x << "," << y << "," << z
+                        << ": " << world.getBlock(p).name() << " vs " << fresh.getBlock(p).name();
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Seeds, SignalBindingRandom, ::testing::Range(1u, 21u));

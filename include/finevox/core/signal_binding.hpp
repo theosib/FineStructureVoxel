@@ -136,6 +136,7 @@ private:
     std::unordered_map<SignalNodeId, BlockCoord> nodeAt_;  // blocks' own nodes
     std::vector<SignalChange> results_;                    // from the last step, to show
     CoordSet newlyMade_;                                   // show these whatever the results
+    std::unordered_map<BlockCoord, BlockTypeId> ownWrites_;  // shown states on their way back
 
     // (type id, property, value) -> type id, and property values by family
     std::unordered_map<std::string, BlockTypeId> withCache_;

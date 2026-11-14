@@ -228,11 +228,24 @@ void SignalBinding::consider(BlockCoord pos, CoordSet& toRefresh) {
     const SignalBlockSpec* spec = specOf(type);
     Entry* e = entryAt(pos);
     if (e && e->type == type) return;
+    // Its own showing, coming back: nothing to do but note the type
+    if (auto own = ownWrites_.find(pos); own != ownWrites_.end()) {
+        bool mine = own->second == type;
+        ownWrites_.erase(own);
+        if (mine && e && e->spec && spec && e->spec->sameShape(*spec)) {
+            e->type = type;
+            e->spec = spec;
+            return;
+        }
+    }
     if (e && e->spec && spec && e->spec->sameShape(*spec)) {
         const SignalBlockSpec* before = e->spec;
         e->type = type;
         e->spec = spec;
         applyParams(*e, before);
+        // Whatever wrote it may have written over what's shown (a no-op when it didn't)
+        if (spec->role == SignalRole::Conductor) showJoins(pos, *e);
+        if (!spec->showEdges) newlyMade_.insert(pos);
         return;
     }
 
@@ -593,6 +606,7 @@ void SignalBinding::setProperty(BlockCoord pos, const std::string& prop, const s
 
 void SignalBinding::writeBlock(BlockCoord pos, BlockTypeId type) {
     BlockTypeId old = world_.getBlock(pos);
+    ownWrites_[pos] = type;
     world_.setBlock(pos, type);
     if (world_.lightEngine()) world_.enqueueLightingUpdateWithRemesh(pos, old, type);
     if (auto* mq = world_.meshRebuildQueue()) {

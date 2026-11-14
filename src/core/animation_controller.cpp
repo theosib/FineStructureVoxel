@@ -46,15 +46,20 @@ void AnimationController::update(float dt) {
 void AnimationController::sample(std::vector<glm::mat4>& localPoses) const {
     if (!current_.clip) return;
 
+    // What the caller filled in (the rest pose) stands for any bone a clip has no track for, in
+    // both clips. Identity there would pull such a bone to its parent's origin mid-fade.
+    bool fading = blending_ && blendFrom_.clip && blendDuration_ > 0.0f;
+    std::vector<glm::mat4> prevPoses;
+    if (fading) prevPoses = localPoses;
+
     // Sample current clip
     current_.clip->sample(current_.time, localPoses);
 
     // Blend with previous clip if crossfading
-    if (blending_ && blendFrom_.clip && blendDuration_ > 0.0f) {
+    if (fading) {
         float blendFactor = std::min(blendTimer_ / blendDuration_, 1.0f);
 
-        // Sample previous clip into temp buffer
-        std::vector<glm::mat4> prevPoses(localPoses.size(), glm::mat4(1.0f));
+        // Sample previous clip over the same starting pose
         blendFrom_.clip->sample(blendFrom_.time, prevPoses);
 
         // Interpolate between prev and current

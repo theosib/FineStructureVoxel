@@ -500,6 +500,37 @@ TEST(AnimationControllerTest, CrossfadeBlend) {
     EXPECT_TRUE(std::isfinite(poses[0][3][1]));
 }
 
+// A bone neither clip animates keeps the pose the caller gave it all through a crossfade, rather
+// than being pulled toward the identity (its parent's origin) and back
+TEST(AnimationControllerTest, CrossfadeKeepsUntrackedBonesAtRest) {
+    auto clipMoving = [](float x) {
+        AnimationClip clip;
+        clip.duration = 1.0f;
+        clip.looping = true;
+        BoneTrack track;
+        track.boneIndex = 0;
+        Keyframe k0; k0.time = 0.0f; k0.position = glm::vec3(x, 0, 0);
+        Keyframe k1; k1.time = 1.0f; k1.position = glm::vec3(x, 0, 0);
+        track.keyframes = {k0, k1};
+        clip.tracks.push_back(std::move(track));
+        return clip;
+    };
+    AnimationClip walk = clipMoving(1.0f);
+    AnimationClip idle = clipMoving(2.0f);
+    const glm::mat4 rest = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.5f, 0.0f));
+
+    AnimationController ctrl;
+    ctrl.play(&walk, 0.0f);
+    ctrl.update(0.3f);
+    ctrl.play(&idle, 0.4f);
+    for (int step = 0; step <= 5; ++step) {
+        std::vector<glm::mat4> poses = {glm::mat4(1.0f), rest};
+        ctrl.sample(poses);
+        EXPECT_FLOAT_EQ(poses[1][3][1], 1.5f) << "step " << step;
+        ctrl.update(0.1f);
+    }
+}
+
 TEST(AnimationControllerTest, CrossfadeCompletes) {
     AnimationClip clipA;
     clipA.duration = 2.0f;

@@ -500,3 +500,30 @@ TEST(SignalBinding, WhatsInFlightSurvivesASave) {
     }
     EXPECT_EQ(ta, tb);
 }
+
+TEST(SignalBinding, AWatcherPulsesWhenItsBlockChanges) {
+    static bool defined = false;
+    if (!defined) {
+        defined = true;
+        defineAll();
+        defineBlock("eye", {{"facing", FACING}, {"powered", BOOL}},
+                    {{"signal", "source"}, {"signal-watch", "front"}, {"signal-watch-level", "15"},
+                     {"signal-watch-pulse", "2"}, {"signal-out", "back"}, {"signal-show", "powered"}},
+                    false);
+    }
+    Rig r;
+    r.set(2, 1, 0, state("eye", {{"facing", "east"}}));  // watches x 3, drives x 1
+    r.set(1, 1, 0, "wire");
+    r.run(3);
+    EXPECT_EQ(r.at(1, 1, 0), 0) << "being found isn't a change";
+    r.set(3, 1, 0, "glass");
+    std::vector<int> trace;
+    for (int i = 0; i < 5; ++i) {
+        r.run(1);
+        trace.push_back(r.at(1, 1, 0));
+    }
+    EXPECT_EQ(trace, (std::vector<int>{15, 15, 0, 0, 0}));
+    r.set(2, 1, 1, "glass");  // beside it, not in front: nothing
+    r.run(3);
+    EXPECT_EQ(r.at(1, 1, 0), 0);
+}

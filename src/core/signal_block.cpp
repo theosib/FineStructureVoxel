@@ -149,7 +149,7 @@ SignalFaces SignalBlockSpec::powers(InternedId cls) const {
 bool SignalBlockSpec::sameShape(const SignalBlockSpec& o) const {
     return role == o.role && group == o.group && loss == o.loss && climb == o.climb &&
            in == o.in && side == o.side && hold == o.hold && out == o.out && power == o.power &&
-           reads == o.reads && joinFaces == o.joinFaces;
+           reads == o.reads && joinFaces == o.joinFaces && watch == o.watch;
 }
 
 std::optional<SignalBlockSpec> parseSignalSpec(
@@ -180,6 +180,9 @@ std::optional<SignalBlockSpec> parseSignalSpec(
     spec.loss = static_cast<SignalLevel>(p.number("signal-loss", 1, 0, 255));
     spec.climb = p.flag("signal-climb");
     spec.level = static_cast<SignalLevel>(p.number("signal-level", 0, 0, 255));
+    spec.watch = p.faces("signal-watch");
+    spec.watchLevel = static_cast<SignalLevel>(p.number("signal-watch-level", 255, 0, 255));
+    spec.watchPulse = static_cast<uint16_t>(p.number("signal-watch-pulse", 1, 1, 65535));
 
     if (const std::string* opName = p.get("signal-op")) {
         if (auto op = opNamed(*opName)) spec.component.op = *op;

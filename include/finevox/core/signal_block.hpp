@@ -68,6 +68,11 @@ struct SignalBlockSpec {
 
     // Source
     SignalLevel level = 0;
+    /// Source: faces it watches. When the block there changes, it puts out watchLevel for
+    /// watchPulse steps, then goes back to `level`.
+    SignalFaces watch = 0;
+    SignalLevel watchLevel = 0;
+    uint16_t watchPulse = 1;
 
     // Component (op, delay...) and the ports. A sink reads `in`.
     SignalComponentSpec component;

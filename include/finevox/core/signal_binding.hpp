@@ -119,6 +119,8 @@ private:
     void showResults();
     void takeChanges();
     void scanColumn(ColumnPos pos, CoordSet& changed);
+    void triggerWatchers(const CoordSet& changed);
+    void endPulses();
     void dropColumn(ColumnPos pos);
     void consider(BlockCoord pos, CoordSet& refresh);
     void refresh(const CoordSet& positions);
@@ -156,6 +158,7 @@ private:
     std::unordered_map<BlockCoord, BlockTypeId> ownWrites_;  // shown states on their way back
     ChangeCallback changeCallback_;
     std::unordered_map<BlockCoord, SignalComponentState> toRestore_;
+    std::unordered_map<BlockCoord, uint64_t> watchersOn_;  // pulsing watchers: step they end
 
     // (type id, property, value) -> type id, and property values by family
     std::unordered_map<std::string, BlockTypeId> withCache_;

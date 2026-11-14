@@ -190,13 +190,18 @@ void SignalBinding::takeChanges() {
     }
     for (ColumnPos pos : removed) dropColumn(pos);
 
+    CoordSet changedBlocks(blocks.begin(), blocks.end());
     CoordSet changed;
     for (ColumnPos pos : added) scanColumn(pos, changed);
-    changed.insert(blocks.begin(), blocks.end());
+    changed.insert(changedBlocks.begin(), changedBlocks.end());
 
     CoordSet toRefresh;
     for (BlockCoord pos : changed) consider(pos, toRefresh);
     if (!toRefresh.empty()) refresh(toRefresh);
+
+    // Changes the world made (not columns arriving) are what watchers see
+    endPulses();
+    triggerWatchers(changedBlocks);
 
     for (auto it = toRestore_.begin(); it != toRestore_.end();) {
         const Entry* e = entryAt(it->first);
@@ -207,6 +212,32 @@ void SignalBinding::takeChanges() {
         } else {
             ++it;
         }
+    }
+}
+
+void SignalBinding::triggerWatchers(const CoordSet& changed) {
+    const uint64_t next = solver_.stepCount() + 1;
+    for (BlockCoord pos : changed) {
+        for (int f = 0; f < 6; ++f) {
+            BlockCoord w = offset(pos, static_cast<Face>(f));
+            const Entry* e = entryAt(w);
+            if (!e || !e->spec || e->spec->role != SignalRole::Source || !e->spec->watch) continue;
+            // w's face toward pos
+            if (!hasSignalFace(e->spec->watch, oppositeFace(static_cast<Face>(f)))) continue;
+            auto [it, fresh] = watchersOn_.try_emplace(w, next + e->spec->watchPulse);
+            if (!fresh) continue;  // already pulsing: a change during a pulse is part of it
+            solver_.setSource(e->node, e->spec->watchLevel);
+        }
+    }
+}
+
+void SignalBinding::endPulses() {
+    const uint64_t next = solver_.stepCount() + 1;
+    for (auto it = watchersOn_.begin(); it != watchersOn_.end();) {
+        if (it->second > next) { ++it; continue; }
+        const Entry* e = entryAt(it->first);
+        if (e && e->spec && e->spec->role == SignalRole::Source) solver_.setSource(e->node, e->spec->level);
+        it = watchersOn_.erase(it);
     }
 }
 

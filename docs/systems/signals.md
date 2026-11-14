@@ -143,6 +143,7 @@ lists comma-separated (`set:powered=true: signal-level=15`).
 | `signal-loss:` | conductor: level lost to each neighbour (1) |
 | `signal-climb: true` | conductor: also joins its group one block up or down beside it, unless an opaque cube cuts the step (over the lower one going up, beside it going down) |
 | `signal-level:` | source: the level it puts out (0) |
+| `signal-watch:` `signal-watch-level:` `signal-watch-pulse:` | source: faces it watches; when the block there changes (a change in the world, its states included, not a column arriving), it puts out the watch level (the maximum) for that many steps (1), then its own level again. A change during a pulse is part of it. |
 | `signal-op:` `signal-delay:` `signal-min-pulse:` `signal-full:` | component: as `SignalComponentSpec` |
 | `signal-in:` `signal-side:` `signal-hold:` | component: faces feeding ports A, B and Hold. A sink reads `signal-in`. |
 | `signal-in-from:` (and `-side-`, `-hold-`) | which neighbours a port reads: `conductor source component relay` (all) |

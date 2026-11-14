@@ -16,7 +16,9 @@
 #include "finevox/core/entity_state.hpp"
 #include <unordered_map>
 #include "finevox/core/column_index.hpp"
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <functional>
 #include <optional>
@@ -305,6 +307,9 @@ public:
     /// Tell the observers a block changed. World's own writes do this; call it after writing a
     /// subchunk directly.
     void notifyBlockChanged(BlockCoord pos);
+    /// Tell the observers a column came or went by a way World doesn't see (a ColumnManager)
+    void notifyColumnAdded(ColumnPos pos);
+    void notifyColumnRemoved(ColumnPos pos);
 
     /// Attach optional FluidTickManager for fluid notifications on direct/script mutations
     void setFluidTickManager(FluidTickManager* ftm) { fluidTickManager_ = ftm; }
@@ -354,9 +359,14 @@ private:
     // Optional column manager for column lifecycle / persistence (not owned)
     ColumnManager* columnManager_ = nullptr;
 
-    // Changed under columnMutex_ held exclusively; read with it held either way
+    // Its own lock, taken last and never held while taking another: a ColumnManager reports
+    // columns holding its lock, while World's writers hold columnMutex_ and then take that.
+    mutable std::mutex observersMutex_;
     std::vector<std::shared_ptr<BlockObserver>> observers_;
+    std::atomic<bool> hasObservers_{false};
     void notifyLocked(BlockCoord pos) {
+        if (!hasObservers_.load(std::memory_order_acquire)) return;
+        std::lock_guard lock(observersMutex_);
         for (const auto& o : observers_) o->blockChanged(pos);
     }
 

@@ -42,7 +42,7 @@ ChunkColumn& World::addColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column
     columns_.emplace(pos.pack(), std::move(column));
     columnIndex_.set(pos.pack(), &added);
     if (updateScheduler_) updateScheduler_->noteColumnAdded(pos);
-    for (const auto& o : observers_) o->columnAdded(pos);
+    notifyColumnAdded(pos);
     return added;
 }
 
@@ -52,7 +52,7 @@ void World::retireColumn(uint64_t key) {
     columnIndex_.erase(key);
     removedColumns_.push_back(std::move(it->second));
     columns_.erase(it);
-    for (const auto& o : observers_) o->columnRemoved(ColumnPos::unpack(key));
+    notifyColumnRemoved(ColumnPos::unpack(key));
 }
 
 BlockTypeId World::getBlock(int32_t x, int32_t y, int32_t z) const {
@@ -161,7 +161,7 @@ size_t World::setBlocks(std::span<const std::pair<BlockCoord, BlockTypeId>> chan
                 sub->setBlock(lc.lx, lc.ly, lc.lz, lc.type);
                 ++changedCount;
                 columnChanged = true;
-                if (!observers_.empty()) {
+                if (hasObservers_.load(std::memory_order_relaxed)) {
                     notifyLocked(BlockCoord(chunkPos.x * SubChunk::SIZE + lc.lx,
                                             chunkPos.y * SubChunk::SIZE + lc.ly,
                                             chunkPos.z * SubChunk::SIZE + lc.lz));
@@ -268,7 +268,7 @@ std::unique_ptr<ChunkColumn> World::extractColumn(ColumnPos pos) {
     auto col = std::move(it->second);
     columns_.erase(it);
     columnIndex_.erase(pos.pack());
-    for (const auto& o : observers_) o->columnRemoved(pos);
+    notifyColumnRemoved(pos);
     return col;
 }
 
@@ -608,18 +608,31 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
 
 void World::addBlockObserver(std::shared_ptr<BlockObserver> observer) {
     if (!observer) return;
-    std::unique_lock lock(columnMutex_);
+    std::lock_guard lock(observersMutex_);
     observers_.push_back(std::move(observer));
+    hasObservers_.store(true, std::memory_order_release);
 }
 
 void World::removeBlockObserver(const BlockObserver* observer) {
-    std::unique_lock lock(columnMutex_);
+    std::lock_guard lock(observersMutex_);
     std::erase_if(observers_, [observer](const auto& o) { return o.get() == observer; });
+    hasObservers_.store(!observers_.empty(), std::memory_order_release);
 }
 
 void World::notifyBlockChanged(BlockCoord pos) {
-    std::shared_lock lock(columnMutex_);
     notifyLocked(pos);
+}
+
+void World::notifyColumnAdded(ColumnPos pos) {
+    if (!hasObservers_.load(std::memory_order_acquire)) return;
+    std::lock_guard lock(observersMutex_);
+    for (const auto& o : observers_) o->columnAdded(pos);
+}
+
+void World::notifyColumnRemoved(ColumnPos pos) {
+    if (!hasObservers_.load(std::memory_order_acquire)) return;
+    std::lock_guard lock(observersMutex_);
+    for (const auto& o : observers_) o->columnRemoved(pos);
 }
 
 void World::setUpdateScheduler(UpdateScheduler* scheduler) {

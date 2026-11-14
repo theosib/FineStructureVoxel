@@ -194,6 +194,8 @@ world.notifyBlockChanged(pos);      // after writing a subchunk directly
 A `BlockObserver` hears of every block type change World makes (`setBlock`, `setBlocks`,
 `BlockContext::setBlock`) and every column added or removed, from whichever thread made it and
 often under World's writer lock: it should record and act later, never call back into World.
+Columns a `ColumnManager` brings and takes away reach it too (`GameSession` calls
+`notifyColumnAdded`/`notifyColumnRemoved`). The observer list has its own lock, taken last.
 `SignalBinding` is one.
 
 ---

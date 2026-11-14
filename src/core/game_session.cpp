@@ -954,14 +954,17 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     impl.columnManager->setBeforeSaveCallback([emPtr](ChunkColumn& col) {
         emPtr->saveColumnEntities(col);
     });
-    impl.columnManager->setColumnLoadedCallback([emPtr, schedPtr](ChunkColumn& col) {
+    auto* worldPtr = impl.world.get();
+    impl.columnManager->setColumnLoadedCallback([emPtr, schedPtr, worldPtr](ChunkColumn& col) {
         emPtr->loadColumnEntities(col);
         schedPtr->noteColumnAdded(col.position());
+        worldPtr->notifyColumnAdded(col.position());
     });
     impl.columnManager->setTickExtractCallback([schedPtr](ColumnPos pos) {
         return schedPtr->extractTicksForColumn(pos);
     });
     impl.columnManager->setPreEvictionCallback([&impl](ColumnPos pos) {
+        impl.world->notifyColumnRemoved(pos);
         auto ticks = impl.scheduler->extractTicksForColumn(pos);
         if (!ticks.empty() && impl.activeIOManager) {
             impl.activeIOManager->queueTickSave(pos, std::move(ticks));

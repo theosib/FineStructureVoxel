@@ -195,7 +195,6 @@ rotation and block data), for things a signal pushes or pulls.
   so they carry over to any clock.
 - **Unloaded columns.** A column leaving the world drops its nodes; links into it from its
   neighbours go with them, and come back when it returns. Circuits aren't frozen as a whole.
-- **Columns from a `ColumnManager`** don't reach the binding: it sees the columns `World` holds.
 - **Showing levels** costs a block change (and a remesh) per shown change, so a fast clock
   remeshes its subchunks every step.
 

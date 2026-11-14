@@ -138,6 +138,25 @@ public:
     /// Check if game thread is running
     [[nodiscard]] bool isGameThreadRunning() const;
 
+    // === Tick Timing ===
+    /// Where the game thread's ticks go, over the last full window of ticks (5 seconds' worth).
+    /// Read on the game thread: a game-side MCP tool, a subsystem. Empty until a window passes.
+    struct SubsystemTiming {
+        std::string name;
+        double meanUs = 0;
+        double maxUs = 0;
+    };
+    struct TickTimings {
+        uint32_t ticks = 0;          ///< ticks in the window
+        double budgetUs = 0;         ///< one tick at the configured rate
+        double tickMeanUs = 0;       ///< all subsystems together
+        double tickMaxUs = 0;
+        double commandMeanUs = 0;    ///< commands carried out between ticks, per tick
+        double commandMaxUs = 0;
+        std::vector<SubsystemTiming> subsystems;  ///< in tick order
+    };
+    [[nodiscard]] const TickTimings& tickTimings() const;
+
     // === Tick Processing (synchronous, for tests / backwards compat) ===
     /// Advance game state by dt seconds. Must NOT be called while game thread is running.
     void tick(float dt);

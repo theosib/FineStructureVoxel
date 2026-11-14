@@ -11,6 +11,7 @@
 #include "finevox/core/block_event.hpp"
 #include "finevox/core/position.hpp"
 
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -319,6 +320,18 @@ public:
     void pushPendingTicks(std::vector<ScheduledTick> ticks);
 
     /**
+     * @brief Tell the scheduler a column joined the world (thread-safe)
+     *
+     * Its subchunks' game-tick registries are read on the next advanceGameTick(), so blocks
+     * that want game ticks in a loaded column get them. World calls this for columns it
+     * stores; whoever adds columns elsewhere (a ColumnManager) calls it too.
+     */
+    void noteColumnAdded(ColumnPos pos);
+
+    /// Subchunks known to hold blocks that want game ticks (game thread)
+    [[nodiscard]] size_t tickingSubChunkCount() const { return tickingSubChunks_.size(); }
+
+    /**
      * @brief Extract all ticks and write them to the tick journal
      *
      * Called during shutdown to persist all remaining scheduled ticks.
@@ -394,6 +407,13 @@ private:
     TickJournal* tickJournal_ = nullptr;
     std::vector<ScheduledTick> pendingTicks_;
     mutable std::mutex pendingTicksMutex_;
+
+    // Subchunks with game-tick blocks, by packed position (ordered, so ticks come out in the
+    // same order every run). Entries whose subchunk is gone or has emptied are dropped lazily.
+    std::set<uint64_t> tickingSubChunks_;
+    std::vector<ColumnPos> pendingColumns_;
+    std::mutex pendingColumnsMutex_;
+    void mergePendingColumns();
 
     // Process a single event (returns true if processed, false if deferred)
     bool processEvent(const BlockEvent& event);

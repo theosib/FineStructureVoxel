@@ -40,6 +40,7 @@ ChunkColumn& World::addColumn(ColumnPos pos, std::unique_ptr<ChunkColumn> column
     retireColumn(pos.pack());
     columns_.emplace(pos.pack(), std::move(column));
     columnIndex_.set(pos.pack(), &added);
+    if (updateScheduler_) updateScheduler_->noteColumnAdded(pos);
     return added;
 }
 
@@ -564,7 +565,10 @@ void World::enqueueLightingUpdateWithRemesh(BlockCoord pos, BlockTypeId oldType,
 // ============================================================================
 
 void World::setUpdateScheduler(UpdateScheduler* scheduler) {
+    std::unique_lock lock(columnMutex_);
     updateScheduler_ = scheduler;
+    if (!scheduler) return;
+    for (const auto& [packed, column] : columns_) scheduler->noteColumnAdded(ColumnPos::unpack(packed));
 }
 
 // ============================================================================

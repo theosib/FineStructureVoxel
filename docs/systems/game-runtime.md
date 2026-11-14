@@ -544,6 +544,7 @@ split into separate processes each will offer its own without changing a tool.
 | `logs` | HTTP thread | | stdout and stderr, the last 5000 lines |
 | `wait` | HTTP thread | yes | Until N more ticks or frames |
 | `server_state`, `server_eval`, `server_entities`, `server_blocks`, `server_command` | Game thread, last in the tick | | The real simulation |
+| `tick_stats` | Game thread, last in the tick | | Mean and worst time per tick of each subsystem over the last 5 seconds (`GameSession::tickTimings()`) |
 | `client_state`, `client_entities`, `client_blocks`, `client_command` | Render thread, after UI scripts | yes | What the player knows: fog of war applies |
 | `client_eval` | The same | | UI script globals and natives. Input goes through this: `input_key`, `gui_click`, `do_action` |
 | `client_screenshot` | Render thread, after the frame | yes | A JPEG, 800 pixels unless asked |

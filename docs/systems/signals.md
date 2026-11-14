@@ -98,13 +98,9 @@ floods them into one.
 ## Threads
 
 Today the solver runs on the game thread. In a release build on an Apple M2 Max, a game on a
-pre-generated world of 64 × 64 columns, at 30 ticks a second, used about 7.7 ms of each 33 ms
-tick. Most of that is two costs that can be fixed:
-
-- 5.3 ms in `UpdateScheduler::generateGameTickEvents`, which lists every subchunk in the world
-  each tick to find the blocks that asked for game ticks.
-- 2.1 ms in entities, mostly physics waiting on `BlockRegistry::getType`'s lock (see
-  ARCHITECTURE.md).
+pre-generated world of 64 × 64 columns, at 30 ticks a second, uses about 3.1 ms of each 33 ms
+tick (the `tick_stats` MCP tool shows it). 2.1 ms of that is entities, mostly physics waiting on
+`BlockRegistry::getType`'s lock (see ARCHITECTURE.md).
 
 Against that, a 100 × 100 sheet of conductors that resettles completely every step takes 93 µs
 (about 9 ns a conductor; `SignalSolver.LargeGridCost` prints it).

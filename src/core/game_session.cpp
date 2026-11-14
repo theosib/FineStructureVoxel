@@ -679,6 +679,37 @@ struct GameSession::Impl {
     // Config
     GameSessionConfig config;
 
+    // Tick timing: accumulated over a window, then published to `timings`
+    struct Accum { double sum = 0, max = 0; void add(double us) { sum += us; max = std::max(max, us); } };
+    std::vector<Accum> subsystemTime;
+    Accum tickTime, commandTime;
+    uint32_t windowTicks = 0;
+    GameSession::TickTimings timings;
+
+    static double microsSince(std::chrono::steady_clock::time_point t0) {
+        return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+    }
+
+    void publishTimings() {
+        const uint32_t rate = std::max<uint32_t>(config.tickRate, 1);
+        const double n = windowTicks;
+        timings.ticks = windowTicks;
+        timings.budgetUs = 1e6 / rate;
+        timings.tickMeanUs = tickTime.sum / n;
+        timings.tickMaxUs = tickTime.max;
+        timings.commandMeanUs = commandTime.sum / n;
+        timings.commandMaxUs = commandTime.max;
+        timings.subsystems.clear();
+        for (size_t i = 0; i < subsystems.size(); ++i) {
+            timings.subsystems.push_back({std::string(subsystems[i]->name()),
+                                          subsystemTime[i].sum / n, subsystemTime[i].max});
+        }
+        subsystemTime.assign(subsystems.size(), {});
+        tickTime = {};
+        commandTime = {};
+        windowTicks = 0;
+    }
+
     // Sort subsystems by (phase, priority)
     void sortSubsystems() {
         std::sort(subsystems.begin(), subsystems.end(),
@@ -692,6 +723,7 @@ struct GameSession::Impl {
 
     // Drain and execute all pending commands, then process scheduler events
     void drainAndExecuteCommands() {
+        const auto t0 = std::chrono::steady_clock::now();
         if (serverConnection) {
             serverConnection->update();
         }
@@ -700,26 +732,33 @@ struct GameSession::Impl {
         }
 
         auto commands = commandQueue->drainAll();
-        if (commands.empty()) return;
-
-        for (const auto& cmd : commands) {
-            executeCommand(*world, *scheduler, *entityManager, *worldTime,
-                           fluidTickManager.get(), particleSystem.get(),
-                           eventBus.get(), gameCommandHandler, cmd);
+        if (!commands.empty()) {
+            for (const auto& cmd : commands) {
+                executeCommand(*world, *scheduler, *entityManager, *worldTime,
+                               fluidTickManager.get(), particleSystem.get(),
+                               eventBus.get(), gameCommandHandler, cmd);
+            }
+            scheduler->processEvents();
         }
-        scheduler->processEvents();
+        commandTime.add(microsSince(t0));
     }
 
     // Tick all subsystems in order
     void tickSubsystems(float dt) {
         bool stopped = paused.load();
-        for (auto& sub : subsystems) {
+        if (subsystemTime.size() != subsystems.size()) subsystemTime.assign(subsystems.size(), {});
+        const auto tickStart = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < subsystems.size(); ++i) {
+            const auto t0 = std::chrono::steady_clock::now();
             if (stopped) {
-                sub->tickPaused(dt);
+                subsystems[i]->tickPaused(dt);
             } else {
-                sub->tick(dt);
+                subsystems[i]->tick(dt);
             }
+            subsystemTime[i].add(microsSince(t0));
         }
+        tickTime.add(microsSince(tickStart));
+        if (++windowTicks >= 5 * std::max<uint32_t>(config.tickRate, 1)) publishTimings();
     }
 
     // Game thread main loop
@@ -915,8 +954,9 @@ std::unique_ptr<GameSession> GameSession::createLocal(const GameSessionConfig& c
     impl.columnManager->setBeforeSaveCallback([emPtr](ChunkColumn& col) {
         emPtr->saveColumnEntities(col);
     });
-    impl.columnManager->setColumnLoadedCallback([emPtr](ChunkColumn& col) {
+    impl.columnManager->setColumnLoadedCallback([emPtr, schedPtr](ChunkColumn& col) {
         emPtr->loadColumnEntities(col);
+        schedPtr->noteColumnAdded(col.position());
     });
     impl.columnManager->setTickExtractCallback([schedPtr](ColumnPos pos) {
         return schedPtr->extractTicksForColumn(pos);
@@ -1083,6 +1123,10 @@ bool GameSession::isPaused() const { return impl_->paused.load(); }
 // ============================================================================
 // Synchronous Tick (for tests)
 // ============================================================================
+
+const GameSession::TickTimings& GameSession::tickTimings() const {
+    return impl_->timings;
+}
 
 void GameSession::tick(float dt) {
     assert(!isGameThreadRunning() && "tick() must not be called while game thread is running");

@@ -151,10 +151,17 @@ scheduler.setTickConfig(config);
 ## Game Tick Registration
 
 Blocks with `BlockType::wantsGameTicks() == true` are automatically tracked per-SubChunk:
-- Auto-register when block placed (`setBlockType` detects it)
+- Auto-register when the scheduler handles the block's placement
 - Auto-unregister when block broken
 - Registry rebuilt on chunk load (`ChunkColumn::rebuildGameTickRegistries()`)
 - NOT serialized — rebuilt deterministically from block palette
+- The scheduler keeps the set of subchunks that have any, so a tick costs what ticks, not the
+  size of the world. A column joining the world is reported with `noteColumnAdded()` (thread-safe;
+  `World` does it for its own columns and `GameSession` for the `ColumnManager`'s), and its
+  subchunks are read on the next `advanceGameTick()`. Ticks come out in subchunk order, then
+  block order, the same every run.
+- A generated column's registry isn't built: a generator that places blocks wanting game ticks
+  has to call `rebuildGameTickRegistries()` before the column joins the world.
 
 ```cpp
 // In BlockType setup:

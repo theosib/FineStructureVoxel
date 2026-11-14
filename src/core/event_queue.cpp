@@ -206,6 +206,7 @@ void UpdateScheduler::advanceGameTick() {
 
     // Merge any pending ticks from IO threads
     mergePendingTicks();
+    mergePendingColumns();
 
     // Process deferred events whose chunks are now loaded
     processDeferredEvents();
@@ -355,6 +356,7 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
             const BlockType& typeInfo = BlockRegistry::global().getType(currentType);
             if (typeInfo.wantsGameTicks()) {
                 subchunk->registerForGameTicks(localIndex);
+                tickingSubChunks_.insert(event.chunkPos.pack());
             }
         }
 
@@ -434,19 +436,45 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
     return true;  // Event was processed
 }
 
+void UpdateScheduler::noteColumnAdded(ColumnPos pos) {
+    std::lock_guard<std::mutex> lock(pendingColumnsMutex_);
+    pendingColumns_.push_back(pos);
+}
+
+void UpdateScheduler::mergePendingColumns() {
+    std::vector<ColumnPos> columns;
+    {
+        std::lock_guard<std::mutex> lock(pendingColumnsMutex_);
+        columns.swap(pendingColumns_);
+    }
+    for (ColumnPos colPos : columns) {
+        ChunkColumn* column = world_.getColumn(colPos);
+        if (!column) continue;
+        column->forEachSubChunk([&](int32_t chunkY, SubChunk& subchunk) {
+            if (!subchunk.gameTickBlocks().empty()) {
+                tickingSubChunks_.insert(ChunkPos(colPos.x, chunkY, colPos.z).pack());
+            }
+        });
+    }
+}
+
 void UpdateScheduler::generateGameTickEvents() {
-    // Iterate over all loaded subchunks
-    auto subchunkPositions = world_.getAllSubChunkPositions();
-
-    for (const ChunkPos& chunkPos : subchunkPositions) {
+    // Only subchunks known to have game-tick blocks: listing the whole world each tick costs
+    // in proportion to its size, not to what ticks
+    std::vector<uint16_t> tickBlocks;
+    for (auto it = tickingSubChunks_.begin(); it != tickingSubChunks_.end();) {
+        ChunkPos chunkPos = ChunkPos::unpack(*it);
         SubChunk* subchunk = world_.getSubChunk(chunkPos);
-        if (!subchunk) continue;
-
-        const auto& tickBlocks = subchunk->gameTickBlocks();
-        for (uint16_t localIndex : tickBlocks) {
-            BlockCoord worldPos = chunkPos.toWorld(localIndex);
-            outbox_.push(BlockEvent::tick(worldPos, TickType::Game));
+        if (!subchunk || subchunk->gameTickBlocks().empty()) {
+            it = tickingSubChunks_.erase(it);
+            continue;
         }
+        tickBlocks.assign(subchunk->gameTickBlocks().begin(), subchunk->gameTickBlocks().end());
+        std::sort(tickBlocks.begin(), tickBlocks.end());
+        for (uint16_t localIndex : tickBlocks) {
+            outbox_.push(BlockEvent::tick(chunkPos.toWorld(localIndex), TickType::Game));
+        }
+        ++it;
     }
 }
 

@@ -837,3 +837,60 @@ TEST(UpdateSchedulerFixTest, GameTickAndScheduledTickDoNotCollideInOutbox) {
     EXPECT_EQ(handlerPtr->scheduledTickCount, 1);
 }
 
+
+TEST(UpdateSchedulerFixTest, LoadedColumnsGetGameTicksAndUnloadedOnesStop) {
+    World world;
+    UpdateScheduler scheduler(world);
+    world.setUpdateScheduler(&scheduler);
+
+    BlockType tickingType;
+    tickingType.setWantsGameTicks(true);
+    BlockTypeId tickingId = BlockTypeId::fromName("r0test:loaded_tick");
+    BlockRegistry::global().registerType(tickingId, tickingType);
+    auto handler = std::make_unique<NeighborTrackingHandler>("r0test:loaded_tick");
+    auto* handlerPtr = handler.get();
+    BlockRegistry::global().registerHandler("r0test:loaded_tick", std::move(handler));
+
+    // As a load does it: the registry is rebuilt from the blocks, then the column joins
+    ColumnPos colPos{3, 4};
+    auto column = std::make_unique<ChunkColumn>(colPos);
+    column->setBlock(3 * 16 + 1, 10, 4 * 16 + 2, tickingId);
+    column->setBlock(3 * 16 + 5, 40, 4 * 16 + 2, tickingId);
+    column->rebuildGameTickRegistries();
+    world.insertColumn(colPos, std::move(column));
+
+    scheduler.advanceGameTick();
+    scheduler.processEvents();
+    EXPECT_EQ(handlerPtr->gameTickCount, 2);
+    EXPECT_EQ(scheduler.tickingSubChunkCount(), 2u);
+
+    world.removeColumn(colPos);
+    scheduler.advanceGameTick();
+    scheduler.processEvents();
+    EXPECT_EQ(handlerPtr->gameTickCount, 2) << "a column that's gone doesn't tick";
+    EXPECT_EQ(scheduler.tickingSubChunkCount(), 0u);
+    world.setUpdateScheduler(nullptr);
+}
+
+TEST(UpdateSchedulerFixTest, ColumnsAlreadyInTheWorldAreFoundWhenTheSchedulerAttaches) {
+    World world;
+    BlockType tickingType;
+    tickingType.setWantsGameTicks(true);
+    BlockTypeId tickingId = BlockTypeId::fromName("r0test:early_tick");
+    BlockRegistry::global().registerType(tickingId, tickingType);
+    auto handler = std::make_unique<NeighborTrackingHandler>("r0test:early_tick");
+    auto* handlerPtr = handler.get();
+    BlockRegistry::global().registerHandler("r0test:early_tick", std::move(handler));
+
+    auto column = std::make_unique<ChunkColumn>(ColumnPos{-2, 7});
+    column->setBlock(-2 * 16, 3, 7 * 16, tickingId);
+    column->rebuildGameTickRegistries();
+    world.insertColumn(ColumnPos{-2, 7}, std::move(column));
+
+    UpdateScheduler scheduler(world);
+    world.setUpdateScheduler(&scheduler);
+    scheduler.advanceGameTick();
+    scheduler.processEvents();
+    EXPECT_EQ(handlerPtr->gameTickCount, 1);
+    world.setUpdateScheduler(nullptr);
+}

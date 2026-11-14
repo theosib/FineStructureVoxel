@@ -258,6 +258,30 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
     };
     server.addTool(std::move(state));
 
+    McpTool tickStats;
+    tickStats.name = "tick_stats";
+    tickStats.description =
+        "Where the game thread's time goes: the mean and worst microseconds per tick for each "
+        "subsystem, over the last 5 seconds, against the tick's budget. Empty for the first "
+        "5 seconds.";
+    tickStats.inputSchema = {{"type", "object"}, {"properties", json::object()}};
+    tickStats.side = McpSide::Game;
+    tickStats.run = [&runtime](const json&) {
+        const auto& t = runtime.session().tickTimings();
+        json subs = json::array();
+        for (const auto& s : t.subsystems) {
+            subs.push_back({{"name", s.name}, {"mean_us", s.meanUs}, {"max_us", s.maxUs}});
+        }
+        return McpResult::value({{"ticks", t.ticks},
+                                 {"budget_us", t.budgetUs},
+                                 {"tick_mean_us", t.tickMeanUs},
+                                 {"tick_max_us", t.tickMaxUs},
+                                 {"commands_mean_us", t.commandMeanUs},
+                                 {"commands_max_us", t.commandMaxUs},
+                                 {"subsystems", std::move(subs)}});
+    };
+    server.addTool(std::move(tickStats));
+
     McpTool eval;
     eval.name = "server_eval";
     eval.description =

@@ -203,6 +203,37 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         return Value::integer(static_cast<int64_t>(ud->entityManager->spawnEntity(std::move(drop))));
     });
 
+    // items_near x y z radius -> ids of items lying in the world within radius, nearest first
+    e.registerFunction("items_near", [=](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        double x, y, z;
+        if (!ud || !ud->entityManager || args.size() < 4 || !positionArg(args, 0, x, y, z)) return emptyArray();
+        float radius = static_cast<float>(number(args[3]));
+        Vec3 center(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+        std::vector<std::pair<float, EntityId>> found;
+        for (EntityId id : ud->entityManager->spatialIndex().queryRadius(center, radius)) {
+            const auto* drop = dynamic_cast<const ItemDropEntity*>(ud->entityManager->getEntity(id));
+            if (!drop || drop->item().count <= 0) continue;
+            Vec3 d = drop->position() - center;
+            float dist2 = d.x * d.x + d.y * d.y + d.z * d.z;
+            if (dist2 <= radius * radius) found.emplace_back(dist2, id);
+        }
+        std::sort(found.begin(), found.end());
+        std::vector<Value> result;
+        for (const auto& [d2, id] : found) result.push_back(Value::integer(static_cast<int64_t>(id)));
+        return Value::array(std::move(result));
+    });
+
+    // item_stack id -> [item count] for an item lying in the world, or nil for any other entity
+    e.registerFunction("item_stack", [](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        if (!ud || !ud->entityManager) return Value::nil();
+        const auto* drop = dynamic_cast<const ItemDropEntity*>(ud->entityManager->getEntity(entityArg(args)));
+        if (!drop || drop->item().count <= 0) return Value::nil();
+        return Value::array(std::vector<Value>{Value::symbol(drop->item().type.id),
+                                               Value::integer(drop->item().count)});
+    });
+
     e.registerFunction("ent_remove", [](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         if (!ud || !ud->entityManager) return Value::boolean(false);

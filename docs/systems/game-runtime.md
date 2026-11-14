@@ -135,6 +135,9 @@ walk cycles and effects by itself, and its body's physics are its own.
 ent_spawn type x y z [=faction n] -> id     ent_remove id     ent_alive id
 item_drop item count x y z [=velocity [vx vy vz]] [=delay s] -> id   an item lying in the world,
     tossed a little way at random without a velocity; players take it through on :pickup
+item_stack id -> [item count]   what an item lying in the world is (nil for other entities)
+items_near x y z radius -> ids   items lying in the world within radius, nearest first (ent_find
+    finds only creatures)
 ent_pos id   ent_set_pos id x y z           ent_type id       ent_faction id
 ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id

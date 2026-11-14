@@ -676,6 +676,32 @@ end
     EXPECT_EQ(one.items[script("left")], "rock");
 }
 
+// A script can find items lying about and read what they are; creatures aren't items
+TEST_F(ReplicationServerTest, ItemsLyingAboutCanBeFoundAndRead) {
+    auto& game = bootTwo(R"(
+set near nil
+set what nil
+set far nil
+on :start do
+    set dropped {item_drop :gem 3 40 60 40 =velocity [0 0 0]}
+    item_drop :rock 1 49 60 40 =velocity [0 0 0]
+end
+on :tick do
+    set near {items_near 40 60 40 2}
+    set far {items_near 40 60 40 20}
+    if (near.length > 0) { set what {item_stack near[0]} }
+end
+)");
+    game.runTicks(2);
+    const auto& near = game.gameScript().context().get("near").asArray();
+    ASSERT_EQ(near.size(), 1u);
+    const auto& what = game.gameScript().context().get("what").asArray();
+    ASSERT_EQ(what.size(), 2u);
+    EXPECT_EQ(StringInterner::global().lookup(what[0].asSymbol()), "gem");
+    EXPECT_EQ(what[1].asInt(), 3);
+    EXPECT_EQ(game.gameScript().context().get("far").asArray().size(), 2u);
+}
+
 TEST_F(ReplicationServerTest, ACommandSaysWhoItCameFrom) {
     auto& game = bootTwo(R"(
 set from nil

@@ -12,6 +12,7 @@
 
 #include "finevox/core/position.hpp"
 #include "finevox/core/fluid_simulator.hpp"
+#include <functional>
 #include <unordered_set>
 #include <memory>
 
@@ -28,6 +29,8 @@ class World;
 ///   3. Block/fluid changes call notifyFluidChanged() / notifyBlockChanged()
 class FluidTickManager {
 public:
+    using ChangeCallback = std::function<void(BlockCoord)>;
+
     explicit FluidTickManager(World& world);
 
     /// Process one game tick of fluid simulation.
@@ -39,10 +42,22 @@ public:
     [[nodiscard]] const FluidSimulator& simulator() const { return simulator_; }
 
     /// Notify that fluid changed at a position
-    void notifyFluidChanged(BlockCoord pos) { simulator_.notifyFluidChanged(pos); }
+    void notifyFluidChanged(BlockCoord pos) {
+        simulator_.notifyFluidChanged(pos);
+        if (changeCallback_) changeCallback_(pos);
+    }
 
     /// Notify that a block changed at a position (may affect adjacent fluid)
-    void notifyBlockChanged(BlockCoord pos) { simulator_.notifyBlockChanged(pos); }
+    void notifyBlockChanged(BlockCoord pos) {
+        simulator_.notifyBlockChanged(pos);
+        if (changeCallback_) changeCallback_(pos);
+    }
+
+    /// Reconcile fluid state across all loaded subchunks
+    void reconcileWorld() { simulator_.reconcileWorld(); }
+
+    /// Register a callback invoked when a block or fluid change dirties a position
+    void setChangeCallback(ChangeCallback cb) { changeCallback_ = std::move(cb); }
 
     /// Mark a subchunk as having active fluid (non-static, needs ticking)
     void markActive(ChunkPos pos);
@@ -63,6 +78,7 @@ private:
 
     /// Set of subchunks that have non-static fluid (need ticking)
     std::unordered_set<ChunkPos> activeSubChunks_;
+    ChangeCallback changeCallback_;
 };
 
 }  // namespace finevox

@@ -456,3 +456,15 @@ TEST(SkyConfigTest, CustomSkyConfOverridesDefaultsAndMissingFallsBack) {
     EXPECT_EQ(fallback.brightnessKeyframes.size(), defs.brightnessKeyframes.size());
 }
 
+TEST(SkyParametersTest, SunDirectionTransitionsSmoothlyAcrossDawnAndDusk) {
+    constexpr int STEPS = 1000;
+    for (int i = 0; i < STEPS; ++i) {
+        float t0 = static_cast<float>(i) / STEPS;
+        float t1 = static_cast<float>((i + 1) % STEPS) / STEPS;
+        glm::vec3 d0 = computeSkyParameters(t0).sunDirection;
+        glm::vec3 d1 = computeSkyParameters(t1).sunDirection;
+        EXPECT_LT(glm::distance(d0, d1), 0.05f) << "discontinuous sun direction jump at t=" << t0;
+    }
+}
+
+

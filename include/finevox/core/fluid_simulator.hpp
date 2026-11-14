@@ -75,6 +75,10 @@ public:
     /// Notify that a block changed at a position (may affect adjacent fluid).
     void notifyBlockChanged(BlockCoord pos);
 
+    /// Reconcile fluid state across all loaded subchunks (strip fluid from solid blocks,
+    /// wake non-static fluid cells after loading a saved world).
+    void reconcileWorld();
+
     /// Get the current configuration
     [[nodiscard]] const FluidSimulatorConfig& config() const { return config_; }
 

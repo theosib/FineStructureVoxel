@@ -15,6 +15,7 @@
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/entity_serializer.hpp"
 #include "finevox/core/data_container.hpp"
+#include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/game_session.hpp"
 #include "finevox/core/region_file.hpp"
 #include "finevox/core/world_time.hpp"
@@ -290,6 +291,7 @@ void GameRuntime::loadSavedWorld() {
         prog->total.store(static_cast<uint32_t>(side * side), std::memory_order_relaxed);
     }
     loadColumns(session_->world(), path / "world", manifest_.worldRadius, prog);
+    session_->fluidTicks().reconcileWorld();
     lightWorld();
 }
 

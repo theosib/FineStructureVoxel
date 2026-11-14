@@ -19,6 +19,11 @@ void FluidTickManager::tick() {
                 queue->push(pos, MeshRebuildRequest::normal());
             }
         }
+        if (changeCallback_) {
+            for (const ChunkPos& pos : dirty) {
+                changeCallback_(BlockCoord(pos.x * 16, pos.y * 16, pos.z * 16));
+            }
+        }
         simulator_.clearDirtySubChunks();
     }
 }

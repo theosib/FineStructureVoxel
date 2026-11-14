@@ -145,6 +145,7 @@ void WorldReplica::syncAll(const std::function<void(ColumnPos)>& onColumn) {
 
 void WorldReplica::expectChange(BlockCoord pos) {
     std::lock_guard lock(expectedMutex_);
+    expected_.push_back({pos, tick_ + 1});
     expected_.push_back({pos, tick_ + EXPECT_TICKS});
 }
 
@@ -178,8 +179,10 @@ void WorldReplica::settleExpected() {
     }
 
     // A column it can't see, it can't look at: a client doesn't get to peek by asking
+    std::unordered_set<uint64_t> synced;
     for (const BlockCoord& pos : due) {
         ColumnPos column(pos.x >> 4, pos.z >> 4);
+        if (!synced.insert(column.pack()).second) continue;
         if (columnVisible(column)) syncColumn(column);
     }
 }

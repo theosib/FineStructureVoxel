@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "finevox/core/player_controller.hpp"
+#include "finevox/core/fluid_type.hpp"
+#include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/key_bindings.hpp"
 #include "finevox/core/config.hpp"
 #include <cmath>
@@ -715,3 +717,45 @@ TEST(PlayerControllerTest, CrouchingFitsUnderALowCeilingAndStandsOnlyWithRoom) {
     EXPECT_NEAR(body.halfExtents().y * 2.0f, 1.9f, 1e-5f);
     EXPECT_LT(body.position().x, 2.0f + 0.35f + 0.01f);
 }
+
+TEST(PlayerControllerTest, ShallowWaterJumpAndBankHopClimbOntoBank) {
+    FluidType water;
+    water.name = "pc_test_water";
+    water.maxLevel = 7;
+    FluidRegistry::global().registerType("pc_test_water", water);
+    FluidTypeId waterId = FluidTypeId::fromName("pc_test_water");
+
+    // A pool at z = 0 (floor at y = -1, water at y = 0) and a bank at z = 1 (solid at y = 0, top at y = 1)
+    BlockWorld world = floorWorld();
+    for (int x = -2; x <= 2; ++x) {
+        for (int z = 1; z <= 3; ++z) world.cells.emplace_back(x, 0, z);
+    }
+    PhysicsSystem physics(world.shapes());
+    physics.setGravity(20.0f);
+
+    const Vec3 start(0.5f, COLLISION_MARGIN, 0.5f);
+    SimplePhysicsBody body(start, Vec3(0.3f, 0.9f, 0.3f));
+    body.setMaxStepHeight(0.6f);
+    PlayerController pc;
+    pc.setPhysics(&body, &physics);
+    pc.setFlyMode(false);
+    body.setPosition(start);
+    pc.setMoveSpeed(4.5f);
+    pc.setJumpVelocity(7.0f);
+    pc.setFluidQuery([waterId](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
+        if (pos.y == 0 && pos.z <= 0) return {waterId, 15};
+        return {EMPTY_FLUID_TYPE, 0};
+    });
+
+    // Settle on the pool floor, then press forward + jump to climb onto the bank at y = 1
+    for (int i = 0; i < 10; ++i) pc.update(FRAME);
+    pc.setMoveForward(true);
+    pc.requestJump();
+    pc.setJumpHeld(true);
+    for (int i = 0; i < 90 && body.position().z < 1.3f; ++i) pc.update(FRAME);
+
+    EXPECT_GE(body.position().y, 1.0f) << "climbed onto the 1-block bank out of water";
+    EXPECT_GT(body.position().z, 1.1f);
+    FluidRegistry::global().clear();
+}
+

@@ -106,6 +106,35 @@ void FluidSimulator::notifyBlockChanged(BlockCoord pos) {
     }
 }
 
+void FluidSimulator::reconcileWorld() {
+    std::vector<BlockCoord> displaced;
+    std::vector<BlockCoord> active;
+
+    for (const ChunkPos& chunkPos : world_.getAllSubChunkPositions()) {
+        const SubChunk* sub = world_.getSubChunk(chunkPos);
+        if (!sub || !sub->fluidLayer()) continue;
+        for (int32_t i = 0; i < SubChunk::VOLUME; ++i) {
+            FluidTypeId type = sub->getFluid(i);
+            if (type.isEmpty()) continue;
+            uint8_t level = sub->getFluidLevel(i);
+            BlockCoord pos = chunkPos.toWorld(static_cast<uint16_t>(i));
+            const FluidType* ft = FluidRegistry::global().getType(type);
+            if (!ft || !canFluidEnter(pos, type, *ft)) {
+                displaced.push_back(pos);
+            } else if (level < FLUID_SOURCE_LEVEL) {
+                active.push_back(pos);
+            }
+        }
+    }
+
+    for (const BlockCoord& pos : displaced) {
+        removeFluidAndNotify(pos);
+    }
+    for (const BlockCoord& pos : active) {
+        scheduleUpdate(pos, EMPTY_FLUID_TYPE, 0, 0);
+    }
+}
+
 bool FluidSimulator::hasPendingUpdate(BlockCoord pos) const {
     for (const auto& u : pendingUpdates_) {
         if (u.pos == pos) return true;
@@ -167,6 +196,12 @@ void FluidSimulator::processFluidAt(BlockCoord pos) {
 
     const FluidType* fluidType = FluidRegistry::global().getType(type);
     if (!fluidType) return;
+
+    // A solid block placed at this position displaces any fluid that cannot coexist with it
+    if (!canFluidEnter(pos, type, *fluidType)) {
+        removeFluidAndNotify(pos);
+        return;
+    }
 
     bool isSource = (level == FLUID_SOURCE_LEVEL);
 
@@ -272,8 +307,14 @@ void FluidSimulator::spreadHorizontally(BlockCoord pos, FluidTypeId type, uint8_
         if (existingType == type && existingLevel >= newLevel) continue;
 
         // If slope detection found preferred directions, only flow those ways
+        // (unless flowing into neighbor would form a new source block)
         uint8_t faceBit = (1 << static_cast<uint8_t>(face));
-        if (slopeMask != 0 && !(slopeMask & faceBit)) continue;
+        if (slopeMask != 0 && !(slopeMask & faceBit)) {
+            if (!fluidType.sourceFormation ||
+                countAdjacentSources(neighbor, type) < fluidType.sourceFormationCount) {
+                continue;
+            }
+        }
 
         // Schedule a FLOW update with flow speed delay
         // This carries the fluid type and level to actually place
@@ -536,7 +577,7 @@ void FluidSimulator::setFluidAndNotify(BlockCoord pos, FluidTypeId type, uint8_t
             lightEngine_->enqueue(lu);
         }
 
-        // Schedule neighbors for re-evaluation next tick
+        // Schedule neighbors for re-evaluation
         for (int i = 0; i < 6; ++i) {
             Face face = static_cast<Face>(i);
             BlockCoord neighbor = BlockCoord{
@@ -546,6 +587,8 @@ void FluidSimulator::setFluidAndNotify(BlockCoord pos, FluidTypeId type, uint8_t
             };
             if (!processedThisTick_.count(neighbor)) {
                 scheduleUpdate(neighbor, EMPTY_FLUID_TYPE, 0, 0);
+            } else if (level == FLUID_SOURCE_LEVEL) {
+                scheduleUpdate(neighbor, EMPTY_FLUID_TYPE, 0, 1);
             }
         }
     }
@@ -578,9 +621,8 @@ void FluidSimulator::removeFluidAndNotify(BlockCoord pos) {
                 pos.y + faceOffset(face).y,
                 pos.z + faceOffset(face).z
             };
-            if (!processedThisTick_.count(neighbor)) {
-                scheduleUpdate(neighbor, EMPTY_FLUID_TYPE, 0, 0);
-            }
+            int32_t delay = processedThisTick_.count(neighbor) ? 1 : 0;
+            scheduleUpdate(neighbor, EMPTY_FLUID_TYPE, 0, delay);
         }
     }
 }

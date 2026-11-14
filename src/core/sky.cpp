@@ -151,14 +151,24 @@ SkyParameters computeSkyParameters(float timeOfDay, const SkyConfig& config) {
         sky.sunIntensity = b0->sunIntensity + (b1->sunIntensity - b0->sunIntensity) * brightFrac;
     }
 
-    // Sun direction (semicircle arc from east to west during day)
+    // Sun direction (semicircle arc from east to west during day, smoothly blending
+    // into soft overhead moonlight across dusk and back to the eastern horizon before dawn)
+    glm::vec3 nightDir = glm::normalize(glm::vec3(0.2f, 0.8f, 0.3f));
     if (t < 0.5f) {
         float sunAngle = t * 2.0f * glm::pi<float>();
         float y = std::sin(sunAngle);
         float x = -std::cos(sunAngle);
         sky.sunDirection = glm::normalize(glm::vec3(x, y + 0.1f, 0.3f));
+    } else if (t < 0.60f) {
+        glm::vec3 westHorizon = glm::normalize(glm::vec3(1.0f, 0.1f, 0.3f));
+        float blend = smoothstep(0.50f, 0.60f, t);
+        sky.sunDirection = glm::normalize(lerpColor3(westHorizon, nightDir, blend));
+    } else if (t > 0.90f) {
+        glm::vec3 eastHorizon = glm::normalize(glm::vec3(-1.0f, 0.1f, 0.3f));
+        float blend = smoothstep(0.90f, 1.00f, t);
+        sky.sunDirection = glm::normalize(lerpColor3(nightDir, eastHorizon, blend));
     } else {
-        sky.sunDirection = glm::normalize(glm::vec3(0.2f, 0.8f, 0.3f));
+        sky.sunDirection = nightDir;
     }
 
     return sky;

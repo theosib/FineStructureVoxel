@@ -240,6 +240,9 @@ void GameRuntime::load() {
 
     revealAll_ = !manifest_.fogOfWar;
     replica_ = &replicaFor(manifest_.viewerFaction);
+    session_->fluidTicks().setChangeCallback([this](BlockCoord pos) {
+        for (const auto& [faction, replica] : replicas_) replica->expectChange(pos);
+    });
 
     // Clients get entities from replication, one view at a time
     session_->entities().setSnapshotsEnabled(false);

@@ -221,12 +221,14 @@ void PlayerController::updatePhysicsMovement(float dt) {
         float bodyHeight = body_->halfExtents().y * 2.0f;
         float depthBelowTarget = (contact.submersion - kSurfaceSubmersion) * bodyHeight;
         if (wantUp) {
-            swimSurface = depthBelowTarget < 0.20f;
-            if (depthBelowTarget > 0.0f) {
+            swimSurface = depthBelowTarget < 0.45f;
+            if (body_->isOnGround() && contact.submersion < 0.6f) {
+                vel.y = std::max(vel.y, jumpVelocity_);
+            } else if (depthBelowTarget > 0.0f) {
                 float targetVelY = std::min(depthBelowTarget * 6.0f, 3.5f);
-                vel.y = targetVelY + physics_->gravity() * dt;
-            } else {
-                // At the surface: hold steady instead of launching into a jump
+                vel.y = std::max(vel.y, targetVelY + physics_->gravity() * dt);
+            } else if (vel.y <= 3.6f) {
+                // At the surface: hold steady unless already rising out on a jump or bank hop
                 vel.y = std::max(vel.y * std::exp(-12.0f * dt), 0.0f) + physics_->gravity() * dt;
             }
         } else {
@@ -255,7 +257,7 @@ void PlayerController::updatePhysicsMovement(float dt) {
                             std::abs(actualMove.z - desiredHoriz.z) > 1e-4f;
         if (blockedHoriz) {
             Vec3 postVel = body_->velocity();
-            postVel.y = std::max(postVel.y, 5.5f);
+            postVel.y = std::max(postVel.y, std::max(6.0f, jumpVelocity_ * 0.9f));
             body_->setVelocity(postVel);
         }
     }

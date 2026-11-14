@@ -577,3 +577,75 @@ TEST_F(FluidSimulatorTest, FluidEventTypesExist) {
     EXPECT_NE(static_cast<uint8_t>(EventType::FluidPlaced),
               static_cast<uint8_t>(EventType::None));
 }
+
+TEST_F(FluidSimulatorTest, SolidBlockDisplacesFluidAndDrainsTrench) {
+    World world;
+    FluidSimulator sim(world);
+
+    // Build a 1-wide trench at y=1 along x=0..4 with floor at y=0 and walls at z=±1
+    buildFloor(world, -1, 5, -1, 1);
+    for (int32_t x = -1; x <= 5; ++x) {
+        world.setBlock(BlockCoord{x, 1, -1}, stoneId_);
+        world.setBlock(BlockCoord{x, 1, 1}, stoneId_);
+    }
+    world.setBlock(BlockCoord{-1, 1, 0}, stoneId_);
+    world.setBlock(BlockCoord{5, 1, 0}, stoneId_);
+
+    // Source at x=0 flows along x=1..4
+    world.setFluid(BlockCoord{0, 1, 0}, waterId_, FLUID_SOURCE_LEVEL);
+    sim.notifyFluidChanged(BlockCoord{0, 1, 0});
+    runTicks(sim, 30);
+
+    for (int32_t x = 1; x <= 4; ++x) {
+        ASSERT_TRUE(world.hasFluid(BlockCoord{x, 1, 0})) << "x=" << x;
+    }
+
+    // Place a solid block at x=1 blocking the source from the rest of the trench
+    world.setBlock(BlockCoord{1, 1, 0}, stoneId_);
+    sim.notifyBlockChanged(BlockCoord{1, 1, 0});
+    runTicks(sim, 60);
+
+    EXPECT_FALSE(world.hasFluid(BlockCoord{1, 1, 0}));
+    for (int32_t x = 2; x <= 4; ++x) {
+        EXPECT_FALSE(world.hasFluid(BlockCoord{x, 1, 0})) << "trench cell x=" << x << " should drain";
+    }
+}
+
+TEST_F(FluidSimulatorTest, ReconcileWorldRemovesDisplacedFluidAndDrainsOrphans) {
+    World world;
+    FluidSimulator sim(world);
+
+    buildFloor(world, 0, 4, -1, 1);
+    // Simulate a pre-existing saved state where a solid block at x=1 still has fluid inside it
+    // and x=2..3 have orphaned flowing fluid
+    world.setBlock(BlockCoord{1, 1, 0}, stoneId_);
+    world.setFluid(BlockCoord{1, 1, 0}, waterId_, 7);
+    world.setFluid(BlockCoord{2, 1, 0}, waterId_, 6);
+    world.setFluid(BlockCoord{3, 1, 0}, waterId_, 5);
+
+    sim.reconcileWorld();
+    EXPECT_FALSE(world.hasFluid(BlockCoord{1, 1, 0}));
+
+    runTicks(sim, 40);
+    EXPECT_FALSE(world.hasFluid(BlockCoord{2, 1, 0}));
+    EXPECT_FALSE(world.hasFluid(BlockCoord{3, 1, 0}));
+}
+
+TEST_F(FluidSimulatorTest, SourceFormsBetweenSourcesEvenNearASlope) {
+    World world;
+    FluidSimulator sim(world);
+
+    // Floor everywhere except a drop at (-1, 0, -2) near the first source
+    buildFloor(world, -3, 3, -3, 3);
+    world.setBlock(BlockCoord{-1, 0, -2}, AIR_BLOCK_TYPE);
+
+    world.setFluid(BlockCoord{-1, 1, 0}, waterId_, FLUID_SOURCE_LEVEL);
+    world.setFluid(BlockCoord{1, 1, 0}, waterId_, FLUID_SOURCE_LEVEL);
+    sim.notifyFluidChanged(BlockCoord{-1, 1, 0});
+    sim.notifyFluidChanged(BlockCoord{1, 1, 0});
+
+    runTicks(sim, 10);
+    EXPECT_EQ(world.getFluid(BlockCoord{0, 1, 0}), waterId_);
+    EXPECT_EQ(world.getFluidLevel(BlockCoord{0, 1, 0}), FLUID_SOURCE_LEVEL);
+}
+

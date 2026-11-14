@@ -747,6 +747,18 @@ Vec3 PhysicsSystem::update(PhysicsBody& body, float deltaTime) {
     return actualMovement;
 }
 
+bool PhysicsSystem::hasFooting(const AABB& box, float depth) const {
+    AABB below(box.min.x, box.min.y - depth, box.min.z, box.max.x, box.min.y, box.max.z);
+    for (const auto& collider : collectColliders(below)) {
+        if (collider.max.y > below.min.y && collider.min.y < below.max.y &&
+            collider.max.x > box.min.x && collider.min.x < box.max.x &&
+            collider.max.z > box.min.z && collider.min.z < box.max.z) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool PhysicsSystem::checkOnGround(const PhysicsBody& body) const {
     AABB entityBox = body.boundingBox();
 

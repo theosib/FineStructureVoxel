@@ -13,6 +13,30 @@ void PlayerController::setPhysics(PhysicsBody* body, PhysicsSystem* system) {
 
 void PlayerController::requestJump() {
     jumpRequested_ = true;
+    // Two presses close together start or stop flight, where it's allowed
+    if (flightAllowed_ && body_ && lastJumpPress_ >= 0.0f && clock_ - lastJumpPress_ <= doubleTapTime_) {
+        setFlying(!flying_);
+        lastJumpPress_ = -1.0f;
+        jumpRequested_ = false;
+        return;
+    }
+    lastJumpPress_ = clock_;
+}
+
+void PlayerController::setFlightAllowed(bool allowed) {
+    flightAllowed_ = allowed;
+    if (!allowed) setFlying(false);
+}
+
+void PlayerController::setFlying(bool flying) {
+    if (flying && !flightAllowed_) return;
+    if (flying == flying_) return;
+    flying_ = flying;
+    if (body_) {
+        Vec3 vel = body_->velocity();
+        vel.y = 0.0f;
+        body_->setVelocity(vel);
+    }
 }
 
 void PlayerController::look(float dx, float dy) {
@@ -29,6 +53,8 @@ void PlayerController::clearInput() {
     moveUp_ = false;
     moveDown_ = false;
     jumpRequested_ = false;
+    jumpHeld_ = false;
+    sneak_ = false;
 }
 
 void PlayerController::setFlyMode(bool fly) {
@@ -53,12 +79,51 @@ void PlayerController::setFlyMode(bool fly) {
 
 void PlayerController::update(float dt) {
     flyPositionDelta_ = glm::dvec3(0.0);
+    clock_ += dt;
 
     if (flyMode_) {
         updateFlyMovement(dt);
     } else if (body_ && physics_) {
-        updatePhysicsMovement(dt);
+        if (flying_) {
+            updateBodyFlight(dt);
+        } else {
+            updatePhysicsMovement(dt);
+        }
     }
+    // A press is for this update only: one made in the air doesn't jump on landing
+    jumpRequested_ = false;
+}
+
+Vec3 PlayerController::guardEdge(Vec3 move) const {
+    float depth = body_->maxStepHeight();
+    AABB box = body_->boundingBox();
+    // Only on firm ground: one already hanging over the edge isn't held there
+    if (!physics_->hasFooting(box, depth)) return move;
+    // Held back a little short of the very edge, so that rounding never leaves the body
+    // reading as already over it
+    constexpr float HOLD = 0.01f;
+    AABB held(box.min.x + HOLD, box.min.y, box.min.z + HOLD, box.max.x - HOLD, box.max.y, box.max.z - HOLD);
+    auto footed = [&](float dx, float dz) {
+        return physics_->hasFooting(held.translated(Vec3(dx, 0.0f, dz)), depth);
+    };
+    // The longest share of a move that keeps footing, found by halving: footing over a share
+    // means footing over less of it too, as the body only slides along a straight line
+    auto longest = [&](float dx, float dz) {
+        if (footed(dx, dz)) return 1.0f;
+        float lo = 0.0f, hi = 1.0f;
+        for (int i = 0; i < 12; ++i) {
+            float mid = 0.5f * (lo + hi);
+            if (footed(dx * mid, dz * mid)) lo = mid; else hi = mid;
+        }
+        return lo;
+    };
+    // Each way on its own first, so a body at a corner can still slide along the edge
+    move.x *= longest(move.x, 0.0f);
+    move.z *= longest(0.0f, move.z);
+    float both = longest(move.x, move.z);
+    move.x *= both;
+    move.z *= both;
+    return move;
 }
 
 glm::vec3 PlayerController::forwardVector() const {
@@ -115,6 +180,8 @@ void PlayerController::updatePhysicsMovement(float dt) {
     }
 
     float speed = contact.inFluid ? moveSpeed_ * 0.65f : moveSpeed_;
+    if (sneak_ && !contact.inFluid) speed *= sneakSpeed_;
+    bool wantUp = jumpHeld_ || jumpRequested_;
     Vec3 vel = body_->velocity();
     if (glm::length(moveDir) > 0.0f) {
         vel.x = moveDir.x * speed;
@@ -132,7 +199,7 @@ void PlayerController::updatePhysicsMovement(float dt) {
         constexpr float kSurfaceSubmersion = 0.28f;
         float bodyHeight = body_->halfExtents().y * 2.0f;
         float depthBelowTarget = (contact.submersion - kSurfaceSubmersion) * bodyHeight;
-        if (jumpRequested_) {
+        if (wantUp) {
             swimSurface = depthBelowTarget < 0.20f;
             if (depthBelowTarget > 0.0f) {
                 float targetVelY = std::min(depthBelowTarget * 6.0f, 3.5f);
@@ -141,15 +208,20 @@ void PlayerController::updatePhysicsMovement(float dt) {
                 // At the surface: hold steady instead of launching into a jump
                 vel.y = std::max(vel.y * std::exp(-12.0f * dt), 0.0f) + physics_->gravity() * dt;
             }
-            jumpRequested_ = false;
         } else {
             // Gently sink with partial buoyancy and water drag
             vel.y += 0.72f * physics_->gravity() * contact.submersion * dt;
             vel.y *= std::exp(-5.0f * dt);
         }
-    } else if (jumpRequested_ && body_->isOnGround()) {
+    } else if (wantUp && body_->isOnGround()) {
         vel.y = jumpVelocity_;
-        jumpRequested_ = false;
+    }
+
+    // Sneaking on the ground: hold back from any edge higher than a step
+    if (sneak_ && !contact.inFluid && body_->isOnGround() && vel.y <= 0.0f && dt > 0.0f) {
+        Vec3 held = guardEdge(Vec3(vel.x * dt, 0.0f, vel.z * dt));
+        vel.x = held.x / dt;
+        vel.z = held.z / dt;
     }
 
     body_->setVelocity(vel);
@@ -166,6 +238,29 @@ void PlayerController::updatePhysicsMovement(float dt) {
             body_->setVelocity(postVel);
         }
     }
+}
+
+void PlayerController::updateBodyFlight(float dt) {
+    Vec3 moveDir = getMoveDirection();
+    Vec3 vel = body_->velocity();
+    float speed = moveSpeed_ * flySpeed_;
+    // Eases to the wanted speed, so flight glides a little at the start and stop
+    float ease = 1.0f - std::exp(-10.0f * dt);
+    vel.x += (moveDir.x * speed - vel.x) * ease;
+    vel.z += (moveDir.z * speed - vel.z) * ease;
+    float climb = 0.0f;
+    if (jumpHeld_ || jumpRequested_) climb += flyClimb_;
+    if (sneak_) climb -= flyClimb_;
+    vel.y = climb;
+    body_->setVelocity(vel);
+
+    Vec3 want = vel * dt;
+    Vec3 moved = physics_->moveBody(*body_, want);
+    if (std::abs(moved.x - want.x) > 1e-4f) vel.x = 0.0f;
+    if (std::abs(moved.z - want.z) > 1e-4f) vel.z = 0.0f;
+    body_->setVelocity(vel);
+    // Coming down onto the ground ends flight
+    if (climb < 0.0f && body_->isOnGround()) setFlying(false);
 }
 
 void PlayerController::updateFlyMovement(float dt) {

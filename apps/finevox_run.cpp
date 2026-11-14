@@ -27,6 +27,8 @@
 
 #include <finevk/core/logging.hpp>
 
+#include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -44,6 +46,14 @@
 using namespace finevox;
 
 namespace {
+
+std::atomic<client::GameClient*> activeClient{nullptr};
+
+void handleStopSignal(int) {
+    if (auto* c = activeClient.load(std::memory_order_acquire)) {
+        c->requestStop();
+    }
+}
 
 #ifdef _WIN32
 std::wstring widen(const std::string& text) {
@@ -321,7 +331,11 @@ int main(int argc, char* argv[]) {
             }
         }
         client::GameClient gameClient(clientOptions);
+        activeClient.store(&gameClient, std::memory_order_release);
+        std::signal(SIGINT, handleStopSignal);
+        std::signal(SIGTERM, handleStopSignal);
         int code = gameClient.run();
+        activeClient.store(nullptr, std::memory_order_release);
         startOver = gameClient.newGameRequested();
         toMenu = gameClient.restartRequested();
         if (mcp) mcp->stop();

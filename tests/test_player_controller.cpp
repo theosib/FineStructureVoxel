@@ -3,6 +3,8 @@
 #include "finevox/core/key_bindings.hpp"
 #include "finevox/core/config.hpp"
 #include <cmath>
+#include <glm/gtc/constants.hpp>
+#include <vector>
 
 using namespace finevox;
 
@@ -494,4 +496,173 @@ TEST(KeyBindingsTest, LoadDefaultsWhenNoConfig) {
         EXPECT_EQ(bindings[i].action, defaults[i].action);
         EXPECT_EQ(bindings[i].keyCode, defaults[i].keyCode);
     }
+}
+
+// ============================================================================
+// PlayerController — jumping, sneaking and flight over real blocks
+// ============================================================================
+
+namespace {
+
+// Solid cubes at the given cells, nothing elsewhere
+struct BlockWorld {
+    std::vector<BlockCoord> cells;
+    BlockShapeProvider shapes() const {
+        return [this](const BlockCoord& pos, RaycastMode) -> const CollisionShape* {
+            for (const auto& c : cells) {
+                if (c.x == pos.x && c.y == pos.y && c.z == pos.z) return &CollisionShape::FULL_BLOCK;
+            }
+            return nullptr;
+        };
+    }
+};
+
+BlockWorld floorWorld() {
+    BlockWorld w;
+    for (int x = -4; x <= 4; ++x) {
+        for (int z = -4; z <= 4; ++z) w.cells.emplace_back(x, -1, z);
+    }
+    return w;
+}
+
+constexpr float FRAME = 1.0f / 60.0f;
+
+// Frames run, counting take-offs: the body leaving the ground going up
+int runCountingJumps(PlayerController& pc, SimplePhysicsBody& body, int frames) {
+    int jumps = 0;
+    for (int i = 0; i < frames; ++i) {
+        bool wasOnGround = body.isOnGround();
+        pc.update(FRAME);
+        if (wasOnGround && body.velocity().y > 1.0f) ++jumps;
+    }
+    return jumps;
+}
+
+}  // namespace
+
+TEST(PlayerControllerTest, JumpPressedInTheAirIsForgotten) {
+    BlockWorld world = floorWorld();
+    PhysicsSystem physics(world.shapes());
+    const Vec3 start(0.5f, 2.0f, 0.5f);
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    PlayerController pc;
+    pc.setPhysics(&body, &physics);
+    pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+    body.setPosition(start);
+
+    pc.requestJump();  // falling: too late to jump, and not to be kept for the landing
+    EXPECT_EQ(runCountingJumps(pc, body, 180), 0);
+    EXPECT_TRUE(body.isOnGround());
+}
+
+TEST(PlayerControllerTest, ATapJumpsOnceAndAHoldKeepsJumping) {
+    BlockWorld world = floorWorld();
+    PhysicsSystem physics(world.shapes());
+    const Vec3 start(0.5f, 0.0f, 0.5f);
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    PlayerController pc;
+    pc.setPhysics(&body, &physics);
+    pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+    body.setPosition(start);
+    runCountingJumps(pc, body, 10);  // settle onto the floor
+    ASSERT_TRUE(body.isOnGround());
+
+    // A tap: the key down for a few frames, as a quick press is
+    pc.requestJump();
+    pc.setJumpHeld(true);
+    int jumps = runCountingJumps(pc, body, 4);
+    pc.setJumpHeld(false);
+    jumps += runCountingJumps(pc, body, 240);
+    EXPECT_EQ(jumps, 1);
+
+    // Held: up again on each landing
+    pc.requestJump();
+    pc.setJumpHeld(true);
+    EXPECT_GE(runCountingJumps(pc, body, 240), 2);
+}
+
+TEST(PlayerControllerTest, SneakingNeverWalksOffAPillar) {
+    BlockWorld world;
+    world.cells.emplace_back(0, 0, 0);  // one block to stand on, its top at y = 1
+    PhysicsSystem physics(world.shapes());
+    for (int heading = 0; heading < 8; ++heading) {
+        for (bool sneak : {true, false}) {
+            SimplePhysicsBody body(Vec3(0.5f, 1.0f, 0.5f), Vec3(0.35f, 0.9f, 0.35f));
+            body.setOnGround(true);
+            PlayerController pc;
+            pc.setPhysics(&body, &physics);
+            pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+            body.setPosition(Vec3(0.5f, 1.0f + COLLISION_MARGIN, 0.5f));
+            pc.setYaw(heading * glm::quarter_pi<float>());
+            pc.setSneak(sneak);
+            pc.setMoveForward(true);
+            for (int i = 0; i < 120; ++i) pc.update(FRAME);
+            Vec3 at = body.position();
+            if (sneak) {
+                EXPECT_NEAR(at.y, 1.0f, 0.01f) << "heading " << heading;
+                // Out to the edge, but some of the body still over the block
+                EXPECT_LT(at.x, 1.35f) << "heading " << heading;
+                EXPECT_GT(at.x, -0.35f) << "heading " << heading;
+                EXPECT_LT(at.z, 1.35f) << "heading " << heading;
+                EXPECT_GT(at.z, -0.35f) << "heading " << heading;
+                EXPECT_GT(std::max(std::abs(at.x - 0.5f), std::abs(at.z - 0.5f)), 0.6f)
+                    << "heading " << heading << ": should reach the edge";
+            } else {
+                EXPECT_LT(at.y, 0.5f) << "heading " << heading << ": walking on falls off";
+            }
+        }
+    }
+}
+
+TEST(PlayerControllerTest, DoubleTapStartsFlightOnlyWhereAllowedAndQuickEnough) {
+    BlockWorld world = floorWorld();
+    PhysicsSystem physics(world.shapes());
+    auto tryDoubleTap = [&](bool allowed, int framesBetween) {
+        SimplePhysicsBody body(Vec3(0.5f, 0.0f, 0.5f), Vec3(0.35f, 0.9f, 0.35f));
+        PlayerController pc;
+        pc.setPhysics(&body, &physics);
+        pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+        body.setPosition(Vec3(0.5f, 0.0f, 0.5f));
+        pc.setFlightAllowed(allowed);
+        runCountingJumps(pc, body, 10);
+        pc.requestJump();
+        for (int i = 0; i < framesBetween; ++i) pc.update(FRAME);
+        pc.requestJump();
+        pc.update(FRAME);
+        return pc.flying();
+    };
+    EXPECT_TRUE(tryDoubleTap(true, 6));
+    EXPECT_FALSE(tryDoubleTap(false, 6));
+    EXPECT_FALSE(tryDoubleTap(true, 40));  // two separate jumps
+}
+
+TEST(PlayerControllerTest, FlightHoversClimbsAndEndsOnLanding) {
+    BlockWorld world = floorWorld();
+    PhysicsSystem physics(world.shapes());
+    const Vec3 start(0.5f, 3.0f, 0.5f);
+    SimplePhysicsBody body(start, Vec3(0.35f, 0.9f, 0.35f));
+    PlayerController pc;
+    pc.setPhysics(&body, &physics);
+    pc.setFlyMode(false);  // which moves the body to the fly position: put it back
+    body.setPosition(start);
+    pc.setFlightAllowed(true);
+    pc.setFlying(true);
+    pc.setFlyClimb(5.0f);
+
+    for (int i = 0; i < 60; ++i) pc.update(FRAME);
+    EXPECT_NEAR(body.position().y, 3.0f, 0.01f) << "hovers with no input";
+
+    pc.setJumpHeld(true);
+    for (int i = 0; i < 60; ++i) pc.update(FRAME);
+    pc.setJumpHeld(false);
+    EXPECT_NEAR(body.position().y, 8.0f, 0.1f) << "climbs at fly_climb";
+
+    pc.setSneak(true);
+    for (int i = 0; i < 180 && pc.flying(); ++i) pc.update(FRAME);
+    EXPECT_FALSE(pc.flying()) << "landing ends flight";
+    EXPECT_NEAR(body.position().y, 0.0f, 0.01f);
+
+    pc.setFlying(true);
+    pc.setFlightAllowed(false);
+    EXPECT_FALSE(pc.flying()) << "taking flight away lands the body";
 }

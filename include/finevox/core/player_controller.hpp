@@ -50,8 +50,17 @@ public:
     void setMoveUp(bool active) { moveUp_ = active; }
     void setMoveDown(bool active) { moveDown_ = active; }
 
-    /// Request a jump (consumed on next update if on ground)
+    /// A jump key was pressed: jumps on the next update if on the ground, and counts towards a
+    /// double tap that starts or stops flight. Forgotten after that update, so a press made in
+    /// the air doesn't wait to jump on landing.
     void requestJump();
+
+    /// The jump key is held: jumps again on every landing, swims up, flies up
+    void setJumpHeld(bool held) { jumpHeld_ = held; }
+
+    /// Sneaking: slower, won't walk off an edge, flies down
+    void setSneak(bool sneak) { sneak_ = sneak; }
+    [[nodiscard]] bool sneaking() const { return sneak_; }
 
     /// Apply mouse look delta (raw pixel delta)
     void look(float dx, float dy);
@@ -82,6 +91,28 @@ public:
 
     void setEyeHeight(float height) { eyeHeight_ = height; }
     [[nodiscard]] float eyeHeight() const { return eyeHeight_; }
+
+    /// Walking speed while sneaking, as a fraction of moveSpeed
+    void setSneakSpeed(float fraction) { sneakSpeed_ = fraction; }
+    [[nodiscard]] float sneakSpeed() const { return sneakSpeed_; }
+
+    // ========================================================================
+    // Flight with a body: no gravity, still collides
+    // ========================================================================
+
+    /// Whether a double tap of jump may start flight. Turning it off ends any flight.
+    void setFlightAllowed(bool allowed);
+    [[nodiscard]] bool flightAllowed() const { return flightAllowed_; }
+
+    void setFlying(bool flying);
+    [[nodiscard]] bool flying() const { return flying_; }
+
+    /// Horizontal speed in flight, as a multiple of moveSpeed
+    void setFlySpeed(float multiple) { flySpeed_ = multiple; }
+    /// Rise and fall speed in flight, blocks per second
+    void setFlyClimb(float speed) { flyClimb_ = speed; }
+    /// Most seconds between two jump presses that make a double tap
+    void setDoubleTapTime(float seconds) { doubleTapTime_ = seconds; }
 
     // ========================================================================
     // Update
@@ -142,6 +173,8 @@ private:
     bool moveUp_ = false;
     bool moveDown_ = false;
     bool jumpRequested_ = false;
+    bool jumpHeld_ = false;
+    bool sneak_ = false;
 
     // Look state
     float yaw_ = 0.0f;
@@ -152,6 +185,16 @@ private:
     float lookSensitivity_ = 0.002f;
     float jumpVelocity_ = 8.0f;
     float eyeHeight_ = 1.65f;
+    float sneakSpeed_ = 0.4f;
+
+    // Flight with a body
+    bool flightAllowed_ = false;
+    bool flying_ = false;
+    float flySpeed_ = 2.0f;
+    float flyClimb_ = 6.0f;
+    float doubleTapTime_ = 0.3f;
+    float clock_ = 0.0f;
+    float lastJumpPress_ = -1.0f;
 
     // Mode
     bool flyMode_ = true;
@@ -166,6 +209,9 @@ private:
     glm::dvec3 flyPositionDelta_{0.0, 0.0, 0.0};
 
     void updatePhysicsMovement(float dt);
+    void updateBodyFlight(float dt);
+    /// Cut a horizontal move short where it would leave the body with nothing under it
+    [[nodiscard]] Vec3 guardEdge(Vec3 move) const;
     void updateFlyMovement(float dt);
 };
 

@@ -49,6 +49,10 @@ struct GameManifest {
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
     float walkSpeed = 4.5f;       ///< First-person walking speed in blocks/second
     float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second
+    float sneakSpeed = 0.4f;      ///< Walking speed while sneaking, as a fraction of walkSpeed
+    float sneakEyeDrop = 0.25f;   ///< How far the eye lowers while sneaking, in blocks
+    float flySpeed = 2.0f;        ///< Flying speed, as a multiple of walkSpeed
+    float flyClimb = 6.0f;        ///< Rise and fall speed while flying, blocks/second
     std::string playerEntity = "finevox:player";  ///< Entity type of the player's body
     /// Bodies in the sky, textures under textures/: the sun where the light comes from, and a
     /// moon opposite, one texture a day in turn (its phases). Empty draws none.

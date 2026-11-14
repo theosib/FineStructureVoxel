@@ -42,6 +42,9 @@ sky.conf
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
+| `walk_speed`, `jump_velocity` | `4.5`, `7` | On foot: blocks per second, and the upward speed a jump starts with |
+| `sneak_speed`, `sneak_eye_drop` | `0.4`, `0.25` | Sneaking (`begin_sneak`/`end_sneak`): a fraction of `walk_speed`, and how far the eye lowers. A sneaking body won't walk off a drop deeper than `step_height` |
+| `fly_speed`, `fly_climb` | `2`, `6` | Flight, where the UI script allows it (`can_fly`): a multiple of `walk_speed`, and blocks per second up (jump held) or down (sneak held) |
 | `player_entity` | `finevox:player` | Entity type of the player's body, as seen when they aren't in it. With no such type, or one without a model, it draws as a box in the viewer's faction colour |
 | `random_ticks` | `4` | Per subchunk per tick; `0` if no block wants them |
 | `sky_sun`, `sky_moon` | none | Textures (under `textures/`) drawn in the sky: the sun where the light comes from, the moon opposite, `sky_moon` a list taken a day at a time. Where they're clear is cut out, not blended; `sky_body_size` is their half-width as a fraction of their distance |
@@ -243,7 +246,13 @@ a faction back on its own, and `faction_hostile a b` asks. Teams aren't saved: s
 The client handles these actions from `input/default.bindings` itself: `begin_pan_*`/`end_pan_*`
 (`left`, `right`, `forward`, `back`), `begin_orbit_*`/`end_orbit_*`, and `begin_grab`/`end_grab`,
 which drag the ground along with the cursor for as long as any bound key or button is held.
-Mouse buttons take `mousepress_middle` and `mouserelease_middle` style names. Anything else
+On foot, `begin_jump`/`end_jump` and `begin_sneak`/`end_sneak`: a held jump jumps again on each
+landing, and a press jumps only if the body is on the ground then. Two presses within 0.3 seconds
+start or stop flight where `can_fly` allows it. `toggle_fullscreen` goes full screen (on macOS,
+the window's own full-screen space) and back.
+Mouse buttons take `mousepress_middle` and `mouserelease_middle` style names, and `scroll` binds
+the wheel: its action carries the amount as `action_amount`, positive away from the user. With no
+`scroll` binding, the wheel zooms the overhead camera. Anything else
 goes to the UI script as an `:action` event.
 
 ### Client (UI script)
@@ -257,14 +266,17 @@ send_command value       ui_show tree [=immediate true] -> id        ui_hide id
 window_size   mouse_pos  gui_has_mouse   key_held "left_shift"   fps   sym_name :x -> "x"
 pick_block mx my     pick_ground mx my     pick_view     pick_entities x0 y0 x1 y1 -> ids
 avatar_overlaps x y z -> bool     set_ghost_style r g b faint solid
-do_action name     gui_click x y   gui_hover x y   input_text "abc"   (for scripted UI tests)
+do_action name     gui_click x y   gui_hover x y   input_text "abc"   input_scroll dy
+                   (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
 entity_type id -> :militia, or nil if not known
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a   (an outline)
 ui_fill x0 y0 x1 y1 r g b a            ui_text x y text [=color [r g b a]] [=size px]
+ui_text_width text [=size px] -> how wide ui_text draws it
 mouse_free [b]       on foot, the cursor out for a screen over the view (looking stops)
+can_fly [b]   flying [b]   on foot: whether a double-tapped jump may fly, and whether it is
 ui_image name x0 y0 x1 y1 [u0 v0 u1 v1] [=tint [r g b a]]   a ui_texture, for a HUD
 marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt

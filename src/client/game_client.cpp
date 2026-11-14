@@ -206,6 +206,8 @@ struct GameClient::Impl {
     bool embodied = false;
     bool mouseFree = false;  ///< On foot with the cursor out, for a screen over the view
     bool jumpHeld = false;
+    bool sneakHeld = false;
+    float sneakDrop = 0.0f;  ///< How far the eye has lowered for sneaking, eased
 
     worldgen::SiteGhostView ghostView;
     glm::vec3 ghostColor{0.35f, 0.75f, 1.0f};
@@ -775,6 +777,9 @@ void GameClient::Impl::enterWorld() {
     world.setMeshRebuildQueue(worldRenderer->meshRebuildQueue());
     world.setAlwaysDeferMeshRebuild(false);
     glm::dvec3 start(0.0, double(worldInfo.seaLevel + 10), 0.0);
+    if (auto binding = session->binding(); binding && binding->spawn != glm::dvec3(0.0)) {
+        start = binding->spawn;
+    }
     worldRenderer->rebuildAllMeshesNear(start);
 
     int32_t radius = worldInfo.radius * 16;
@@ -794,6 +799,9 @@ void GameClient::Impl::enterWorld() {
     });
     steward.setMoveSpeed(manifest.walkSpeed);
     steward.setJumpVelocity(manifest.jumpVelocity);
+    steward.setSneakSpeed(manifest.sneakSpeed);
+    steward.setFlySpeed(manifest.flySpeed);
+    steward.setFlyClimb(manifest.flyClimb);
     steward.setFlyMode(false);
 
     if (auto binding = session->binding()) {
@@ -1002,7 +1010,19 @@ void GameClient::Impl::bindInput() {
                 }
                 case finevk::InputEventType::MouseScroll: {
                     float notch = e.state.scrollDelta.y;
-                    if (notch != 0.0f) tactical.zoom(notch > 0.0f ? 0.88f : 1.0f / 0.88f);
+                    if (notch == 0.0f) return finevk::ListenerResult::Consumed;
+                    // A `scroll` binding takes it, with the amount as `action_amount`; the
+                    // overhead camera zooms otherwise
+                    RawInputEvent raw;
+                    raw.type = RawEventType::MouseScroll;
+                    raw.scrollDelta = notch;
+                    if (e.state.isShiftPressed()) raw.modifiers = raw.modifiers | InputModifier::Shift;
+                    if (e.state.isControlPressed()) raw.modifiers = raw.modifiers | InputModifier::Control;
+                    if (e.state.isAltPressed()) raw.modifiers = raw.modifiers | InputModifier::Alt;
+                    if (e.state.isSuperPressed()) raw.modifiers = raw.modifiers | InputModifier::Super;
+                    if (!handleAction(inputActions.processEvent(raw))) {
+                        tactical.zoom(notch > 0.0f ? 0.88f : 1.0f / 0.88f);
+                    }
                     return finevk::ListenerResult::Consumed;
                 }
                 case finevk::InputEventType::KeyPress:
@@ -1050,13 +1070,17 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
         steward.requestJump();
     }
     else if (action == "end_jump") jumpHeld = false;
+    else if (action == "begin_sneak") sneakHeld = true;
+    else if (action == "end_sneak") sneakHeld = false;
     else if (action == "begin_orbit_left") orbitLeft = true;
     else if (action == "end_orbit_left") orbitLeft = false;
     else if (action == "begin_orbit_right") orbitRight = true;
     else if (action == "end_orbit_right") orbitRight = false;
+    else if (action == "quit") engine->requestStop();
     else {
         uiCtx->set("action", Value::symbol(uiEngine->intern(action)));
         uiCtx->set("action_arg", Value::string(result.argExpression));
+        uiCtx->set("action_amount", Value::number(result.scrollDelta));
         fireUi(symAction);
     }
     return true;
@@ -1077,6 +1101,7 @@ void GameClient::Impl::setEmbodied(bool on) {
     panLeft = panRight = panForward = panBack = false;
     grabHeld = 0;
     stepLag = 0.0f;
+    jumpHeld = sneakHeld = false;
     steward.clearInput();
 
     // On foot the cursor is hidden, but it still has a position. Left alone it wanders over the
@@ -1111,7 +1136,8 @@ void GameClient::Impl::updateStewardView(float dt) {
     steward.setMoveBack(panBack);
     steward.setMoveLeft(panLeft);
     steward.setMoveRight(panRight);
-    if (jumpHeld) steward.requestJump();
+    steward.setJumpHeld(jumpHeld);
+    steward.setSneak(sneakHeld);
 
     glm::vec2 delta = input.mouseDelta();
     if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward.look(delta.x, delta.y);
@@ -1127,7 +1153,11 @@ void GameClient::Impl::updateStewardView(float dt) {
     if (pos.y - footing > STEP_FRAME_RISE) stepLag += pos.y - footing;
     stepLag *= std::exp(-EYE_RISE_RATE * dt);
 
-    Vec3 eye(pos.x, pos.y + steward.eyeHeight() - stepLag, pos.z);
+    // Sneaking crouches: the eye eases down and back up
+    float crouch = steward.sneaking() && !steward.flying() ? manifest.sneakEyeDrop : 0.0f;
+    sneakDrop += (crouch - sneakDrop) * (1.0f - std::exp(-12.0f * dt));
+
+    Vec3 eye(pos.x, pos.y + steward.eyeHeight() - stepLag - sneakDrop, pos.z);
     Vec3 safeOrigin(pos.x, pos.y + 0.9f, pos.z);
     Vec3 adjusted = adjustCameraForWallCollision(safeOrigin, eye, stewardShapes);
     glm::dvec3 cameraPos(adjusted.x, adjusted.y, adjusted.z);
@@ -1496,7 +1526,14 @@ void GameClient::Impl::registerNatives() {
         auto found = contentPath(args[1].toString());
         if (!found) return Value::boolean(false);
         fs::path path = *found;
-        finegui::TextureHandle handle = gui->loadSkinAtlas(path.string());
+        finegui::TextureHandle handle;
+        try {
+            handle = gui->loadSkinAtlas(path.string());
+        } catch (const std::exception& error) {
+            // Out of GPU room, say: the picture is missing, the game goes on
+            std::cerr << "[ui script] texture " << path.string() << " didn't load: " << error.what() << "\n";
+            return Value::boolean(false);
+        }
         if (!handle.valid()) {
             std::cerr << "[ui script] texture " << path.string() << " didn't load\n";
             return Value::boolean(false);
@@ -1694,6 +1731,18 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // input_scroll dy: the mouse wheel turned (positive away from the user), through the listeners
+    e.registerFunction("input_scroll", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        auto& input = engine->inputManager();
+        finevk::InputEvent event;
+        event.type = finevk::InputEventType::MouseScroll;
+        event.state.scrollDelta = glm::vec2(0.0f, float(number(args[0])));
+        event.state.mousePosition = input.mousePosition();
+        input.injectEvent(event);
+        return Value::nil();
+    });
+
     e.registerFunction("input_move", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 2) return Value::nil();
         auto& input = engine->inputManager();
@@ -1872,6 +1921,19 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
+    // can_fly [b]: on foot, whether a double tap of jump starts flight (and stops it). Taking it
+    // away lands the body. Answers whether it's allowed.
+    e.registerFunction("can_fly", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) steward.setFlightAllowed(args[0].truthy());
+        return Value::boolean(steward.flightAllowed());
+    });
+
+    // flying [b]: on foot, whether the body is flying. Only starts where can_fly allows it.
+    e.registerFunction("flying", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) steward.setFlying(args[0].truthy());
+        return Value::boolean(steward.flying());
+    });
+
     // mouse_free [b]: on foot, let the cursor out to use a screen over the view (an inventory),
     // or take it back for looking around. Answers whether it's out.
     e.registerFunction("mouse_free", [this](ExecutionContext&, const Args& args) -> Value {
@@ -1924,6 +1986,22 @@ void GameClient::Impl::registerNatives() {
             ImVec2(float(number(args[1])), float(number(args[2]))),
             ImVec2(float(number(args[3])), float(number(args[4]))), uv0, uv1, tint);
         return Value::nil();
+    });
+
+    // ui_text_width text [=size px] -> how wide ui_text would draw it, for centring and fitting
+    e.registerFunction("ui_text_width", [](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::number(0.0);
+        float size = 0.0f;
+        if (args.back().isMap()) {
+            auto& map = const_cast<Value&>(args.back()).asMap();
+            auto s = map.get(StringInterner::global().intern("size"));
+            if (s.isNumeric()) size = float(s.asNumber());
+        }
+        std::string text = args[0].toString();
+        ImFont* font = ImGui::GetFont();
+        if (size <= 0.0f) size = ImGui::GetFontSize();
+        ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str());
+        return Value::number(extent.x);
     });
 
     // ui_text x y text [=color [r g b a]] [=size px]: words over everything, this frame
@@ -2413,6 +2491,10 @@ bool GameClient::newGameRequested() const {
 
 bool GameClient::restartRequested() const {
     return impl_->restartRequested;
+}
+
+void GameClient::requestStop() {
+    if (impl_ && impl_->engine) impl_->engine->requestStop();
 }
 
 int GameClient::run() {

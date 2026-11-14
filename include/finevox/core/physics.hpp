@@ -385,6 +385,9 @@ public:
                                          float maxDistance,
                                          RaycastMode mode = RaycastMode::Interaction) const;
 
+    // Is there anything to stand on under this box, within `depth` below its bottom?
+    [[nodiscard]] bool hasFooting(const AABB& box, float depth) const;
+
     // Collect all collision AABBs in a region
     [[nodiscard]] std::vector<AABB> collectColliders(const AABB& region) const;
 

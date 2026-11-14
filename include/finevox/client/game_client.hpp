@@ -112,6 +112,9 @@ public:
     /// Run until the window closes. Returns a process exit code.
     int run();
 
+    /// Ask the client to stop cleanly at the end of the current frame (saving if hosting).
+    void requestStop();
+
     /// True if the player asked to start over, which the caller does by starting afresh
     [[nodiscard]] bool newGameRequested() const;
 

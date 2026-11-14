@@ -5,6 +5,8 @@
 #include "finevox/core/signal_binding.hpp"
 #include "finevox/core/world.hpp"
 
+#include <chrono>
+#include <cstdio>
 #include <functional>
 #include <random>
 
@@ -548,4 +550,40 @@ TEST(SignalBinding, ABoxOffersItsLevelOnlyToComponents) {
     EXPECT_EQ(signals.levelAt(BlockCoord(0, 1, 0)), 6);
     EXPECT_EQ(signals.levelAt(BlockCoord(2, 1, 0)), 15) << "the component read it";
     EXPECT_EQ(signals.levelAt(BlockCoord(0, 1, 1)), 0) << "the wire beside it didn't";
+}
+
+TEST(SignalBinding, CostOfALongWireSwitching) {
+    // 50 lines of 15 wires, each fed by a lever: every wire changes level and shown state each
+    // time the levers flip
+    defineAll();
+    World world;
+    constexpr int LINES = 50, LEN = 15;
+    for (int x = -1; x <= LEN + 1; ++x) {
+        for (int z = -1; z <= LINES * 2; ++z) world.setBlock(BlockCoord(x, 0, z), block("stone"));
+    }
+    for (int i = 0; i < LINES; ++i) {
+        world.setBlock(BlockCoord(0, 1, i * 2), block("lever"));
+        for (int x = 1; x <= LEN; ++x) world.setBlock(BlockCoord(x, 1, i * 2), block("wire"));
+    }
+    SignalBinding signals(world, MAX);
+    signals.attach();
+    signals.step();
+    signals.step();
+    double worst = 0, total = 0;
+    int steps = 0;
+    for (int flip = 0; flip < 10; ++flip) {
+        for (int i = 0; i < LINES; ++i) {
+            world.setBlock(BlockCoord(0, 1, i * 2), block(flip % 2 == 0 ? "lever[powered=true]" : "lever"));
+        }
+        for (int s = 0; s < 3; ++s) {
+            auto t0 = std::chrono::steady_clock::now();
+            signals.step();
+            double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+            worst = std::max(worst, us);
+            total += us;
+            ++steps;
+        }
+    }
+    EXPECT_EQ(signals.levelAt(BlockCoord(LEN, 1, 0)), 0);
+    std::printf("[signal] %d wires switching: %.0f us worst step, %.0f us mean\n", LINES * LEN, worst, total / steps);
 }

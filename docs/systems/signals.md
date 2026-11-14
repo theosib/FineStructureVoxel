@@ -107,7 +107,9 @@ tick (the `tick_stats` MCP tool shows it). 2.1 ms of that is entities, mostly ph
 `BlockRegistry::getType`'s lock (see ARCHITECTURE.md).
 
 Against that, a 100 × 100 sheet of conductors that resettles completely every step takes 93 µs
-(about 9 ns a conductor; `SignalSolver.LargeGridCost` prints it).
+(about 9 ns a conductor; `SignalSolver.LargeGridCost` prints it). Through the binding, 750 wires
+all changing level and shown state take about 370 µs in the worst step (`SignalBinding.
+CostOfALongWireSwitching`), most of it writing the shown states.
 
 The solver is built so it can move to its own thread if it ever needs to. It owns all of its
 state and calls nothing outside itself. Its input between steps (edits and source levels) and its

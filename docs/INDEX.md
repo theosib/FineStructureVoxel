@@ -35,6 +35,7 @@
 | [systems/lighting.md](systems/lighting.md) | LightEngine, sky/block light, AO | `finevox` | Light propagation, vertex lighting |
 | [systems/physics.md](systems/physics.md) | AABB, collision, raycasting | `finevox` | Entity movement, block raycasting |
 | [systems/events.md](systems/events.md) | UpdateScheduler, BlockHandler, event flow | `finevox` | Block behavior, game tick logic |
+| [systems/signals.md](systems/signals.md) | SignalSolver: circuits of sources, conductors, components | `finevox` | Wires, gates, switches, anything carrying a signal |
 | [systems/worldgen.md](systems/worldgen.md) | Noise, biomes, generation pipeline | `finevox_worldgen` | World generation, biome/feature system |
 | [systems/entities.md](systems/entities.md) | Entity, MobEntity, AI, animation | `finevox` | Entity behavior, spawning, AI goals |
 | [systems/fluids.md](systems/fluids.md) | FluidType, simulation, mesh, light | `finevox` | Fluid behavior, rendering, physics |

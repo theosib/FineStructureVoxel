@@ -143,7 +143,12 @@ Automation and logic — the "factory floor endgame."
 - **Actuator** — push/pull/rotate/dispense/valve/switch.
 - **Comparator** — greater/less/equal/threshold on two inputs.
 
-Signal propagation via scheduled ticks and neighbor updates. Each block stores mode + state in DataContainer.
+Signals are solved by `SignalSolver` ([systems/signals.md](systems/signals.md)), not by scheduled
+ticks and neighbour updates: blocks declare what they are to the solver, which steps once per game
+tick and reports the levels that changed. Only conductors are instant and every component delays at
+least one step, so circuits are deterministic and can't form instant loops. The solver is done; the
+binding from blocks (`.model` declarations, results as block states, saving, unloaded columns) is
+next. The block types above are one game's vocabulary on top of it.
 
 #### Phase 30: Item Transport + Power
 **Priority: Medium**

@@ -222,6 +222,10 @@ Known design issue:
 
 See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
+- **Phase 29 — Signals:** `SignalSolver` (the circuit solver, no world dependency) is built and
+  tested; the binding from blocks to the solver is next. See [systems/signals.md](systems/signals.md).
+- **Game thread:** `UpdateScheduler::generateGameTickEvents` lists every subchunk each tick (5.3 ms
+  of a 33 ms tick on a 64 × 64-column world); it should keep the subchunks that have game-tick blocks
 - **Phase 27 — Structure template system + puzzle-block stitcher** (pending planner confirmation)
 - **Phase 23 polish (remaining)** — config-driven input bindings, icon-based slots, container UI (see ROADMAP.md deferred items)
 - **Particle polish (minor)** — footstep-dust cross-library wiring, luminite continuous-flame handler, real art to replace placeholder PNGs (see `docs/systems/particles.md` deferred list)

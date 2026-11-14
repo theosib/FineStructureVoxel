@@ -149,6 +149,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/pathfinder.cpp
     src/core/navigation.cpp
     src/core/work_claims.cpp
+    src/core/signal_solver.cpp
     src/core/task_board.cpp
     src/core/faction_vision.cpp
     src/core/projectile_system.cpp
@@ -773,6 +774,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_world_replica.cpp
         tests/test_projectile_system.cpp
         tests/test_work_claims.cpp
+        tests/test_signal_solver.cpp
         tests/test_task_board.cpp
         tests/test_tactical_camera.cpp
         tests/test_region_tint.cpp

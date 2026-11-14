@@ -120,6 +120,7 @@ private:
     void applyParams(Entry& e, const SignalBlockSpec* before);
     void showLevel(BlockCoord pos, const Entry& e);
     void showJoins(BlockCoord pos, const Entry& e);
+    void showHold(BlockCoord pos, const Entry& e);
 
     [[nodiscard]] const SignalBlockSpec* specOf(BlockTypeId type) const;
     [[nodiscard]] bool isRelayBlock(BlockTypeId type) const;

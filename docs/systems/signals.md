@@ -154,6 +154,7 @@ lists comma-separated (`set:powered=true: signal-level=15`).
 | `signal-facing:` | property that gives `front` (`facing`) |
 | `signal-join-faces:` | sink: faces on which it joins sinks of its group, so the halves of a two-block thing act as one |
 | `signal-show-edges: true` | only a change of level changes the shown property, so it can also be set by hand, and a block found with it set keeps it (a door) |
+| `signal-show-hold:` | component: property showing whether its Hold port is on (`true`/`false`) |
 | `signal-notify: true` | report its level changes: `SignalBinding::setChangeCallback`, which a game runtime turns into `on :signal` (`signal.x y z level`). Blocks the handler changes are taken in that same tick. |
 
 Faces are `north south east west up down`, `sides` (the four around), `all`, `front back left

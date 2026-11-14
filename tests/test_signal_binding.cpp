@@ -83,10 +83,11 @@ void defineAll() {
                  {"signal-in", "down"}, {"signal-out", "sides up"}, {"signal-power:strong", "up"},
                  {"signal-show", "lit"}},
                 false);
-    defineBlock("delay", {{"facing", FACING}, {"ticks", range(1, 4)}, {"powered", BOOL}},
+    defineBlock("delay", {{"facing", FACING}, {"ticks", range(1, 4)}, {"powered", BOOL}, {"locked", BOOL}},
                 {{"signal", "component"}, {"signal-op", "buffer"}, {"signal-full", "true"},
                  {"signal-in", "front"}, {"signal-out", "back"}, {"signal-power:strong", "back"},
-                 {"signal-hold", "left right"}, {"signal-hold-from", "component"}, {"signal-show", "powered"}},
+                 {"signal-hold", "left right"}, {"signal-hold-from", "component"}, {"signal-show", "powered"},
+                 {"signal-show-hold", "locked"}},
                 false, [](const std::vector<std::string>& v, SignalKeys& k) { k["signal-delay"] = v[1]; });
 }
 
@@ -445,4 +446,22 @@ TEST(WorldMoveBlocks, MovesALineWithRotationAndData) {
     world.setBlock(BlockCoord(3, 5, 0), block("stone"));
     EXPECT_FALSE(world.moveBlocks(BlockCoord(1, 5, 0), Face::PosX, 2)) << "blocked: nothing moves";
     EXPECT_EQ(world.getBlock(BlockCoord(1, 5, 0)), block("stone"));
+}
+
+TEST(SignalBinding, AHeldComponentShowsIt) {
+    Rig r;
+    r.set(0, 1, 0, "lever");
+    r.set(1, 1, 0, state("delay", {{"facing", "west"}}));
+    r.set(1, 1, 2, "lever[powered=true]");
+    r.set(1, 1, 1, state("delay", {{"facing", "south"}}));  // drives north, into the first one's side
+    r.run(4);
+    EXPECT_EQ(prop(r.world, BlockCoord(1, 1, 0), "locked"), "true");
+    r.set(0, 1, 0, "lever[powered=true]");
+    r.run(4);
+    EXPECT_EQ(r.at(1, 1, 0), 0) << "held: the lever doesn't get through";
+    r.set(1, 1, 2, "lever");
+    r.run(4);
+    EXPECT_EQ(prop(r.world, BlockCoord(1, 1, 0), "locked"), "false");
+    r.run(2);
+    EXPECT_EQ(r.at(1, 1, 0), 15) << "let go: it reads the lever";
 }

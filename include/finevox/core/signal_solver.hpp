@@ -139,6 +139,10 @@ public:
     const std::vector<SignalChange>& step();
 
     [[nodiscard]] SignalLevel level(SignalNodeId id) const;
+    /// The strongest level on one of a component's ports
+    [[nodiscard]] SignalLevel portLevel(SignalNodeId component, SignalPort port) const;
+    /// The components reading a node (one entry per port connection)
+    [[nodiscard]] const std::vector<SignalNodeId>& readersOf(SignalNodeId id) const;
     [[nodiscard]] bool exists(SignalNodeId id) const;
     [[nodiscard]] SignalOp op(SignalNodeId id) const;
     /// Steps taken so far

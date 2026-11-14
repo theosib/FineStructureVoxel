@@ -210,6 +210,7 @@ std::optional<SignalBlockSpec> parseSignalSpec(
     }
 
     if (const std::string* s = p.get("signal-show")) spec.show = *s;
+    if (const std::string* h = p.get("signal-show-hold")) spec.showHold = *h;
     if (const std::string* j = p.get("signal-joins")) {
         auto w = words(*j);
         if (w.size() == 4) std::copy(w.begin(), w.end(), spec.joins.begin());

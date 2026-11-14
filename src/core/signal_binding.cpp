@@ -535,6 +535,7 @@ void SignalBinding::refresh(const CoordSet& positions) {
     for (BlockCoord pos : positions) {
         Entry* e = entryAt(pos);
         if (e && e->spec && e->spec->role == SignalRole::Conductor) showJoins(pos, *e);
+        if (e && e->spec && !e->spec->showHold.empty()) showHold(pos, *e);
     }
 }
 
@@ -545,6 +546,13 @@ void SignalBinding::refresh(const CoordSet& positions) {
 void SignalBinding::showResults() {
     std::vector<std::pair<BlockCoord, SignalLevel>> notices;
     for (const SignalChange& c : results_) {
+        // Components whose hold this feeds may show it
+        for (SignalNodeId r : solver_.readersOf(c.node)) {
+            auto at = nodeAt_.find(r);
+            if (at == nodeAt_.end()) continue;
+            const Entry* re = entryAt(at->second);
+            if (re && re->spec && !re->spec->showHold.empty()) showHold(at->second, *re);
+        }
         auto it = nodeAt_.find(c.node);
         if (it == nodeAt_.end()) continue;
         newlyMade_.erase(it->second);
@@ -561,7 +569,10 @@ void SignalBinding::showResults() {
         for (const auto& [pos, level] : notices) changeCallback_(pos, level);
     }
     for (BlockCoord pos : newlyMade_) {
-        if (const Entry* e = entryAt(pos)) showLevel(pos, *e);
+        if (const Entry* e = entryAt(pos)) {
+            showLevel(pos, *e);
+            if (e->spec && !e->spec->showHold.empty()) showHold(pos, *e);
+        }
     }
     newlyMade_.clear();
 }
@@ -587,6 +598,11 @@ void SignalBinding::showLevel(BlockCoord pos, const Entry& e) {
         else if (!numeric) setProperty(pos, p.name, level > 0 ? "true" : "false");
         return;
     }
+}
+
+void SignalBinding::showHold(BlockCoord pos, const Entry& e) {
+    if (e.node == NO_SIGNAL_NODE) return;
+    setProperty(pos, e.spec->showHold, solver_.portLevel(e.node, SignalPort::Hold) > 0 ? "true" : "false");
 }
 
 void SignalBinding::showJoins(BlockCoord pos, const Entry& e) {

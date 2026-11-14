@@ -63,6 +63,15 @@ SignalLevel SignalSolver::level(SignalNodeId id) const {
     return exists(id) ? nodes_[id].level : SignalLevel{0};
 }
 
+SignalLevel SignalSolver::portLevel(SignalNodeId id, SignalPort port) const {
+    return exists(id) ? portMax(node(id), port) : SignalLevel{0};
+}
+
+const std::vector<SignalNodeId>& SignalSolver::readersOf(SignalNodeId id) const {
+    static const std::vector<SignalNodeId> none;
+    return exists(id) ? node(id).readers : none;
+}
+
 SignalOp SignalSolver::op(SignalNodeId id) const {
     return exists(id) ? nodes_[id].op : SignalOp::Source;
 }

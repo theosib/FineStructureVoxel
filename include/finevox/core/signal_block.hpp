@@ -87,6 +87,8 @@ struct SignalBlockSpec {
     /// Only a change of level changes what's shown: the property is free to be set otherwise
     /// (a door opened by hand), and a block found with it set keeps it
     bool showEdges = false;
+    /// Component: property that shows whether its Hold port is on
+    std::string showHold;
     /// Report its level changes to the game (SignalBinding's change callback), for what a
     /// property can't do on its own
     bool notify = false;

@@ -83,6 +83,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/chunk_column.cpp
     src/core/rotation.cpp
     src/core/world.cpp
+    src/core/block_mover.cpp
     src/core/column_manager.cpp
     src/core/batch_builder.cpp
     src/core/data_container.cpp
@@ -778,6 +779,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_work_claims.cpp
         tests/test_signal_solver.cpp
         tests/test_signal_binding.cpp
+        tests/test_block_mover.cpp
         tests/test_task_board.cpp
         tests/test_tactical_camera.cpp
         tests/test_region_tint.cpp

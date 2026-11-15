@@ -224,8 +224,9 @@ See [ROADMAP.md](ROADMAP.md) for full roadmap. Near-term candidates:
 
 - **Phase 29 — Signals:** `SignalSolver` and `SignalBinding` work: blocks declare `signal*` keys,
   levels show as block states (see [systems/signals.md](systems/signals.md), "Not yet" for what's
-  left: freezing circuits at unloaded columns). Block
-  movers (push/pull a line of blocks) are the next signal-driven feature.
+  left: freezing circuits at unloaded columns). Block movers push or pull a group of blocks
+  by per-block `move:` rules and `move-grip:` groups ([systems/world.md](systems/world.md),
+  "Block movers"); moves are instant (nothing in flight between cells).
 - **Game thread:** with the game-tick scan fixed, a 64 × 64-column world uses about 3.1 ms of a
   33 ms tick (`tick_stats`). Most of what's left is entity physics waiting on
   `BlockRegistry::getType`'s lock (2.1 ms), which can freeze into a plain table after startup.

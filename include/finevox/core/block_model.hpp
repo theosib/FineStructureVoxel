@@ -290,6 +290,11 @@ public:
     /// Blocks naming the same group join up, showing their connect_* faces
     BlockModel& setConnects(std::string group);
 
+    /// How a block mover treats it: `moves`, `fixed`, `breaks` or `no-drag` (MoveRule)
+    BlockModel& setMove(std::string rule) { move_ = std::move(rule); return *this; }
+    /// The grip group it drags its neighbours with when moved (empty: grips nothing)
+    BlockModel& setMoveGrip(std::string group) { moveGrip_ = std::move(group); return *this; }
+
     /// Set sound set name
     BlockModel& setSounds(const std::string& sounds);
 
@@ -379,7 +384,7 @@ public:
 
     /// Behaviour that differs by state: `set:lit=true: light-emission=13`. Every matching
     /// line applies, in order. Keys: light-emission, light-attenuation, hardness, opaque,
-    /// collision (none or full), walk-speed, tint-color (r,g,b), and any signal key
+    /// collision (none or full), walk-speed, tint-color (r,g,b), move, move-grip, and any signal key
     /// (`signal-level=15`, lists comma-separated: `signal-out=north,up`).
     struct StateSetting {
         PropertyCondition when;
@@ -402,6 +407,8 @@ public:
     [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
     [[nodiscard]] const std::string& connects() const { return connects_; }
+    [[nodiscard]] const std::string& move() const { return move_; }
+    [[nodiscard]] const std::string& moveGrip() const { return moveGrip_; }
     [[nodiscard]] bool opaque() const { return opaque_; }
     [[nodiscard]] bool hasBlocksSkyLightOverride() const { return hasBlocksSkyLightOverride_; }
     [[nodiscard]] bool blocksSkyLight() const { return blocksSkyLight_; }
@@ -466,6 +473,8 @@ private:
     bool hasBlocksSkyLightOverride_ = false;
     bool blocksSkyLight_ = true;
     std::string connects_;
+    std::string move_;
+    std::string moveGrip_;
     std::string sounds_;
     std::string script_;
     std::string loot_;

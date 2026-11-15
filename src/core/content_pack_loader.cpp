@@ -2,6 +2,7 @@
 
 #include "finevox/audio/sound_loader.hpp"
 #include "finevox/core/block_model_loader.hpp"
+#include "finevox/core/block_mover.hpp"
 #include "finevox/core/config_parser.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/block_model_transform.hpp"
@@ -209,6 +210,11 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             blockType.setLightAttenuation(m.lightAttenuation());
 
             blockType.setWalkSpeed(m.walkSpeed());
+            if (!m.move().empty()) {
+                if (auto rule = moveRuleNamed(m.move())) blockType.setMoveRule(*rule);
+                else std::cerr << "[ContentPackLoader] " << name << ": move: unknown rule '" << m.move() << "'\n";
+            }
+            if (!m.moveGrip().empty()) blockType.setGripGroup(StringInterner::global().intern(m.moveGrip()));
             if (m.hasOpaqueOverride()) {
                 blockType.setOpaque(m.opaque());
                 if (!m.opaque()) {

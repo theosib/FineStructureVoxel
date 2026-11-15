@@ -39,6 +39,19 @@ enum class PropagationPolicy : uint8_t {
 };
 
 /**
+ * @brief How a block takes being moved by a block mover (see block_mover.hpp)
+ *
+ * A block is pushed when a moving block goes into its cell, and dragged when a gripping
+ * neighbour (or a mover that pulls) takes it along.
+ */
+enum class MoveRule : uint8_t {
+    Moves = 0,     ///< Goes when pushed or dragged (default)
+    Fixed = 1,     ///< Never goes: a push into it stops the whole move; a drag leaves it
+    Breaks = 2,    ///< A push breaks it (it becomes air); a drag leaves it
+    NoDrag = 3,  ///< Goes when pushed; a drag leaves it
+};
+
+/**
  * @brief Properties for a block type
  *
  * BlockType stores the collision and hit shapes for a block,
@@ -114,6 +127,14 @@ public:
     /// Set movement speed multiplier for entities walking on this block
     BlockType& setWalkSpeed(float multiplier) { walkSpeed_ = multiplier; return *this; }
 
+    /// Set how a block mover treats this block
+    BlockType& setMoveRule(MoveRule rule) { moveRule_ = rule; return *this; }
+
+    /// Make this block grip its neighbours when a block mover moves it, dragging them along.
+    /// `group` is an interned name (0 = grips nothing). Two gripping blocks of different
+    /// groups don't grip each other.
+    BlockType& setGripGroup(uint32_t group) { gripGroup_ = group; return *this; }
+
     /// Set propagation policy for cross-chunk neighbor notifications
     BlockType& setPropagationPolicy(PropagationPolicy policy);
 
@@ -175,6 +196,12 @@ public:
     /// Movement speed multiplier for entities walking on this block
     [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
 
+    /// How a block mover treats this block
+    [[nodiscard]] MoveRule moveRule() const { return moveRule_; }
+
+    /// Interned grip group, 0 if this block grips nothing
+    [[nodiscard]] uint32_t gripGroup() const { return gripGroup_; }
+
 private:
     // Precomputed rotations for collision and hit shapes
     // Index 0 = identity rotation
@@ -190,6 +217,8 @@ private:
     uint8_t lightAttenuation_ = 15;  // Full attenuation by default (opaque)
     float hardness_ = 1.0f;          // Default mining difficulty
     float walkSpeed_ = 1.0f;         // Entity speed multiplier when standing on this block
+    MoveRule moveRule_ = MoveRule::Moves;  // How a block mover treats it
+    uint32_t gripGroup_ = 0;         // Interned grip group (0 = grips nothing)
     bool wantsGameTicks_ = false;    // Wants game tick events (auto-registered)
     bool hasCustomMesh_ = false;     // Has custom geometry (excluded from greedy meshing)
     SoundSetId soundSet_;            // Sound set for this block type

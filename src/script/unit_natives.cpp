@@ -9,6 +9,7 @@
 
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/script_game_subsystem.hpp"
+#include "finevox/core/block_mover.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_type_registry.hpp"
@@ -31,6 +32,7 @@
 #include <optional>
 #include <random>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace finevox::script {
 
@@ -273,6 +275,72 @@ void GameScriptEngine::registerUnitNativeFunctions() {
                     mob->setVelocity(mob->velocity() + dir * (push * share) + Vec3(0, push * share * 0.5f, 0));
                 }
             }
+        }
+        return Value::array(std::move(broken));
+    });
+
+    // world_push_blocks x y z dx dy dz [=pull true] [=limit n] [=anchor [x y z]] -> nil if nothing
+    // can move, else [[x y z block] ...] the blocks it broke. Moves the block at x y z one cell
+    // along the unit step, with everything it takes along (block_mover.hpp: each block's `move:`
+    // rule, and the neighbours `move-grip:` blocks drag). `=pull true`: the mover drags the first
+    // block rather than pushing it. `=limit`: most blocks that may move (64). `=anchor`: the
+    // mover's own cell, which never moves and stops any push into it. What drops is the caller's.
+    const uint32_t keyPull = si.intern("pull");
+    const uint32_t keyLimit = si.intern("limit");
+    const uint32_t keyAnchor = si.intern("anchor");
+    e.registerFunction("world_push_blocks", [=](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        if (!ud || !ud->world || args.size() < 6) return Value::nil();
+        for (size_t i = 0; i < 6; ++i) {
+            if (!args[i].isNumeric()) return Value::nil();
+        }
+        auto at = [&](size_t i) { return static_cast<int32_t>(std::floor(args[i].asNumber())); };
+        MoveRequest request;
+        request.start = BlockCoord(at(0), at(1), at(2));
+        const int dx = at(3), dy = at(4), dz = at(5);
+        if (std::abs(dx) + std::abs(dy) + std::abs(dz) != 1) return Value::nil();
+        for (size_t f = 0; f < FACE_COUNT; ++f) {
+            auto n = faceNormal(static_cast<Face>(f));
+            if (n[0] == dx && n[1] == dy && n[2] == dz) request.dir = static_cast<Face>(f);
+        }
+        Value options = optionsArg(args, 6);
+        request.pull = option(options, keyPull).truthy();
+        if (Value limit = option(options, keyLimit); limit.isNumeric()) {
+            request.limit = static_cast<int32_t>(limit.asNumber());
+        }
+        if (Value a = option(options, keyAnchor); a.isArray()) {
+            BlockCoord anchor;
+            if (coordArg(Args{a}, 0, anchor)) request.anchor = anchor;
+        }
+
+        World& world = *ud->world;
+        auto plan = planMove(world, request);
+        if (!plan) return Value::nil();
+
+        std::vector<Value> broken;
+        for (const BlockCoord& p : plan->breaks) {
+            broken.push_back(Value::array(std::vector<Value>{
+                Value::integer(p.x), Value::integer(p.y), Value::integer(p.z), Value::symbol(world.getBlock(p).id)}));
+        }
+        std::vector<std::pair<BlockCoord, BlockTypeId>> before;
+        for (const BlockCoord& p : plan->breaks) before.emplace_back(p, world.getBlock(p));
+        for (const BlockCoord& p : plan->moves) {
+            before.emplace_back(p, world.getBlock(p));
+            const BlockCoord to = p.neighbor(request.dir);
+            before.emplace_back(to, world.getBlock(to));
+        }
+        applyMove(world, *plan, request.dir);
+        std::unordered_set<BlockCoord> done;
+        for (const auto& [pos, oldType] : before) {
+            if (!done.insert(pos).second) continue;  // the first read is the cell's old block
+            const BlockTypeId newType = world.getBlock(pos);
+            if (world.lightEngine()) world.enqueueLightingUpdateWithRemesh(pos, oldType, newType);
+            if (auto* mq = world.meshRebuildQueue()) {
+                for (const ChunkPos& affected : world.getAffectedSubChunks(pos)) {
+                    mq->push(affected, MeshRebuildRequest::immediate());
+                }
+            }
+            if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : world.fluidTickManager()) ftm->notifyBlockChanged(pos);
         }
         return Value::array(std::move(broken));
     });

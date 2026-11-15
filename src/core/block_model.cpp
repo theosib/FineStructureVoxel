@@ -402,6 +402,10 @@ void BlockModel::applySetting(const StateSetting& setting) {
             std::istringstream iss(rgb);
             iss >> c.r >> c.g >> c.b;
             setTintColor(c);
+        } else if (key == "move") {
+            setMove(value);
+        } else if (key == "move-grip") {
+            setMoveGrip(value);
         } else if (key.rfind("signal", 0) == 0) {
             std::string list = value;
             std::replace(list.begin(), list.end(), ',', ' ');

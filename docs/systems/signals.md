@@ -185,8 +185,10 @@ and for conductors `points`.
 
 `signal_level x y z` is a block's level (0 out of circuit); `signal_set x y z level` sets a
 source's level until its block changes (it holds for a block the binding hasn't taken in yet). `on :signal` hears `signal-notify` blocks change.
-`world_move_blocks x y z dx dy dz n` moves a line of n blocks one cell (`World::moveBlocks`, with
-rotation and block data), for things a signal pushes or pulls.
+`world_push_blocks x y z dx dy dz [=pull true] [=limit n] [=anchor [x y z]]` moves a block one cell
+with everything it takes along, by each block's `move:` and `move-grip:` keys (world.md, "Block
+movers"), for things a signal pushes or pulls. `world_move_blocks x y z dx dy dz n` moves a plain
+line of n blocks (`World::moveBlocks`, with rotation and block data).
 
 ### Not yet
 

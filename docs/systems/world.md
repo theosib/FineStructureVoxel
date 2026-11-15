@@ -85,6 +85,8 @@ struct BlockType {
     uint8_t lightEmission() const;    // 0-15
     uint8_t lightAttenuation() const; // 0-15
     bool blocksSkyLight() const;
+    MoveRule moveRule() const;        // how a block mover treats it (see Block Movers)
+    uint32_t gripGroup() const;       // interned; 0 = grips nothing
 
     // Collision/hit shapes (24-rotation precomputed)
     const CollisionShape& collisionShape(uint8_t rotation = 0) const;
@@ -197,6 +199,40 @@ often under World's writer lock: it should record and act later, never call back
 Columns a `ColumnManager` brings and takes away reach it too (`GameSession` calls
 `notifyColumnAdded`/`notifyColumnRemoved`). The observer list has its own lock, taken last.
 `SignalBinding` is one.
+
+---
+
+## Block Movers
+
+```cpp
+#include <finevox/core/block_mover.hpp>
+
+MoveRequest r{.start = pos, .dir = Face::PosX, .pull = false, .limit = 32, .anchor = moverPos};
+if (auto plan = planMove(world, r)) applyMove(world, *plan, r.dir, &changed);
+```
+
+Moving one block one cell (a ram, a lift, a sliding wall) moves a group. Two things each block
+type says decide it, both `.model` keys that can differ by state (`set:out=true: move=fixed`):
+
+| `move:` | pushed (a moving block goes into its cell) | dragged (gripped, or pulled by the mover) |
+|---|---|---|
+| `moves` (default) | goes | goes |
+| `fixed` | stops the whole move | stays |
+| `breaks` | becomes air | stays |
+| `no-drag` | goes | stays |
+
+`move-grip: <group>` makes a block grip its six neighbours: when it goes, every neighbour not
+straight ahead of it (that one is pushed) is dragged, except a gripping block of another group.
+Same-group blocks hold each other, so a mass of them goes as one. What goes pushes what's ahead of
+it and drags what it grips, until the group closes. The move fails, changing nothing, if a `fixed`
+block or the anchor is pushed, or more than `limit` blocks would go (broken ones don't count).
+`pull` drags the first block instead of pushing it, so a mover can't pull a `no-drag`, `fixed` or
+`breaks` block. The anchor is the mover's own cell: never moved, never gripped.
+
+`applyMove` empties the `breaks` cells, then moves every block in `moves` one cell together, with
+its rotation and block data. It writes raw (`setBlock`; observers hear it, handlers don't), so the
+caller relights and remeshes; the script native `world_push_blocks` does all of that.
+`World::moveBlocks` is the older single-line form, with no rules.
 
 ---
 

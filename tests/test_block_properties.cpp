@@ -301,6 +301,29 @@ TEST_F(BlockPropertyLoading, EveryCombinationIsABlockWithItsVariantsLook) {
     EXPECT_TRUE(loader.getGeometry(east)->faces()[0].hasTextureUV);
 }
 
+TEST_F(BlockPropertyLoading, MoveRulesAndGripsComeFromTheModelAndItsStates) {
+    write(root_ / "blocks/ram.model",
+          "state:out: false true\n"
+          "move: no-drag\n"
+          "move-grip: glue\n"
+          "set:out=true: move=fixed\n");
+    write(root_ / "blocks/plain.model", "hardness: 1\n");
+    write(root_ / "blocks/odd.model", "move: sideways\n");
+    ContentPackLoader loader("test");
+    EXPECT_EQ(loader.loadBlocks(root_), 4u);
+    const auto& in = BlockRegistry::global().getType(BlockTypeId::fromName("test:ram"));
+    const auto& out = BlockRegistry::global().getType(BlockTypeId::fromName("test:ram[out=true]"));
+    EXPECT_EQ(in.moveRule(), MoveRule::NoDrag);
+    EXPECT_EQ(out.moveRule(), MoveRule::Fixed);
+    EXPECT_EQ(in.gripGroup(), StringInterner::global().intern("glue"));
+    EXPECT_EQ(out.gripGroup(), in.gripGroup());
+    const auto& plain = BlockRegistry::global().getType(BlockTypeId::fromName("test:plain"));
+    EXPECT_EQ(plain.moveRule(), MoveRule::Moves);
+    EXPECT_EQ(plain.gripGroup(), 0u);
+    EXPECT_EQ(BlockRegistry::global().getType(BlockTypeId::fromName("test:odd")).moveRule(), MoveRule::Moves)
+        << "an unknown rule is reported and left at the default";
+}
+
 TEST_F(BlockPropertyLoading, PartsDrawTogether) {
     write(root_ / "shapes/half.geom",
           "face:north: block/rail\n"

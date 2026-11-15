@@ -513,6 +513,8 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
     if (const ConfigEntry* connectsEntry = doc.get("connects")) {
         model.setConnects(connectsEntry->value.asStringOwned());
     }
+    if (const ConfigEntry* moveEntry = doc.get("move")) model.setMove(moveEntry->value.asStringOwned());
+    if (const ConfigEntry* gripEntry = doc.get("move-grip")) model.setMoveGrip(gripEntry->value.asStringOwned());
 }
 
 std::optional<FaceGeometry> BlockModelLoader::parseFaceEntry(

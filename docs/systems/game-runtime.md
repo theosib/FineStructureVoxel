@@ -142,6 +142,11 @@ explode x y z radius [=damage d] [=push p] -> [[x y z block] ...]   breaks block
     under the radius less their distance (a fixed jitter by position makes the edge ragged;
     hardness below 0 never breaks), hurts and throws creatures within twice the radius, less
     with distance, and returns what broke for the game to drop
+world_push_blocks x y z dx dy dz [=pull true] [=limit n] [=anchor [x y z]] -> nil or [[x y z block] ...]
+    moves the block at x y z one cell along the unit step with all it takes along (each block's
+    `move:` rule and `move-grip:` neighbours; world.md, "Block movers"); nil if it can't move,
+    else what it broke, for the game to drop. `=pull`: the mover drags the first block rather
+    than pushing it. `=limit` (64): most blocks that may go. `=anchor`: the mover's cell
 ent_pos id   ent_set_pos id x y z           ent_type id       ent_faction id
 ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id
@@ -416,7 +421,8 @@ couldn't see shows nothing, and `despawnEntity` on a living one removes it at on
 ### .model additions
 
 `texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`,
-`blocks-sky-light`, `far-geometry`. With `opaque: false` a block lets light through, its `light-attenuation`
+`blocks-sky-light`, `far-geometry`, `move` and `move-grip` (how a block mover treats it: world.md,
+"Block movers"). With `opaque: false` a block lets light through, its `light-attenuation`
 defaulting to 1, and sky light falls past it. `blocks-sky-light: true` stops the sky light while
 letting the rest through, for leaves that shade the ground under them.
 
@@ -441,7 +447,8 @@ part:open=true: looks/door_leaf          # or: every matching part, drawn togeth
 The default state keeps the block's plain name; the others are named `door[facing=east,open=true]`,
 properties in declared order. Each is an ordinary block type, so nothing else needs to know.
 Behaviour can differ by state too: `set:lit=true: light-emission=13` (also `light-attenuation`,
-`hardness`, `opaque`, `walk-speed`, `collision=none|full`); every matching line applies, in order.
+`hardness`, `opaque`, `walk-speed`, `collision=none|full`, `move`, `move-grip`); every matching line
+applies, in order.
 A look is another `.model`, by path from `blocks/` (keep looks in a subfolder, which isn't
 loaded as blocks), turned `x=` degrees about X then `y=` about the vertical, each clockwise seen
 from the positive end. The turn is baked in at load: geometry, collision and hit shapes, and the

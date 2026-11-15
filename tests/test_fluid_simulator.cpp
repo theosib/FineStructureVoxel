@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <vector>
 #include "finevox/core/fluid_simulator.hpp"
 #include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/fluid_type.hpp"
@@ -611,13 +614,13 @@ TEST_F(FluidSimulatorTest, SolidBlockDisplacesFluidAndDrainsTrench) {
     }
 }
 
-TEST_F(FluidSimulatorTest, ReconcileWorldRemovesDisplacedFluidAndDrainsOrphans) {
+TEST_F(FluidSimulatorTest, ReconcileWorldRemovesDisplacedFluidAndWakesNothing) {
     World world;
     FluidSimulator sim(world);
 
     buildFloor(world, 0, 4, -1, 1);
-    // Simulate a pre-existing saved state where a solid block at x=1 still has fluid inside it
-    // and x=2..3 have orphaned flowing fluid
+    // A saved state where a solid block at x=1 still has fluid inside it, beside flowing fluid
+    // with nothing feeding it. Generated worlds have both, at rest; loading must leave them so.
     world.setBlock(BlockCoord{1, 1, 0}, stoneId_);
     world.setFluid(BlockCoord{1, 1, 0}, waterId_, 7);
     world.setFluid(BlockCoord{2, 1, 0}, waterId_, 6);
@@ -625,10 +628,55 @@ TEST_F(FluidSimulatorTest, ReconcileWorldRemovesDisplacedFluidAndDrainsOrphans) 
 
     sim.reconcileWorld();
     EXPECT_FALSE(world.hasFluid(BlockCoord{1, 1, 0}));
+    EXPECT_EQ(sim.pendingUpdateCount(), 0u);
 
     runTicks(sim, 40);
-    EXPECT_FALSE(world.hasFluid(BlockCoord{2, 1, 0}));
-    EXPECT_FALSE(world.hasFluid(BlockCoord{3, 1, 0}));
+    EXPECT_EQ(world.getFluidLevel(BlockCoord{2, 1, 0}), 6);
+    EXPECT_EQ(world.getFluidLevel(BlockCoord{3, 1, 0}), 5);
+}
+
+// What a simulator has queued, given to a new one, carries the flow on exactly as the first
+// would have: how a saved world resumes water that was moving
+TEST_F(FluidSimulatorTest, QueuedUpdatesCarryFlowOnInANewSimulator) {
+    auto build = [&](World& world) {
+        buildFloor(world, -8, 8, -8, 8);
+        world.setBlock(BlockCoord{3, 0, 2}, AIR_BLOCK_TYPE);  // a drop to flow towards
+        world.setFluid(BlockCoord{0, 1, 0}, waterId_, FLUID_SOURCE_LEVEL);
+    };
+    auto levels = [](const World& world) {
+        std::vector<int> out;
+        for (int32_t y = -1; y <= 2; ++y)
+            for (int32_t z = -8; z <= 8; ++z)
+                for (int32_t x = -8; x <= 8; ++x) {
+                    BlockCoord pos{x, y, z};
+                    out.push_back(world.getFluid(pos).isEmpty() ? -1 : world.getFluidLevel(pos));
+                }
+        return out;
+    };
+
+    World a, b;
+    build(a);
+    build(b);
+    FluidSimulator simA(a), simB(b);
+    simA.notifyFluidChanged(BlockCoord{0, 1, 0});
+    simB.notifyFluidChanged(BlockCoord{0, 1, 0});
+    runTicks(simA, 7);
+    runTicks(simB, 7);
+    ASSERT_EQ(levels(a), levels(b));
+
+    // Saved mid-flow: some updates wait on a delay
+    std::vector<FluidUpdate> queued = simB.queuedUpdates();
+    ASSERT_FALSE(queued.empty());
+    ASSERT_TRUE(std::any_of(queued.begin(), queued.end(), [](const FluidUpdate& u) { return u.tickDelay > 0; }));
+    EXPECT_EQ(queued.size(), simB.pendingUpdateCount());
+    std::vector<int> atSave = levels(b);
+
+    FluidSimulator resumed(b);
+    resumed.restoreUpdates(queued);
+    runTicks(simA, 60);
+    runTicks(resumed, 60);
+    EXPECT_NE(levels(a), atSave) << "the flow should still have been moving when saved";
+    EXPECT_EQ(levels(b), levels(a));
 }
 
 TEST_F(FluidSimulatorTest, SourceFormsBetweenSourcesEvenNearASlope) {

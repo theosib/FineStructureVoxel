@@ -75,9 +75,17 @@ public:
     /// Notify that a block changed at a position (may affect adjacent fluid).
     void notifyBlockChanged(BlockCoord pos);
 
-    /// Reconcile fluid state across all loaded subchunks (strip fluid from solid blocks,
-    /// wake non-static fluid cells after loading a saved world).
+    /// Reconcile fluid state across all loaded subchunks after loading a saved world: strip
+    /// fluid from solid blocks. Nothing is woken, so water a fresh world leaves at rest stays
+    /// at rest; flow that was under way when the world was saved resumes from restoreUpdates().
     void reconcileWorld();
+
+    /// Every update waiting to run, with the ticks each still has to wait, to save with the
+    /// world. They are copies; the queue is unchanged.
+    [[nodiscard]] std::vector<FluidUpdate> queuedUpdates() const;
+
+    /// Queue updates taken from queuedUpdates(), as when loading a saved world.
+    void restoreUpdates(const std::vector<FluidUpdate>& updates);
 
     /// Get the current configuration
     [[nodiscard]] const FluidSimulatorConfig& config() const { return config_; }

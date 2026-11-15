@@ -28,16 +28,17 @@ FluidSimulator::FluidSimulator(World& world)
 void FluidSimulator::simulateTick() {
     if (!config_.enabled) return;
 
-    // Move deferred updates that are ready into pending
-    auto it = deferredUpdates_.begin();
-    while (it != deferredUpdates_.end()) {
-        if (--it->tickDelay <= 0) {
-            pendingUpdates_.push_back(*it);
-            it = deferredUpdates_.erase(it);
+    // Move deferred updates that are ready into pending, keeping the rest in order. One pass:
+    // erasing each from the middle of the vector is quadratic, and a flood defers millions
+    size_t kept = 0;
+    for (FluidUpdate& update : deferredUpdates_) {
+        if (--update.tickDelay <= 0) {
+            pendingUpdates_.push_back(update);
         } else {
-            ++it;
+            deferredUpdates_[kept++] = update;
         }
     }
+    deferredUpdates_.resize(kept);
 
     // Process pending updates up to the budget
     processedThisTick_.clear();
@@ -108,30 +109,40 @@ void FluidSimulator::notifyBlockChanged(BlockCoord pos) {
 
 void FluidSimulator::reconcileWorld() {
     std::vector<BlockCoord> displaced;
-    std::vector<BlockCoord> active;
-
     for (const ChunkPos& chunkPos : world_.getAllSubChunkPositions()) {
         const SubChunk* sub = world_.getSubChunk(chunkPos);
         if (!sub || !sub->fluidLayer()) continue;
         for (int32_t i = 0; i < SubChunk::VOLUME; ++i) {
             FluidTypeId type = sub->getFluid(i);
             if (type.isEmpty()) continue;
-            uint8_t level = sub->getFluidLevel(i);
             BlockCoord pos = chunkPos.toWorld(static_cast<uint16_t>(i));
             const FluidType* ft = FluidRegistry::global().getType(type);
-            if (!ft || !canFluidEnter(pos, type, *ft)) {
-                displaced.push_back(pos);
-            } else if (level < FLUID_SOURCE_LEVEL) {
-                active.push_back(pos);
-            }
+            if (!ft || !canFluidEnter(pos, type, *ft)) displaced.push_back(pos);
         }
     }
 
+    // Quietly: fluid inside a solid block was never seen or simulated, and generated worlds
+    // have plenty of it. Waking the cells around it, or any flowing cell, would set off water
+    // a fresh world leaves at rest, which then floods through caves for minutes.
     for (const BlockCoord& pos : displaced) {
-        removeFluidAndNotify(pos);
+        world_.removeFluid(pos);
     }
-    for (const BlockCoord& pos : active) {
-        scheduleUpdate(pos, EMPTY_FLUID_TYPE, 0, 0);
+}
+
+std::vector<FluidUpdate> FluidSimulator::queuedUpdates() const {
+    std::vector<FluidUpdate> updates;
+    updates.reserve(pendingUpdates_.size() + deferredUpdates_.size());
+    for (FluidUpdate update : pendingUpdates_) {
+        update.tickDelay = 0;
+        updates.push_back(update);
+    }
+    updates.insert(updates.end(), deferredUpdates_.begin(), deferredUpdates_.end());
+    return updates;
+}
+
+void FluidSimulator::restoreUpdates(const std::vector<FluidUpdate>& updates) {
+    for (const FluidUpdate& update : updates) {
+        scheduleUpdate(update.pos, update.type, update.level, update.tickDelay);
     }
 }
 

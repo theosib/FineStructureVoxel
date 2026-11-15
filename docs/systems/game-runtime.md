@@ -514,10 +514,10 @@ end
 ```
 
 Plain data only, but shared references and cycles survive: two lists holding one record still
-hold one record. Paths, work claims, and shots in flight aren't kept, so `on :resume` must set
-units to choose new work. A save goes to one side and is renamed into place, so a failure leaves
-the last good one alone, and the save it replaces stays as `autosave.bak`. Saves run between
-ticks, on the game thread during play.
+hold one record. The engine keeps signals and fluids in flight itself. Paths, work claims, and
+shots in flight aren't kept, so `on :resume` must set units to choose new work. A save goes to
+one side and is renamed into place, so a failure leaves the last good one alone, and the save it
+replaces stays as `autosave.bak`. Saves run between ticks, on the game thread during play.
 
 `new_game` from the UI script saves and restarts the process with `--new`, and `to_menu` restarts
 it without. Only a fresh process is sure of leaving nothing of the old game in the global registries.

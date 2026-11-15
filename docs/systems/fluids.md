@@ -151,6 +151,13 @@ Fluid data serialized in CBOR via `SerializedSubChunk`:
 - Packed data (same `uint8_t[4096]` layout)
 - Stored alongside block data in region files
 
+A saved game also keeps the simulator's queue (`FluidSimulator::queuedUpdates()`, in `game.cbor`
+as `fluids`), and loading gives it back with `restoreUpdates()`, so water that was moving carries
+on. `reconcileWorld()` runs on load too, but only strips fluid from solid cells, quietly: it wakes
+nothing. A generated world leaves flowing cells and fluid inside solid blocks at rest (the sim
+never looked at them), and waking them on load set off floods through caves, millions of updates
+that kept the fluid queue full for minutes and resent subchunks to clients all the while.
+
 ---
 
 ## Worldgen Integration (FluidPass — Phase 21-6C)

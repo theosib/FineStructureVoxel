@@ -262,6 +262,17 @@ bool GameRuntime::saveGame(std::string& error) {
             }
             set("signals", Value::array(std::move(saved)));
         }
+        {
+            // [x y z fluid level delay] per fluid update waiting to run; fluid "" re-checks a cell
+            std::vector<Value> queued;
+            for (const FluidUpdate& u : session_->fluidTicks().simulator().queuedUpdates()) {
+                queued.push_back(Value::array(std::vector<Value>{
+                    integer(u.pos.x), integer(u.pos.y), integer(u.pos.z),
+                    Value::string(u.type.isEmpty() ? std::string() : std::string(u.type.name())),
+                    integer(u.level), integer(u.tickDelay)}));
+            }
+            set("fluids", Value::array(std::move(queued)));
+        }
         ClientSave client = clientSaveCopy();
         for (const Seat& seat : everyone) {
             if (!seat.local || seat.body == INVALID_ENTITY_ID) continue;
@@ -377,6 +388,22 @@ void GameRuntime::loadSavedState() {
             saved.push_back(std::move(c));
         }
         signals_->restoreComponents(std::move(saved));
+    }
+
+    // Flow under way when the world was saved carries on; reconcileWorld wakes nothing
+    if (get("fluids").isArray()) {
+        std::vector<FluidUpdate> queued;
+        for (const Value& entry : get("fluids").asArray()) {
+            const auto& f = entry.asArray();
+            if (f.size() < 6 || !f[3].isString()) continue;
+            std::string_view name = f[3].asString();
+            FluidTypeId type = name.empty() ? EMPTY_FLUID_TYPE : FluidTypeId::fromName(name);
+            queued.push_back(FluidUpdate{
+                BlockCoord(static_cast<int32_t>(f[0].asInt()), static_cast<int32_t>(f[1].asInt()),
+                           static_cast<int32_t>(f[2].asInt())),
+                type, static_cast<uint8_t>(f[4].asInt()), static_cast<int32_t>(f[5].asInt())});
+        }
+        session_->fluidTicks().simulator().restoreUpdates(queued);
     }
 
     EntityManager& entities = session_->entities();

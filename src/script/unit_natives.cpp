@@ -285,9 +285,13 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     // rule, and the neighbours `move-grip:` blocks drag). `=pull true`: the mover drags the first
     // block rather than pushing it. `=limit`: most blocks that may move (64). `=anchor`: the
     // mover's own cell, which never moves and stops any push into it. What drops is the caller's.
+    // Before it returns, `on :moved` hears what went where (ScriptGameSubsystem::deliverMoved).
     const uint32_t keyPull = si.intern("pull");
     const uint32_t keyLimit = si.intern("limit");
     const uint32_t keyAnchor = si.intern("anchor");
+    const uint32_t keyFrom = si.intern("from");
+    const uint32_t keyTo = si.intern("to");
+    const uint32_t keyBroken = si.intern("broken");
     e.registerFunction("world_push_blocks", [=](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         if (!ud || !ud->world || args.size() < 6) return Value::nil();
@@ -330,6 +334,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             before.emplace_back(to, world.getBlock(to));
         }
         applyMove(world, *plan, request.dir);
+        Value brokenList = Value::array(std::move(broken));
         std::unordered_set<BlockCoord> done;
         for (const auto& [pos, oldType] : before) {
             if (!done.insert(pos).second) continue;  // the first read is the cell's old block
@@ -342,7 +347,19 @@ void GameScriptEngine::registerUnitNativeFunctions() {
             }
             if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : world.fluidTickManager()) ftm->notifyBlockChanged(pos);
         }
-        return Value::array(std::move(broken));
+        if (ud->gameScript && !plan->moves.empty()) {
+            std::vector<Value> from, to;
+            for (const BlockCoord& p : plan->moves) {
+                from.push_back(coordValue(p));
+                to.push_back(coordValue(p.neighbor(request.dir)));
+            }
+            Value moved = Value::map();
+            moved.asMap().set(keyFrom, Value::array(std::move(from)));
+            moved.asMap().set(keyTo, Value::array(std::move(to)));
+            moved.asMap().set(keyBroken, brokenList);
+            ud->gameScript->deliverMoved(moved);
+        }
+        return brokenList;
     });
 
     // items_near x y z radius -> ids of items lying in the world within radius, nearest first

@@ -894,3 +894,19 @@ TEST(UpdateSchedulerFixTest, ColumnsAlreadyInTheWorldAreFoundWhenTheSchedulerAtt
     EXPECT_EQ(handlerPtr->gameTickCount, 1);
     world.setUpdateScheduler(nullptr);
 }
+
+TEST(UpdateSchedulerTest, ScheduledTicksGoWithMovedBlocks) {
+    World world;
+    UpdateScheduler scheduler(world);
+    world.setUpdateScheduler(&scheduler);
+    const BlockCoord a(0, 5, 0), b(1, 5, 0), c(4, 5, 0);
+    scheduler.scheduleTick(a, 5, TickType::Scheduled);
+    scheduler.scheduleTick(c, 5, TickType::Scheduled);
+    const BlockMove moves[] = {{a, b}};
+    world.notifyBlocksMoved(moves);
+    EXPECT_FALSE(scheduler.hasScheduledTick(a));
+    EXPECT_TRUE(scheduler.hasScheduledTick(b));
+    EXPECT_TRUE(scheduler.hasScheduledTick(c));
+    EXPECT_EQ(scheduler.scheduledTickCount(), 2u);
+    world.setUpdateScheduler(nullptr);
+}

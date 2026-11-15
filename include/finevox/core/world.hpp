@@ -18,6 +18,7 @@
 #include "finevox/core/column_index.hpp"
 #include <atomic>
 #include <memory>
+#include <span>
 #include <mutex>
 #include <shared_mutex>
 #include <functional>
@@ -52,6 +53,10 @@ public:
     virtual void columnAdded(ColumnPos pos) { (void)pos; }
     /// A column left the world
     virtual void columnRemoved(ColumnPos pos) { (void)pos; }
+    /// Blocks moved together, each keeping what it is (block_mover.hpp). Their cells were
+    /// reported through blockChanged already; this is what to carry from each `from` to its
+    /// `to`, for anything kept by position. Called with no World lock held.
+    virtual void blocksMoved(std::span<const BlockMove> moves) { (void)moves; }
 };
 
 // World contains all chunk columns and provides block access
@@ -307,6 +312,9 @@ public:
     /// Tell the observers a block changed. World's own writes do this; call it after writing a
     /// subchunk directly.
     void notifyBlockChanged(BlockCoord pos);
+    /// Tell the observers, and the update scheduler (scheduled ticks), that blocks moved
+    /// together, after the move is written. applyMove (block_mover.hpp) calls it.
+    void notifyBlocksMoved(std::span<const BlockMove> moves);
     /// Tell the observers a column came or went by a way World doesn't see (a ColumnManager)
     void notifyColumnAdded(ColumnPos pos);
     void notifyColumnRemoved(ColumnPos pos);

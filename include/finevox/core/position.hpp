@@ -202,6 +202,12 @@ struct ChunkPos {
     constexpr auto operator<=>(const ChunkPos& other) const = default;
 };
 
+/// A block that went from one cell to another, keeping what it is (a block mover's move)
+struct BlockMove {
+    BlockCoord from;
+    BlockCoord to;
+};
+
 // Column position (full-height column, x and z only)
 /// Call `visit` with the subchunk holding a block and every subchunk whose mesh can depend on
 /// it: those across each face, edge and corner it touches.

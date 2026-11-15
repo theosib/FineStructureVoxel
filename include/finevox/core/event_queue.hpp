@@ -12,6 +12,7 @@
 #include "finevox/core/position.hpp"
 
 #include <set>
+#include <span>
 #include <unordered_map>
 #include <vector>
 #include <queue>
@@ -196,6 +197,13 @@ public:
      * Note: This is O(n) where n is total scheduled ticks - use sparingly.
      */
     void cancelScheduledTicks(BlockCoord pos);
+
+    /**
+     * @brief Carry scheduled ticks with blocks that moved (World::notifyBlocksMoved)
+     *
+     * A tick for a `from` cell fires at its `to` cell instead, at the same time. O(n).
+     */
+    void moveScheduledTicks(std::span<const BlockMove> moves);
 
     /**
      * @brief Check if a block has any pending scheduled ticks

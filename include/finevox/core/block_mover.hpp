@@ -56,7 +56,8 @@ struct MovePlan {
 
 /// Carry out a plan: the `breaks` cells become air, then every `moves` block goes one cell along
 /// `dir` together, with its rotation and block data. Raw block writes (no handlers), like
-/// World::setBlock. Every cell that changed goes into `changed`, once.
+/// World::setBlock; then World::notifyBlocksMoved, so observers and the update scheduler carry
+/// whatever they keep by position. Every cell that changed goes into `changed`, once.
 void applyMove(World& world, const MovePlan& plan, Face dir, std::vector<BlockCoord>* changed = nullptr);
 
 }  // namespace finevox

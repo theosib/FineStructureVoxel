@@ -623,6 +623,14 @@ void World::notifyBlockChanged(BlockCoord pos) {
     notifyLocked(pos);
 }
 
+void World::notifyBlocksMoved(std::span<const BlockMove> moves) {
+    if (moves.empty()) return;
+    if (updateScheduler_) updateScheduler_->moveScheduledTicks(moves);
+    if (!hasObservers_.load(std::memory_order_acquire)) return;
+    std::lock_guard lock(observersMutex_);
+    for (const auto& o : observers_) o->blocksMoved(moves);
+}
+
 void World::notifyColumnAdded(ColumnPos pos) {
     if (!hasObservers_.load(std::memory_order_acquire)) return;
     std::lock_guard lock(observersMutex_);

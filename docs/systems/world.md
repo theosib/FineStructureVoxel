@@ -232,6 +232,15 @@ block or the anchor is pushed, or more than `limit` blocks would go (broken ones
 `applyMove` empties the `breaks` cells, then moves every block in `moves` one cell together, with
 its rotation and block data. It writes raw (`setBlock`; observers hear it, handlers don't), so the
 caller relights and remeshes; the script native `world_push_blocks` does all of that.
+
+**What a block has elsewhere goes with it.** Rotation and block data live in the subchunk and move
+with the block. Anything kept by position somewhere else has to be told: `applyMove` ends with
+`World::notifyBlocksMoved(moves)`, a list of `BlockMove{from, to}`, which reaches every
+`BlockObserver::blocksMoved` (after the cells' `blockChanged`, with no World lock held) and the
+`UpdateScheduler`, whose scheduled ticks for a `from` cell fire at its `to` cell instead.
+`SignalBinding` carries its own (signals.md). Scripts hear `on :moved` (`moved.from`, `moved.to`)
+from `world_push_blocks` before it returns, so a game moves what its tables keep by cell. Read every
+`from` before writing any `to`: a move's cells overlap.
 `World::moveBlocks` is the older single-line form, with no rules.
 
 ---

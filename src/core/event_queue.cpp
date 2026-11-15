@@ -126,6 +126,21 @@ void UpdateScheduler::cancelScheduledTicks(BlockCoord pos) {
     }
 }
 
+void UpdateScheduler::moveScheduledTicks(std::span<const BlockMove> moves) {
+    if (scheduledTicks_.empty() || moves.empty()) return;
+    std::unordered_map<BlockCoord, BlockCoord> to;
+    for (const BlockMove& m : moves) to.emplace(m.from, m.to);
+    std::vector<ScheduledTick> all;
+    all.reserve(scheduledTicks_.size());
+    while (!scheduledTicks_.empty()) {
+        ScheduledTick tick = scheduledTicks_.top();
+        scheduledTicks_.pop();
+        if (auto it = to.find(tick.pos); it != to.end()) tick.pos = it->second;
+        all.push_back(tick);
+    }
+    for (const auto& tick : all) scheduledTicks_.push(tick);
+}
+
 bool UpdateScheduler::hasScheduledTick(BlockCoord pos) const {
     // Need non-const access to iterate - use a copy
     auto copy = scheduledTicks_;

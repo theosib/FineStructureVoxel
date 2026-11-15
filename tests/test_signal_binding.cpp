@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "finevox/core/block_mover.hpp"
 #include "finevox/core/block_properties.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/data_container.hpp"
@@ -503,16 +504,30 @@ TEST(SignalBinding, WhatsInFlightSurvivesASave) {
     EXPECT_EQ(ta, tb);
 }
 
-TEST(SignalBinding, AWatcherPulsesWhenItsBlockChanges) {
+namespace {
+
+void defineEye() {
     static bool defined = false;
-    if (!defined) {
-        defined = true;
-        defineAll();
-        defineBlock("eye", {{"facing", FACING}, {"powered", BOOL}},
-                    {{"signal", "source"}, {"signal-watch", "front"}, {"signal-watch-level", "15"},
-                     {"signal-watch-pulse", "2"}, {"signal-out", "back"}, {"signal-show", "powered"}},
-                    false);
-    }
+    if (defined) return;
+    defined = true;
+    defineAll();
+    defineBlock("eye", {{"facing", FACING}, {"powered", BOOL}},
+                {{"signal", "source"}, {"signal-watch", "front"}, {"signal-watch-level", "15"},
+                 {"signal-watch-pulse", "2"}, {"signal-out", "back"}, {"signal-show", "powered"}},
+                false);
+}
+
+/// Move these cells' blocks one along +z, as a block mover does
+void shiftSouth(World& world, std::vector<BlockCoord> cells) {
+    MovePlan plan;
+    plan.moves = std::move(cells);
+    applyMove(world, plan, Face::PosZ);
+}
+
+}  // namespace
+
+TEST(SignalBinding, AWatcherPulsesWhenItsBlockChanges) {
+    defineEye();
     Rig r;
     r.set(2, 1, 0, state("eye", {{"facing", "east"}}));  // watches x 3, drives x 1
     r.set(1, 1, 0, "wire");
@@ -528,6 +543,88 @@ TEST(SignalBinding, AWatcherPulsesWhenItsBlockChanges) {
     r.set(2, 1, 1, "glass");  // beside it, not in front: nothing
     r.run(3);
     EXPECT_EQ(r.at(1, 1, 0), 0);
+}
+
+TEST(SignalBindingMoves, AWatcherThatMovesPulses) {
+    defineEye();
+    Rig r;
+    r.set(2, 1, 0, state("eye", {{"facing", "east"}}));  // watches x 3, drives x 1
+    r.set(1, 1, 0, "wire");
+    r.run(3);
+    shiftSouth(r.world, {BlockCoord(1, 1, 0), BlockCoord(2, 1, 0)});  // what it faces is air both times
+    std::vector<int> trace;
+    for (int i = 0; i < 4; ++i) {
+        r.run(1);
+        trace.push_back(r.at(1, 1, 1));
+    }
+    EXPECT_EQ(trace, (std::vector<int>{15, 15, 0, 0}));
+}
+
+TEST(SignalBindingMoves, AWatcherMovedMidPulseKeepsItsPulse) {
+    defineEye();
+    Rig r;
+    r.set(2, 1, 0, state("eye", {{"facing", "east"}}));
+    r.set(1, 1, 0, "wire");
+    r.run(3);
+    r.set(3, 1, 0, "glass");
+    r.run(1);
+    ASSERT_EQ(r.at(1, 1, 0), 15);
+    shiftSouth(r.world, {BlockCoord(1, 1, 0), BlockCoord(2, 1, 0)});
+    std::vector<int> trace;
+    for (int i = 0; i < 3; ++i) {
+        r.run(1);
+        trace.push_back(r.at(1, 1, 1));
+    }
+    EXPECT_EQ(trace, (std::vector<int>{15, 0, 0})) << "the pulse ends when it would have, not two steps on";
+}
+
+TEST(SignalBindingMoves, AComponentKeepsWhatsInFlight) {
+    defineAll();
+    // The same circuit twice: one left alone, one moved while a change is on its way through
+    auto build = [](Rig& r) {
+        r.set(0, 1, 0, "lever");
+        r.set(1, 1, 0, state("delay", {{"facing", "west"}, {"ticks", "4"}}));  // reads x 0, drives x 2
+        r.set(2, 1, 0, "wire");
+        r.run(3);
+        r.set(0, 1, 0, "lever[powered=true]");
+        r.run(2);
+    };
+    Rig still, moved;
+    build(still);
+    build(moved);
+    shiftSouth(moved.world, {BlockCoord(0, 1, 0), BlockCoord(1, 1, 0), BlockCoord(2, 1, 0)});
+    std::vector<int> a, b;
+    for (int i = 0; i < 8; ++i) {
+        still.run(1);
+        moved.run(1);
+        a.push_back(still.at(2, 1, 0));
+        b.push_back(moved.at(2, 1, 1));
+    }
+    EXPECT_EQ(b, a);
+    EXPECT_NE(std::find(a.begin(), a.end(), 15), a.end()) << "the change does get through";
+    EXPECT_EQ(a.front(), 0) << "and was still on its way when the move came";
+}
+
+TEST(SignalBindingMoves, AScriptsLevelGoesWithItsBlock) {
+    static bool defined = false;
+    if (!defined) {
+        defined = true;
+        defineAll();
+        defineBlock("knob", {}, {{"signal", "source"}, {"signal-out", "all"}}, false);
+    }
+    Rig r;
+    r.set(0, 1, 0, "knob");
+    r.run(1);
+    r.signals.setSourceLevel(BlockCoord(0, 1, 0), 6);
+    r.run(1);
+    ASSERT_EQ(r.at(0, 1, 0), 6);
+    shiftSouth(r.world, {BlockCoord(0, 1, 0)});
+    r.run(2);
+    EXPECT_EQ(r.at(0, 1, 1), 6);
+    EXPECT_EQ(r.at(0, 1, 0), 0);
+    r.set(0, 1, 0, "knob");  // a new one where it was starts at its own level
+    r.run(2);
+    EXPECT_EQ(r.at(0, 1, 0), 0);
 }
 
 TEST(SignalBinding, ABoxOffersItsLevelOnlyToComponents) {

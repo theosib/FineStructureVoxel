@@ -58,6 +58,11 @@ void SignalBinding::Inbox::blockChanged(BlockCoord pos) {
     blocks.push_back(pos);
 }
 
+void SignalBinding::Inbox::blocksMoved(std::span<const BlockMove> moved) {
+    std::lock_guard lock(mutex);
+    moves.insert(moves.end(), moved.begin(), moved.end());
+}
+
 void SignalBinding::Inbox::columnAdded(ColumnPos pos) {
     std::lock_guard lock(mutex);
     added.push_back(pos);
@@ -184,13 +189,16 @@ SignalFaces SignalBinding::effectiveOut(const Entry& e, SignalFaces faces) const
 void SignalBinding::takeChanges() {
     std::vector<BlockCoord> blocks;
     std::vector<ColumnPos> added, removed;
+    std::vector<BlockMove> moves;
     {
         std::lock_guard lock(inbox_->mutex);
         blocks.swap(inbox_->blocks);
         added.swap(inbox_->added);
         removed.swap(inbox_->removed);
+        moves.swap(inbox_->moves);
     }
     for (ColumnPos pos : removed) dropColumn(pos);
+    const Carried carried = carryMoves(moves);
 
     CoordSet changedBlocks(blocks.begin(), blocks.end());
     CoordSet changed;
@@ -200,6 +208,7 @@ void SignalBinding::takeChanges() {
     CoordSet toRefresh;
     for (BlockCoord pos : changed) consider(pos, toRefresh);
     if (!toRefresh.empty()) refresh(toRefresh);
+    landMoves(carried);
 
     // Changes the world made (not columns arriving) are what watchers see
     endPulses();
@@ -217,6 +226,12 @@ void SignalBinding::takeChanges() {
     }
 }
 
+void SignalBinding::startPulse(BlockCoord pos, const Entry& e, uint64_t ends) {
+    auto [it, fresh] = watchersOn_.try_emplace(pos, ends);
+    if (!fresh) return;  // already pulsing: a change during a pulse is part of it
+    solver_.setSource(e.node, e.spec->watchLevel);
+}
+
 void SignalBinding::triggerWatchers(const CoordSet& changed) {
     const uint64_t next = solver_.stepCount() + 1;
     for (BlockCoord pos : changed) {
@@ -226,10 +241,70 @@ void SignalBinding::triggerWatchers(const CoordSet& changed) {
             if (!e || !e->spec || e->spec->role != SignalRole::Source || !e->spec->watch) continue;
             // w's face toward pos
             if (!hasSignalFace(e->spec->watch, oppositeFace(static_cast<Face>(f)))) continue;
-            auto [it, fresh] = watchersOn_.try_emplace(w, next + e->spec->watchPulse);
-            if (!fresh) continue;  // already pulsing: a change during a pulse is part of it
-            solver_.setSource(e->node, e->spec->watchLevel);
+            startPulse(w, *e, next + e->spec->watchPulse);
         }
+    }
+}
+
+SignalBinding::Carried SignalBinding::carryMoves(const std::vector<BlockMove>& moves) {
+    Carried out;
+    if (moves.empty()) return out;
+    // Read every old cell before writing any new one: a move's cells overlap
+    struct Taken {
+        BlockCoord to;
+        std::optional<SignalComponentState> state;
+        std::optional<SignalLevel> source;
+        std::optional<uint64_t> pulse;
+        bool watcher = false;
+    };
+    std::vector<Taken> taken;
+    taken.reserve(moves.size());
+    for (const BlockMove& m : moves) {
+        Taken t{m.to};
+        if (const Entry* e = entryAt(m.from); e && e->spec && e->node != NO_SIGNAL_NODE) {
+            if (e->spec->role == SignalRole::Component) {
+                SignalComponentState s = solver_.componentState(e->node);
+                if (!s.settled()) t.state = std::move(s);
+            }
+            t.watcher = e->spec->role == SignalRole::Source && e->spec->watch;
+        }
+        if (auto it = toRestore_.find(m.from); it != toRestore_.end()) t.state = it->second;
+        if (auto it = sourceLevels_.find(m.from); it != sourceLevels_.end()) t.source = it->second;
+        if (auto it = watchersOn_.find(m.from); it != watchersOn_.end()) t.pulse = it->second;
+        taken.push_back(std::move(t));
+    }
+    // Every cell a move touched is built afresh, even where the same kind of block lands (its
+    // node is the one that left)
+    for (const BlockMove& m : moves) {
+        for (BlockCoord pos : {m.from, m.to}) {
+            removeEntry(pos);
+            toRestore_.erase(pos);
+            sourceLevels_.erase(pos);
+            watchersOn_.erase(pos);
+            ownWrites_.erase(pos);
+        }
+    }
+    for (Taken& t : taken) {
+        if (t.state) toRestore_[t.to] = std::move(*t.state);
+        if (t.source) sourceLevels_[t.to] = *t.source;
+        if (t.pulse) out.pulses.emplace_back(t.to, *t.pulse);
+        else if (t.watcher) out.watchers.push_back(t.to);
+    }
+    return out;
+}
+
+void SignalBinding::landMoves(const Carried& carried) {
+    auto watcherAt = [&](BlockCoord pos) -> const Entry* {
+        const Entry* e = entryAt(pos);
+        return e && e->spec && e->spec->role == SignalRole::Source && e->spec->watch ? e : nullptr;
+    };
+    for (const auto& [pos, ends] : carried.pulses) {
+        if (const Entry* e = watcherAt(pos)) startPulse(pos, *e, ends);
+    }
+    // A watcher that moved sees a different view: that's a change
+    const uint64_t next = solver_.stepCount() + 1;
+    for (BlockCoord pos : carried.watchers) {
+        if (const Entry* e = watcherAt(pos)) startPulse(pos, *e, next + e->spec->watchPulse);
     }
 }
 

@@ -115,6 +115,11 @@ void ScriptGameSubsystem::deliverSignal(int32_t x, int32_t y, int32_t z, int lev
     fire("signal");
 }
 
+void ScriptGameSubsystem::deliverMoved(const finescript::Value& moved) {
+    ctx_->set("moved", moved);
+    fire("moved");
+}
+
 void ScriptGameSubsystem::deliverCommand(const finescript::Value& command, int64_t sender) {
     ctx_->set("cmd", command);
     ctx_->set("sender", finescript::Value::integer(sender));

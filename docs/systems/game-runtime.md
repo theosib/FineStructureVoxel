@@ -81,6 +81,7 @@ arrives over a connection. See [multiplayer.md](multiplayer.md).
 | `on :paused_tick` | `dt`. In place of `on :tick` while the game is paused |
 | `on :command` | `cmd`, and `sender`, the player's id, or 0 if it's nobody in particular |
 | `on :player_join`, `on :player_leave` | `player`: `{=id =name =local}` |
+| `on :moved` | `moved`: `{=from =to =broken}`, blocks a block mover (`world_push_blocks`) just moved: `from` and `to` are lists of `[x y z]`, each block's old and new cell in the same order. Fired before the native returns (so from inside whatever handler moved them), for a game to carry what it keeps by position |
 | `on :pickup` | `pickup`: `{=player =item =count =entity}`, an item lying in the world (`item_drop`) that has reached a player. Returns how many it took; the rest stays. With no handler, nothing is ever picked up |
 
 A handler that throws is logged once per distinct message and the game continues.

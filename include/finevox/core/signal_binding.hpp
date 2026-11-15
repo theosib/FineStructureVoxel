@@ -92,7 +92,9 @@ private:
         std::mutex mutex;
         std::vector<BlockCoord> blocks;
         std::vector<ColumnPos> added, removed;
+        std::vector<BlockMove> moves;
         void blockChanged(BlockCoord pos) override;
+        void blocksMoved(std::span<const BlockMove> moved) override;
         void columnAdded(ColumnPos pos) override;
         void columnRemoved(ColumnPos pos) override;
     };
@@ -120,6 +122,14 @@ private:
     void takeChanges();
     void scanColumn(ColumnPos pos, CoordSet& changed);
     void triggerWatchers(const CoordSet& changed);
+    /// What moved blocks kept by position, read off their old cells; applied after the rebuild
+    struct Carried {
+        std::vector<std::pair<BlockCoord, uint64_t>> pulses;  // watchers mid-pulse: step they end
+        std::vector<BlockCoord> watchers;                      // other watchers that moved
+    };
+    Carried carryMoves(const std::vector<BlockMove>& moves);
+    void landMoves(const Carried& carried);
+    void startPulse(BlockCoord pos, const Entry& e, uint64_t ends);
     void endPulses();
     void dropColumn(ColumnPos pos);
     void consider(BlockCoord pos, CoordSet& refresh);

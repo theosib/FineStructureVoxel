@@ -73,6 +73,12 @@ public:
     /// A block in a circuit changed level: `on :signal` sees `signal`, a map of =x =y =z =level
     void deliverSignal(int32_t x, int32_t y, int32_t z, int level);
 
+    /// Blocks moved (world_push_blocks): `on :moved` sees `moved`, a map of =from and =to (lists
+    /// of [x y z], each block's old and new cell, in the same order) and =broken ([x y z block]),
+    /// so a game can carry what it keeps by position. Fired before the native returns, and so
+    /// possibly from inside another handler.
+    void deliverMoved(const finescript::Value& moved);
+
     /// Where ui_publish goes. Payloads are CBOR, safe to hand across threads.
     void setMessageSink(MessageSink sink) { sink_ = std::move(sink); }
     void publish(const finescript::Value& message, Audience audience);

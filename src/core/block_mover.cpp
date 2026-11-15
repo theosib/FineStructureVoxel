@@ -119,6 +119,11 @@ void applyMove(World& world, const MovePlan& plan, Face dir, std::vector<BlockCo
         if (c.data) sub->allBlockData()[index] = std::move(c.data);
     }
 
+    std::vector<BlockMove> moves;
+    moves.reserve(carried.size());
+    for (const BlockCoord& from : plan.moves) moves.push_back({from, from.neighbor(dir)});
+    world.notifyBlocksMoved(moves);
+
     if (changed) {
         std::unordered_set<BlockCoord> seen;
         auto note = [&](const BlockCoord& pos) {

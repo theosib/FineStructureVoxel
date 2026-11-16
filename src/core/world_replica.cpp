@@ -18,9 +18,11 @@ constexpr int32_t COLUMNS_PER_TICK = 40;
 /// first tick after it arrives, and this subsystem runs late in the tick, so two would do.
 constexpr uint64_t EXPECT_TICKS = 2;
 
-/// Light is worked out on its own thread after a block changes: look at a changed column again
-/// this many ticks later for what that brought
+/// Light is worked out on its own thread after a block changes: look at a changed column, and the
+/// columns round it that its light reaches (light goes under a column's width, so no further),
+/// again this many ticks later for what that brought, and once more in case the thread was busy
 constexpr uint64_t LIGHT_TICKS = 6;
+constexpr uint64_t LIGHT_LATE_TICKS = 15;
 
 uint64_t subchunkKey(const ChunkPos& pos) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(pos.x) & 0xFFFFF) << 40) |
@@ -61,9 +63,15 @@ void WorldReplica::syncChangedColumns() {
     for (uint64_t packed : changed) {
         ColumnPos column = ColumnPos::unpack(packed);
         // Unseen, it stays as remembered; the sweep finds it once it's in sight
-        if (!columnVisible(column)) continue;
-        syncColumn(column);
-        later.push_back({BlockCoord(column.x * 16, 0, column.z * 16), tick_ + LIGHT_TICKS});
+        if (columnVisible(column)) syncColumn(column);
+        // Its light reaches the columns round it, seen or not from here (each is checked when due)
+        for (int32_t dz = -1; dz <= 1; ++dz) {
+            for (int32_t dx = -1; dx <= 1; ++dx) {
+                BlockCoord corner((column.x + dx) * 16, 0, (column.z + dz) * 16);
+                later.push_back({corner, tick_ + LIGHT_TICKS});
+                later.push_back({corner, tick_ + LIGHT_LATE_TICKS});
+            }
+        }
     }
     if (later.empty()) return;
     std::lock_guard lock(expectedMutex_);

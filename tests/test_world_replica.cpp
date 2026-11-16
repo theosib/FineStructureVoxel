@@ -286,3 +286,26 @@ TEST(WorldReplicaChanges, AReplicaCanGoBeforeOrAfterItsWorld) {
         map.replica.reset();  // Mustn't reach for the world
     }
 }
+
+TEST(WorldReplicaChanges, LightABlockChangeSpreadsIntoTheNextColumnArrivesSoon) {
+    BigMap map;
+    map.world->setBlock(BigMap::SPOT + 8, GROUND_Y - 1, BigMap::SPOT, map.stone);  // Ground next door too
+    map.look();
+    for (int i = 0; i < 20; ++i) map.replica->tick(1.0f / 30.0f);  // Nothing left to look at again
+    // A light put down at the east edge of its column: the lighting thread spreads it into the
+    // next column a little later, where no block changed
+    BlockCoord lamp(BigMap::SPOT + 7, GROUND_Y, BigMap::SPOT);  // 3007: the last cell of its column
+    ASSERT_EQ((lamp.x + 1) >> 4, (lamp.x >> 4) + 1);
+    map.world->setBlock(lamp, map.marker);
+    map.replica->tick(1.0f / 30.0f);
+
+    ChunkPos next((lamp.x + 1) >> 4, GROUND_Y >> 4, lamp.z >> 4);
+    SubChunk* source = map.world->getSubChunk(next);
+    ASSERT_NE(source, nullptr);
+    source->setBlockLight(0, GROUND_Y & 15, lamp.z & 15, 9);
+
+    for (int i = 0; i < 16; ++i) map.replica->tick(1.0f / 30.0f);
+    const SubChunk* copy = map.replica->world().getSubChunk(next);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_EQ(copy->getBlockLight(0, GROUND_Y & 15, lamp.z & 15), 9) << "not left for the sweep";
+}

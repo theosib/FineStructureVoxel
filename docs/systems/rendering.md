@@ -20,7 +20,7 @@
 | `SubChunkView` | Per-subchunk GPU mesh handle; owns opaque + fluid `RawMeshPtr` |
 | `MeshBuilder` | CPU-side face culling, greedy meshing, AO, custom geometry |
 | `MeshWorkerPool` | Thread pool for parallel CPU mesh generation |
-| `MeshRebuildQueue` | `AlarmQueueWithData<SubChunkPos, MeshRebuildRequest>` — deduplicates by key |
+| `MeshRebuildQueue` | `KeyedQueue<ChunkPos, MeshRebuildRequest>`: deduplicates by key; pops what's ahead of the eye first (`meshViewPriority`: distance, stretched up to 4x for what's behind, except within 24 blocks; requests under priority 100 share one band). `WorldRenderer` moves the focus and calls `reprioritize()` when the view moves 4 blocks or turns 10 degrees, at most every 100 ms |
 | `MeshCacheEntry` | Per-subchunk: pending mesh, uploaded mesh, version/LOD tracking |
 | `BlockAtlas` | Texture atlas for block face textures |
 | `LODSubChunk` | Downsampled block storage for LOD levels 1-4 |

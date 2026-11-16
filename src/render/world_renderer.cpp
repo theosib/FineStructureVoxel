@@ -172,10 +172,13 @@ void WorldRenderer::initialize() {
     createPipeline();
 
     // Create the mesh rebuild queue and worker pool (always active)
-    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(
-        mergeMeshRebuildRequest,
-        [](const MeshRebuildRequest& r) { return static_cast<int>(r.priority); }
-    );
+    meshRebuildQueue_ = std::make_unique<MeshRebuildQueue>(mergeMeshRebuildRequest);
+    // What's ahead of the eye first; updateCamera moves the focus and reorders what waits
+    meshRebuildQueue_->setPriorityFunction(
+        [focus = meshFocus_](const ChunkPos& chunk, const MeshRebuildRequest& request) {
+            std::lock_guard lock(focus->mutex);
+            return meshViewPriority(chunk, request, focus->eye, focus->forward);
+        });
 
     meshWorkerPool_ = std::make_unique<MeshWorkerPool>(world_, 0);
     meshWorkerPool_->setInputQueue(meshRebuildQueue_.get());
@@ -280,6 +283,34 @@ void WorldRenderer::createPipeline() {
     }
 }
 
+namespace {
+/// The view must move this far, or turn this much, before what waits to be meshed is reordered,
+/// and not more often than this
+constexpr double MESH_FOCUS_MOVE = 4.0;
+constexpr double MESH_FOCUS_TURN_COS = 0.985;  // About 10 degrees
+constexpr auto MESH_FOCUS_EVERY = std::chrono::milliseconds(100);
+}  // namespace
+
+void WorldRenderer::updateMeshFocus(const glm::dvec3& eye, const glm::dvec3& forward) {
+    if (!meshRebuildQueue_) return;
+    double length = glm::length(forward);
+    if (length < 1e-6) return;
+    glm::dvec3 unit = forward / length;
+    auto now = std::chrono::steady_clock::now();
+    bool moved = glm::length(eye - focusEye_) > MESH_FOCUS_MOVE;
+    bool turned = glm::dot(unit, focusForward_) < MESH_FOCUS_TURN_COS;
+    if (!(moved || turned) || now - focusAt_ < MESH_FOCUS_EVERY) return;
+    {
+        std::lock_guard lock(meshFocus_->mutex);
+        meshFocus_->eye = eye;
+        meshFocus_->forward = unit;
+    }
+    focusEye_ = eye;
+    focusForward_ = unit;
+    focusAt_ = now;
+    meshRebuildQueue_->reprioritize();
+}
+
 void WorldRenderer::updateCamera(const finevk::CameraState& cameraState) {
     // Delegate to high-precision version using float position
     updateCamera(cameraState, glm::dvec3(cameraState.position));
@@ -300,6 +331,7 @@ void WorldRenderer::updateCamera(const finevk::CameraState& cameraState, const g
     glm::vec3 right = glm::vec3(cameraState_.view[0][0], cameraState_.view[1][0], cameraState_.view[2][0]);
     glm::vec3 up = glm::vec3(cameraState_.view[0][1], cameraState_.view[1][1], cameraState_.view[2][1]);
     glm::vec3 forward = -glm::vec3(cameraState_.view[0][2], cameraState_.view[1][2], cameraState_.view[2][2]);
+    updateMeshFocus(highPrecisionPos, glm::dvec3(forward));
 
     // Calculate render camera position (may be offset for debug visualization)
     glm::dvec3 renderCameraPosD = highPrecisionPos;

@@ -35,6 +35,7 @@
 
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <array>
 #include <algorithm>
@@ -792,6 +793,20 @@ private:
     // Async meshing (optional)
     std::unique_ptr<MeshRebuildQueue> meshRebuildQueue_;
     std::unique_ptr<MeshWorkerPool> meshWorkerPool_;
+
+    /// Where the queue's priorities were last worked out from: what's ahead of the eye is meshed
+    /// first (meshViewPriority). Read by whoever pushes, so under its own lock.
+    struct MeshFocus {
+        std::mutex mutex;
+        glm::dvec3 eye{0.0};
+        glm::dvec3 forward{0.0, 0.0, -1.0};
+    };
+    std::shared_ptr<MeshFocus> meshFocus_ = std::make_shared<MeshFocus>();
+    glm::dvec3 focusEye_{0.0};
+    glm::dvec3 focusForward_{0.0, 0.0, -1.0};
+    std::chrono::steady_clock::time_point focusAt_{};
+    /// Move the focus, and reorder what waits, when the view has moved or turned enough
+    void updateMeshFocus(const glm::dvec3& eye, const glm::dvec3& forward);
 
     // Particle renderer (non-owning; set via setParticleRenderer).
     // Drawn inside render() after the fluid pass.

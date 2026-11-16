@@ -10,6 +10,8 @@
 #include "finevox/core/keyed_queue.hpp"
 #include "finevox/core/position.hpp"
 #include "finevox/core/lod.hpp"
+#include <glm/glm.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 
@@ -116,6 +118,38 @@ inline MeshRebuildRequest mergeMeshRebuildRequest(
 ///   queue.shutdown();
 ///
 using MeshRebuildQueue = KeyedQueue<ChunkPos, MeshRebuildRequest>;
+
+// ============================================================================
+// Meshing what the viewer looks at first
+// ============================================================================
+
+/// Within this many blocks of the eye, direction doesn't count: it's turned to in a moment
+constexpr double MESH_NEAR_ANY_WAY = 24.0;
+/// Something straight behind waits as if it were this many times as far
+constexpr double MESH_BEHIND_FACTOR = 4.0;
+
+/// How soon a subchunk should be meshed for an eye looking along `forward` (unit length), as a
+/// distance in blocks: its real distance, stretched for what's off to the side, up to
+/// MESH_BEHIND_FACTOR times straight behind; close by, just the distance. Lower is sooner.
+inline double meshViewDistance(const ChunkPos& chunk, const glm::dvec3& eye, const glm::dvec3& forward) {
+    glm::dvec3 centre((chunk.x + 0.5) * 16.0, (chunk.y + 0.5) * 16.0, (chunk.z + 0.5) * 16.0);
+    glm::dvec3 to = centre - eye;
+    double distance = glm::length(to);
+    if (distance <= MESH_NEAR_ANY_WAY) return distance;
+    double ahead = glm::dot(to / distance, forward);  // 1 ahead, -1 behind
+    return distance * (1.0 + (MESH_BEHIND_FACTOR - 1.0) * (1.0 - ahead) * 0.5);
+}
+
+/// A queue priority (lower first) for a viewer: requests that want doing now (priority under
+/// 100: what a player did, what just arrived, its neighbours' borders) share one band ordered by
+/// meshViewDistance; slower ones keep their own bands after it, each ordered the same way.
+inline int meshViewPriority(const ChunkPos& chunk, const MeshRebuildRequest& request,
+                            const glm::dvec3& eye, const glm::dvec3& forward) {
+    constexpr int BAND = 1 << 16;
+    int band = request.priority < 100 ? 0 : static_cast<int>(request.priority);
+    double quarters = meshViewDistance(chunk, eye, forward) * 4.0;
+    return band * BAND + static_cast<int>(std::min(quarters, static_cast<double>(BAND - 1)));
+}
 
 /// Create a MeshRebuildQueue with proper merge and priority semantics
 inline MeshRebuildQueue createMeshRebuildQueue() {

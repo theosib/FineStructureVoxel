@@ -863,3 +863,107 @@ TEST(MeshRebuildQueueTest, PriorityOrderingPopsImmediateBeforeBackground) {
     EXPECT_EQ(second->first, ChunkPos(5, 0, 0));
     EXPECT_EQ(third->first, ChunkPos(10, 0, 0));
 }
+
+// ============================================================================
+// Priority from the key and from outside the queue; reordering what waits
+// ============================================================================
+
+TEST(KeyedQueueTest, APriorityCanSeeTheKey) {
+    KeyedQueue<int, std::string> queue;
+    queue.setPriorityFunction([](const int& key, const std::string&) { return -key; });  // Biggest first
+    queue.push(3, "c");
+    queue.push(9, "i");
+    queue.push(5, "e");
+    EXPECT_EQ(queue.tryPop()->first, 9);
+    EXPECT_EQ(queue.tryPop()->first, 5);
+    EXPECT_EQ(queue.tryPop()->first, 3);
+}
+
+TEST(KeyedQueueTest, ReprioritizeReordersWhatWaits) {
+    int target = 0;  // Nearest to this first: something outside the queue
+    KeyedQueue<int, int> queue;
+    queue.setPriorityFunction([&target](const int& key, const int&) { return std::abs(key - target); });
+    for (int k = 0; k <= 10; ++k) queue.push(k, k);
+    EXPECT_EQ(queue.tryPop()->first, 0);
+
+    target = 10;
+    queue.reprioritize();
+    EXPECT_EQ(queue.tryPop()->first, 10);
+    EXPECT_EQ(queue.tryPop()->first, 9);
+}
+
+TEST(KeyedQueueTest, EqualsKeepTheirOrderThroughAReprioritize) {
+    KeyedQueue<int, int> queue;
+    queue.setPriorityFunction([](const int&, const int&) { return 0; });
+    for (int k : {7, 3, 5}) queue.push(k, k);
+    queue.reprioritize();
+    EXPECT_EQ(queue.tryPop()->first, 7);
+    EXPECT_EQ(queue.tryPop()->first, 3);
+    EXPECT_EQ(queue.tryPop()->first, 5);
+}
+
+TEST(KeyedQueueTest, SwitchingBetweenFifoAndPriorityKeepsEverything) {
+    KeyedQueue<int, int> queue;
+    for (int k : {4, 1, 3}) queue.push(k, k);
+    queue.setPriorityFunction([](const int& key, const int&) { return key; });
+    queue.push(2, 2);
+    EXPECT_EQ(queue.tryPop()->first, 1);
+    queue.setPriorityFunction(nullptr);  // Back to the order they came: 4, 3, 2
+    EXPECT_EQ(queue.tryPop()->first, 4);
+    EXPECT_EQ(queue.tryPop()->first, 3);
+    EXPECT_EQ(queue.tryPop()->first, 2);
+    EXPECT_TRUE(queue.empty());
+}
+
+// A pop doesn't look at everything waiting: tens of thousands go out quickly
+TEST(KeyedQueueTest, ABigPriorityQueuePopsQuickly) {
+    KeyedQueue<int, int> queue;
+    queue.setPriorityFunction([](const int& key, const int&) { return (key * 7919) % 50021; });
+    constexpr int N = 50000;
+    for (int k = 0; k < N; ++k) queue.push(k, k);
+    auto start = std::chrono::steady_clock::now();
+    int last = -1;
+    int popped = 0;
+    while (auto item = queue.tryPop()) {
+        int prio = (item->first * 7919) % 50021;
+        EXPECT_GE(prio, last);
+        last = prio;
+        ++popped;
+    }
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    EXPECT_EQ(popped, N);
+    EXPECT_LT(ms, 2000) << "a scan per pop would be 2.5 billion steps";
+}
+
+// ============================================================================
+// Meshing what the viewer looks at first
+// ============================================================================
+
+TEST(MeshViewPriorityTest, AheadBeforeBehindAtTheSameDistance) {
+    glm::dvec3 eye(8.0, 8.0, 8.0);  // Middle of subchunk 0,0,0
+    glm::dvec3 forward(1.0, 0.0, 0.0);
+    double ahead = meshViewDistance(ChunkPos(5, 0, 0), eye, forward);
+    double side = meshViewDistance(ChunkPos(0, 0, 5), eye, forward);
+    double behind = meshViewDistance(ChunkPos(-5, 0, 0), eye, forward);
+    EXPECT_DOUBLE_EQ(ahead, 80.0);
+    EXPECT_DOUBLE_EQ(side, 80.0 * (1.0 + (MESH_BEHIND_FACTOR - 1.0) * 0.5));
+    EXPECT_DOUBLE_EQ(behind, 80.0 * MESH_BEHIND_FACTOR);
+}
+
+TEST(MeshViewPriorityTest, CloseByAnyWayRoundIsJustItsDistance) {
+    glm::dvec3 eye(8.0, 8.0, 8.0);
+    glm::dvec3 forward(1.0, 0.0, 0.0);
+    EXPECT_DOUBLE_EQ(meshViewDistance(ChunkPos(-1, 0, 0), eye, forward), 16.0) << "right behind, but close";
+}
+
+TEST(MeshViewPriorityTest, WhatWantsDoingNowSharesABandSlowerWaits) {
+    glm::dvec3 eye(8.0, 8.0, 8.0);
+    glm::dvec3 forward(1.0, 0.0, 0.0);
+    // A neighbour's border fix just ahead goes before a new arrival far behind
+    int nearFix = meshViewPriority(ChunkPos(2, 0, 0), MeshRebuildRequest(1), eye, forward);
+    int farNew = meshViewPriority(ChunkPos(-30, 0, 0), MeshRebuildRequest::immediate(), eye, forward);
+    EXPECT_LT(nearFix, farNew);
+    // Background work waits for all of that, however close
+    int closeBackground = meshViewPriority(ChunkPos(1, 0, 0), MeshRebuildRequest::background(), eye, forward);
+    EXPECT_GT(closeBackground, farNew);
+}

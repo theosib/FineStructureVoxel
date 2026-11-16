@@ -26,6 +26,7 @@
 #include "finevox/core/wake_signal.hpp"
 
 #include <deque>
+#include <set>
 #include <unordered_map>
 #include <optional>
 #include <functional>
@@ -46,6 +47,9 @@ public:
     using TimePoint = Clock::time_point;
     using MergeFn = std::function<Data(const Data& existing, const Data& incoming)>;
     using PriorityFn = std::function<int(const Data& data)>;
+    /// A priority that can depend on the key too (where it is, say), and on things outside the
+    /// queue that change: reprioritize() asks it again for everything waiting
+    using KeyPriorityFn = std::function<int(const Key& key, const Data& data)>;
 
     /**
      * @brief Create queue with default merge (replace with incoming) and FIFO order
@@ -62,7 +66,7 @@ public:
      */
     explicit KeyedQueue(MergeFn merge, PriorityFn priorityFn = nullptr, size_t capacity = 0)
         : merge_(merge ? std::move(merge) : defaultMerge()),
-          priorityFn_(std::move(priorityFn)),
+          priorityFn_(wrap(std::move(priorityFn))),
           capacity_(capacity) {}
 
     /**
@@ -71,7 +75,7 @@ public:
     explicit KeyedQueue(PriorityFn priorityFn, size_t capacity = 0)
         requires (!std::is_same_v<PriorityFn, MergeFn>)
         : merge_(defaultMerge()),
-          priorityFn_(std::move(priorityFn)),
+          priorityFn_(wrap(std::move(priorityFn))),
           capacity_(capacity) {}
 
     /**
@@ -101,7 +105,27 @@ public:
      */
     void setPriorityExtractor(PriorityFn priorityFn) {
         std::lock_guard<std::mutex> lock(mutex_);
-        priorityFn_ = std::move(priorityFn);
+        setPriorityLocked(wrap(std::move(priorityFn)));
+    }
+
+    /**
+     * @brief Configure a priority that sees the key as well as the data (nullptr for FIFO)
+     */
+    void setPriorityFunction(KeyPriorityFn priorityFn) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        setPriorityLocked(std::move(priorityFn));
+    }
+
+    /**
+     * @brief Ask the priority function again for everything waiting
+     *
+     * For a priority that depends on something outside the queue that has changed. Keeps each
+     * entry's place among equals (its insertion order). O(n log n).
+     */
+    void reprioritize() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!priorityFn_) return;
+        rebuildIndexLocked();
     }
 
     /**
@@ -212,13 +236,14 @@ public:
             auto it = dataMap_.find(key);
             if (it != dataMap_.end()) {
                 it->second = merge_(it->second, data);
+                mergedLocked(it->first);
                 isNew = false;
             } else {
                 if (capacity_ > 0 && dataMap_.size() >= capacity_) {
                     return false;
                 }
                 dataMap_.emplace(key, data);
-                order_.push_back(key);
+                addedLocked(key);
                 isNew = true;
             }
 
@@ -250,13 +275,14 @@ public:
             auto it = dataMap_.find(key);
             if (it != dataMap_.end()) {
                 it->second = merge_(it->second, std::move(data));
+                mergedLocked(it->first);
                 isNew = false;
             } else {
                 if (capacity_ > 0 && dataMap_.size() >= capacity_) {
                     return false;
                 }
                 auto [emplacedIt, inserted] = dataMap_.try_emplace(std::move(key), std::move(data));
-                order_.push_back(emplacedIt->first);
+                addedLocked(emplacedIt->first);
                 isNew = true;
             }
 
@@ -293,9 +319,10 @@ public:
             auto it = dataMap_.find(key);
             if (it != dataMap_.end()) {
                 it->second = merge_(it->second, data);
+                mergedLocked(it->first);
             } else {
                 dataMap_.emplace(key, data);
-                order_.push_back(key);
+                addedLocked(key);
             }
             signalToNotify = signal_;
         }
@@ -327,9 +354,10 @@ public:
             auto it = dataMap_.find(key);
             if (it != dataMap_.end()) {
                 it->second = merge_(it->second, std::move(data));
+                mergedLocked(it->first);
             } else {
                 auto [emplacedIt, inserted] = dataMap_.try_emplace(std::move(key), std::move(data));
-                order_.push_back(emplacedIt->first);
+                addedLocked(emplacedIt->first);
             }
             signalToNotify = signal_;
         }
@@ -371,13 +399,14 @@ public:
                 auto it = dataMap_.find(key);
                 if (it != dataMap_.end()) {
                     it->second = merge_(it->second, std::move(data));
+                    mergedLocked(it->first);
                     anyAddedOrMerged = true;
                 } else {
                     if (capacity_ > 0 && dataMap_.size() >= capacity_) {
                         continue;
                     }
                     auto [emplacedIt, inserted] = dataMap_.try_emplace(std::move(key), std::move(data));
-                    order_.push_back(emplacedIt->first);
+                    addedLocked(emplacedIt->first);
                     ++newCount;
                     anyAddedOrMerged = true;
                 }
@@ -442,10 +471,10 @@ public:
             std::unique_lock<std::mutex> lock(mutex_);
 
             condition_.wait(lock, [this]() {
-                return !order_.empty() || shutdownFlag_;
+                return !dataMap_.empty() || shutdownFlag_;
             });
 
-            if (order_.empty()) {
+            if (dataMap_.empty()) {
                 return std::nullopt;
             }
 
@@ -471,7 +500,7 @@ public:
         std::vector<std::pair<Key, Data>> result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            const size_t count = order_.size();
+            const size_t count = dataMap_.size();
             result.reserve(count);
 
             if (!priorityFn_) {
@@ -486,33 +515,13 @@ public:
                     result.emplace_back(std::move(key), std::move(data));
                 }
             } else {
-                struct IndexedEntry {
-                    int priority;
-                    size_t orderIndex;
-                    Key key;
-                    Data data;
-                };
-                std::vector<IndexedEntry> entries;
-                entries.reserve(count);
-                size_t idx = 0;
-                while (!order_.empty()) {
-                    Key key = std::move(order_.front());
-                    order_.pop_front();
-
-                    auto it = dataMap_.find(key);
-                    int prio = priorityFn_(it->second);
-                    Data data = std::move(it->second);
-                    dataMap_.erase(it);
-
-                    entries.push_back(IndexedEntry{prio, idx++, std::move(key), std::move(data)});
+                for (const Rank& rank : index_) {
+                    auto it = dataMap_.find(rank.key);
+                    result.emplace_back(rank.key, std::move(it->second));
                 }
-                std::stable_sort(entries.begin(), entries.end(),
-                    [](const IndexedEntry& a, const IndexedEntry& b) {
-                        return a.priority < b.priority;
-                    });
-                for (auto& e : entries) {
-                    result.emplace_back(std::move(e.key), std::move(e.data));
-                }
+                index_.clear();
+                ranks_.clear();
+                dataMap_.clear();
             }
         }
         if (!result.empty()) {
@@ -531,7 +540,7 @@ public:
         std::vector<std::pair<Key, Data>> result;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            size_t count = std::min(maxItems, order_.size());
+            size_t count = std::min(maxItems, dataMap_.size());
             result.reserve(count);
 
             for (size_t i = 0; i < count; ++i) {
@@ -618,7 +627,7 @@ public:
                 return false;
             }
 
-            if (!order_.empty()) {
+            if (!dataMap_.empty()) {
                 return true;
             }
 
@@ -656,7 +665,7 @@ public:
                 return false;
             }
 
-            if (!order_.empty()) {
+            if (!dataMap_.empty()) {
                 return true;
             }
 
@@ -774,6 +783,8 @@ public:
         {
             std::lock_guard<std::mutex> lock(mutex_);
             order_.clear();
+            index_.clear();
+            ranks_.clear();
             dataMap_.clear();
             alarmPending_ = false;
         }
@@ -785,8 +796,79 @@ private:
         return [](const Data&, const Data& incoming) { return incoming; };
     }
 
+    static KeyPriorityFn wrap(PriorityFn fn) {
+        if (!fn) return nullptr;
+        return [fn = std::move(fn)](const Key&, const Data& data) { return fn(data); };
+    }
+
+    /// In priority mode an entry's place: by priority, then by when it came (seq)
+    struct Rank {
+        int priority;
+        uint64_t seq;
+        Key key;
+    };
+    struct RankLess {
+        bool operator()(const Rank& a, const Rank& b) const {
+            if (a.priority != b.priority) return a.priority < b.priority;
+            return a.seq < b.seq;  // Unique per entry, so the key never decides
+        }
+    };
+
+    void addedLocked(const Key& key) {
+        if (!priorityFn_) {
+            order_.push_back(key);
+            return;
+        }
+        uint64_t seq = nextSeq_++;
+        int priority = priorityFn_(key, dataMap_.find(key)->second);
+        ranks_.emplace(key, std::make_pair(priority, seq));
+        index_.insert(Rank{priority, seq, key});
+    }
+
+    void mergedLocked(const Key& key) {
+        if (!priorityFn_) return;
+        auto& [priority, seq] = ranks_.find(key)->second;
+        int now = priorityFn_(key, dataMap_.find(key)->second);
+        if (now == priority) return;
+        index_.erase(Rank{priority, seq, key});
+        priority = now;
+        index_.insert(Rank{priority, seq, key});
+    }
+
+    void setPriorityLocked(KeyPriorityFn fn) {
+        bool wasPriority = static_cast<bool>(priorityFn_);
+        if (wasPriority && !fn) {
+            // Back to FIFO, in the order things came
+            std::vector<std::pair<uint64_t, Key>> bySeq;
+            bySeq.reserve(ranks_.size());
+            for (const auto& [key, rank] : ranks_) bySeq.emplace_back(rank.second, key);
+            std::sort(bySeq.begin(), bySeq.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+            order_.clear();
+            for (auto& [seq, key] : bySeq) order_.push_back(std::move(key));
+            index_.clear();
+            ranks_.clear();
+        }
+        priorityFn_ = std::move(fn);
+        if (!priorityFn_) return;
+        if (!wasPriority) {
+            // From FIFO: the order things came is their seq
+            for (const Key& key : order_) ranks_[key] = {0, nextSeq_++};
+            order_.clear();
+        }
+        rebuildIndexLocked();
+    }
+
+    void rebuildIndexLocked() {
+        index_.clear();
+        for (auto& [key, rank] : ranks_) {
+            rank.first = priorityFn_(key, dataMap_.find(key)->second);
+            index_.insert(Rank{rank.first, rank.second, key});
+        }
+    }
+
     std::optional<std::pair<Key, Data>> popLocked() {
-        if (order_.empty()) {
+        if (dataMap_.empty()) {
             return std::nullopt;
         }
 
@@ -801,26 +883,14 @@ private:
             return std::make_pair(std::move(key), std::move(data));
         }
 
-        // Priority mode: find the key in order_ whose current Data in dataMap_
-        // has the lowest priority value (ties broken by earliest insertion in order_).
-        auto bestOrderIt = order_.begin();
-        auto bestMapIt = dataMap_.find(*bestOrderIt);
-        int bestPriority = priorityFn_(bestMapIt->second);
-
-        for (auto it = std::next(order_.begin()); it != order_.end(); ++it) {
-            auto mapIt = dataMap_.find(*it);
-            int prio = priorityFn_(mapIt->second);
-            if (prio < bestPriority) {
-                bestPriority = prio;
-                bestOrderIt = it;
-                bestMapIt = mapIt;
-            }
-        }
-
-        Key key = std::move(*bestOrderIt);
-        order_.erase(bestOrderIt);
-        Data data = std::move(bestMapIt->second);
-        dataMap_.erase(bestMapIt);
+        // Priority mode: the first in the index (lowest priority value, earliest among equals)
+        auto first = index_.begin();
+        Key key = first->key;
+        index_.erase(first);
+        ranks_.erase(key);
+        auto mapIt = dataMap_.find(key);
+        Data data = std::move(mapIt->second);
+        dataMap_.erase(mapIt);
 
         return std::make_pair(std::move(key), std::move(data));
     }
@@ -830,11 +900,16 @@ private:
     std::condition_variable producerCv_;
     bool shutdownFlag_ = false;
 
-    std::deque<Key> order_;                              // Insertion order
+    std::deque<Key> order_;                              // Insertion order (FIFO mode only)
     std::unordered_map<Key, Data, Hash, Equal> dataMap_; // Key -> Data (single hash table)
 
+    // Priority mode only: each entry's (priority, seq), and the entries in pop order
+    std::unordered_map<Key, std::pair<int, uint64_t>, Hash, Equal> ranks_;
+    std::set<Rank, RankLess> index_;
+    uint64_t nextSeq_ = 0;
+
     MergeFn merge_;
-    PriorityFn priorityFn_;
+    KeyPriorityFn priorityFn_;
     size_t capacity_ = 0;
 
     // Alarm state

@@ -64,6 +64,13 @@ faction: a second `World` holding only what was seen, stale where nothing's look
 the server, one per faction with a player, and it's what a client view syncs from. So a late joiner
 or a reconnecting player gets the faction's memory, not the true world, and saves keep working.
 
+A replica learns of changes two ways. A `BlockObserver` on the true world hears every block change,
+and the replica copies that column on the same tick if its faction can see it (and looks again a
+few ticks later for the light the lighting thread works out), so a chain of changes in sight, a
+circuit or a machine, reaches clients as it happens. A sweep walks the map a few columns a tick for
+the rest: columns coming into sight, and light and fluid that change on their own. On a big map a
+lap of the sweep takes seconds, so anything that has to show promptly must come as a block change.
+
 Each `ClientView` sends subchunks from its faction's replica, entities its faction can see now, its
 faction's vision cells, and only its faction's ghosts. Tests assert on the bytes the client holds,
 not on what it draws.

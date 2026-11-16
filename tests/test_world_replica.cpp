@@ -206,3 +206,83 @@ TEST_F(WorldReplicaTest, TickingEventuallyCoversTheMap) {
     for (int i = 0; i < 40; ++i) replica->tick(1.0f / 30.0f);
     EXPECT_EQ(replica->world().getBlock(100, GROUND_Y - 1, 16), stone);
 }
+
+namespace {
+
+/// A map far bigger than a tick's sweep, so only the block-change path can bring a change in fast
+struct BigMap {
+    BigMap() {
+        stone = BlockTypeId::fromName("replica_stone");
+        marker = BlockTypeId::fromName("replica_marker");
+        BlockType type;
+        type.setCollisionShape(CollisionShape::FULL_BLOCK);
+        BlockRegistry::global().registerOrUpdateType(stone, type);
+        BlockRegistry::global().registerOrUpdateType(marker, type);
+        world = std::make_unique<World>();
+        for (int x = SPOT - 8; x < SPOT + 8; ++x) {
+            for (int z = SPOT - 8; z < SPOT + 8; ++z) world->setBlock(x, GROUND_Y - 1, z, stone);
+        }
+        entities = std::make_unique<EntityManager>(*world, graphics);
+        vision = std::make_unique<FactionVision>(*world, *entities, VisionBounds{0, 0, 4096, 4096});
+        vision->addFaction(VIEWER);
+        replica = std::make_unique<WorldReplica>(*world, *vision, VIEWER);
+    }
+    void look() {
+        vision->addSource(VIEWER, glm::dvec3(SPOT + 0.5, GROUND_Y + 2.0, SPOT + 0.5), 20.0f);
+        vision->refresh(VIEWER);
+        replica->syncAll();
+        (void)replica->takeChanges();
+    }
+
+    static constexpr int SPOT = 3000;  // Far from where the sweep starts
+    GraphicsEventQueue graphics;
+    std::unique_ptr<World> world;
+    std::unique_ptr<EntityManager> entities;
+    std::unique_ptr<FactionVision> vision;
+    std::unique_ptr<WorldReplica> replica;
+    BlockTypeId stone;
+    BlockTypeId marker;
+};
+
+}  // namespace
+
+TEST(WorldReplicaChanges, ABlockChangeInViewArrivesOnTheNextTick) {
+    BigMap map;
+    map.look();
+    ASSERT_EQ(map.replica->world().getBlock(BigMap::SPOT, GROUND_Y - 1, BigMap::SPOT), map.stone);
+
+    // A chain of changes, one a tick, as a circuit makes them: each is there a tick later
+    for (int i = 0; i < 5; ++i) {
+        BlockCoord cell(BigMap::SPOT + i, GROUND_Y, BigMap::SPOT);
+        map.world->setBlock(cell, map.marker);
+        map.replica->tick(1.0f / 30.0f);
+        EXPECT_EQ(map.replica->world().getBlock(cell), map.marker) << "change " << i;
+        EXPECT_FALSE(map.replica->takeChanges().empty()) << "change " << i << " goes out";
+    }
+}
+
+TEST(WorldReplicaChanges, ABlockChangeOutOfSightStaysRemembered) {
+    BigMap map;
+    map.look();
+    BlockCoord far(BigMap::SPOT + 600, GROUND_Y, BigMap::SPOT);
+    map.world->setBlock(far, map.marker);
+    for (int i = 0; i < 10; ++i) map.replica->tick(1.0f / 30.0f);
+    EXPECT_TRUE(map.replica->world().getBlock(far).isAir());
+}
+
+TEST(WorldReplicaChanges, AReplicaCanGoBeforeOrAfterItsWorld) {
+    {
+        BigMap map;
+        map.look();
+        map.replica.reset();
+        map.world->setBlock(BigMap::SPOT, GROUND_Y, BigMap::SPOT, map.marker);  // Into a closed inbox
+    }
+    {
+        BigMap map;
+        map.look();
+        map.entities.reset();
+        map.vision.reset();
+        map.world.reset();
+        map.replica.reset();  // Mustn't reach for the world
+    }
+}

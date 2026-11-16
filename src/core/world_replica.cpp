@@ -18,6 +18,10 @@ constexpr int32_t COLUMNS_PER_TICK = 40;
 /// first tick after it arrives, and this subsystem runs late in the tick, so two would do.
 constexpr uint64_t EXPECT_TICKS = 2;
 
+/// Light is worked out on its own thread after a block changes: look at a changed column again
+/// this many ticks later for what that brought
+constexpr uint64_t LIGHT_TICKS = 6;
+
 uint64_t subchunkKey(const ChunkPos& pos) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(pos.x) & 0xFFFFF) << 40) |
            (static_cast<uint64_t>(static_cast<uint32_t>(pos.z) & 0xFFFFF) << 20) |
@@ -27,10 +31,43 @@ uint64_t subchunkKey(const ChunkPos& pos) {
 }  // namespace
 
 WorldReplica::WorldReplica(World& source, FactionVision& vision, uint16_t viewer)
-    : source_(source), vision_(vision), viewer_(viewer) {
+    : source_(source), vision_(vision), viewer_(viewer), inbox_(std::make_shared<Inbox>()) {
     const auto& bounds = vision.bounds();
     cursorX_ = bounds.minX >> 4;
     cursorZ_ = bounds.minZ >> 4;
+    source_.addBlockObserver(inbox_);
+}
+
+WorldReplica::~WorldReplica() {
+    // The source World may be gone already (a session goes before its runtime's replicas), so
+    // this doesn't unhook from it: a closed inbox it still holds keeps nothing
+    std::lock_guard lock(inbox_->mutex);
+    inbox_->closed = true;
+    inbox_->columns.clear();
+}
+
+void WorldReplica::Inbox::blockChanged(BlockCoord pos) {
+    std::lock_guard lock(mutex);
+    if (!closed) columns.insert(ColumnPos(pos.x >> 4, pos.z >> 4).pack());
+}
+
+void WorldReplica::syncChangedColumns() {
+    std::unordered_set<uint64_t> changed;
+    {
+        std::lock_guard lock(inbox_->mutex);
+        changed.swap(inbox_->columns);
+    }
+    std::vector<Expected> later;
+    for (uint64_t packed : changed) {
+        ColumnPos column = ColumnPos::unpack(packed);
+        // Unseen, it stays as remembered; the sweep finds it once it's in sight
+        if (!columnVisible(column)) continue;
+        syncColumn(column);
+        later.push_back({BlockCoord(column.x * 16, 0, column.z * 16), tick_ + LIGHT_TICKS});
+    }
+    if (later.empty()) return;
+    std::lock_guard lock(expectedMutex_);
+    expected_.insert(expected_.end(), later.begin(), later.end());
 }
 
 bool WorldReplica::columnVisible(ColumnPos pos) const {
@@ -189,6 +226,7 @@ void WorldReplica::settleExpected() {
 
 void WorldReplica::tick(float /*dt*/) {
     settleExpected();
+    syncChangedColumns();
 
     const auto& bounds = vision_.bounds();
     int32_t minX = bounds.minX >> 4;

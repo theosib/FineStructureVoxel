@@ -15,6 +15,11 @@
  *
  * Copying is by subchunk and uses block and light versions, so unchanged terrain
  * costs an integer compare or two. Game thread.
+ *
+ * Two ways in: a sweep that walks the map a few columns a tick (what came into view, light and
+ * fluid that changed on their own), and the source World's block changes (a BlockObserver), whose
+ * columns are looked at on the tick they change, so a chain of changes in view (a circuit, a
+ * machine) arrives as it happens rather than when the sweep comes round.
  */
 
 #include "finevox/core/faction_vision.hpp"
@@ -36,6 +41,10 @@ namespace finevox {
 class WorldReplica : public GameSubsystem {
 public:
     WorldReplica(World& source, FactionVision& vision, uint16_t viewer);
+    /// Doesn't touch the source World, which may already be gone
+    ~WorldReplica() override;
+    WorldReplica(const WorldReplica&) = delete;
+    WorldReplica& operator=(const WorldReplica&) = delete;
 
     [[nodiscard]] std::string_view name() const override { return "WorldReplica"; }
     [[nodiscard]] TickPhase phase() const override { return TickPhase::LateTick; }
@@ -99,6 +108,18 @@ private:
         uint64_t fluid = 0;
     };
     std::unordered_map<uint64_t, Copied> versions_;
+
+    /// Block changes in the source World, from any thread under its lock. The World holds it too,
+    /// and outlives or not: a closed inbox keeps nothing.
+    struct Inbox : BlockObserver {
+        std::mutex mutex;
+        std::unordered_set<uint64_t> columns;  // ColumnPos::pack()
+        bool closed = false;
+        void blockChanged(BlockCoord pos) override;
+    };
+    std::shared_ptr<Inbox> inbox_;
+    /// Look now at the columns whose blocks changed since last tick
+    void syncChangedColumns();
 
     std::vector<ChunkPos> changes_;
     std::unordered_set<uint64_t> changesNoted_;

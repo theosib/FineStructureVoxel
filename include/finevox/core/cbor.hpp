@@ -24,6 +24,7 @@ constexpr uint8_t BYTE_STRING = 2;
 constexpr uint8_t TEXT_STRING = 3;
 constexpr uint8_t ARRAY = 4;
 constexpr uint8_t MAP = 5;
+constexpr uint8_t TAG = 6;
 constexpr uint8_t SIMPLE = 7;
 
 // Simple values
@@ -232,10 +233,11 @@ public:
                     skipValue(); // value
                 }
                 break;
+            case TAG:
+                skipValue();  // What the tag is on
+                break;
             case SIMPLE:
-                if ((value & 0x1F) == FLOAT64) {
-                    pos_ += 8;
-                }
+                // readHeader has already read a float's bytes, and the rest have none
                 break;
         }
     }

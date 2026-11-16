@@ -1,10 +1,15 @@
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
 
 EntityTypeRegistry& EntityTypeRegistry::global() {
     static EntityTypeRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "EntityTypeRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

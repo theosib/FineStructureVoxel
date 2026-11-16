@@ -6,6 +6,7 @@
  */
 
 #include "finevox/worldgen/clipboard_manager.hpp"
+#include "finevox/core/global_registries.hpp"
 
 #include <algorithm>
 
@@ -13,6 +14,10 @@ namespace finevox::worldgen {
 
 ClipboardManager& ClipboardManager::instance() {
     static ClipboardManager inst;
+    static const bool joined = (GlobalRegistries::join(
+        "ClipboardManager", [] { inst.clearAll(); },
+        [] { return inst.size(); }), true);
+    (void)joined;
     return inst;
 }
 
@@ -48,6 +53,11 @@ const Schematic* ClipboardManager::getNamed(std::string_view name) const {
 void ClipboardManager::clearNamed(std::string_view name) {
     std::lock_guard<std::mutex> lock(mutex_);
     namedClipboards_.erase(std::string(name));
+}
+
+size_t ClipboardManager::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return (clipboard_ ? 1 : 0) + namedClipboards_.size() + history_.size();
 }
 
 void ClipboardManager::clearAll() {

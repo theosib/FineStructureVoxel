@@ -287,6 +287,10 @@ public:
     /// Get number of registered types
     [[nodiscard]] size_t size() const;
 
+    /// Forget every type and handler, back to air alone (GlobalRegistries::clearAll).
+    /// Frees every type a reader may hold a reference to: only with no game running.
+    void clear();
+
     /// Get the default block type (full solid block)
     [[nodiscard]] static const BlockType& defaultType();
 
@@ -368,7 +372,7 @@ private:
     // Types are read from every mesh worker for every neighbour of every block, so a read takes no
     // lock: pages of slots by id, each holding the type's current version. A type is built once
     // and published with a release store; replacing it publishes a new one and keeps the old, so
-    // a reference a reader already has stays good for the life of the registry.
+    // a reference a reader already has stays good until clear().
     static constexpr uint32_t PAGE_BITS = 12;
     static constexpr uint32_t PAGE_SIZE = 1u << PAGE_BITS;
     static constexpr uint32_t PAGE_COUNT = 4096;  // Ids under 16M; any past that go in overflow_

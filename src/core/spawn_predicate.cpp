@@ -1,10 +1,15 @@
 #include "finevox/core/spawn_predicate.hpp"
+#include "finevox/core/global_registries.hpp"
 #include "finevox/core/spawn_rule.hpp"
 
 namespace finevox {
 
 SpawnPredicateRegistry& SpawnPredicateRegistry::global() {
     static SpawnPredicateRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "SpawnPredicateRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

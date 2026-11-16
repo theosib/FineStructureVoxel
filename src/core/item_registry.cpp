@@ -1,10 +1,15 @@
 #include "finevox/core/item_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
 
 ItemRegistry& ItemRegistry::global() {
     static ItemRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "ItemRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 
@@ -48,6 +53,11 @@ bool ItemRegistry::hasType(std::string_view name) const {
 size_t ItemRegistry::size() const {
     std::shared_lock lock(mutex_);
     return types_.size();
+}
+
+void ItemRegistry::clear() {
+    std::unique_lock lock(mutex_);
+    types_.clear();
 }
 
 void ItemRegistry::registerBlockItems() {

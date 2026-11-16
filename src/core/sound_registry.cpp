@@ -1,4 +1,5 @@
 #include "finevox/core/sound_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
@@ -26,6 +27,10 @@ const SoundGroup* SoundSetDefinition::getAction(SoundAction action) const {
 
 SoundRegistry& SoundRegistry::global() {
     static SoundRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "SoundRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

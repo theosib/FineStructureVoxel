@@ -42,6 +42,9 @@ public:
     /// Get number of registered item types
     [[nodiscard]] size_t size() const;
 
+    /// Forget every type
+    void clear();
+
     /// Auto-register block items: for every block in BlockRegistry,
     /// create a corresponding item with placesBlock set.
     void registerBlockItems();

@@ -6,6 +6,7 @@
  */
 
 #include "finevox/worldgen/biome.hpp"
+#include "finevox/core/global_registries.hpp"
 
 #include <cmath>
 #include <limits>
@@ -31,6 +32,10 @@ std::string_view BiomeId::name() const {
 
 BiomeRegistry& BiomeRegistry::global() {
     static BiomeRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "BiomeRegistry", [] { instance.clear(); },
+        [] { return instance.size() + instance.allowedBiomes().size(); }), true);
+    (void)joined;
     return instance;
 }
 
@@ -79,6 +84,7 @@ size_t BiomeRegistry::size() const {
 void BiomeRegistry::clear() {
     std::unique_lock lock(mutex_);
     biomes_.clear();
+    allowed_.clear();
 }
 
 void BiomeRegistry::setAllowed(std::vector<BiomeId> biomes) {

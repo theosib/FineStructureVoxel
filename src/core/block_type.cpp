@@ -1,4 +1,5 @@
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/global_registries.hpp"
 #include "finevox/core/block_handler.hpp"
 #include "finevox/core/world.hpp"
 
@@ -135,11 +136,16 @@ bool BlockType::hasHitShape() const {
 
 BlockRegistry& BlockRegistry::global() {
     static BlockRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "BlockRegistry", [] { instance.clear(); },
+        [] { return instance.size() - 1; }), true);
+    (void)joined;
     return instance;
 }
 
-BlockRegistry::BlockRegistry() {
-    // Register air type at ID 0
+namespace {
+
+BlockType airDefinition() {
     BlockType air;
     air.setNoCollision()
        .setNoHit()
@@ -148,8 +154,27 @@ BlockRegistry::BlockRegistry() {
        .setLightAttenuation(1)      // Light passes through with minimal loss
        .setBlocksSkyLight(false)     // Doesn't block sky light
        .setHardness(0.0f);
+    return air;
+}
 
-    publish(AIR_BLOCK_TYPE, std::move(air));
+}  // namespace
+
+BlockRegistry::BlockRegistry() {
+    publish(AIR_BLOCK_TYPE, airDefinition());  // Air at ID 0
+}
+
+void BlockRegistry::clear() {
+    std::unique_lock lock(mutex_);
+    for (auto& page : pages_) page.store(nullptr, std::memory_order_release);
+    {
+        std::lock_guard overflowLock(overflowMutex_);
+        overflow_.clear();
+    }
+    ownedPages_.clear();
+    ownedTypes_.clear();
+    count_ = 0;
+    handlers_.clear();
+    publish(AIR_BLOCK_TYPE, airDefinition());
 }
 
 const BlockType* BlockRegistry::lookup(BlockTypeId id) const {

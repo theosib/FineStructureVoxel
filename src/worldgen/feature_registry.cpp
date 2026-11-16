@@ -6,12 +6,17 @@
  */
 
 #include "finevox/worldgen/feature_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox::worldgen {
 
 FeatureRegistry& FeatureRegistry::global() {
     static FeatureRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "FeatureRegistry", [] { instance.clear(); },
+        [] { return instance.featureCount() + instance.placementCount(); }), true);
+    (void)joined;
     return instance;
 }
 

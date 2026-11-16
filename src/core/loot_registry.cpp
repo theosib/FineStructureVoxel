@@ -1,10 +1,15 @@
 #include "finevox/core/loot_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
 
 LootRegistry& LootRegistry::global() {
     static LootRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "LootRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

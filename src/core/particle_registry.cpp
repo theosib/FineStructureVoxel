@@ -1,4 +1,5 @@
 #include "finevox/core/particle_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include "finevox/core/config_parser.hpp"
 
 #include <filesystem>
@@ -15,6 +16,10 @@ namespace finevox {
 
 ParticleTypeRegistry& ParticleTypeRegistry::global() {
     static ParticleTypeRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "ParticleTypeRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 
@@ -87,6 +92,10 @@ bool ParticleTypeRegistry::setAtlasUV(std::string_view name, glm::vec4 uv) {
 
 EmitterPresetRegistry& EmitterPresetRegistry::global() {
     static EmitterPresetRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "EmitterPresetRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

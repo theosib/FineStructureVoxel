@@ -72,6 +72,9 @@ public:
     /// Clear all loaded labels
     void clear();
 
+    /// Strings loaded, in every locale and none
+    [[nodiscard]] size_t size() const;
+
 private:
     LabelRegistry() = default;
 

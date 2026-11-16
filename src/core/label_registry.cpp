@@ -1,4 +1,5 @@
 #include "finevox/core/label_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 
 #include <fstream>
 #include <mutex>
@@ -8,6 +9,10 @@ namespace finevox {
 
 LabelRegistry& LabelRegistry::global() {
     static LabelRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "LabelRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 
@@ -212,6 +217,13 @@ std::string LabelRegistry::format(std::string_view key,
 bool LabelRegistry::has(std::string_view key) const {
     std::shared_lock lock(mutex_);
     return findLocked(key) != nullptr;
+}
+
+size_t LabelRegistry::size() const {
+    std::shared_lock lock(mutex_);
+    size_t n = labels_.size();
+    for (const auto& [locale, table] : locales_) n += table.size();
+    return n;
 }
 
 void LabelRegistry::clear() {

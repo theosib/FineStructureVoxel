@@ -53,6 +53,7 @@ public:
                                                           std::string_view value) const;
 
     void clear() { families_.clear(); }
+    [[nodiscard]] size_t size() const { return families_.size(); }
 
 private:
     /// Every property's value for a state name, defaults filled in, or nothing if unknown

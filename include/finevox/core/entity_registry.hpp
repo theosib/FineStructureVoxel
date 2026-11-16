@@ -57,6 +57,9 @@ public:
      */
     [[nodiscard]] size_t size() const;
 
+    /// Forget every type
+    void clear();
+
     // Non-copyable singleton
     EntityRegistry(const EntityRegistry&) = delete;
     EntityRegistry& operator=(const EntityRegistry&) = delete;

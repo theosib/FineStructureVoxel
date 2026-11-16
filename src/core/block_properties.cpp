@@ -1,4 +1,5 @@
 #include "finevox/core/block_properties.hpp"
+#include "finevox/core/global_registries.hpp"
 
 #include <algorithm>
 
@@ -6,6 +7,10 @@ namespace finevox {
 
 BlockPropertyRegistry& BlockPropertyRegistry::global() {
     static BlockPropertyRegistry registry;
+    static const bool joined = (GlobalRegistries::join(
+        "BlockPropertyRegistry", [] { registry.clear(); },
+        [] { return registry.size(); }), true);
+    (void)joined;
     return registry;
 }
 

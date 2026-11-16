@@ -1,10 +1,15 @@
 #include "finevox/core/fluid_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
 
 FluidRegistry& FluidRegistry::global() {
     static FluidRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "FluidRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

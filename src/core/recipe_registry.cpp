@@ -1,10 +1,15 @@
 #include "finevox/core/recipe_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include <mutex>
 
 namespace finevox {
 
 RecipeRegistry& RecipeRegistry::global() {
     static RecipeRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "RecipeRegistry", [] { instance.clear(); },
+        [] { return instance.size(); }), true);
+    (void)joined;
     return instance;
 }
 

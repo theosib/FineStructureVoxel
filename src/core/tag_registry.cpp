@@ -1,4 +1,5 @@
 #include "finevox/core/tag_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include "finevox/core/unification.hpp"
 
 #include <algorithm>
@@ -15,6 +16,10 @@ namespace finevox {
 
 TagRegistry& TagRegistry::global() {
     static TagRegistry instance;
+    static const bool joined = (GlobalRegistries::join(
+        "TagRegistry", [] { instance.clear(); },
+        [] { return instance.tagCount(); }), true);
+    (void)joined;
     return instance;
 }
 

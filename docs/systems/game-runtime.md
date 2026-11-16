@@ -547,6 +547,14 @@ replaces stays as `autosave.bak`. Saves run between ticks, on the game thread du
 `new_game` from the UI script saves and restarts the process with `--new`, and `to_menu` restarts
 it without. Only a fresh process is sure of leaving nothing of the old game in the global registries.
 
+Content fills process-wide registries (blocks, items, sounds, biomes and the rest). Each joins
+one list (`GlobalRegistries`, `core/global_registries.hpp`) when it is first made, with a clear
+and a size, and `GlobalRegistries::clearAll()` empties them all: valid only once the old game's
+threads, worlds, renderers and script engines are gone, since block types are read by reference
+without a lock. The string interner, the user's settings and the resource roots aren't on it:
+they belong to the run, not the game. A test scans the headers for every `static X& global()`
+and fails if one hasn't joined.
+
 Each faction with a player has its own memory in the save, and seats go by name, so a host resuming
 a game gets everyone back on their own side. A hosted game keeps to `saves/hosted`, and a server
 that says `saves: true` keeps to `saves/server`, so neither costs you the game you were playing.

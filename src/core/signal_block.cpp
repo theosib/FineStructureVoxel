@@ -1,4 +1,5 @@
 #include "finevox/core/signal_block.hpp"
+#include "finevox/core/global_registries.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -237,6 +238,10 @@ std::optional<SignalBlockSpec> parseSignalSpec(
 
 SignalBlockRegistry& SignalBlockRegistry::global() {
     static SignalBlockRegistry registry;
+    static const bool joined = (GlobalRegistries::join(
+        "SignalBlockRegistry", [] { registry.clear(); },
+        [] { return registry.size(); }), true);
+    (void)joined;
     return registry;
 }
 

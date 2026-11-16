@@ -36,6 +36,9 @@ public:
     void clearNamed(std::string_view name);
     void clearAll();
 
+    /// Schematics held: the clipboard, the named ones and the history
+    [[nodiscard]] size_t size() const;
+
     // ---- History ----
 
     void pushHistory(Schematic schematic);

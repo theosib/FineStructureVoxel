@@ -78,6 +78,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/position.cpp
     src/core/string_interner.cpp
+    src/core/global_registries.cpp
     src/core/palette.cpp
     src/core/subchunk.cpp
     src/core/chunk_column.cpp
@@ -695,6 +696,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_chunk_column.cpp
         tests/test_rotation.cpp
         tests/test_world.cpp
+        tests/test_global_registries.cpp
         tests/test_lru_cache.cpp
         tests/test_column_manager.cpp
         tests/test_batch_builder.cpp

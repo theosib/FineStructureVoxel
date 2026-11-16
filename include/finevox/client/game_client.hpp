@@ -118,12 +118,6 @@ public:
     /// Ask the client to stop cleanly at the end of the current frame (saving if hosting).
     void requestStop();
 
-    /// True if the player asked to start over, which the caller does by starting afresh
-    [[nodiscard]] bool newGameRequested() const;
-
-    /// True if the player asked to go back to the menu. The same way, for the same reason.
-    [[nodiscard]] bool restartRequested() const;
-
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

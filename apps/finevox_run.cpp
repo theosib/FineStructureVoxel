@@ -39,8 +39,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <unistd.h>
 #endif
 
 using namespace finevox;
@@ -56,42 +54,6 @@ void handleStopSignal(int) {
 }
 
 #ifdef _WIN32
-std::wstring widen(const std::string& text) {
-    if (text.empty()) return {};
-    int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    std::wstring out(static_cast<size_t>(size), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
-    return out;
-}
-
-/// One argument as CommandLineToArgvW will read it back
-void appendQuoted(std::wstring& line, const std::wstring& arg) {
-    if (!line.empty()) line += L' ';
-    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
-        line += arg;
-        return;
-    }
-    line += L'"';
-    for (size_t i = 0;; ++i) {
-        size_t slashes = 0;
-        while (i < arg.size() && arg[i] == L'\\') {
-            ++i;
-            ++slashes;
-        }
-        if (i == arg.size()) {
-            line.append(slashes * 2, L'\\');
-            break;
-        }
-        if (arg[i] == L'"') {
-            line.append(slashes * 2 + 1, L'\\');
-        } else {
-            line.append(slashes, L'\\');
-        }
-        line += arg[i];
-    }
-    line += L'"';
-}
-
 /// A windowed build (FINEVOX_WINDOWS_GUI) has no console. Started from one, it prints there as
 /// a console program would; started from a shortcut, there's nowhere to print and nothing to do.
 void attachParentConsole() {
@@ -105,26 +67,6 @@ void attachParentConsole() {
     std::cerr.clear();
 }
 
-/// Windows has no exec: start a new process and leave this one to end
-bool restartAs(const std::vector<std::string>& args) {
-    wchar_t self[MAX_PATH * 4];
-    DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
-    if (length == 0 || length >= std::size(self)) return false;
-
-    std::wstring line;
-    appendQuoted(line, self);
-    for (const std::string& arg : args) appendQuoted(line, widen(arg));
-
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(self, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
-        return false;
-    }
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    return true;
-}
 #endif
 
 /// What a client sees of a game in this process
@@ -327,8 +269,6 @@ int main(int argc, char* argv[]) {
         return handle;
     };
 
-    bool startOver = false;
-    bool toMenu = false;
     try {
         if (mcp) {
             std::string error;
@@ -338,44 +278,17 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[mcp] " << error << ": running without it\n";
             }
         }
+        // Leaving a game for the menu, or for a new game, happens inside: the window stays
         client::GameClient gameClient(clientOptions);
         activeClient.store(&gameClient, std::memory_order_release);
         std::signal(SIGINT, handleStopSignal);
         std::signal(SIGTERM, handleStopSignal);
         int code = gameClient.run();
         activeClient.store(nullptr, std::memory_order_release);
-        startOver = gameClient.newGameRequested();
-        toMenu = gameClient.restartRequested();
         if (mcp) mcp->stop();
-        if (!startOver && !toMenu) return code;
+        return code;
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";
         return 1;
     }
-
-    // Only a fresh process is sure of leaving nothing of the old game behind. The arguments that
-    // chose how this one started don't apply to the next.
-    std::vector<std::string> kept;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--new" || arg == "--continue") continue;
-        if (arg == "--join" || arg == "--password") {
-            ++i;
-            continue;
-        }
-        kept.push_back(std::move(arg));
-    }
-    if (startOver) kept.emplace_back("--new");
-
-#ifdef _WIN32
-    if (restartAs(kept)) return 0;
-#else
-    std::vector<char*> arguments;
-    arguments.push_back(argv[0]);
-    for (std::string& arg : kept) arguments.push_back(arg.data());
-    arguments.push_back(nullptr);
-    execv(argv[0], arguments.data());
-#endif
-    std::cerr << "error: couldn't restart\n";
-    return 1;
 }

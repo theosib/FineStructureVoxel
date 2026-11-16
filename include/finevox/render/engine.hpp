@@ -115,6 +115,10 @@ public:
     /// If not set, fence wait overlap is disabled (simpler but less efficient).
     void setFenceWakeSignal(WakeSignal* signal);
 
+    /// Stop using the wake signal now, so that what owns it can go. From the loop's own thread
+    /// between frames (onUpdate), where the waiter is never waiting.
+    void clearFenceWakeSignal();
+
     // === Accessors ===
 
     [[nodiscard]] finevk::Window& window() const;

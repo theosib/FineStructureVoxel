@@ -6,6 +6,7 @@
 #include "finevox/core/content_pack_loader.hpp"
 #include "finevox/core/entity_model.hpp"
 #include "finevox/core/entity_type_registry.hpp"
+#include "finevox/core/global_registries.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
 #include "finevox/core/input_action_system.hpp"
 #include "finevox/core/particle_system.hpp"
@@ -40,6 +41,7 @@
 #include "finevox/script/finevox_interner.hpp"
 
 #include <finegui/finegui.hpp>
+#include <finegui/lifetime.hpp>
 #include <imgui.h>
 #include <finegui/map_renderer.hpp>
 #include <finegui/script_bindings.hpp>
@@ -233,6 +235,11 @@ glm::vec4 colorArg(const Args& args, size_t index) {
 
 }  // namespace
 
+// What the UI shows and loads, by how long it lasts: the title, world list and settings until a
+// game starts; everything in a game until it ends
+constexpr finegui::Lifetime UI_PRE_GAME = 1;
+constexpr finegui::Lifetime UI_IN_GAME = 2;
+
 struct GameClient::Impl {
     explicit Impl(ClientOptions opts) : options(std::move(opts)) {}
 
@@ -256,7 +263,9 @@ struct GameClient::Impl {
     net::WorldInfo worldInfo;
     bool inWorld = false;
     bool directStart = false;
-    bool restartRequested = false;
+    /// Asked for by to_menu or new_game, done at the start of the next frame's update
+    enum class Leave : uint8_t { None, ToMenu, NewGame };
+    Leave leaveRequested = Leave::None;
     float viewHintTimer = 0.0f;
     float playerStateTimer = 0.0f;
 
@@ -266,9 +275,13 @@ struct GameClient::Impl {
     std::unique_ptr<finegui::MapRenderer> mapRenderer;
     std::unique_ptr<finegui::ScriptGuiManager> guiManager;
     std::unique_ptr<finegui::TextureRegistry> textureRegistry;
-    std::vector<std::unique_ptr<finegui::Skin>> skins;
+    struct LoadedSkin {
+        finegui::Lifetime lifetime;
+        std::unique_ptr<finegui::Skin> skin;
+    };
+    std::vector<LoadedSkin> skins;
+    const finegui::Skin* activeSkin = nullptr;
     std::unique_ptr<ExecutionContext> uiCtx;
-    std::vector<std::unique_ptr<ExecutionContext>> pastContexts;  ///< Hidden windows may still point here
     std::unique_ptr<ContentRootFinder> finder;
     script::FineVoxInterner interner;
 
@@ -278,6 +291,7 @@ struct GameClient::Impl {
     std::unique_ptr<render::WorldRenderer> worldRenderer;
     std::unique_ptr<render::ParticleRenderer> particleRenderer;
     std::unique_ptr<render::SceneRenderer> sceneRenderer;
+    std::shared_ptr<render::WorldRenderLayer> worldLayer;
     render::EntityRenderer entityRenderer;
     EntityModelRegistry models;
     render::EntityPoseScratch poseScratch;
@@ -287,7 +301,7 @@ struct GameClient::Impl {
     ViewBasis view;
 
     // Embodied view: a first-person avatar sharing the same world and picking
-    PlayerController steward;
+    std::unique_ptr<PlayerController> steward = std::make_unique<PlayerController>();
     std::unique_ptr<PhysicsSystem> stewardPhysics;
     std::unique_ptr<SimplePhysicsBody> stewardBody;
     BlockShapeProvider stewardShapes;
@@ -315,7 +329,6 @@ struct GameClient::Impl {
     std::unordered_map<EntityId, glm::vec4> xrayNext;  ///< marker_xray, for the next frame
     std::unordered_map<EntityId, glm::vec4> xray;      ///< And for this one
     glm::dvec3 markerCamera{0.0};
-    bool newGameRequested = false;
     int grabHeld = 0;               ///< Bindings holding the world in hand: it takes either
     glm::vec2 grabCursor{0.0f};
     bool orbitLeft = false, orbitRight = false;
@@ -344,6 +357,9 @@ struct GameClient::Impl {
     void pumpSession();
     void fireNet(std::string_view phase, std::string_view failure);
     void shutdown();
+    void leaveGame(bool startNew);
+    void endUiLifetime(finegui::Lifetime lifetime);
+    void showMenu(bool newGame);
     [[nodiscard]] std::optional<fs::path> contentPath(std::string_view relative) const;
     [[nodiscard]] fs::path recentPath() const;
     [[nodiscard]] std::vector<std::string> recentServers() const;
@@ -485,6 +501,13 @@ void GameClient::Impl::setupShell() {
         glm::ivec2 size = engine->window().windowSize();
         viewport = glm::vec2(float(size.x), float(size.y));
 
+        // Between frames: nothing is drawing, and the fence waiter isn't waiting
+        if (leaveRequested != Leave::None) {
+            bool startNew = std::exchange(leaveRequested, Leave::None) == Leave::NewGame;
+            leaveGame(startNew);
+            return;
+        }
+
         pumpSession();
 
         ++framesThisSecond;
@@ -614,6 +637,8 @@ void GameClient::Impl::setupShell() {
     glm::ivec2 size = engine->window().windowSize();
     viewport = glm::vec2(float(size.x), float(size.y));
 
+    // What the menus show and load lasts until a game starts
+    finegui::setCurrentLifetime(UI_PRE_GAME);
     switch (options.start) {
         case ClientStart::Menu:
             if (manifest.menuScript.empty()) {
@@ -892,17 +917,17 @@ void GameClient::Impl::enterWorld() {
         Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f),
         Vec3(manifest.playerWidth, manifest.playerHeight, manifest.playerWidth) * 0.5f);
     stewardBody->setMaxStepHeight(worldInfo.stepHeight);
-    steward.setPhysics(stewardBody.get(), stewardPhysics.get());
-    steward.setFluidQuery([&world](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
+    steward->setPhysics(stewardBody.get(), stewardPhysics.get());
+    steward->setFluidQuery([&world](const BlockCoord& pos) -> std::pair<FluidTypeId, uint8_t> {
         return {world.getFluid(pos), world.getFluidLevel(pos)};
     });
-    steward.setMoveSpeed(manifest.walkSpeed);
-    steward.setJumpVelocity(manifest.jumpVelocity);
-    steward.setSneakSpeed(manifest.sneakSpeed);
-    steward.setCrouchShrink(manifest.sneakShrink);
-    steward.setFlySpeed(manifest.flySpeed);
-    steward.setFlyClimb(manifest.flyClimb);
-    steward.setFlyMode(false);
+    steward->setMoveSpeed(manifest.walkSpeed);
+    steward->setJumpVelocity(manifest.jumpVelocity);
+    steward->setSneakSpeed(manifest.sneakSpeed);
+    steward->setCrouchShrink(manifest.sneakShrink);
+    steward->setFlySpeed(manifest.flySpeed);
+    steward->setFlyClimb(manifest.flyClimb);
+    steward->setFlyMode(false);
 
     if (auto binding = session->binding()) {
         stewardId = binding->body;
@@ -924,9 +949,11 @@ void GameClient::Impl::enterWorld() {
         }
     }
 
-    // The menu's over. What it showed goes, and the game's own UI script starts afresh.
-    mapRenderer->hideAll();
-    pastContexts.push_back(std::move(uiCtx));
+    // The menu's over. What it showed and loaded goes (its pictures once no frame still draws
+    // them), and the game's own UI script starts afresh.
+    device.waitIdle();
+    endUiLifetime(UI_PRE_GAME);
+    finegui::setCurrentLifetime(UI_IN_GAME);
     uiCtx = std::make_unique<ExecutionContext>(*uiEngine);
     uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
     uiCtx->set("resumed", Value::boolean(worldInfo.resumed));
@@ -936,7 +963,8 @@ void GameClient::Impl::enterWorld() {
     loadUiScript(manifest.uiScript);
 
     // Under the GUI, wherever it's added: layers go in order of their phase
-    engine->addRenderLayer(std::make_shared<render::WorldRenderLayer>(*worldRenderer));
+    worldLayer = std::make_shared<render::WorldRenderLayer>(*worldRenderer);
+    engine->addRenderLayer(worldLayer);
     engine->setFenceWakeSignal(worldRenderer->wakeSignal());
 
     // Counted from here, so that a script's idea of frames doesn't depend on how long this took
@@ -1078,6 +1106,113 @@ void GameClient::Impl::shutdown() {
     if (host) host->stop();
 }
 
+void GameClient::Impl::endUiLifetime(finegui::Lifetime lifetime) {
+    for (const LoadedSkin& loaded : skins) {
+        if (loaded.lifetime == lifetime && loaded.skin.get() == activeSkin) {
+            finegui::setActiveSkin(activeSkin = nullptr);
+        }
+    }
+    finegui::endLifetime(lifetime);
+    std::erase_if(skins, [lifetime](const LoadedSkin& loaded) { return loaded.lifetime == lifetime; });
+}
+
+void GameClient::Impl::leaveGame(bool startNew) {
+    // Saved and said goodbye to, as when the window closes
+    if (inWorld && embodied) setEmbodied(false);
+    shutdown();
+
+    // Nothing may still be drawing what goes now
+    engine->device().waitIdle();
+    if (worldLayer) {
+        engine->removeRenderLayer(worldLayer);
+        worldLayer.reset();
+    }
+    engine->clearFenceWakeSignal();
+
+    // Renderers before the atlases: mesh workers read them until WorldRenderer stops
+    worldRenderer.reset();
+    particleRenderer.reset();
+    sceneRenderer.reset();
+    particleAtlas.reset();
+    atlas.reset();
+    entityRenderer = render::EntityRenderer{};
+    models = EntityModelRegistry{};
+    poseScratch = render::EntityPoseScratch{};
+    particles.reset();
+
+    steward = std::make_unique<PlayerController>();
+    stewardBody.reset();
+    stewardPhysics.reset();
+    stewardShapes = {};
+    stewardId = INVALID_ENTITY_ID;
+    embodied = mouseFree = jumpHeld = sneakHeld = false;
+    sneakDrop = 0.0f;
+    panLeft = panRight = panForward = panBack = orbitLeft = orbitRight = false;
+    grabHeld = 0;
+    groundCheckIn = stepLag = 0.0f;
+    ghostView = worldgen::SiteGhostView{};
+    fog.reset();
+    fogStarted = false;
+    markers.clear();
+    xray.clear();
+    xrayNext.clear();
+    factionColors.clear();
+    camera = finevk::Camera{};
+    tactical = TacticalCamera{};
+    view = ViewBasis{};
+    sky = SkyParameters{};
+    clouds = render::CloudMask{};
+    cloudDrift = 0.0;
+    clock = 0.0f;
+    detailPixels.reset();
+    viewHintTimer = playerStateTimer = 0.0f;
+    worldInfo = net::WorldInfo{};
+    blueprints = worldgen::BlueprintLibrary{};
+
+    // The game: the session first, since the host outlives what's connected to it
+    session.reset();
+    host.reset();
+    ownContent.reset();
+    content = nullptr;
+    inWorld = false;
+    directStart = false;
+
+    // What the UI showed and loaded for it. Its trees are gone, so its context can go too.
+    endUiLifetime(UI_IN_GAME);
+    uiCtx.reset();
+
+    // No thread of the game is left, nor anything that reads the registries: they can empty
+    GlobalRegistries::clearAll();
+
+    // Back to this program's own game, which a server's content may have stood in for
+    contentRoot = options.gameRoot;
+    finder->setRoot(contentRoot);
+    ResourceLocator::instance().setGameRoot(contentRoot);
+    manifest = game::GameManifest{};
+    if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
+    ContentPackLoader(manifest.contentNamespace).loadLocalization(contentRoot);
+    inputActions = InputActionSystem{};
+    std::string bindings = (contentRoot / "input" / "default.bindings").string();
+    if (fs::exists(bindings)) inputActions.loadBindings(bindings);
+    frameCount = 0;
+
+    showMenu(startNew);
+}
+
+void GameClient::Impl::showMenu(bool newGame) {
+    finegui::setCurrentLifetime(UI_PRE_GAME);
+    uiCtx = std::make_unique<ExecutionContext>(*uiEngine);
+    uiCtx->set("view_mode", Value::symbol(uiEngine->intern("tactical")));
+    uiCtx->set("resumed", Value::boolean(false));
+    if (newGame || manifest.menuScript.empty()) {
+        // A game without a menu goes straight back into the game, as it started
+        directStart = true;
+        startLocal(newGame);
+    } else {
+        loadUiScript(manifest.menuScript);
+    }
+}
+
 void GameClient::Impl::bindInput() {
     auto& input = engine->inputManager();
     input.setCursorMode(finevk::CursorMode::Normal);
@@ -1197,7 +1332,7 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
     else if (action == "begin_jump" && embodied) {
         if (!mouseFree) {
             jumpHeld = true;
-            steward.requestJump();
+            steward->requestJump();
         }
     }
     else if (action == "end_jump") jumpHeld = false;
@@ -1233,7 +1368,7 @@ void GameClient::Impl::setEmbodied(bool on) {
     grabHeld = 0;
     stepLag = 0.0f;
     jumpHeld = sneakHeld = false;
-    steward.clearInput();
+    steward->clearInput();
 
     // On foot the cursor is hidden, but it still has a position. Left alone it wanders over the
     // panels, and a click meant for the world lands on a button nobody can see.
@@ -1263,17 +1398,17 @@ void GameClient::Impl::updateStewardView(float dt) {
         stewardBody->setPosition(Vec3(float(moved->x), float(moved->y), float(moved->z)));
         stewardBody->setVelocity(Vec3(0.0f));
     }
-    steward.setMoveForward(!mouseFree && panForward);
-    steward.setMoveBack(!mouseFree && panBack);
-    steward.setMoveLeft(!mouseFree && panLeft);
-    steward.setMoveRight(!mouseFree && panRight);
-    steward.setJumpHeld(!mouseFree && jumpHeld);
-    steward.setSneak(!mouseFree && sneakHeld);
+    steward->setMoveForward(!mouseFree && panForward);
+    steward->setMoveBack(!mouseFree && panBack);
+    steward->setMoveLeft(!mouseFree && panLeft);
+    steward->setMoveRight(!mouseFree && panRight);
+    steward->setJumpHeld(!mouseFree && jumpHeld);
+    steward->setSneak(!mouseFree && sneakHeld);
 
     glm::vec2 delta = input.mouseDelta();
-    if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward.look(delta.x, delta.y);
+    if (!mouseFree && (delta.x != 0.0f || delta.y != 0.0f)) steward->look(delta.x, delta.y);
     float footing = stewardBody->position().y;
-    if (!session->paused()) steward.update(dt);
+    if (!session->paused()) steward->update(dt);
 
     Vec3 pos = stewardBody->position();
 
@@ -1285,27 +1420,27 @@ void GameClient::Impl::updateStewardView(float dt) {
     stepLag *= std::exp(-EYE_RISE_RATE * dt);
 
     // Sneaking crouches: the eye eases down and back up
-    float crouch = steward.crouched() ? manifest.sneakEyeDrop : 0.0f;
+    float crouch = steward->crouched() ? manifest.sneakEyeDrop : 0.0f;
     sneakDrop += (crouch - sneakDrop) * (1.0f - std::exp(-12.0f * dt));
 
-    Vec3 eye(pos.x, pos.y + steward.eyeHeight() - stepLag - sneakDrop, pos.z);
+    Vec3 eye(pos.x, pos.y + steward->eyeHeight() - stepLag - sneakDrop, pos.z);
     Vec3 safeOrigin(pos.x, pos.y + 0.9f, pos.z);
     Vec3 adjusted = adjustCameraForWallCollision(safeOrigin, eye, stewardShapes);
     glm::dvec3 cameraPos(adjusted.x, adjusted.y, adjusted.z);
 
     camera.moveTo(cameraPos);
-    camera.setOrientation(steward.forwardVector(), glm::vec3(0.0f, 1.0f, 0.0f));
+    camera.setOrientation(steward->forwardVector(), glm::vec3(0.0f, 1.0f, 0.0f));
     camera.updateState();
-    view = makeViewBasis(cameraPos, steward.forwardVector(), FOV_DEGREES,
+    view = makeViewBasis(cameraPos, steward->forwardVector(), FOV_DEGREES,
                          viewport.x / std::max(viewport.y, 1.0f));
 
     EntityState state;
     state.position = glm::dvec3(pos.x, pos.y, pos.z);
     state.velocity = glm::dvec3(stewardBody->velocity());
     state.onGround = stewardBody->isOnGround();
-    state.crouching = steward.crouched();
-    state.yaw = glm::degrees(steward.yaw());
-    state.pitch = glm::degrees(steward.pitch());
+    state.crouching = steward->crouched();
+    state.yaw = glm::degrees(steward->yaw());
+    state.pitch = glm::degrees(steward->pitch());
     playerStateTimer -= dt;
     if (playerStateTimer <= 0.0f) {
         playerStateTimer = 1.0f / static_cast<float>(worldInfo.tickRate);
@@ -1657,7 +1792,7 @@ void GameClient::Impl::registerNatives() {
     // ui_skin "ui/skin/x.fgs" -> true if loaded and now in use. With no path, back to plain ImGui.
     e.registerFunction("ui_skin", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty() || !args[0].isString()) {
-            finegui::setActiveSkin(nullptr);
+            finegui::setActiveSkin(activeSkin = nullptr);
             return Value::boolean(true);
         }
         std::string error;
@@ -1669,8 +1804,8 @@ void GameClient::Impl::registerNatives() {
             std::cerr << "[ui script] skin " << path.string() << ": " << error << "\n";
             return Value::boolean(false);
         }
-        skins.push_back(std::move(skin));
-        finegui::setActiveSkin(skins.back().get());
+        skins.push_back(LoadedSkin{finegui::currentLifetime(), std::move(skin)});
+        finegui::setActiveSkin(activeSkin = skins.back().skin.get());
         return Value::boolean(true);
     });
 
@@ -2127,14 +2262,14 @@ void GameClient::Impl::registerNatives() {
     // can_fly [b]: on foot, whether a double tap of jump starts flight (and stops it). Taking it
     // away lands the body. Answers whether it's allowed.
     e.registerFunction("can_fly", [this](ExecutionContext&, const Args& args) -> Value {
-        if (!args.empty()) steward.setFlightAllowed(args[0].truthy());
-        return Value::boolean(steward.flightAllowed());
+        if (!args.empty()) steward->setFlightAllowed(args[0].truthy());
+        return Value::boolean(steward->flightAllowed());
     });
 
     // flying [b]: on foot, whether the body is flying. Only starts where can_fly allows it.
     e.registerFunction("flying", [this](ExecutionContext&, const Args& args) -> Value {
-        if (!args.empty()) steward.setFlying(args[0].truthy());
-        return Value::boolean(steward.flying());
+        if (!args.empty()) steward->setFlying(args[0].truthy());
+        return Value::boolean(steward->flying());
     });
 
     // mouse_free [b]: on foot, let the cursor out to use a screen over the view (an inventory),
@@ -2145,7 +2280,7 @@ void GameClient::Impl::registerNatives() {
             if (mouseFree) {
                 panLeft = panRight = panForward = panBack = false;
                 jumpHeld = sneakHeld = false;
-                steward.clearInput();
+                steward->clearInput();
             }
             if (embodied) {
                 ImGuiIO& io = ImGui::GetIO();
@@ -2248,18 +2383,16 @@ void GameClient::Impl::registerNatives() {
         return Value::string(screenshotPath);
     });
 
-    // to_menu: leave this game for the menu. The same goes as for new_game.
+    // to_menu: save and leave this game for the menu, in this window. It happens between
+    // frames, so the script that asked runs to its end first.
     e.registerFunction("to_menu", [this](ExecutionContext&, const Args&) -> Value {
-        restartRequested = true;
-        engine->requestStop();
+        leaveRequested = Leave::ToMenu;
         return Value::nil();
     });
 
-    // new_game: save this game and start another. Only a fresh process is sure of leaving
-    // nothing of the old one behind, so the caller of GameClient::run does the rest.
+    // new_game: save this game and start a new one, the same way
     e.registerFunction("new_game", [this](ExecutionContext&, const Args&) -> Value {
-        newGameRequested = true;
-        engine->requestStop();
+        leaveRequested = Leave::NewGame;
         return Value::nil();
     });
 
@@ -2821,14 +2954,6 @@ GameClient::GameClient(ClientOptions options) : impl_(std::make_unique<Impl>(std
 }
 
 GameClient::~GameClient() = default;
-
-bool GameClient::newGameRequested() const {
-    return impl_->newGameRequested;
-}
-
-bool GameClient::restartRequested() const {
-    return impl_->restartRequested;
-}
 
 void GameClient::requestStop() {
     if (impl_ && impl_->engine) impl_->engine->requestStop();

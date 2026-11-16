@@ -1,4 +1,5 @@
 #include "finevox/game/mcp_server.hpp"
+#include "finevox/core/live_counts.hpp"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -412,7 +413,8 @@ void McpServer::addBuiltinTools() {
     status.description =
         "Is the game alive? Tick and frame counts, rates, and how long ago each last happened, "
         "so a hang shows up as a growing age. Answers even if the game has hung. Tick times "
-        "cover the last second.";
+        "cover the last second. `live` counts the worlds, columns, subchunks, entities, sessions "
+        "and threads that exist now, and the heap in use.";
     status.inputSchema = {{"type", "object"}, {"properties", json::object()}};
     status.player = true;
     status.run = [this](const json&) { return McpResult::value(statusReport()); };
@@ -471,7 +473,15 @@ json McpServer::statusReport() const {
     return {{"ticks", ticks_.report(now)},
             {"frames", frames_.report(now)},
             {"tick_ms_average", tickMsAverage_.load()},
-            {"tick_ms_worst", tickMsWorst_.load()}};
+            {"tick_ms_worst", tickMsWorst_.load()},
+            // What exists now, to see that a game that ended left nothing behind
+            {"live", {{"worlds", liveCount(Counted::World)},
+                      {"columns", liveCount(Counted::ChunkColumn)},
+                      {"subchunks", liveCount(Counted::SubChunk)},
+                      {"entities", liveCount(Counted::Entity)},
+                      {"sessions", liveCount(Counted::GameSession)},
+                      {"threads", processThreadCount()},
+                      {"heap_bytes", heapBytesInUse()}}}};
 }
 
 void McpServer::Rate::note(int64_t nanos) {

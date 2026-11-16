@@ -333,6 +333,12 @@ only for a body a ray from the camera to its feet, middle or head finds a block 
 folder (the game root, with `--game-root`), written at once. `set_pref name nil` forgets one.
 Nothing in a game should depend on them: they're the player's, not the game's.
 
+What the menu script shows and loads (windows, `ui_texture` images, skins) lasts until a game
+starts, and what the game's UI script does until it ends: each is a finegui lifetime
+(`docs/USER_GUIDE.md#lifetimes` in finegui), and ending one takes it all away, with ImGui's memory
+of those windows. Neither script sees the other's leftovers, and a texture loaded for one is
+loaded again for the other.
+
 `ui_skin`, `ui_texture` and `source` take paths inside the content root and refuse anything else,
 and `request_screenshot` does too when the content came from a server. A UI script can be a
 server's, so natives must stay this way.
@@ -544,8 +550,13 @@ shots in flight aren't kept, so `on :resume` must set units to choose new work. 
 one side and is renamed into place, so a failure leaves the last good one alone, and the save it
 replaces stays as `autosave.bak`. Saves run between ticks, on the game thread during play.
 
-`new_game` from the UI script saves and restarts the process with `--new`, and `to_menu` restarts
-it without. Only a fresh process is sure of leaving nothing of the old game in the global registries.
+`to_menu` from the UI script saves and leaves the game for the menu, in the same window, and
+`new_game` saves and goes straight into a new one. It happens at the start of the next frame's
+update, so the script that asked runs to its end first. The client says goodbye and stops the host
+(which saves), waits for the GPU, tears down the world renderer, atlases, particles, session and
+host, ends the in-game UI lifetime, clears the global registries (below), and loads the menu
+script again. The window, the device, the GUI and the MCP server stay; the game's MCP tools go with
+it (`McpServer::removeTools`). A game with no menu script goes back into a game.
 
 Content fills process-wide registries (blocks, items, sounds, biomes and the rest). Each joins
 one list (`GlobalRegistries`, `core/global_registries.hpp`) when it is first made, with a clear

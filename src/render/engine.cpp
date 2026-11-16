@@ -169,6 +169,12 @@ void Engine::setFenceWakeSignal(WakeSignal* signal) {
     impl_->pendingFenceWakeSignal.store(signal, std::memory_order_release);
 }
 
+void Engine::clearFenceWakeSignal() {
+    impl_->pendingFenceWakeSignal.store(nullptr, std::memory_order_release);
+    impl_->fenceWaiter.detach();
+    impl_->fenceWakeSignal = nullptr;
+}
+
 // ============================================================================
 // Accessors
 // ============================================================================

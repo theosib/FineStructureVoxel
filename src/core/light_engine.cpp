@@ -366,34 +366,11 @@ void LightEngine::onBlockPlaced(const BlockCoord& pos, BlockTypeId oldType, Bloc
 
     // Handle sky light blocking
     if (queryCombinedBlocksSkyLight(newType) && !queryCombinedBlocksSkyLight(oldType)) {
-        // New block now blocks sky light - update column below
+        // New block now blocks sky light: take away what came down through here (the column below,
+        // and what spread sideways from it), then let the light around fill back in, so a cell
+        // under the new block is lit from beside it as it would be had the block always been there
         uint8_t currentSkyLight = getSkyLight(pos);
-        if (currentSkyLight > 0) {
-            // Remove sky light at this position and below
-            ChunkPos chunkPos = toChunkPos(pos);
-            SubChunk* subChunk = getOrCreateSubChunkForLight(chunkPos);
-            if (subChunk) {
-                subChunk->setSkyLight(toLocalIndex(pos), 0);
-                recordAffectedChunk(pos);
-            }
-
-            // Propagate darkness down
-            for (int32_t y = pos.y - 1; y >= pos.y - 16; --y) {
-                BlockCoord belowPos{pos.x, y, pos.z};
-                uint8_t belowLight = getSkyLight(belowPos);
-                if (belowLight == 0) break;
-
-                BlockTypeId belowBlock = world_.getBlock(belowPos);
-                if (queryCombinedBlocksSkyLight(belowBlock)) break;
-
-                ChunkPos belowChunkPos = toChunkPos(belowPos);
-                SubChunk* belowSubChunk = getOrCreateSubChunkForLight(belowChunkPos);
-                if (belowSubChunk) {
-                    belowSubChunk->setSkyLight(toLocalIndex(belowPos), 0);
-                    recordAffectedChunk(belowPos);
-                }
-            }
-        }
+        if (currentSkyLight > 0) removeLightBFS(pos, currentSkyLight, true);
     }
 }
 
@@ -721,7 +698,11 @@ void LightEngine::removeLightBFS(const BlockCoord& start, uint8_t startLevel, bo
 
             if (neighborLight == 0) continue;
 
-            if (neighborLight < node.oldLight) {
+            // Sky light goes straight down at full strength, and nothing else reaches full
+            // strength below the top: a full cell under a full cell being removed came from it
+            bool fromAbove = isSkyLight && offset.y == -1 && node.oldLight == SubChunk::MAX_LIGHT &&
+                             neighborLight == SubChunk::MAX_LIGHT;
+            if (neighborLight < node.oldLight || fromAbove) {
                 // This light was coming from the removed source
                 if (isSkyLight) {
                     neighborSubChunk->setSkyLight(neighborIdx, 0);

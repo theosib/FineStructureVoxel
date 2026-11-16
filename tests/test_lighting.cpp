@@ -1683,6 +1683,12 @@ protected:
         engine.enqueue(update);
     }
 
+    void place(BlockCoord pos, BlockTypeId type) {
+        world.setBlock(pos, type);
+        LightingUpdate update{pos, BlockTypeId(), type, {}, {}};
+        engine.enqueue(update);
+    }
+
     /// Updates are applied only by the lighting thread, as in a running game
     void settle() {
         engine.start();
@@ -1759,4 +1765,43 @@ TEST_F(SkyLightClearingTest, ANewSubchunkUnderARoofStaysDark) {
     world.setBlock(3, 40, 3, log);
 
     EXPECT_EQ(engine.getSkyLight({8, 40, 8}), 0) << "something's above it, so it isn't open sky";
+}
+
+// A block put down in the open shades the cells under it, which are then lit from beside: the same
+// light they'd have had if the block had always been there, not none
+TEST_F(SkyLightClearingTest, UnderANewBlockTheSkyComesInFromTheSide) {
+    initialise();
+    place({8, 22, 8}, log);
+    settle();
+    EXPECT_EQ(engine.getSkyLight({8, 21, 8}), 14);
+}
+
+TEST_F(SkyLightClearingTest, UnderANewBlockHigherUpEveryCellIsLitFromTheSide) {
+    initialise();
+    place({8, 26, 8}, log);
+    settle();
+    for (int y = 21; y <= 25; ++y) EXPECT_EQ(engine.getSkyLight({8, y, 8}), 14) << "y " << y;
+}
+
+// Light that came in through a hole and spread under a roof goes when the hole is plugged, and
+// what's under the hole is then lit as the rest is
+TEST_F(SkyLightClearingTest, PluggingTheOnlyHoleDarkensWhatItLit) {
+    initialise();
+    engine.start();  // One lighting thread throughout, as in a running game
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            if (x != 8 || z != 8) place({x, 25, z}, log);
+        }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    EXPECT_EQ(engine.getSkyLight({8, 22, 8}), 15) << "under the hole";
+    EXPECT_GT(engine.getSkyLight({5, 22, 8}), 0) << "spread under the roof";
+
+    place({8, 25, 8}, log);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    engine.stop();
+    // What's left comes in from the open sides of the roofed area (x and z run 0 to 15, open air
+    // beyond), one less a step: the hole's light is gone, the cell under it no brighter than the rest
+    EXPECT_EQ(engine.getSkyLight({8, 22, 8}), 15 - 8) << "8 steps from the side at x = 16";
+    EXPECT_EQ(engine.getSkyLight({5, 22, 8}), 15 - 6) << "6 steps from the side at x = -1";
 }

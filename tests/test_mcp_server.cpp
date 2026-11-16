@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -468,4 +470,83 @@ TEST(McpFilterTest, EntitiesMatchEveryFilterGiven) {
     EXPECT_TRUE(mcpEntityMatches(near, "hand", 1, 6, 0, 0));
     EXPECT_FALSE(mcpEntityMatches(near, "hand", 1, 4, 0, 0));
     EXPECT_THROW((void)mcpEntityMatches({{"near", {1, 2}}}, "hand", 1, 0, 0, 0), std::runtime_error);
+}
+
+// A game's tools go when it does, and a server that outlives it offers what it had before
+TEST(McpServerTest, AnOwnersToolsCanBeWithdrawn) {
+    McpServer server(0, false);
+    int game = 0, other = 0;
+    McpTool lasting = echoTool("state", McpSide::Any);
+    lasting.run = [](const json&) { return McpResult::text("the menu's"); };
+    server.addTool(std::move(lasting));
+    McpTool gameState = echoTool("state", McpSide::Any);
+    gameState.run = [](const json&) { return McpResult::text("the game's"); };
+    gameState.owner = &game;
+    server.addTool(std::move(gameState));
+    McpTool gameOnly = echoTool("blocks", McpSide::Any);
+    gameOnly.owner = &game;
+    server.addTool(std::move(gameOnly));
+    McpTool otherTool = echoTool("other", McpSide::Any);
+    otherTool.owner = &other;
+    server.addTool(std::move(otherTool));
+
+    EXPECT_EQ(firstText(callTool(server, "state", {{"text", "x"}})), "the game's");
+    server.removeTools(&game);
+    EXPECT_EQ(firstText(callTool(server, "state", {{"text", "x"}})), "the menu's");
+    EXPECT_TRUE(callTool(server, "blocks", {{"text", "x"}}).contains("error"));
+    EXPECT_EQ(firstText(callTool(server, "other", {{"text", "x"}})), "x");
+    auto names = toolNames(server);
+    EXPECT_EQ(std::count(names.begin(), names.end(), "state"), 1);
+    EXPECT_EQ(std::count(names.begin(), names.end(), "blocks"), 0);
+    server.removeTools(&game);  // Twice is nothing
+    server.removeTools(nullptr);  // Ownerless tools aren't anyone's to withdraw
+    EXPECT_EQ(firstText(callTool(server, "state", {{"text", "x"}})), "the menu's");
+}
+
+// A call waiting for the game thread when the game ends is answered, and never runs later
+TEST(McpServerTest, AQueuedCallToAWithdrawnToolIsAnsweredAndNeverRuns) {
+    McpServer server(0, false);
+    int game = 0;
+    std::atomic<bool> ran{false};
+    McpTool tool = echoTool("game_eval", McpSide::Game);
+    tool.run = [&ran](const json&) {
+        ran.store(true);
+        return McpResult::text("ran");
+    };
+    tool.owner = &game;
+    server.addTool(std::move(tool));
+
+    json reply;
+    std::thread caller([&] { reply = callTool(server, "game_eval", {{"text", "x"}}); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Queued; no game thread pumps
+    server.removeTools(&game);
+    caller.join();
+    ASSERT_TRUE(reply.contains("result"));
+    EXPECT_TRUE(reply["result"]["isError"].get<bool>());
+    EXPECT_NE(firstText(reply).find("has ended"), std::string::npos);
+
+    server.pump(McpSide::Game);  // The next game's thread comes round
+    EXPECT_FALSE(ran.load());
+}
+
+// Withdrawing waits for a call already running, so what it points into is still there
+TEST(McpServerTest, WithdrawingWaitsForARunningCall) {
+    McpServer server(0, false);
+    int game = 0;
+    std::atomic<bool> started{false}, finished{false};
+    McpTool tool = echoTool("slow", McpSide::Any);
+    tool.run = [&](const json&) {
+        started.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        finished.store(true);
+        return McpResult::text("done");
+    };
+    tool.owner = &game;
+    server.addTool(std::move(tool));
+
+    std::thread caller([&] { (void)callTool(server, "slow", {{"text", "x"}}); });
+    while (!started.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    server.removeTools(&game);
+    EXPECT_TRUE(finished.load());
+    caller.join();
 }

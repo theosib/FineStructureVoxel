@@ -136,6 +136,8 @@ private:
 GameRuntime::GameRuntime(RuntimeOptions options) : options_(std::move(options)) {}
 
 GameRuntime::~GameRuntime() {
+    // Its tools point into it; a server that outlives it (the client's) mustn't keep them
+    if (mcp_) mcp_->removeTools(this);
     stopThreads();
     if (session_) {
         // Subsystems detach in the session's destructor and may reach for scripts,

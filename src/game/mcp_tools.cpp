@@ -256,6 +256,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
                                  {"script_errors", script.errors()},
                                  {"script_error_count", script.errorCount()}});
     };
+    state.owner = &runtime;
     server.addTool(std::move(state));
 
     McpTool tickStats;
@@ -280,6 +281,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
                                  {"commands_max_us", t.commandMaxUs},
                                  {"subsystems", std::move(subs)}});
     };
+    tickStats.owner = &runtime;
     server.addTool(std::move(tickStats));
 
     McpTool eval;
@@ -294,6 +296,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
     eval.run = [&runtime](const json& args) {
         return mcpEval(args, runtime.scripts().engine(), runtime.gameScript().context());
     };
+    eval.owner = &runtime;
     server.addTool(std::move(eval));
 
     McpTool entities;
@@ -316,6 +319,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
         }
         return McpResult::value({{"entities", std::move(out)}, {"matched", matched}});
     };
+    entities.owner = &runtime;
     server.addTool(std::move(entities));
 
     McpTool blocks;
@@ -327,6 +331,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
     blocks.inputSchema = mcpBlocksSchema();
     blocks.side = McpSide::Game;
     blocks.run = [&runtime](const json& args) { return mcpBlocks(args, runtime.session().world()); };
+    blocks.owner = &runtime;
     server.addTool(std::move(blocks));
 
     McpTool command;
@@ -340,6 +345,7 @@ void addServerMcpTools(McpServer& server, GameRuntime& runtime) {
         runtime.session().actions().sendGameCommand(mcpCommandValue(args, runtime.scripts().engine()));
         return McpResult::text("sent; the game thread takes it up between ticks");
     };
+    command.owner = &runtime;
     server.addTool(std::move(command));
 }
 

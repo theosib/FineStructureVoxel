@@ -66,6 +66,9 @@ struct McpTool {
     /// Shows no more than a player could see, so an LLM player may be given it
     bool player = false;
     std::function<McpResult(const nlohmann::json& args)> run;
+    /// Whose tool it is, for removeTools: what its run points into. Null for one that lasts as
+    /// long as the server.
+    const void* owner = nullptr;
 };
 
 class McpServer {
@@ -77,8 +80,12 @@ public:
     McpServer(const McpServer&) = delete;
     McpServer& operator=(const McpServer&) = delete;
 
-    /// Before start()
+    /// Any time. A tool with a name already offered takes its place until removed.
     void addTool(McpTool tool);
+
+    /// Withdraw every tool `owner` added, before what they point into goes. Calls already
+    /// running finish first; calls still queued for a thread are answered with an error.
+    void removeTools(const void* owner);
 
     /// Listen on 127.0.0.1. A failure leaves the game running without a server.
     bool start(std::string& error);
@@ -118,8 +125,9 @@ private:
 
     [[nodiscard]] nlohmann::json initializeResult(const nlohmann::json& params) const;
     [[nodiscard]] nlohmann::json listTools() const;
-    [[nodiscard]] nlohmann::json callTool(const McpTool& tool, const nlohmann::json& args);
-    [[nodiscard]] const McpTool* findTool(const std::string& name) const;
+    struct Offered;
+    [[nodiscard]] nlohmann::json callTool(const std::shared_ptr<Offered>& tool, const nlohmann::json& args);
+    [[nodiscard]] std::shared_ptr<Offered> findTool(const std::string& name) const;
     [[nodiscard]] nlohmann::json statusReport() const;
     void addBuiltinTools();
     void listen();
@@ -129,10 +137,10 @@ private:
     int port_;
     bool playerOnly_;
     /// A client's tools go in before a game exists, and the game's when it has loaded, with the
-    /// server already answering. A deque so that a tool stays where it is as more arrive.
+    /// server already answering, and the game's go when it ends. A call holds its tool.
     mutable std::shared_mutex toolMutex_;
-    std::deque<McpTool> tools_;
-    std::unordered_map<std::string, size_t> toolIndex_;
+    std::vector<std::shared_ptr<Offered>> tools_;
+    std::unordered_map<std::string, std::shared_ptr<Offered>> toolIndex_;
     Mailbox gameBox_;
     Mailbox frameBox_;
     Mailbox afterFrameBox_;

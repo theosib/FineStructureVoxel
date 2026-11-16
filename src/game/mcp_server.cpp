@@ -328,10 +328,16 @@ private:
 // McpServer
 // ============================================================================
 
+struct McpServer::Offered {
+    McpTool tool;
+    std::atomic<bool> removed{false};
+    std::atomic<int> running{0};  ///< Calls in its run now
+};
+
 struct McpServer::Job {
     enum State { Queued, Running, Abandoned };
 
-    const McpTool* tool = nullptr;
+    std::shared_ptr<Offered> tool;
     json args;
     std::atomic<int> state{Queued};
     std::mutex mutex;
@@ -349,9 +355,51 @@ McpServer::~McpServer() {
 }
 
 void McpServer::addTool(McpTool tool) {
+    auto offered = std::make_shared<Offered>();
+    offered->tool = std::move(tool);
     std::unique_lock lock(toolMutex_);
-    toolIndex_[tool.name] = tools_.size();
-    tools_.push_back(std::move(tool));
+    toolIndex_[offered->tool.name] = offered;
+    tools_.push_back(std::move(offered));
+}
+
+void McpServer::removeTools(const void* owner) {
+    if (!owner) return;
+    std::vector<std::shared_ptr<Offered>> gone;
+    {
+        std::unique_lock lock(toolMutex_);
+        std::vector<std::shared_ptr<Offered>> kept;
+        for (auto& offered : tools_) {
+            if (offered->tool.owner == owner) {
+                offered->removed.store(true);
+                gone.push_back(offered);
+            } else {
+                kept.push_back(offered);
+            }
+        }
+        if (gone.empty()) return;
+        tools_ = std::move(kept);
+        toolIndex_.clear();
+        for (auto& offered : tools_) toolIndex_[offered->tool.name] = offered;  // The latest of a name
+    }
+    // What's queued for a thread may never run now, and mustn't run later
+    for (McpSide side : {McpSide::Game, McpSide::Frame, McpSide::AfterFrame}) {
+        Mailbox& box = mailbox(side);
+        std::lock_guard lock(box.mutex);
+        for (auto& job : box.jobs) {
+            if (!job->tool->removed.load()) continue;
+            int expected = Job::Queued;
+            if (!job->state.compare_exchange_strong(expected, Job::Abandoned)) continue;
+            {
+                std::lock_guard jobLock(job->mutex);
+                job->result = McpResult::error("the game that offered " + job->tool->tool.name + " has ended");
+                job->done = true;
+            }
+            job->finished.notify_all();
+        }
+    }
+    for (auto& offered : gone) {
+        while (offered->running.load() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 }
 
 void McpServer::captureOutput() {
@@ -496,11 +544,17 @@ void McpServer::pump(McpSide side) {
         int expected = Job::Queued;
         if (!job->state.compare_exchange_strong(expected, Job::Running)) continue;
         McpResult result;
-        try {
-            result = job->tool->run(job->args);
-        } catch (const std::exception& e) {
-            result = McpResult::error(e.what());
+        job->tool->running.fetch_add(1);
+        if (job->tool->removed.load()) {
+            result = McpResult::error("the game that offered " + job->tool->tool.name + " has ended");
+        } else {
+            try {
+                result = job->tool->tool.run(job->args);
+            } catch (const std::exception& e) {
+                result = McpResult::error(e.what());
+            }
         }
+        job->tool->running.fetch_sub(1);
         {
             std::lock_guard lock(job->mutex);
             job->result = std::move(result);
@@ -510,17 +564,24 @@ void McpServer::pump(McpSide side) {
     }
 }
 
-json McpServer::callTool(const McpTool& tool, const json& args) {
+json McpServer::callTool(const std::shared_ptr<Offered>& offered, const json& args) {
+    const McpTool& tool = offered->tool;
     McpResult result;
     if (tool.side == McpSide::Any) {
-        try {
-            result = tool.run(args);
-        } catch (const std::exception& e) {
-            result = McpResult::error(e.what());
+        offered->running.fetch_add(1);
+        if (offered->removed.load()) {
+            result = McpResult::error("the game that offered " + tool.name + " has ended");
+        } else {
+            try {
+                result = tool.run(args);
+            } catch (const std::exception& e) {
+                result = McpResult::error(e.what());
+            }
         }
+        offered->running.fetch_sub(1);
     } else {
         auto job = std::make_shared<Job>();
-        job->tool = &tool;
+        job->tool = offered;
         job->args = args;
         Mailbox& box = mailbox(tool.side);
         {
@@ -552,18 +613,18 @@ json McpServer::callTool(const McpTool& tool, const json& args) {
     return {{"content", std::move(result.content)}, {"isError", result.isError}};
 }
 
-const McpTool* McpServer::findTool(const std::string& name) const {
+std::shared_ptr<McpServer::Offered> McpServer::findTool(const std::string& name) const {
     std::shared_lock lock(toolMutex_);
     auto found = toolIndex_.find(name);
     if (found == toolIndex_.end()) return nullptr;
-    const McpTool& tool = tools_[found->second];
-    return playerOnly_ && !tool.player ? nullptr : &tool;
+    return playerOnly_ && !found->second->tool.player ? nullptr : found->second;
 }
 
 json McpServer::listTools() const {
     json tools = json::array();
     std::shared_lock lock(toolMutex_);
-    for (const McpTool& tool : tools_) {
+    for (const auto& offered : tools_) {
+        const McpTool& tool = offered->tool;
         if (playerOnly_ && !tool.player) continue;
         tools.push_back({{"name", tool.name}, {"description", tool.description}, {"inputSchema", tool.inputSchema}});
     }
@@ -602,12 +663,12 @@ std::string McpServer::handleMessage(std::string_view body) {
     if (method != "tools/call") return dump(rpcError(id, METHOD_NOT_FOUND, "no such method: " + method));
 
     std::string name = params.value("name", std::string());
-    const McpTool* tool = findTool(name);
+    std::shared_ptr<Offered> tool = findTool(name);
     if (!tool) return dump(rpcError(id, INVALID_PARAMS, "no such tool: " + name));
     json args = params.value("arguments", json::object());
-    std::string problem = validate(tool->inputSchema, args);
+    std::string problem = validate(tool->tool.inputSchema, args);
     if (!problem.empty()) return dump(rpcError(id, INVALID_PARAMS, problem));
-    return dump(rpcResult(id, callTool(*tool, args)));
+    return dump(rpcResult(id, callTool(tool, args)));
 }
 
 bool McpServer::start(std::string& error) {

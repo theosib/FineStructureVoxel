@@ -97,6 +97,37 @@ void appendBillboard(std::vector<SceneVertex>& out, const glm::vec3& center, con
              color);
 }
 
+void appendBoxEdges(std::vector<SceneVertex>& out, const glm::vec3& minCorner, const glm::vec3& maxCorner,
+                    float width, const glm::vec4& color) {
+    auto corner = [&](int i) {
+        return glm::vec3((i & 1) ? maxCorner.x : minCorner.x, (i & 2) ? maxCorner.y : minCorner.y,
+                         (i & 4) ? maxCorner.z : minCorner.z);
+    };
+    // Flat on an axis, its two layers are one: draw it once, or a see-through line doubles up
+    int flat = 0;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (maxCorner[axis] <= minCorner[axis]) flat |= 1 << axis;
+    }
+    for (int i = 0; i < 8; ++i) {
+        if (i & flat) continue;
+        for (int axis = 0; axis < 3; ++axis) {
+            int bit = 1 << axis;
+            if (i & bit) continue;  // Each edge once, from its low end
+            if (maxCorner[axis] <= minCorner[axis]) continue;
+            glm::vec3 a = corner(i) * (1.0f - EDGE_LIFT);
+            glm::vec3 b = corner(i | bit) * (1.0f - EDGE_LIFT);
+            // Across the edge, square to the line of sight: the strip shows its full width
+            glm::vec3 side = glm::cross(b - a, (a + b) * 0.5f);
+            float length = glm::length(side);
+            if (length < 1e-9f) continue;
+            side /= length;
+            glm::vec3 sa = side * (0.5f * width * glm::length(a));
+            glm::vec3 sb = side * (0.5f * width * glm::length(b));
+            pushQuad(out, a - sa, b - sb, b + sb, a + sa, glm::vec3(0.0f), color);
+        }
+    }
+}
+
 void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
                   const EntityRenderState& state, const glm::dvec3& cameraPos,
                   const glm::vec3& teamColor, float light, float tickRate,

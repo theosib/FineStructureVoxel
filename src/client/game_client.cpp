@@ -1948,6 +1948,25 @@ void GameClient::Impl::registerNatives() {
         if (args.empty()) return Value::nil();
         return Value::symbol(StringInterner::global().intern(BlockPropertyRegistry::familyOf(nameOf(args[0]))));
     });
+    // block_shape block [:collision] -> [[x0 y0 z0 x1 y1 z1] ...] within the cell, as that state is
+    // turned: what a click hits (what picking uses), or with :collision what a body bumps into
+    e.registerFunction("block_shape", [nameOf](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        std::string name = nameOf(args[0]);
+        if (name.empty() || name == "air") return Value::array(std::vector<Value>{});
+        const BlockType& type = BlockRegistry::global().getType(BlockTypeId::fromName(name));
+        bool collision = args.size() >= 2 && nameOf(args[1]) == "collision";
+        std::vector<Value> boxes;
+        if (collision ? type.hasCollision() : type.hasHitShape()) {
+            const CollisionShape& shape = collision ? type.collisionShape() : type.hitShape();
+            for (const AABB& box : shape.boxes()) {
+                boxes.push_back(Value::array(std::vector<Value>{
+                    Value::number(box.min.x), Value::number(box.min.y), Value::number(box.min.z),
+                    Value::number(box.max.x), Value::number(box.max.y), Value::number(box.max.z)}));
+            }
+        }
+        return Value::array(std::move(boxes));
+    });
     e.registerFunction("block_collides", [nameOf](ExecutionContext&, const Args& args) -> Value {
         if (args.empty()) return Value::boolean(false);
         std::string n = nameOf(args[0]);
@@ -2056,6 +2075,23 @@ void GameClient::Impl::registerNatives() {
         glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
                          camera.positionD());
         render::appendBox(markers, center + size * 0.5f, size * 0.5f, colorArg(args, 6), false);
+        return Value::nil();
+    });
+
+    // marker_edges x y z sx sy sz r g b [a] [=pixels n]: the edges of that box as lines, n pixels
+    // thick (1.5) however far away, drawn a hair nearer the eye than the faces they lie on
+    e.registerFunction("marker_edges", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 9) return Value::nil();
+        float pixels = 1.5f;
+        if (args.back().isMap()) {
+            Value n = args.back().asMap().get(StringInterner::global().intern("pixels"));
+            if (n.isNumeric()) pixels = static_cast<float>(n.asNumber());
+        }
+        glm::vec3 lo(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) - camera.positionD());
+        glm::vec3 hi = lo + glm::vec3(number(args[3]), number(args[4]), number(args[5]));
+        // A pixel's height at one unit away, from the vertical field of view
+        float perPixel = 2.0f * std::tan(glm::radians(FOV_DEGREES) * 0.5f) / std::max(viewport.y, 1.0f);
+        render::appendBoxEdges(markers, lo, hi, pixels * perPixel, colorArg(args, 6));
         return Value::nil();
     });
 

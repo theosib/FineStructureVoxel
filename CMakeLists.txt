@@ -836,6 +836,7 @@ if(FINEVOX_BUILD_TESTS)
     # Render tests (separate binary, links finevox_render)
     if(TARGET finevox_render)
         add_executable(finevox_render_tests
+            tests/test_box_edges.cpp
             tests/test_camera_depth.cpp
             tests/test_cloud_layer.cpp
             tests/test_frame_capture.cpp

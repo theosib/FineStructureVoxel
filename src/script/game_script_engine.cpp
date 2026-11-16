@@ -12,10 +12,14 @@
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/fluid_tick_manager.hpp"
 #include "finevox/core/light_engine.hpp"
+#include "finevox/core/column_manager.hpp"
+#include "finevox/core/event_queue.hpp"
+#include "finevox/core/subchunk.hpp"
 #include <finescript/map_data.h>
 #include <finescript/native_function.h>
 #include <cmath>
 #include <iostream>
+#include <optional>
 
 namespace finevox::script {
 
@@ -89,6 +93,17 @@ static bool extractPos(const std::vector<finescript::Value>& args,
         return true;
     }
     return false;
+}
+
+// A value read through a DataContainerProxy, with its nested maps (live proxies into the
+// container) turned into plain maps, all the way down. Arrays are already copies.
+static finescript::Value copyDataValue(const finescript::Value& v) {
+    if (!v.isMap() || !v.asMap().isProxy()) return v;
+    finescript::Value out = finescript::Value::map();
+    for (uint32_t key : v.asMap().keys()) {
+        out.asMap().set(key, copyDataValue(v.asMap().get(key)));
+    }
+    return out;
 }
 
 // ============================================================================
@@ -443,6 +458,91 @@ void GameScriptEngine::registerNativeFunctions() {
         return finescript::Value::boolean(true);
     });
     engine_->registerFunction("world_set_block", setBlockFn);
+
+    // Any cell's block data, from any script. Both copy: what a script keeps after the call
+    // is its own, so nothing points into a subchunk that may change or go.
+    //   block_data_get x y z key -> the value, or nil
+    //   block_data_get x y z     -> all of the cell's data as a map, or nil if it has none
+    //   block_data_set x y z key value -> true if the cell is loaded; nil removes the key
+    // The position is three numbers or one [x y z]. Keys are symbols or strings.
+    struct CellArgs {
+        BlockCoord pos;
+        size_t next = 0;  // index of the first argument after the position
+    };
+    auto cellArgs = [](const std::vector<finescript::Value>& args) -> std::optional<CellArgs> {
+        int x, y, z;
+        if (!extractPos(args, 0, x, y, z)) return std::nullopt;
+        return CellArgs{BlockCoord{x, y, z}, args[0].isArray() ? size_t{1} : size_t{3}};
+    };
+    auto keyOf = [](const finescript::Value& v) -> std::optional<uint32_t> {
+        if (v.isSymbol()) return v.asSymbol();
+        if (v.isString()) return StringInterner::global().intern(v.asString());
+        return std::nullopt;
+    };
+    engine_->registerFunction("block_data_get",
+        [cellArgs, keyOf](finescript::ExecutionContext& ctx,
+                          const std::vector<finescript::Value>& args) -> finescript::Value {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            auto cell = cellArgs(args);
+            if (!ud || !ud->world || !cell) return finescript::Value::nil();
+            SubChunk* sub = ud->world->getSubChunk(ChunkPos::fromBlock(cell->pos));
+            if (!sub) return finescript::Value::nil();
+            auto local = cell->pos.local();
+            DataContainer* data = sub->blockData(local.x, local.y, local.z);
+            if (!data) return finescript::Value::nil();
+            auto live = finescript::Value::proxyMap(std::make_shared<DataContainerProxy>(*data));
+            if (cell->next >= args.size()) return copyDataValue(live);
+            auto key = keyOf(args[cell->next]);
+            if (!key) return finescript::Value::nil();
+            return copyDataValue(live.asMap().get(*key));
+        });
+    engine_->registerFunction("block_data_set",
+        [cellArgs, keyOf](finescript::ExecutionContext& ctx,
+                          const std::vector<finescript::Value>& args) -> finescript::Value {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            auto cell = cellArgs(args);
+            if (!ud || !ud->world || !cell || cell->next >= args.size()) {
+                return finescript::Value::boolean(false);
+            }
+            auto key = keyOf(args[cell->next]);
+            if (!key) return finescript::Value::boolean(false);
+            finescript::Value value =
+                cell->next + 1 < args.size() ? args[cell->next + 1] : finescript::Value::nil();
+            SubChunk* sub = ud->world->getSubChunk(ChunkPos::fromBlock(cell->pos));
+            if (!sub) return finescript::Value::boolean(false);
+            auto local = cell->pos.local();
+            if (value.isNil()) {
+                DataContainer* data = sub->blockData(local.x, local.y, local.z);
+                if (!data || !data->has(*key)) return finescript::Value::boolean(true);
+                data->remove(*key);
+            } else {
+                DataContainerProxy(sub->getOrCreateBlockData(local.x, local.y, local.z))
+                    .set(*key, value);
+            }
+            if (auto* cm = ud->world->columnManager()) {
+                cm->markDirty(ColumnPos::fromBlock(cell->pos));
+            }
+            return finescript::Value::boolean(true);
+        });
+
+    // world_schedule_tick x y z n: the block at x y z gets a scheduled tick (its :tick
+    // handler) n game ticks from now, as ctx.schedule_tick does from inside a handler.
+    // False when the world has no scheduler (nothing runs block ticks).
+    engine_->registerFunction("world_schedule_tick",
+        [cellArgs](finescript::ExecutionContext& ctx,
+                   const std::vector<finescript::Value>& args) -> finescript::Value {
+            auto* ud = static_cast<ScriptUserData*>(ctx.userData());
+            auto cell = cellArgs(args);
+            if (!ud || !ud->world || !cell || cell->next >= args.size() ||
+                !args[cell->next].isNumeric()) {
+                return finescript::Value::boolean(false);
+            }
+            UpdateScheduler* scheduler = ud->world->updateScheduler();
+            if (!scheduler) return finescript::Value::boolean(false);
+            scheduler->scheduleTick(cell->pos, static_cast<int>(args[cell->next].asNumber()),
+                                    TickType::Scheduled);
+            return finescript::Value::boolean(true);
+        });
 
     // Block states: `block_prop :door :open` -> :false, `block_with :door :open :true` ->
     // the block named for that state, `block_family` -> the name without its properties.

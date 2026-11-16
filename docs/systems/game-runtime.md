@@ -202,6 +202,19 @@ claim_block scope x y z owner [ttl_ticks]     release_block scope x y z owner
 release_claims owner                          block_claimed scope x y z
 ```
 
+Any cell's block data (the per-block `DataContainer` a block script sees as `data`), from
+any script, and its scheduled ticks:
+
+```
+block_data_get x y z key -> the value, or nil       block_data_get x y z -> all of it as a map
+block_data_set x y z key value -> false if the cell isn't loaded; nil removes the key
+world_schedule_tick x y z n -> the block's :tick handler runs n game ticks from now
+```
+
+The position can also be one `[x y z]`; keys are symbols or strings. Both copy: a map read
+is the script's own (nested maps too), so changing it changes nothing until it is set back,
+and nothing a script keeps points into a subchunk. A write marks the column for saving.
+
 `find_blocks` skips subchunks with a palette check, so a wide search is cheap when the
 block is rare. Use `:air` for air; the natives normalise it.
 

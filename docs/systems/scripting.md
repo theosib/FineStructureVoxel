@@ -82,6 +82,9 @@ ctx.schedule_tick ticks              -- schedule future tick
 ctx.get_neighbor face_symbol         -- block type at adjacent face
 ```
 
+Another cell's data and ticks, from a block script or game code: `block_data_get`,
+`block_data_set`, `world_schedule_tick` (game-runtime.md, "World"). They copy; `data` is live.
+
 ### Fluid native functions
 ```
 fluid_at x y z          -- returns FluidTypeId name (or nil)

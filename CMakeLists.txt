@@ -718,6 +718,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_unified_queue.cpp
         tests/test_mesh_worker_pool.cpp
         tests/test_lod.cpp
+        tests/test_block_registry.cpp
         tests/test_module.cpp
         tests/test_lighting.cpp
         tests/test_light_provider.cpp

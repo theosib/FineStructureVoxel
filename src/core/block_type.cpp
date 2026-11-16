@@ -149,19 +149,51 @@ BlockRegistry::BlockRegistry() {
        .setBlocksSkyLight(false)     // Doesn't block sky light
        .setHardness(0.0f);
 
-    types_[AIR_BLOCK_TYPE] = std::move(air);
+    publish(AIR_BLOCK_TYPE, std::move(air));
+}
+
+const BlockType* BlockRegistry::lookup(BlockTypeId id) const {
+    uint32_t page = id.id >> PAGE_BITS;
+    if (page < PAGE_COUNT) {
+        const Page* p = pages_[page].load(std::memory_order_acquire);
+        return p ? p->slots[id.id & (PAGE_SIZE - 1)].load(std::memory_order_acquire) : nullptr;
+    }
+    std::lock_guard lock(overflowMutex_);
+    auto it = overflow_.find(id);
+    return it == overflow_.end() ? nullptr : it->second;
+}
+
+bool BlockRegistry::publish(BlockTypeId id, BlockType type) {
+    ownedTypes_.push_back(std::make_unique<BlockType>(std::move(type)));
+    const BlockType* version = ownedTypes_.back().get();
+    bool added = false;
+    uint32_t page = id.id >> PAGE_BITS;
+    if (page < PAGE_COUNT) {
+        Page* p = pages_[page].load(std::memory_order_relaxed);
+        if (!p) {
+            ownedPages_.push_back(std::make_unique<Page>());
+            p = ownedPages_.back().get();
+            pages_[page].store(p, std::memory_order_release);
+        }
+        auto& slot = p->slots[id.id & (PAGE_SIZE - 1)];
+        added = slot.load(std::memory_order_relaxed) == nullptr;
+        slot.store(version, std::memory_order_release);
+    } else {
+        std::lock_guard lock(overflowMutex_);
+        added = overflow_.insert_or_assign(id, version).second;
+    }
+    if (added) ++count_;
+    return added;
 }
 
 bool BlockRegistry::registerType(BlockTypeId id, BlockType type) {
     std::unique_lock lock(mutex_);
 
     // Don't allow overwriting
-    if (types_.find(id) != types_.end()) {
+    if (lookup(id) != nullptr) {
         return false;
     }
-
-    types_[id] = std::move(type);
-    return true;
+    return publish(id, std::move(type));
 }
 
 bool BlockRegistry::registerType(std::string_view name, BlockType type) {
@@ -170,7 +202,7 @@ bool BlockRegistry::registerType(std::string_view name, BlockType type) {
 
 void BlockRegistry::registerOrUpdateType(BlockTypeId id, BlockType type) {
     std::unique_lock lock(mutex_);
-    types_[id] = std::move(type);
+    publish(id, std::move(type));
 }
 
 void BlockRegistry::registerOrUpdateType(std::string_view name, BlockType type) {
@@ -178,15 +210,9 @@ void BlockRegistry::registerOrUpdateType(std::string_view name, BlockType type) 
 }
 
 const BlockType& BlockRegistry::getType(BlockTypeId id) const {
-    std::shared_lock lock(mutex_);
-
-    auto it = types_.find(id);
-    if (it != types_.end()) {
-        return it->second;
-    }
-
-    // Return default type for unregistered blocks
-    return defaultType();
+    const BlockType* type = lookup(id);
+    // Default type for unregistered blocks
+    return type ? *type : defaultType();
 }
 
 const BlockType& BlockRegistry::getType(std::string_view name) const {
@@ -198,8 +224,7 @@ const BlockType& BlockRegistry::getType(std::string_view name) const {
 }
 
 bool BlockRegistry::hasType(BlockTypeId id) const {
-    std::shared_lock lock(mutex_);
-    return types_.find(id) != types_.end();
+    return lookup(id) != nullptr;
 }
 
 bool BlockRegistry::hasType(std::string_view name) const {
@@ -212,7 +237,7 @@ bool BlockRegistry::hasType(std::string_view name) const {
 
 size_t BlockRegistry::size() const {
     std::shared_lock lock(mutex_);
-    return types_.size();
+    return count_;
 }
 
 const BlockType& BlockRegistry::defaultType() {

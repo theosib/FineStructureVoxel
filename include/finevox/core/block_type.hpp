@@ -14,8 +14,10 @@
 #include "finevox/core/loot_table.hpp"
 #include "finevox/core/particle_type.hpp"
 
+#include <atomic>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
 #include <shared_mutex>
 #include <optional>
 #include <array>
@@ -360,8 +362,31 @@ private:
         bool hasFactory() const { return factory != nullptr; }
     };
 
+    // Writers (types and handlers) take this; reading a type doesn't
     mutable std::shared_mutex mutex_;
-    std::unordered_map<BlockTypeId, BlockType> types_;
+
+    // Types are read from every mesh worker for every neighbour of every block, so a read takes no
+    // lock: pages of slots by id, each holding the type's current version. A type is built once
+    // and published with a release store; replacing it publishes a new one and keeps the old, so
+    // a reference a reader already has stays good for the life of the registry.
+    static constexpr uint32_t PAGE_BITS = 12;
+    static constexpr uint32_t PAGE_SIZE = 1u << PAGE_BITS;
+    static constexpr uint32_t PAGE_COUNT = 4096;  // Ids under 16M; any past that go in overflow_
+    struct Page {
+        std::array<std::atomic<const BlockType*>, PAGE_SIZE> slots{};
+    };
+    std::array<std::atomic<Page*>, PAGE_COUNT> pages_{};
+    std::vector<std::unique_ptr<Page>> ownedPages_;
+    std::vector<std::unique_ptr<BlockType>> ownedTypes_;  // Every version published
+    mutable std::mutex overflowMutex_;  // Its own, so a writer holding mutex_ can look up
+    std::unordered_map<BlockTypeId, const BlockType*> overflow_;  // Under overflowMutex_
+    size_t count_ = 0;
+
+    /// The current version, or null. No lock unless the id is past the pages (overflowMutex_).
+    [[nodiscard]] const BlockType* lookup(BlockTypeId id) const;
+    /// Publish a version; mutex_ held exclusively. True if the id had none before.
+    bool publish(BlockTypeId id, BlockType type);
+
     std::unordered_map<std::string, HandlerEntry> handlers_;  // Keyed by name string
 };
 

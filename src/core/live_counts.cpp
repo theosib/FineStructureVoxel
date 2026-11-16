@@ -11,7 +11,12 @@
 #define FINEVOX_ASAN 1
 #endif
 #ifdef FINEVOX_ASAN
+#if __has_include(<sanitizer/allocator_interface.h>)
 #include <sanitizer/allocator_interface.h>
+#else
+// GCC's runtime has it, but not the header that declares it
+extern "C" size_t __sanitizer_get_current_allocated_bytes();
+#endif
 #endif
 
 #if defined(__APPLE__)

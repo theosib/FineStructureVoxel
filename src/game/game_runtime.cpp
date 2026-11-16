@@ -878,13 +878,20 @@ void GameRuntime::lightWorld() {
         if (prog && prog->cancelled.load(std::memory_order_relaxed)) {
             throw std::runtime_error("cancelled");
         }
-        light.initializeSkyLight(pos);
+        light.initializeSkyLight(pos, false);
         light.initializeColumnLighting(pos);
         if (ChunkColumn* column = world.getColumn(pos)) column->markLightInitialized();
         if (prog) {
             prog->setColumn(pos.x, pos.z, 2);
             prog->done.fetch_add(1, std::memory_order_relaxed);
         }
+    }
+    // Every column has its straight-down light: now under cover, from beside, across columns
+    for (const ColumnPos& pos : columns) {
+        if (prog && prog->cancelled.load(std::memory_order_relaxed)) {
+            throw std::runtime_error("cancelled");
+        }
+        light.spreadSkyLight(pos);
     }
 }
 

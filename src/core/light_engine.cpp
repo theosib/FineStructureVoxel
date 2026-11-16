@@ -456,7 +456,7 @@ void LightEngine::removeBlockLight(const BlockCoord& pos, uint8_t oldLevel) {
 // Sky Light Updates
 // ============================================================================
 
-void LightEngine::initializeSkyLight(const ColumnPos& columnPos) {
+void LightEngine::initializeSkyLight(const ColumnPos& columnPos, bool spread) {
     ChunkColumn* column = world_.getColumn(columnPos);
     if (!column) return;
 
@@ -479,8 +479,6 @@ void LightEngine::initializeSkyLight(const ColumnPos& columnPos) {
     for (int32_t localZ = 0; localZ < 16; ++localZ) {
         for (int32_t localX = 0; localX < 16; ++localX) {
             int32_t height = column->getHeight(localX, localZ);
-            int32_t worldX = columnPos.x * 16 + localX;
-            int32_t worldZ = columnPos.z * 16 + localZ;
 
             // Above heightmap: full sky light
             // At and below: propagate from above
@@ -505,14 +503,51 @@ void LightEngine::initializeSkyLight(const ColumnPos& columnPos) {
                     }
                 }
             }
+        }
+    }
 
-            // Now propagate sky light horizontally at the surface
-            if (height != std::numeric_limits<int32_t>::min()) {
-                BlockCoord surfacePos{worldX, height, worldZ};
-                propagateSkyLight(surfacePos, SubChunk::MAX_LIGHT);
+    if (spread) spreadSkyLight(columnPos);
+}
+
+void LightEngine::spreadSkyLight(const ColumnPos& columnPos) {
+    ChunkColumn* column = world_.getColumn(columnPos);
+    if (!column || !column->getYBounds()) return;
+    if (column->heightmapDirty()) column->recalculateHeightmap();
+
+    constexpr int32_t NONE = std::numeric_limits<int32_t>::min();
+    auto heightAt = [this](int32_t worldX, int32_t worldZ) {
+        const ChunkColumn* col = world_.getColumn(ColumnPos(worldX >> 4, worldZ >> 4));
+        return col ? col->getHeight(worldX & 15, worldZ & 15) : NONE;
+    };
+
+    // Seed from every open-sky cell a darker one could be beside: from this column's top up to
+    // the tallest of its neighbours (a cliff face, a block's side, the cell under a block next door).
+    // A seed already at full light is spread from as it is; propagateSkyLight would stop at it.
+    std::vector<LightNode> seeds;
+    for (int32_t localZ = 0; localZ < 16; ++localZ) {
+        for (int32_t localX = 0; localX < 16; ++localX) {
+            int32_t worldX = columnPos.x * 16 + localX;
+            int32_t worldZ = columnPos.z * 16 + localZ;
+            int32_t height = column->getHeight(localX, localZ);
+            if (height == NONE) continue;
+            int32_t top = height;
+            for (auto [dx, dz] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                top = std::max(top, heightAt(worldX + dx, worldZ + dz));
+            }
+            for (int32_t y = height; y <= top; ++y) {
+                BlockCoord seed{worldX, y, worldZ};
+                if (getSkyLight(seed) != SubChunk::MAX_LIGHT) continue;
+                // Only where something beside is darker than the spread would make it: open ground
+                // has none, and most of a world is open ground
+                bool darker = false;
+                for (auto [dx, dz] : {std::pair{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                    if (getSkyLight({worldX + dx, y, worldZ + dz}) < SubChunk::MAX_LIGHT - 1) darker = true;
+                }
+                if (darker) seeds.push_back({seed, SubChunk::MAX_LIGHT});
             }
         }
     }
+    propagateLightBFS(seeds, true);  // One pass for the column
 }
 
 void LightEngine::updateSkyLight(const BlockCoord& pos, int32_t oldHeight, int32_t newHeight) {
@@ -560,18 +595,24 @@ void LightEngine::propagateSkyLight(const BlockCoord& pos, uint8_t lightLevel) {
 
 void LightEngine::propagateLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight) {
     if (startLevel == 0) return;
+    propagateLightBFS(std::vector<LightNode>{{start, startLevel}}, isSkyLight);
+}
 
+void LightEngine::propagateLightBFS(const std::vector<LightNode>& starts, bool isSkyLight) {
     // Use priority queue to process higher light levels first
     std::priority_queue<LightNode> queue;
-    queue.push({start, startLevel});
+    for (const LightNode& start : starts) {
+        if (start.light > 0) queue.push(start);
+    }
 
     static const std::array<BlockCoord, 6> offsets = {{
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     }};
 
     int32_t processed = 0;
+    const int64_t limit = static_cast<int64_t>(maxPropagationDistance_) * static_cast<int64_t>(starts.size());
 
-    while (!queue.empty() && processed < maxPropagationDistance_) {
+    while (!queue.empty() && processed < limit) {
         LightNode node = queue.top();
         queue.pop();
         ++processed;

@@ -271,7 +271,15 @@ public:
     /// Initialize sky light for a chunk column
     /// Call after loading a chunk or generating terrain
     /// @param columnPos Column position
-    void initializeSkyLight(const ColumnPos& columnPos);
+    /// @param spread Also spreadSkyLight; leave it off when initializing many columns, and spread
+    ///        them all after
+    void initializeSkyLight(const ColumnPos& columnPos, bool spread = true);
+
+    /// Spread a column's open sky sideways: into cells under cover (an overhang, the cell under a
+    /// block, a cave mouth) here and in the columns beside. A column initialized later sets its own
+    /// cells over what spread into it, so to light a whole area, initialize every column without
+    /// spreading and then spread every column.
+    void spreadSkyLight(const ColumnPos& columnPos);
 
     /// Update sky light after heightmap change
     /// @param pos Position where block was placed/removed affecting sky
@@ -486,6 +494,8 @@ private:
 
     // BFS light propagation implementation
     void propagateLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight);
+    /// From many starts in one pass, each with its share of the propagation limit
+    void propagateLightBFS(const std::vector<LightNode>& starts, bool isSkyLight);
 
     // Light removal with re-propagation
     void removeLightBFS(const BlockCoord& start, uint8_t startLevel, bool isSkyLight);

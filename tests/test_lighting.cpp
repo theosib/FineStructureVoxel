@@ -1759,7 +1759,10 @@ TEST_F(SkyLightClearingTest, ANewSubchunkAboveTheGroundIsOpenToTheSky) {
 }
 
 TEST_F(SkyLightClearingTest, ANewSubchunkUnderARoofStaysDark) {
-    world.setBlock(8, 70, 8, log);
+    // Over the whole column, so no light comes in from beside
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) world.setBlock(x, 70, z, log);
+    }
     initialise();
 
     world.setBlock(3, 40, 3, log);
@@ -1804,4 +1807,31 @@ TEST_F(SkyLightClearingTest, PluggingTheOnlyHoleDarkensWhatItLit) {
     // beyond), one less a step: the hole's light is gone, the cell under it no brighter than the rest
     EXPECT_EQ(engine.getSkyLight({8, 22, 8}), 15 - 8) << "8 steps from the side at x = 16";
     EXPECT_EQ(engine.getSkyLight({5, 22, 8}), 15 - 6) << "6 steps from the side at x = -1";
+}
+
+// Light worked out from scratch (a world loaded: saves keep blocks, not light) is what it would be
+// had it been built in the open: a cell under a block is lit from beside it
+TEST_F(SkyLightClearingTest, AtLoadACellUnderABlockIsLitFromBeside) {
+    world.setBlock(8, 22, 8, log);
+    initialise();
+    EXPECT_EQ(engine.getSkyLight({8, 21, 8}), 14);
+}
+
+// The same where the light comes from the next column, initialized after: each column set first,
+// then each spread, as the game does for a world it loads
+TEST_F(SkyLightClearingTest, AtLoadLightComesInFromTheNextColumn) {
+    for (int x = 16; x < 32; ++x) {
+        for (int z = 0; z < 16; ++z) world.setBlock(x, 20, z, ground);
+    }
+    // A roof over x 0 to 15, open from x = 16 on: the cell at the roof's edge is lit from x = 16
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) world.setBlock(x, 22, z, log);
+    }
+    engine.initializeSkyLight(ColumnPos(0, 0), false);
+    engine.initializeSkyLight(ColumnPos(1, 0), false);
+    engine.spreadSkyLight(ColumnPos(0, 0));
+    engine.spreadSkyLight(ColumnPos(1, 0));
+    EXPECT_EQ(engine.getSkyLight({16, 21, 8}), 15) << "open";
+    EXPECT_EQ(engine.getSkyLight({15, 21, 8}), 14) << "one in under the roof";
+    EXPECT_EQ(engine.getSkyLight({12, 21, 8}), 11) << "four in";
 }

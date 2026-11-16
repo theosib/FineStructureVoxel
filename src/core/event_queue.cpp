@@ -342,6 +342,9 @@ bool UpdateScheduler::processEvent(const BlockEvent& event) {
 
     // Handle BlockPlaced - need to place the block first, then call handler
     if (event.type == EventType::BlockPlaced) {
+        // What's there already (something placed into, as a plant or a fluid's cell) ends first
+        beforeBlockReplaced(world_, event.pos, event.blockType,
+                            event.actorId != INVALID_ENTITY_ID ? event.actorId : event.entityId);
         // Place the block in the world first
         world_.setBlock(event.pos, event.blockType);
         subchunk->setRotation(event.localPos, event.rotation);

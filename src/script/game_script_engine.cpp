@@ -95,17 +95,6 @@ static bool extractPos(const std::vector<finescript::Value>& args,
     return false;
 }
 
-// A value read through a DataContainerProxy, with its nested maps (live proxies into the
-// container) turned into plain maps, all the way down. Arrays are already copies.
-static finescript::Value copyDataValue(const finescript::Value& v) {
-    if (!v.isMap() || !v.asMap().isProxy()) return v;
-    finescript::Value out = finescript::Value::map();
-    for (uint32_t key : v.asMap().keys()) {
-        out.asMap().set(key, copyDataValue(v.asMap().get(key)));
-    }
-    return out;
-}
-
 // ============================================================================
 
 GameScriptEngine::GameScriptEngine(World& world)
@@ -113,6 +102,7 @@ GameScriptEngine::GameScriptEngine(World& world)
     , cache_(*engine_)
     , world_(world)
 {
+    gameScope_ = engine_->globalScope()->createChild();
     engine_->setInterner(&interner_);
     userData_.world = &world_;
     registerNativeFunctions();
@@ -140,7 +130,8 @@ ScriptBlockHandler* GameScriptEngine::loadBlockScript(
         return nullptr;
     }
 
-    auto ctx = std::make_unique<finescript::ExecutionContext>(*engine_);
+    // Under the game's scripts, so it can call what they define
+    auto ctx = std::make_unique<finescript::ExecutionContext>(*engine_, gameScope_->createChild());
     ctx->setUserData(&userData_);
 
     auto result = engine_->execute(*script, *ctx);
@@ -394,8 +385,10 @@ void GameScriptEngine::registerNativeFunctions() {
         if (typeId == airSymbol) typeId = AIR_INTERNED_ID;
 
         BlockCoord pos{x, y, z};
-        BlockTypeId oldType = ud->world->getBlock(pos);
         BlockTypeId newType(typeId);
+        // A block of another family ending hears of it, with its data; one starting, after
+        beforeBlockReplaced(*ud->world, pos, newType);
+        BlockTypeId oldType = ud->world->getBlock(pos);
         ud->world->setBlock(pos, newType);
         if (oldType != newType) {
             if (ud->world->lightEngine()) {
@@ -409,6 +402,7 @@ void GameScriptEngine::registerNativeFunctions() {
             if (auto* ftm = ud->fluidTicks ? ud->fluidTicks : ud->world->fluidTickManager()) {
                 ftm->notifyBlockChanged(pos);
             }
+            afterBlockReplaced(*ud->world, pos, oldType);
         }
         return finescript::Value::nil();
     };
@@ -490,11 +484,11 @@ void GameScriptEngine::registerNativeFunctions() {
             auto local = cell->pos.local();
             DataContainer* data = sub->blockData(local.x, local.y, local.z);
             if (!data) return finescript::Value::nil();
-            auto live = finescript::Value::proxyMap(std::make_shared<DataContainerProxy>(*data));
-            if (cell->next >= args.size()) return copyDataValue(live);
+            if (cell->next >= args.size()) return DataContainerProxy::copyOut(*data);
             auto key = keyOf(args[cell->next]);
             if (!key) return finescript::Value::nil();
-            return copyDataValue(live.asMap().get(*key));
+            const DataValue* raw = data->getRaw(*key);
+            return raw ? DataContainerProxy::copyOut(*raw) : finescript::Value::nil();
         });
     engine_->registerFunction("block_data_set",
         [cellArgs, keyOf](finescript::ExecutionContext& ctx,
@@ -508,20 +502,11 @@ void GameScriptEngine::registerNativeFunctions() {
             if (!key) return finescript::Value::boolean(false);
             finescript::Value value =
                 cell->next + 1 < args.size() ? args[cell->next + 1] : finescript::Value::nil();
-            SubChunk* sub = ud->world->getSubChunk(ChunkPos::fromBlock(cell->pos));
-            if (!sub) return finescript::Value::boolean(false);
-            auto local = cell->pos.local();
-            if (value.isNil()) {
-                DataContainer* data = sub->blockData(local.x, local.y, local.z);
-                if (!data || !data->has(*key)) return finescript::Value::boolean(true);
-                data->remove(*key);
-            } else {
-                DataContainerProxy(sub->getOrCreateBlockData(local.x, local.y, local.z))
-                    .set(*key, value);
+            if (!ud->world->getSubChunk(ChunkPos::fromBlock(cell->pos))) {
+                return finescript::Value::boolean(false);
             }
-            if (auto* cm = ud->world->columnManager()) {
-                cm->markDirty(ColumnPos::fromBlock(cell->pos));
-            }
+            // The proxy marks the column for saving, and only if something changed
+            DataContainerProxy(*ud->world, cell->pos).set(*key, value);
             return finescript::Value::boolean(true);
         });
 

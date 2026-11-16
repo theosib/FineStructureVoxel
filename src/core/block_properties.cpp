@@ -46,6 +46,18 @@ std::string BlockPropertyRegistry::familyOf(std::string_view stateName) {
     return std::string(stateName.substr(0, stateName.find('[')));
 }
 
+bool BlockPropertyRegistry::sameFamily(BlockTypeId a, BlockTypeId b) {
+    if (a == b) return true;
+    if (a.isAir() || b.isAir()) return false;
+    auto local = [](BlockTypeId id) {
+        std::string_view name = id.name();
+        name = name.substr(0, name.find('['));
+        auto colon = name.find(':');
+        return colon == std::string_view::npos ? name : name.substr(colon + 1);
+    };
+    return local(a) == local(b);
+}
+
 std::optional<std::vector<std::string>> BlockPropertyRegistry::valuesOf(std::string_view stateName,
                                                                      std::string& family,
                                                                      std::string& prefix) const {

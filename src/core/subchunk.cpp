@@ -1,4 +1,5 @@
 #include "finevox/core/subchunk.hpp"
+#include "finevox/core/block_properties.hpp"
 #include <algorithm>
 #include "finevox/core/shared_cell.hpp"
 #include "finevox/core/data_container.hpp"
@@ -61,6 +62,8 @@ void SubChunk::setBlock(LocalBlockCoord pos, BlockTypeId type) {
         return;
     }
 
+    dropDataIfFamilyChanges(index, oldType, type);
+
     // Perform the actual block change
     setBlockInternal(index, type, oldType);
 
@@ -82,6 +85,8 @@ void SubChunk::setBlock(uint16_t index, BlockTypeId type) {
         return;
     }
 
+    dropDataIfFamilyChanges(index, oldType, type);
+
     // Perform the actual block change
     setBlockInternal(index, type, oldType);
 
@@ -92,6 +97,14 @@ void SubChunk::setBlock(uint16_t index, BlockTypeId type) {
     if (blockChangeCallback_) {
         blockChangeCallback_(position_, LocalBlockCoord::fromIndex(index), oldType, type);
     }
+}
+
+void SubChunk::dropDataIfFamilyChanges(int32_t index, BlockTypeId oldType, BlockTypeId newType) {
+    if (blockData_.empty()) return;
+    auto it = blockData_.find(index);
+    if (it == blockData_.end()) return;
+    // A kiln lighting up is still that kiln, with its contents; stone in its place isn't
+    if (!BlockPropertyRegistry::sameFamily(oldType, newType)) blockData_.erase(it);
 }
 
 void SubChunk::touchBlock(LocalBlockCoord pos) {

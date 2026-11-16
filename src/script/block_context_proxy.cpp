@@ -1,6 +1,7 @@
 #include "finevox/script/block_context_proxy.hpp"
 #include "finevox/script/data_container_proxy.hpp"
 #include "finevox/core/string_interner.hpp"
+#include "finevox/core/world.hpp"
 #include <finescript/map_data.h>
 #include <finescript/native_function.h>
 
@@ -239,13 +240,14 @@ void BlockContextProxy::set(uint32_t key, finescript::Value value) {
     if (key == f.rotation && value.isInt()) {
         ctx_.setRotationIndex(static_cast<uint8_t>(value.asInt()));
     } else if (key == f.data && value.isMap()) {
+        // Everything the block had, for what the map holds. Converted first: the map may be
+        // this block's own data.
+        auto replacement = DataContainerProxy::toData(value);
+        auto* fresh = replacement ? std::get_if<std::unique_ptr<DataContainer>>(&*replacement) : nullptr;
+        if (!fresh || !*fresh) return;
         DataContainer& dc = ctx_.getOrCreateData();
-        dc.clear();
-        DataContainerProxy proxy(dc);
-        const auto& map = value.asMap();
-        for (uint32_t k : map.keys()) {
-            proxy.set(k, map.get(k));
-        }
+        dc = std::move(**fresh);
+        ctx_.world().noteBlockDataChanged(ctx_.pos());
     }
 }
 

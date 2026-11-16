@@ -504,6 +504,9 @@ private:
     // Internal setBlock implementation (no dirty tracking or callbacks)
     void setBlockInternal(int32_t index, BlockTypeId type, BlockTypeId oldType);
 
+    // A block's data goes when a block of another family takes its cell
+    void dropDataIfFamilyChanges(int32_t index, BlockTypeId oldType, BlockTypeId newType);
+
     [[no_unique_address]] LiveCounter<Counted::SubChunk> liveCounter_;
 };
 

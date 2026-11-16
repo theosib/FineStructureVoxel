@@ -7,6 +7,7 @@
  * would otherwise be a loop over cells or entities in script is done here.
  */
 
+#include "finevox/core/block_handler.hpp"
 #include "finevox/script/game_script_engine.hpp"
 #include "finevox/script/script_game_subsystem.hpp"
 #include "finevox/core/block_mover.hpp"
@@ -245,6 +246,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
                                  static_cast<uint32_t>(z) * 83492791u;
                     double jitter = static_cast<double>((h >> 8) & 0xFF) / 512.0;
                     if (hardness * (1.0 + jitter) >= left) continue;
+                    beforeBlockReplaced(world, p, AIR_BLOCK_TYPE);  // Its handler hears, data and all
                     world.setBlock(p, AIR_BLOCK_TYPE);
                     if (world.lightEngine()) world.enqueueLightingUpdateWithRemesh(p, type, AIR_BLOCK_TYPE);
                     if (auto* mq = world.meshRebuildQueue()) {

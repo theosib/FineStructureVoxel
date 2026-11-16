@@ -65,8 +65,9 @@ struct InternedString {
     bool operator!=(std::string_view s) const { return str() != s; }
 };
 
-// Forward declaration for recursive variant
+// Forward declarations for recursive variant
 class DataContainer;
+struct DataList;
 
 // Type-safe variant for data values
 // Covers common block metadata needs:
@@ -80,6 +81,7 @@ class DataContainer;
 // - vector<int64_t>: integer arrays
 // - vector<double>: float arrays
 // - vector<string>: string arrays
+// - unique_ptr<DataList>: any other list (nil, mixed, nested elements)
 using DataValue = std::variant<
     std::monostate,
     bool,
@@ -91,8 +93,18 @@ using DataValue = std::variant<
     std::unique_ptr<DataContainer>,
     std::vector<int64_t>,
     std::vector<double>,
-    std::vector<std::string>
+    std::vector<std::string>,
+    std::unique_ptr<DataList>
 >;
+
+// A list of any values, in order: nil, mixed types, lists and containers inside. A list of only
+// integers, only floats or only strings is better kept as the typed vector above, and comes
+// back from CBOR as one.
+struct DataList {
+    std::vector<DataValue> items;
+
+    [[nodiscard]] std::unique_ptr<DataList> clone() const;
+};
 
 // Container for arbitrary block metadata
 // Uses interned keys for compact storage and fast lookup

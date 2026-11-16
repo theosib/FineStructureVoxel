@@ -1,4 +1,5 @@
 #include "finevox/core/data_container.hpp"
+#include <algorithm>
 #include <cstring>
 
 namespace finevox {
@@ -62,11 +63,21 @@ DataValue DataContainer::cloneValue(const DataValue& value) {
                 return v->clone();
             }
             return std::unique_ptr<DataContainer>{};
+        } else if constexpr (std::is_same_v<T, std::unique_ptr<DataList>>) {
+            if (v) return v->clone();
+            return std::unique_ptr<DataList>{};
         } else {
             // Copy primitives and vectors
             return v;
         }
     }, value);
+}
+
+std::unique_ptr<DataList> DataList::clone() const {
+    auto result = std::make_unique<DataList>();
+    result->items.reserve(items.size());
+    for (const DataValue& item : items) result->items.push_back(DataContainer::cloneValue(item));
+    return result;
 }
 
 std::unique_ptr<DataContainer> DataContainer::clone() const {
@@ -316,6 +327,13 @@ static void encodeValue(std::vector<uint8_t>& out, const DataValue& value) {
             for (const std::string& item : v) {
                 cbor::encodeString(out, item);
             }
+        } else if constexpr (std::is_same_v<T, std::unique_ptr<DataList>>) {
+            if (!v) {
+                cbor::encodeNull(out);
+                return;
+            }
+            cbor::encodeHeader(out, cbor::ARRAY, v->items.size());
+            for (const DataValue& item : v->items) encodeValue(out, item);
         }
     }, value);
 }
@@ -385,52 +403,41 @@ static DataValue decodeValue(cbor::Decoder& decoder) {
 
         case cbor::ARRAY: {
             auto [mt, count] = decoder.readHeader();
-
-            // Peek at first element to determine array type
             if (count == 0) {
                 return std::vector<int64_t>{};
             }
 
-            uint8_t firstType = decoder.peek() >> 5;
-            uint8_t firstAdditional = decoder.peek() & 0x1F;
-
-            if (firstType == cbor::UNSIGNED_INT || firstType == cbor::NEGATIVE_INT) {
-                std::vector<int64_t> arr;
-                arr.reserve(count);
-                for (uint64_t i = 0; i < count; ++i) {
-                    auto val = decodeValue(decoder);
-                    if (auto* intVal = std::get_if<int64_t>(&val)) {
-                        arr.push_back(*intVal);
-                    }
-                }
-                return arr;
-            } else if (firstType == cbor::SIMPLE && firstAdditional == cbor::FLOAT64) {
-                std::vector<double> arr;
-                arr.reserve(count);
-                for (uint64_t i = 0; i < count; ++i) {
-                    auto val = decodeValue(decoder);
-                    if (auto* dblVal = std::get_if<double>(&val)) {
-                        arr.push_back(*dblVal);
-                    }
-                }
-                return arr;
-            } else if (firstType == cbor::TEXT_STRING) {
-                std::vector<std::string> arr;
-                arr.reserve(count);
-                for (uint64_t i = 0; i < count; ++i) {
-                    auto val = decodeValue(decoder);
-                    if (auto* strVal = std::get_if<std::string>(&val)) {
-                        arr.push_back(std::move(*strVal));
-                    }
-                }
-                return arr;
-            } else {
-                // Skip unsupported array types
-                for (uint64_t i = 0; i < count; ++i) {
-                    decodeValue(decoder);
-                }
-                return std::monostate{};
+            // Every element as it is; then a list of one plain kind becomes the typed vector it
+            // was written from, so saves from before general lists read the same
+            std::vector<DataValue> items;
+            items.reserve(std::min<uint64_t>(count, decoder.size - decoder.pos));
+            for (uint64_t i = 0; i < count && decoder.hasMore(); ++i) {
+                items.push_back(decodeValue(decoder));
             }
+            auto all = [&items](auto test) {
+                return std::all_of(items.begin(), items.end(), [&](const DataValue& v) { return test(v); });
+            };
+            if (all([](const DataValue& v) { return std::holds_alternative<int64_t>(v); })) {
+                std::vector<int64_t> arr;
+                arr.reserve(items.size());
+                for (const DataValue& v : items) arr.push_back(std::get<int64_t>(v));
+                return arr;
+            }
+            if (all([](const DataValue& v) { return std::holds_alternative<double>(v); })) {
+                std::vector<double> arr;
+                arr.reserve(items.size());
+                for (const DataValue& v : items) arr.push_back(std::get<double>(v));
+                return arr;
+            }
+            if (all([](const DataValue& v) { return std::holds_alternative<std::string>(v); })) {
+                std::vector<std::string> arr;
+                arr.reserve(items.size());
+                for (DataValue& v : items) arr.push_back(std::move(std::get<std::string>(v)));
+                return arr;
+            }
+            auto list = std::make_unique<DataList>();
+            list->items = std::move(items);
+            return list;
         }
 
         case cbor::MAP: {

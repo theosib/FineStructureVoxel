@@ -151,6 +151,9 @@ public:
 
     // Attach optional ColumnManager for column lifecycle and dirty tracking
     void setColumnManager(ColumnManager* manager);
+
+    /// A block's data changed in place (nothing else marks it): its column needs saving
+    void noteBlockDataChanged(BlockCoord pos);
     [[nodiscard]] ColumnManager* columnManager() { return columnManager_; }
     [[nodiscard]] const ColumnManager* columnManager() const { return columnManager_; }
 

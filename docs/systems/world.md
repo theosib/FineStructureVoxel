@@ -118,6 +118,11 @@ sc.setBlockType(localIndex, blockTypeId);
 DataContainer* data = sc.blockData(localIndex);           // nullptr if none
 DataContainer& data = sc.getOrCreateBlockData(localIndex); // creates if needed
 
+// A block's data goes when a block of another family takes its cell (BlockPropertyRegistry::
+// sameFamily: the name without properties or namespace). A state change (a kiln lighting
+// up) keeps it; stone in its place doesn't. Data written in place marks nothing: call
+// World::noteBlockDataChanged(pos) so the column is saved.
+
 // Subchunk-level data
 DataContainer* data = sc.data();
 DataContainer& data = sc.getOrCreateData();
@@ -136,6 +141,15 @@ bool wantsTick = sc.hasGameTickBlocks();
 ```
 
 ---
+
+## Replacing a block outside block events
+
+Breaking and placing through block events run the handlers. Anything else that replaces a
+block calls `beforeBlockReplaced(world, pos, newType)` first and `afterBlockReplaced(world, pos,
+oldType)` after (`block_handler.hpp`): when the family changes, the old block's `onDestroy` runs
+with its data still there and its scheduled ticks are cancelled, and the new block's `onPlace`
+runs. `world_set_block`, `explode`, a block mover's broken cells, and placing over a block do
+this. Blocks without handlers cost nothing.
 
 ## ChunkColumn
 

@@ -576,4 +576,25 @@ private:
     bool neighborsNotified_ = false;
 };
 
+// ============================================================================
+// A block replaced by something other than block events
+// ============================================================================
+//
+// Breaking and placing through block events (UpdateScheduler) run handlers themselves. A system or
+// script that replaces a block directly (setting a block, an explosion, a block mover's broken
+// cells) brackets the change with these, so a block's handler hears of its end, with its data
+// still there, whoever ended it. Only a change of family counts: a block changing state is the
+// same block.
+
+/// Before the block at `pos` is replaced with `newType`: if that's another family, the old
+/// block's handler gets onDestroy and the cell's scheduled ticks are cancelled. True if a
+/// handler ran.
+bool beforeBlockReplaced(World& world, BlockCoord pos, BlockTypeId newType,
+                         EntityId actor = INVALID_ENTITY_ID);
+
+/// After: if the block there now is of another family than `previousType`, its handler gets
+/// onPlace. True if a handler ran.
+bool afterBlockReplaced(World& world, BlockCoord pos, BlockTypeId previousType,
+                        EntityId actor = INVALID_ENTITY_ID);
+
 }  // namespace finevox

@@ -12,7 +12,7 @@ namespace finevox::script {
 
 ScriptGameSubsystem::ScriptGameSubsystem(GameScriptEngine& scripts)
     : scripts_(scripts)
-    , ctx_(std::make_unique<finescript::ExecutionContext>(scripts.engine()))
+    , ctx_(std::make_unique<finescript::ExecutionContext>(scripts.engine(), scripts.gameScope()))
     , tickEvent_(scripts.engine().intern("tick"))
 {
     ctx_->setUserData(&scripts.userData());

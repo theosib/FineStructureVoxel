@@ -818,6 +818,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_script_entity.cpp
             tests/test_script_fluid.cpp
             tests/test_script_block_data.cpp
+            tests/test_block_data_lifecycle.cpp
             tests/test_event_value.cpp
             tests/test_hotbar_bridge.cpp
             tests/test_inventory_natives.cpp

@@ -643,6 +643,10 @@ void World::notifyColumnRemoved(ColumnPos pos) {
     for (const auto& o : observers_) o->columnRemoved(pos);
 }
 
+void World::noteBlockDataChanged(BlockCoord pos) {
+    if (columnManager_) columnManager_->markDirty(blockToColumn(pos));
+}
+
 void World::setUpdateScheduler(UpdateScheduler* scheduler) {
     std::unique_lock lock(columnMutex_);
     updateScheduler_ = scheduler;

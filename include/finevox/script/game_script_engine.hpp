@@ -78,6 +78,12 @@ public:
     /// Access cache for direct script use outside block handlers.
     ScriptCache& cache() { return cache_; }
 
+    /// Where the game's own scripts keep their top-level names (ScriptGameSubsystem's context
+    /// lives in it). Each block script's context is a child of it, so a block script can call
+    /// what the game scripts define and read their constants, whichever loaded first; names it
+    /// defines itself stay its own. Setting a top-level name the game scripts have sets theirs.
+    [[nodiscard]] const std::shared_ptr<finescript::Scope>& gameScope() const { return gameScope_; }
+
     /// Set entity manager reference (for mob.spawn etc.)
     void setEntityManager(EntityManager* em);
 
@@ -111,6 +117,7 @@ private:
     ScriptCache cache_;
     World& world_;
     ScriptUserData userData_;
+    std::shared_ptr<finescript::Scope> gameScope_;
 
     // Owns all script block handlers (keyed by block name)
     std::unordered_map<std::string, std::unique_ptr<ScriptBlockHandler>> handlers_;

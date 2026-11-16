@@ -20,8 +20,9 @@ All persistent data uses CBOR (RFC 8949). `DataContainer` is the universal in-me
 // Keys are interned from the global StringInterner (same pool as block types)
 DataContainer dc;
 
-// Basic types: int64_t, double, bool, std::string, std::vector<uint8_t>
-// Nested DataContainer, std::vector<DataValue>
+// Basic types: int64_t, double, bool, std::string, InternedString, std::vector<uint8_t>
+// Typed vectors of int64_t, double, std::string; nested DataContainer; and DataList, a
+// list of any DataValues (nil, mixed, nested), which is what an inventory is
 
 dc.set("health", int64_t(100));
 dc.set("name", std::string("finevox:stone"));
@@ -47,6 +48,11 @@ DataContainer::DataKey key = ...;
 ```
 
 **InternedString** in DataContainer: stored as `uint32_t`, serialized as CBOR tagged string (tag 39); must be re-interned on load.
+
+**Lists** are CBOR arrays. On load an array of only integers, only floats or only untagged
+strings becomes the typed vector; anything else a `DataList`. So saves from before `DataList`
+read the same, and a `DataList` that happens to hold only integers comes back as a typed vector
+(a script sees the same array either way).
 
 ---
 

@@ -2,6 +2,7 @@
 #include "finevox/core/world.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/block_properties.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/event_queue.hpp"  // For UpdateScheduler
 #include "finevox/core/fluid_tick_manager.hpp"
@@ -217,6 +218,37 @@ std::vector<ItemStack> BlockContext::rollBlockLoot(const LootContext& extraCtx) 
     ctx.position = pos_;
 
     return LootRegistry::global().roll(tableId, ctx);
+}
+
+bool beforeBlockReplaced(World& world, BlockCoord pos, BlockTypeId newType, EntityId actor) {
+    BlockTypeId oldType = world.getBlock(pos);
+    if (oldType.isAir() || BlockPropertyRegistry::sameFamily(oldType, newType)) return false;
+    BlockHandler* handler = BlockRegistry::global().getHandler(oldType);
+    if (!handler) return false;
+    SubChunk* sub = world.getSubChunk(ChunkPos::fromBlock(pos));
+    if (!sub) return false;
+    UpdateScheduler* scheduler = world.updateScheduler();
+    if (scheduler) scheduler->cancelScheduledTicks(pos);
+    BlockContext ctx(world, *sub, pos, pos.local());
+    ctx.setScheduler(scheduler);
+    ctx.setActor(actor);
+    handler->onDestroy(ctx);
+    return true;
+}
+
+bool afterBlockReplaced(World& world, BlockCoord pos, BlockTypeId previousType, EntityId actor) {
+    BlockTypeId newType = world.getBlock(pos);
+    if (newType.isAir() || BlockPropertyRegistry::sameFamily(previousType, newType)) return false;
+    BlockHandler* handler = BlockRegistry::global().getHandler(newType);
+    if (!handler) return false;
+    SubChunk* sub = world.getSubChunk(ChunkPos::fromBlock(pos));
+    if (!sub) return false;
+    BlockContext ctx(world, *sub, pos, pos.local());
+    ctx.setScheduler(world.updateScheduler());
+    ctx.setActor(actor);
+    ctx.setPreviousType(previousType);
+    handler->onPlace(ctx);
+    return true;
 }
 
 }  // namespace finevox

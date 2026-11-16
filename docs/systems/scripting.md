@@ -47,7 +47,7 @@ Block events (use `on :symbol` in .fsc files):
 | Symbol | When fired |
 |--------|-----------|
 | `:place` | Block placed in world |
-| `:destroy` | Block broken |
+| `:destroy` | Block ends: broken, or replaced by a block of another family however that happened (`world_set_block`, an explosion, a mover, placing over it). `data` is still there. |
 | `:tick` | Game tick (if `wantsGameTicks()` = true) |
 | `:neighbor_updated` | Adjacent block changed |
 | `:block_update` | Generic block update |
@@ -58,6 +58,22 @@ Block events (use `on :symbol` in .fsc files):
 Entity events: `:spawn`, `:tick`, `:damage`, `:death`, `:interact`, `:strike`
 
 Face symbols: `:pos_x`, `:neg_x`, `:pos_y`, `:neg_y`, `:pos_z`, `:neg_z`
+
+### A block's `data`
+
+`data` is the block's own map, saved with its chunk, moved by a block mover, and gone when a
+block of another family takes the cell. It holds nil-free maps of numbers, strings, symbols,
+bools, maps and lists of any of these (an inventory, `[nil [:stone 3] ...]`). A list read from it
+is a copy: change it and set it back. A nested map is live (`set data.fuel.left 3` writes
+through). Neither `data` nor a nested map points into the world: each finds the cell again when
+used, so one kept past its block reads nil and writes nowhere. A write marks the chunk for saving.
+
+### Block scripts and the game's scripts
+
+A block script's context is a child of the game scripts' (`GameScriptEngine::gameScope`): it can
+call the functions the game's scripts define and read their top-level names, whichever loaded
+first, since names are looked up when a handler runs. What it defines stays its own, but `set`
+on a name the game's scripts have sets theirs.
 
 ---
 

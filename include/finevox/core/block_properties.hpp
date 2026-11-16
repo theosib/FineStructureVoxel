@@ -42,6 +42,11 @@ public:
     /// A state's block name without its properties: `ns:door[open=true]` is `ns:door`
     [[nodiscard]] static std::string familyOf(std::string_view stateName);
 
+    /// Whether two block types are states of one block: the same name once properties and any
+    /// namespace are taken off (a block can be in the world under its short name or its full
+    /// one). Air is a family of its own.
+    [[nodiscard]] static bool sameFamily(BlockTypeId a, BlockTypeId b);
+
     /// One property of a state, or nothing if the block has no such property
     [[nodiscard]] std::optional<std::string> property(std::string_view stateName,
                                                       std::string_view prop) const;

@@ -1,5 +1,6 @@
 #include "finevox/core/block_mover.hpp"
 
+#include "finevox/core/block_handler.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/subchunk.hpp"
@@ -82,6 +83,9 @@ void applyMove(World& world, const MovePlan& plan, Face dir, std::vector<BlockCo
         uint8_t rotation = 0;
         std::unique_ptr<DataContainer> data;
     };
+
+    // What breaks hears of it first, with its data: before anything has moved
+    for (const BlockCoord& pos : plan.breaks) beforeBlockReplaced(world, pos, AIR_BLOCK_TYPE);
 
     // Lift everything out first, so no block is written over before it moves
     std::vector<Carried> carried;

@@ -234,7 +234,8 @@ Cells:
 A client MUST refuse a subchunk whose indices aren't all inside its palette, or whose cells come to
 more than 64 KiB.
 
-A client MUST ignore a server's change to a cell it's predicting (§7.3) until that prediction ends.
+A client MUST ignore a server's change to a cell it's predicting (§7.3) until that prediction ends,
+and MAY end it on a change that shows the server has acted (§7.3).
 A subchunk a client hasn't been sent is unknown, not empty. A client SHOULD treat its light as full
 sky, so that terrain at the edge of what's known isn't drawn black.
 
@@ -318,6 +319,14 @@ A server MAY close a connection that exceeds these. A client MUST stay inside th
 A client MAY show its own action at once. Sending `ExpectChange` asks the server to look at that
 column soon, instead of waiting for its sweep to come round. A client that predicts SHOULD hold a
 prediction for at least a round trip, and then take the server's word.
+
+A subchunk sent before the server ran the command still shows the cell as it was, which is why the
+hold exists. A client MAY end a prediction early, taking the server's block, when that block shows
+the server has acted: it is the block predicted, or the cell was predicted once and the server's
+block is anything other than what the cell held before. The server's block may be a fuller form of
+the prediction (a piece that joins what's beside it), and should show without waiting out the hold.
+With more than one prediction on a cell, a change may answer an earlier one; only agreement with the
+latest ends it early.
 
 ---
 

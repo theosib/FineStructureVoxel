@@ -262,6 +262,8 @@ TEST_F(ClientWorldTest, TheServersLastWordWinsWhenAPredictionEnds) {
     world.apply(stoneWith(BlockCoord(15, 15, 15), 2));
     world.predict(spot, marker, 100ms);
 
+    world.predict(spot, marker, 100ms);  // Twice: a change may answer the first
+
     SubchunkData air = stoneWith(BlockCoord(15, 15, 15), 2);
     air.palette = {1, 2, 0};
     air.indices[spot.x + spot.z * 16 + spot.y * 256] = 2;
@@ -270,6 +272,38 @@ TEST_F(ClientWorldTest, TheServersLastWordWinsWhenAPredictionEnds) {
 
     world.settle(ClientWorld::Clock::now() + 200ms);
     EXPECT_TRUE(world.world().getBlock(spot).isAir());
+}
+
+TEST_F(ClientWorldTest, TheServerHavingActedEndsAPredictionAtOnce) {
+    // A piece predicted plain that the server puts down joined to its neighbours
+    auto joined = BlockTypeId::fromName("net_joined");
+    world.nameBlock(3, "net_joined");
+    SubchunkData before = stoneWith(BlockCoord(15, 15, 15), 2);
+    before.palette = {1, 2, 0};
+    before.indices[spot.x + spot.z * 16 + spot.y * 256] = 2;
+    world.apply(before);
+    world.predict(spot, marker, 100s);
+    EXPECT_EQ(world.world().getBlock(spot), marker);
+
+    SubchunkData after = before;
+    after.palette = {1, 2, 0, 3};
+    after.indices[spot.x + spot.z * 16 + spot.y * 256] = 3;
+    world.apply(after);
+    EXPECT_EQ(world.world().getBlock(spot), joined) << "not after the hold";
+}
+
+TEST_F(ClientWorldTest, TheServerSayingWhatWasPredictedEndsItAtOnce) {
+    world.apply(stoneWith(BlockCoord(15, 15, 15), 2));
+    world.predict(spot, marker, 100s);
+    world.predict(spot, stone, 100s);  // Clicked twice, back where it was
+
+    world.apply(stoneWith(spot, 2));
+    EXPECT_EQ(world.world().getBlock(spot), stone) << "answers the first click only: still held";
+
+    world.apply(stoneWith(BlockCoord(15, 15, 15), 2));
+    EXPECT_EQ(world.world().getBlock(spot), stone) << "agrees with the last";
+    world.apply(stoneWith(spot, 2));
+    EXPECT_EQ(world.world().getBlock(spot), marker) << "and that ended it: the server's word goes";
 }
 
 TEST(ContentTest, Sha256MatchesKnownVectors) {

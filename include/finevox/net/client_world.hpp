@@ -37,7 +37,10 @@ public:
     void nameFluid(uint32_t wireId, std::string_view name);
 
     /// Take a subchunk from the server, whole. Cells under prediction keep their predicted block
-    /// and the server's is held until the prediction ends.
+    /// and the server's is held until the prediction ends, unless what the server says shows it
+    /// has acted: the block predicted, or (for a cell predicted once) anything but what was there
+    /// before. That ends the prediction now, with the server's block, which may be a fuller form
+    /// of the one predicted (a piece that joins its neighbours).
     void apply(const SubchunkData& data);
 
     /// Show the block the player's own action should leave here, now. If the server hasn't said
@@ -56,8 +59,16 @@ public:
 private:
     struct Prediction {
         BlockTypeId before;     ///< What's there if the server never says anything
+        BlockTypeId predicted;  ///< The latest prediction
+        int made = 0;           ///< Predictions on this cell; with more than one, a change from
+                                ///< `before` may answer an earlier one
         std::optional<BlockTypeId> serverSays;
         Clock::time_point until;
+
+        /// The server's word shows it has acted on what was predicted
+        [[nodiscard]] bool answeredBy(BlockTypeId block) const {
+            return block == predicted || (made == 1 && block != before);
+        }
     };
 
     void remesh(ChunkPos chunk, bool neighbours);

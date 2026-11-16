@@ -63,8 +63,12 @@ void ClientWorld::apply(const SubchunkData& data) {
 
                 auto predicted = predictions_.find(world);
                 if (predicted != predictions_.end()) {
-                    predicted->second.serverSays = block;
-                    continue;
+                    if (!predicted->second.answeredBy(block)) {
+                        predicted->second.serverSays = block;
+                        continue;
+                    }
+                    // The server has done it: its word now, not when the hold runs out
+                    predictions_.erase(predicted);
                 }
                 if (subchunk.getBlock(static_cast<uint16_t>(index)) != block) {
                     subchunk.setBlock(static_cast<uint16_t>(index), block);
@@ -100,6 +104,8 @@ void ClientWorld::predict(BlockCoord pos, BlockTypeId block, std::chrono::millis
         auto [it, inserted] = predictions_.try_emplace(pos);
         // A second prediction on a cell is still measured against what the server last said
         if (inserted) it->second.before = before;
+        it->second.predicted = block;
+        ++it->second.made;
         it->second.until = Clock::now() + hold;
     }
     world_.setBlock(pos, block);

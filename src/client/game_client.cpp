@@ -2078,20 +2078,21 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
-    // marker_edges x y z sx sy sz r g b [a] [=pixels n]: the edges of that box as lines, n pixels
-    // thick (1.5) however far away, drawn a hair nearer the eye than the faces they lie on
+    // marker_edges x y z sx sy sz r g b [a] [=points n]: the edges of that box as lines, n screen
+    // points thick (1.5) however far away, drawn a hair nearer the eye than the faces they lie on
     e.registerFunction("marker_edges", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 9) return Value::nil();
-        float pixels = 1.5f;
+        float points = 1.5f;
         if (args.back().isMap()) {
-            Value n = args.back().asMap().get(StringInterner::global().intern("pixels"));
-            if (n.isNumeric()) pixels = static_cast<float>(n.asNumber());
+            Value n = args.back().asMap().get(StringInterner::global().intern("points"));
+            if (n.isNumeric()) points = static_cast<float>(n.asNumber());
         }
         glm::vec3 lo(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) - camera.positionD());
         glm::vec3 hi = lo + glm::vec3(number(args[3]), number(args[4]), number(args[5]));
-        // A pixel's height at one unit away, from the vertical field of view
-        float perPixel = 2.0f * std::tan(glm::radians(FOV_DEGREES) * 0.5f) / std::max(viewport.y, 1.0f);
-        render::appendBoxEdges(markers, lo, hi, pixels * perPixel, colorArg(args, 6));
+        // A point's height at one unit away, from the vertical field of view (the viewport is the
+        // window in points, as the UI is)
+        float perPoint = 2.0f * std::tan(glm::radians(FOV_DEGREES) * 0.5f) / std::max(viewport.y, 1.0f);
+        render::appendBoxEdges(markers, lo, hi, points * perPoint, colorArg(args, 6));
         return Value::nil();
     });
 

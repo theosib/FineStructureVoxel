@@ -292,7 +292,7 @@ ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
 entity_type id -> :militia, or nil if not known
 marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
-marker_edges x y z sx sy sz r g b [a] [=pixels 1.5]   a box's edges as lines, as thick on screen
+marker_edges x y z sx sy sz r g b [a] [=points 1.5]   a box's edges as lines, as thick on screen
                    near as far, a hair nearer the eye than the faces they lie on
 block_shape block [:collision] -> [[x0 y0 z0 x1 y1 z1] ...]   the state's hit shape (what a
                    click hits), or what a body bumps into, as that state is turned

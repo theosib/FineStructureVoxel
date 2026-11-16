@@ -368,6 +368,14 @@ TEST(CollisionShapeTest, AddBox) {
     EXPECT_EQ(shape.boxes().size(), 1);
 }
 
+TEST(CollisionShapeTest, ABoxAlreadyThereAddsNothing) {
+    CollisionShape shape;
+    shape.addBox(AABB(0.0f, 0.0f, 0.0f, 1.0f, 0.0625f, 1.0f));
+    shape.addBox(AABB(0.0f, 0.0f, 0.0f, 1.0f, 0.0625f, 1.0f));
+    shape.addBox(AABB(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0625f));
+    EXPECT_EQ(shape.boxes().size(), 2u);
+}
+
 TEST(CollisionShapeTest, Bounds) {
     CollisionShape shape;
     shape.addBox(AABB(0.0f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f));

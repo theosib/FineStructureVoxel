@@ -1,4 +1,6 @@
 #include "finevox/core/physics.hpp"
+
+#include <algorithm>
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/fluid_layer.hpp"   // FLUID_SOURCE_LEVEL
@@ -197,6 +199,7 @@ bool AABB::rayIntersect(const Vec3& origin, const Vec3& direction,
 // ============================================================================
 
 void CollisionShape::addBox(const AABB& box) {
+    if (std::find(boxes_.begin(), boxes_.end(), box) != boxes_.end()) return;
     boxes_.push_back(box);
 }
 

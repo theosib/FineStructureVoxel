@@ -177,7 +177,8 @@ class CollisionShape {
 public:
     CollisionShape() = default;
 
-    // Add a box to the shape (in local [0,1] coordinates)
+    // Add a box to the shape (in local [0,1] coordinates). A box the shape already has adds
+    // nothing: parts of a block that share a box (two halves of a straight line) make one.
     void addBox(const AABB& box);
 
     // Get all boxes

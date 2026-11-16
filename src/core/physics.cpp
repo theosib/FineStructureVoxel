@@ -145,10 +145,11 @@ bool AABB::rayIntersect(const Vec3& origin, const Vec3& direction,
             float tNear = (boxMin - rayOrigin) * invDir;
             float tFar = (boxMax - rayOrigin) * invDir;
 
-            bool enteredNeg = true;  // Entering from negative side
+            // A ray going the positive way enters by the negative face. Decided by the direction,
+            // not by which time is smaller: a box flat on this axis (a sheet) has them equal.
+            bool enteredNeg = rayDir > 0.0f;
             if (tNear > tFar) {
                 std::swap(tNear, tFar);
-                enteredNeg = false;
             }
 
             if (tNear > t1) {

@@ -605,6 +605,30 @@ TEST(RayAABBTest, InsideBox) {
     EXPECT_GT(tMax, 0.0f);            // Exit is in front
 }
 
+// A sheet, flat on one axis (a mark on the floor, something hung on a wall): the face hit is the
+// side the ray comes from, as for any box
+TEST(RayAABBTest, AFlatSheetIsHitOnTheSideTheRayComesFrom) {
+    AABB floorMark(0.0f, 0.0156f, 0.0f, 1.0f, 0.0156f, 1.0f);
+    Face hitFace = Face::NegX;
+    float tMin = 0.0f;
+    EXPECT_TRUE(floorMark.rayIntersect(Vec3(0.5f, 1.6f, -0.5f), Vec3(0.0f, -0.8f, 0.6f), &tMin, nullptr,
+                                       &hitFace));
+    EXPECT_EQ(hitFace, Face::PosY) << "looked at from above";
+    EXPECT_NEAR(tMin, (1.6f - 0.0156f) / 0.8f, 0.001f);
+
+    EXPECT_TRUE(floorMark.rayIntersect(Vec3(0.5f, -1.0f, 0.5f), Vec3(0.0f, 1.0f, 0.0f), nullptr, nullptr,
+                                       &hitFace));
+    EXPECT_EQ(hitFace, Face::NegY) << "from below";
+
+    AABB wallMark(0.95f, 0.0f, 0.0f, 0.95f, 1.0f, 1.0f);
+    EXPECT_TRUE(wallMark.rayIntersect(Vec3(3.0f, 0.5f, 0.5f), Vec3(-1.0f, 0.0f, 0.1f), nullptr, nullptr,
+                                      &hitFace));
+    EXPECT_EQ(hitFace, Face::PosX) << "from the east";
+    EXPECT_TRUE(wallMark.rayIntersect(Vec3(-2.0f, 0.5f, 0.5f), Vec3(1.0f, 0.0f, 0.1f), nullptr, nullptr,
+                                      &hitFace));
+    EXPECT_EQ(hitFace, Face::NegX) << "from the west";
+}
+
 TEST(RayAABBTest, BoxBehindRay) {
     AABB box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
     Vec3 origin(2.0f, 0.5f, 0.5f);  // Past box

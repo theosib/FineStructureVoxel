@@ -555,6 +555,14 @@ without a lock. The string interner, the user's settings and the resource roots 
 they belong to the run, not the game. A test scans the headers for every `static X& global()`
 and fails if one hasn't joined.
 
+`core/live_counts.hpp` says how many worlds, columns, subchunks, entities and sessions exist
+(each holds a `LiveCounter` member), how many threads the process has, and how many heap bytes
+the program holds (the sanitizer's own count under ASan, whose quarantine the platform's figure
+would include). `tests/test_game_cycles.cpp` starts and stops games over and over with them: all
+back to where they started after each, the heap flat after the first, and two games in turn
+seeing only their own content. Leaks proper need LeakSanitizer, which doesn't run on macOS on
+Apple silicon: run that test in an ASan build on Linux.
+
 Each faction with a player has its own memory in the save, and seats go by name, so a host resuming
 a game gets everyone back on their own side. A hosted game keeps to `saves/hosted`, and a server
 that says `saves: true` keeps to `saves/server`, so neither costs you the game you were playing.

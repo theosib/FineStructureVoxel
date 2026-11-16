@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <limits>
 #include <chrono>
+#include "finevox/core/live_counts.hpp"
 
 namespace finevox {
 
@@ -283,6 +284,8 @@ private:
     [[nodiscard]] static constexpr int32_t toHeightmapIndex(int32_t localX, int32_t localZ) {
         return localZ * 16 + localX;
     }
+
+    [[no_unique_address]] LiveCounter<Counted::ChunkColumn> liveCounter_;
 };
 
 }  // namespace finevox

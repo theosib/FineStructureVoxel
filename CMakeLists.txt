@@ -79,6 +79,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/position.cpp
     src/core/string_interner.cpp
     src/core/global_registries.cpp
+    src/core/live_counts.cpp
     src/core/palette.cpp
     src/core/subchunk.cpp
     src/core/chunk_column.cpp
@@ -823,6 +824,7 @@ if(FINEVOX_BUILD_TESTS)
             tests/test_entity_script_wiring.cpp
             tests/test_player_stats_bridge.cpp
             tests/test_game_runtime.cpp
+            tests/test_game_cycles.cpp
             tests/test_mcp_server.cpp
         )
 

@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "finevox/core/live_counts.hpp"
 
 namespace finevox {
 
@@ -165,6 +166,8 @@ private:
     GameSession();
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    [[no_unique_address]] LiveCounter<Counted::GameSession> liveCounter_;
 };
 
 }  // namespace finevox

@@ -26,6 +26,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include "finevox/core/live_counts.hpp"
 
 namespace finevox {
 
@@ -386,6 +387,8 @@ private:
 
     // Per-world stable name↔ID mapping (for inventory serialization, networking)
     NameRegistry nameRegistry_;
+
+    [[no_unique_address]] LiveCounter<Counted::World> liveCounter_;
 };
 
 }  // namespace finevox

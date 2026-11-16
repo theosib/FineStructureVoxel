@@ -23,6 +23,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include "finevox/core/live_counts.hpp"
 
 namespace finevox {
 
@@ -502,6 +503,8 @@ private:
 
     // Internal setBlock implementation (no dirty tracking or callbacks)
     void setBlockInternal(int32_t index, BlockTypeId type, BlockTypeId oldType);
+
+    [[no_unique_address]] LiveCounter<Counted::SubChunk> liveCounter_;
 };
 
 }  // namespace finevox

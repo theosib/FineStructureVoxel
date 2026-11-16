@@ -11,6 +11,7 @@
 #include "finevox/core/data_container.hpp"
 #include "finevox/core/physics.hpp"
 #include <string>
+#include "finevox/core/live_counts.hpp"
 
 namespace finevox {
 
@@ -273,6 +274,8 @@ protected:
 
     // Per-entity extra data (inventory, custom state, etc.)
     std::unique_ptr<DataContainer> entityData_;
+
+    [[no_unique_address]] LiveCounter<Counted::Entity> liveCounter_;
 };
 
 // ============================================================================

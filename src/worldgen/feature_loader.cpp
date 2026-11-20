@@ -124,6 +124,7 @@ std::optional<ClusterConfig> FeatureLoader::parseClusterConfig(const ConfigDocum
     config.radius = doc.getInt("radius", config.radius);
     config.minHeight = doc.getInt("min_stack", config.minHeight);
     config.maxHeight = doc.getInt("max_stack", config.maxHeight);
+    config.lowestGround = doc.getInt("place_min_height", config.lowestGround);
 
     return config;
 }

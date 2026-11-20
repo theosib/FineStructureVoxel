@@ -34,7 +34,8 @@ struct GameManifest {
     bool caves = false;
     std::string terrain;  ///< A .terrain file (density_graph.hpp) in place of the built-in terrain
     std::vector<std::string> worldBiomes;  ///< Only these biomes. Empty means all of them.
-    /// Rivers and lakes (`river_scale`, `river_width`, `river_depth`, `river_marshes`,
+    /// Rivers and lakes (`river_scale`, `river_course` noise or line, `river_heading`,
+    /// `river_meander`, `river_width`, `river_depth`, `river_marshes`,
     /// `marsh_width`, `marsh_block`, `river_fords`, `ford_block`, `lake_scale`, `lake_threshold`, `lake_depth`, `bank_slope`):
     /// see WaterwaySettings
     worldgen::WaterwaySettings waterways;

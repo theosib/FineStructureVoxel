@@ -12,6 +12,7 @@
 #include "finevox/worldgen/feature.hpp"
 #include "finevox/core/string_interner.hpp"
 
+#include <limits>
 #include <string>
 
 namespace finevox::worldgen {
@@ -26,6 +27,10 @@ struct ClusterConfig {
     int32_t radius = 3;          ///< Horizontal spread
     int32_t minHeight = 1;       ///< Stack height range
     int32_t maxHeight = 1;
+    /// Lowest ground any of it stands on (`place_min_height`, which also limits where the
+    /// cluster's middle goes). Its blocks spread and drop to the ground, so without this one
+    /// at a shore ends up on the bed, where the water takes all but the top of a stack.
+    int32_t lowestGround = std::numeric_limits<int32_t>::min();
 };
 
 class ClusterFeature : public Feature {

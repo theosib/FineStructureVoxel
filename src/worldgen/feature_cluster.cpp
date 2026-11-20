@@ -57,6 +57,7 @@ FeatureResult ClusterFeature::place(FeaturePlacementContext& ctx) {
         }
         BlockCoord below(pos.x, pos.y - 1, pos.z);
         if (isOpen(ctx.world, below) || !isOpen(ctx.world, pos)) continue;
+        if (below.y < config_.lowestGround) continue;
         if (!config_.requiredBelow.isAir() && ctx.world.getBlock(below) != config_.requiredBelow) {
             continue;
         }

@@ -78,6 +78,12 @@ private:
 /// they meet where they cross. A scale of 0 leaves that kind out.
 struct WaterwaySettings {
     float riverScale = 0.0f;   ///< Noise frequency: lower is fewer, longer rivers
+    /// One river, on a line through the origin, in place of wherever the noise puts them: across
+    /// the map at riverHeading degrees (0 runs along z), wandering up to about riverMeander
+    /// blocks either side of the line, at riverScale.
+    bool riverLine = false;
+    float riverHeading = 0.0f;
+    float riverMeander = 40.0f;
     float riverWidth = 6.0f;   ///< Blocks across at the surface
     int32_t riverDepth = 3;    ///< Blocks of water at the middle
     /// Rivers spread into a marsh where a noise is below this (-1..1): wider, a block deep,

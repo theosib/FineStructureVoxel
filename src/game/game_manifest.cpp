@@ -43,6 +43,9 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     w.riverScale = doc->getFloat("river_scale", w.riverScale);
     w.riverWidth = doc->getFloat("river_width", w.riverWidth);
     w.riverDepth = doc->getInt("river_depth", w.riverDepth);
+    w.riverLine = doc->getString("river_course", "noise") == "line";
+    w.riverHeading = doc->getFloat("river_heading", w.riverHeading);
+    w.riverMeander = doc->getFloat("river_meander", w.riverMeander);
     w.riverMarshes = doc->getFloat("river_marshes", w.riverMarshes);
     w.marshWidth = doc->getFloat("marsh_width", w.marshWidth);
     w.marshBlock = std::string(doc->getString("marsh_block", w.marshBlock));
@@ -106,6 +109,12 @@ bool GameManifest::applyOverride(std::string_view key, std::string_view value) {
     if (key == "river_width") return number(waterways.riverWidth);
     if (key == "river_depth") return number(waterways.riverDepth);
     if (key == "river_marshes") return number(waterways.riverMarshes);
+    if (key == "river_course") {
+        waterways.riverLine = value == "line";
+        return true;
+    }
+    if (key == "river_heading") return number(waterways.riverHeading);
+    if (key == "river_meander") return number(waterways.riverMeander);
     if (key == "river_fords") return number(waterways.riverFords);
     if (key == "lake_scale") return number(waterways.lakeScale);
     if (key == "lake_threshold") return number(waterways.lakeThreshold);

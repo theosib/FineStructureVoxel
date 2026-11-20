@@ -319,6 +319,17 @@ Waterways::Waterways(uint64_t worldSeed, int32_t seaLevel, WaterwaySettings sett
 
 Waterways::River Waterways::riverAt(float x, float z) const {
     ContourSample r = sampleContour(*river_, x, z);
+    if (settings_.riverLine) {
+        // Distance across the line, pushed about by the noise; its gradient is the line's
+        // direction plus the noise's
+        const float h = settings_.riverHeading * 0.017453293f;
+        const float nx = std::cos(h), nz = -std::sin(h);
+        const float m = settings_.riverMeander;
+        float gx = (river_->evaluate(x + 1.0f, z) - river_->evaluate(x - 1.0f, z)) * 0.5f * m + nx;
+        float gz = (river_->evaluate(x, z + 1.0f) - river_->evaluate(x, z - 1.0f)) * 0.5f * m + nz;
+        r.value = x * nx + z * nz + r.value * m;
+        r.gradient = std::max(std::sqrt(gx * gx + gz * gz), 1e-3f);
+    }
     float stretch = marsh_->evaluate(x, z);
     float marsh = std::clamp((settings_.riverMarshes - stretch) / 0.1f, 0.0f, 1.0f);
     float half = std::max(settings_.riverWidth * 0.5f, 0.5f) * (1.0f + (std::max(settings_.marshWidth, 1.0f) - 1.0f) * marsh);

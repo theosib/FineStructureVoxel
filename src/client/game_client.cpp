@@ -1932,6 +1932,17 @@ void GameClient::Impl::registerNatives() {
         return pickResult(pickBlock(glm::vec2(number(args[0]), number(args[1])), RaycastMode::Collision));
     });
 
+    // fluid_at x y z -> the fluid's name in that cell, or nil: as this client knows the world, so
+    // what it hasn't seen is dry. The game script's fluid_at is the same, on the real world.
+    e.registerFunction("fluid_at", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3 || !session) return Value::nil();
+        BlockCoord pos(static_cast<int32_t>(std::floor(number(args[0]))), static_cast<int32_t>(std::floor(number(args[1]))),
+                       static_cast<int32_t>(std::floor(number(args[2]))));
+        FluidTypeId fluid = session->world().world().getFluid(pos);
+        if (fluid.isEmpty()) return Value::nil();
+        return Value::symbol(fluid.id);
+    });
+
     // avatar_pos -> [x y z] of the embodied avatar's feet
     e.registerFunction("avatar_pos", [this](ExecutionContext&, const Args&) -> Value {
         Vec3 pos = stewardBody ? stewardBody->position() : Vec3(0.0f);

@@ -2,6 +2,8 @@
 #include "finevox/worldgen/generation_passes.hpp"
 #include "finevox/worldgen/world_generator.hpp"
 #include "finevox/worldgen/biome_map.hpp"
+#include "finevox/worldgen/feature_cluster.hpp"
+#include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/world.hpp"
 
@@ -148,4 +150,77 @@ TEST(WaterwaysTest, PassCutsColumnsDownToTheCeilingAndNoFurther) {
         }
     }
     EXPECT_GT(cut, 0);
+}
+
+TEST(WaterwaysTest, ALineCourseIsOneRiverAcrossTheWholeMap) {
+    WaterwaySettings w = riversAndLakes();
+    w.lakeScale = 0.0f;
+    w.riverLine = true;
+    w.riverMeander = 30.0f;
+    for (float heading : {0.0f, 30.0f, 90.0f}) {
+        w.riverHeading = heading;
+        Waterways ways(9, SEA, w);
+        const float h = heading * 0.017453293f;
+        const float along[2] = {std::sin(h), std::cos(h)};   // the line's direction
+        const float across[2] = {std::cos(h), -std::sin(h)};
+        // Every crossing of the map, square to the line, meets the river once, near the line.
+        // A marsh's tussocks are part of it, and so is an island where it splits for a bit.
+        for (int32_t a = -SPAN; a <= SPAN; a += 16) {
+            int32_t first = SPAN + 1, last = -SPAN - 1;
+            for (int32_t b = -SPAN; b <= SPAN; ++b) {
+                float x = along[0] * a + across[0] * b, z = along[1] * a + across[1] * b;
+                if (*ways.ceilingAt(x, z) < SEA) {
+                    first = std::min(first, b);
+                    last = std::max(last, b);
+                }
+            }
+            ASSERT_LE(first, last) << "no river across at " << a << ", heading " << heading;
+            EXPECT_LT(last - first, 60) << "more than one river at " << a << ", heading " << heading;
+            EXPECT_LT(std::abs(first + last) / 2, 30 + 12) << "far from the line, heading " << heading;
+        }
+    }
+}
+
+TEST(WaterwaysTest, AClusterAtAShoreKeepsOffTheBed) {
+    // Land at 59 for x < 8, a river's shallow edge a block under the water beyond, and boulders
+    // scattered from the shore, which drop as far as that edge. Every
+    // stack has to stand on ground no lower than the cluster's lowest, or the water would take all
+    // but the top of it.
+    World world;
+    BlockTypeId stone = BlockTypeId::fromName("stone");
+    BlockTypeId boulder = BlockTypeId::fromName("cluster_boulder");
+    BlockType solid;
+    solid.setCollisionShape(CollisionShape::FULL_BLOCK);
+    BlockRegistry::global().registerOrUpdateType(stone, solid);
+    BlockRegistry::global().registerOrUpdateType(boulder, solid);
+    for (int32_t x = -8; x < 24; ++x) {
+        for (int32_t z = -8; z < 24; ++z) {
+            int32_t top = x < 8 ? SEA + 1 : SEA - 1;
+            for (int32_t y = 40; y <= top; ++y) world.setBlock(x, y, z, stone);
+        }
+    }
+    ClusterConfig config;
+    config.block = boulder;
+    config.attempts = 200;
+    config.radius = 3;
+    config.minHeight = 1;
+    config.maxHeight = 2;
+    config.lowestGround = SEA;
+    BiomeMap biomeMap(1, BiomeRegistry::global());
+    int onLand = 0;
+    for (uint64_t seed = 1; seed <= 20; ++seed) {
+        ClusterFeature cluster("boulders", config);
+        FeaturePlacementContext ctx{world, BlockCoord(7, SEA + 2, 8), BiomeId{}, seed, nullptr};
+        (void)cluster.place(ctx);
+    }
+    for (int32_t x = -8; x < 24; ++x) {
+        for (int32_t z = -8; z < 24; ++z) {
+            for (int32_t y = 54; y < 66; ++y) {
+                if (world.getBlock(x, y, z) != boulder) continue;
+                EXPECT_LT(x, 8) << "a boulder on the riverbed at " << x << "," << y << "," << z;
+                if (world.getBlock(x, y - 1, z) == stone) ++onLand;
+            }
+        }
+    }
+    EXPECT_GT(onLand, 0) << "nothing placed at all";
 }

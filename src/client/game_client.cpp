@@ -129,6 +129,25 @@ std::string makeSaveSlot(const fs::path& savesDir, std::string_view title) {
     return candidate;
 }
 
+/// The slot saved to last, or "" with none. A game hosted from a lobby saves to a slot of its
+/// own, so carrying on means the newest, not always the autosave.
+std::string newestSaveSlot(const fs::path& savesDir) {
+    std::error_code ignored;
+    std::string newest;
+    fs::file_time_type newestTime{};
+    for (const auto& entry : fs::directory_iterator(savesDir, ignored)) {
+        std::string slot = entry.path().filename().string();
+        if (!entry.is_directory(ignored) || !isSafeSaveSlot(slot)) continue;
+        auto written = fs::last_write_time(entry.path() / "game.cbor", ignored);
+        if (ignored) continue;
+        if (newest.empty() || written > newestTime) {
+            newest = slot;
+            newestTime = written;
+        }
+    }
+    return newest;
+}
+
 uint64_t randomWorldSeed() {
     std::random_device rd;
     uint64_t a = static_cast<uint64_t>(rd());
@@ -685,6 +704,9 @@ void GameClient::Impl::startLocal(HostRequest request) {
         return;
     }
     request.autoLaunch = true;
+    if (!request.newGame && request.saveSlot.empty()) {
+        request.saveSlot = newestSaveSlot(options.userRoot / "saves");
+    }
     std::string error;
     host = options.hostFactory(request, error);
     if (!host) {

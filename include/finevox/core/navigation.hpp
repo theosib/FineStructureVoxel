@@ -43,6 +43,9 @@ struct NavQuery {
     glm::dvec3 goal{0.0};
     float entityHeight = 1.8f;
     float goalRange = 0.0f;    ///< Accept any standable cell this close (horizontally) to goal
+    /// With a goalRange, how far above the feet the goal may be: a cell of 2 is head height, and
+    /// more is reaching up. Below, it's always 2.
+    int goalReachUp = 2;
     int maxNodes = 12000;      ///< Expansion cap
     int maxFall = 3;           ///< Largest drop taken without building
     /// Deepest water walked through, in blocks: a cell with water at the feet and this many
@@ -107,6 +110,7 @@ enum class NavState : uint8_t {
 struct NavOrder {
     glm::dvec3 goal{0.0};
     float goalRange = 0.0f;
+    int goalReachUp = NavQuery{}.goalReachUp;
     bool allowPlace = false;
     bool allowDig = false;
     int maxNodes = 12000;

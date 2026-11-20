@@ -206,7 +206,7 @@ private:
         // Ranged goals are for interacting with something: reach past it at the
         // same level, or a little above or below.
         float reach = query_.goalRange + 0.5f;
-        return float(dx * dx + dz * dz) <= reach * reach && std::abs(dy) <= 2;
+        return float(dx * dx + dz * dz) <= reach * reach && dy <= 2 && -dy <= query_.goalReachUp;
     }
 
     float heuristic(const BlockCoord& cell) const {
@@ -479,6 +479,7 @@ void NavigationSystem::runSearches() {
         query.start = glm::dvec3(pos.x, pos.y + 0.05, pos.z);
         query.goal = agent.order.goal;
         query.goalRange = agent.order.goalRange;
+        query.goalReachUp = agent.order.goalReachUp;
         query.entityHeight = half.y * 2.0f;
         query.allowPlace = agent.order.allowPlace;
         query.allowDig = agent.order.allowDig;

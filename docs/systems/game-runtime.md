@@ -164,7 +164,8 @@ builder placing a wall would, since being shoved out of the way isn't pretty.
 ### Navigation
 
 ```
-ent_goto id x y z [=range r] [=place true] [=dig true] [=partial true] [=max_nodes n]
+ent_goto id x y z [=range r] [=reach_up n] [=place true] [=dig true] [=partial true] [=max_nodes n]
+                   (with a range, the goal may be up to reach_up cells above the feet: 2 by default)
 ent_nav id -> :idle | :pending | :moving | :blocked | :arrived | :failed
 ent_nav_action id -> {=kind :place|:dig =pos [x y z] =stand [x y z]}
 ent_nav_resume id     ent_nav_ack id     ent_stop id
@@ -322,6 +323,7 @@ cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil
 pick_ground mx my -> the same, looking through what a body can walk through. Orders use it,
 so that foliage with a `hit:` shape can be inspected without catching clicks on the ground.
+fluid_at x y z -> the fluid's name there, or nil, as this client knows the world (unseen is dry)
 request_screenshot path    quit_game    to_menu
 ```
 

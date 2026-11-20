@@ -287,6 +287,23 @@ TEST_F(NavigationTest, DeepWaterIsABarrierButAFordIsNot) {
     EXPECT_FALSE(findNavPath(world, limited).has_value());
 }
 
+TEST_F(NavigationTest, ReachUpCountsAGoalAboveHeadHeight) {
+    // A pillar three blocks high, and a goal on its top: out of a body's reach from the ground,
+    // unless it may reach up three
+    for (int y = 0; y < 3; ++y) world.setBlock(10, GROUND_Y + y, 0, stone);
+    NavQuery q = query(cell(0, GROUND_Y, 0), cell(10, GROUND_Y + 3, 0));
+    q.goalRange = 2.0f;
+    q.maxNodes = 4000;
+    EXPECT_FALSE(findNavPath(world, q).has_value());
+
+    q.goalReachUp = 3;
+    auto path = findNavPath(world, q);
+    ASSERT_TRUE(path.has_value());
+    replay(*path, {0, GROUND_Y, 0});
+    EXPECT_EQ(path->steps.back().pos.y, GROUND_Y);
+    EXPECT_LE(std::abs(path->steps.back().pos.x - 10), 2);
+}
+
 TEST_F(NavigationTest, DoesNotSqueezeThroughDiagonalGaps) {
     // Blocks touching only at their corners form a barrier: x=4 below z=5, then a
     // diagonal chain, then x=7 above z=6. The only way across would be between

@@ -144,6 +144,7 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     const uint32_t keyPlace = si.intern("place");
     const uint32_t keyDig = si.intern("dig");
     const uint32_t keyPartial = si.intern("partial");
+    const uint32_t keyReachUp = si.intern("reach_up");
     const uint32_t keyMaxNodes = si.intern("max_nodes");
     const uint32_t keyKind = si.intern("kind");
     const uint32_t keyPos = si.intern("pos");
@@ -574,7 +575,8 @@ void GameScriptEngine::registerUnitNativeFunctions() {
     // Navigation
     // ------------------------------------------------------------------------
 
-    // ent_goto id x y z [=range r] [=place true] [=dig true] [=partial true] [=max_nodes n]
+    // ent_goto id x y z [=range r] [=reach_up n] [=place true] [=dig true] [=partial true] [=max_nodes n]
+    // With a range, reach_up is how many cells above the feet the goal may be (2, head height)
     e.registerFunction("ent_goto", [=](ExecutionContext& ctx, const Args& args) -> Value {
         auto* ud = scriptData(ctx);
         if (!ud || !ud->navigation || !mobArg(ctx, args)) return Value::boolean(false);
@@ -588,6 +590,8 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         Value nodes = option(options, keyMaxNodes);
         if (range.isNumeric()) order.goalRange = static_cast<float>(range.asNumber());
         if (nodes.isNumeric()) order.maxNodes = static_cast<int>(nodes.asNumber());
+        Value reachUp = option(options, keyReachUp);
+        if (reachUp.isNumeric()) order.goalReachUp = static_cast<int>(reachUp.asNumber());
         order.allowPlace = option(options, keyPlace).truthy();
         order.allowDig = option(options, keyDig).truthy();
         order.allowPartial = option(options, keyPartial).truthy();

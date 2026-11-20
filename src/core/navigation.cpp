@@ -181,7 +181,12 @@ private:
     }
 
     bool isStandableHere(const BlockCoord& feet) {
-        return probe_.solid(down(feet)) && bodyClear(feet);
+        return probe_.solid(down(feet)) && bodyClear(feet) && !tooDeep(feet);
+    }
+
+    bool tooDeep(const BlockCoord& feet) {
+        if (query_.maxWade < 0 || !(probe_.flags(feet) & CellProbe::Fluid)) return false;
+        return probe_.flags(up(feet, query_.maxWade)) & CellProbe::Fluid;
     }
 
     /// Where the feet are, standing in this cell: on top of what's below
@@ -271,7 +276,9 @@ private:
 
         if (bodyClear(next)) {
             if (probe_.solid(down(next))) {
-                if (canRise(node.pos, floorHeight(next))) consider(key, node, next, walkCost(next, 1.0f));
+                if (!tooDeep(next) && canRise(node.pos, floorHeight(next))) {
+                    consider(key, node, next, walkCost(next, 1.0f));
+                }
                 return;
             }
 
@@ -281,6 +288,7 @@ private:
                 BlockCoord cell = down(next, drop);
                 if (!probe_.clear(cell)) break;
                 if (probe_.solid(down(cell))) {
+                    if (tooDeep(cell)) break;
                     int excess = std::max(drop - query_.comfortableFall, 0);
                     consider(key, node, cell,
                              walkCost(cell, 1.0f + 0.3f * drop) + excess * query_.fallPenalty);
@@ -306,7 +314,8 @@ private:
         // Something in the way: step onto it if it's a single block high
         if (headroomToClimb) {
             BlockCoord above = up(next);
-            if (probe_.solid(next) && bodyClear(above) && canRise(node.pos, floorHeight(above))) {
+            if (probe_.solid(next) && bodyClear(above) && !tooDeep(above) &&
+                canRise(node.pos, floorHeight(above))) {
                 consider(key, node, above, walkCost(above, 1.0f + CLIMB_PENALTY));
                 return;
             }
@@ -475,6 +484,7 @@ void NavigationSystem::runSearches() {
         query.allowDig = agent.order.allowDig;
         query.maxNodes = agent.order.maxNodes;
         query.maxFall = maxFall_;
+        query.maxWade = maxWade_;
         query.allowPartial = agent.order.allowPartial;
 
         int nodes = 0;

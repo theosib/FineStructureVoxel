@@ -2,6 +2,7 @@
 #include "finevox/core/navigation.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_manager.hpp"
+#include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/entity_type_def.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
@@ -237,6 +238,53 @@ TEST_F(NavigationTest, LongFallIsALastResortNotAShortcut) {
         largestDrop = std::max(largestDrop, path->steps[i - 1].pos.y - path->steps[i].pos.y);
     }
     EXPECT_LE(largestDrop, query.comfortableFall);
+}
+
+TEST_F(NavigationTest, DeepWaterIsABarrierButAFordIsNot) {
+    // A river across the whole field, x 10..14: a block deep at its edges and two in the
+    // middle, with the water's surface level with the ground, as worldgen makes them. At z 30
+    // a ford, a block deep all the way across.
+    FluidTypeId water = FluidTypeId::fromName("nav_water");
+    for (int x = 10; x <= 14; ++x) {
+        for (int z = -8; z < 64; ++z) {
+            int depth = (x == 10 || x == 14 || (z >= 29 && z <= 31)) ? 1 : 2;
+            for (int d = 0; d < depth; ++d) {
+                world.setBlock(x, GROUND_Y - 1 - d, z, BlockTypeId());
+                world.setFluid({x, GROUND_Y - 1 - d, z}, water, 15);
+            }
+            world.setBlock(x, GROUND_Y - 1 - depth, z, stone);
+        }
+    }
+
+    NavQuery any = query(cell(0, GROUND_Y, 0), cell(24, GROUND_Y, 0));
+    auto wading = findNavPath(world, any);
+    ASSERT_TRUE(wading.has_value());
+    replay(*wading, {0, GROUND_Y, 0});
+    int furthest = 0;
+    for (const auto& step : wading->steps) furthest = std::max(furthest, step.pos.z);
+    EXPECT_LT(furthest, 10) << "with no limit it walks the bed straight across";
+
+    NavQuery limited = any;
+    limited.maxWade = 1;
+    auto forded = findNavPath(world, limited);
+    ASSERT_TRUE(forded.has_value());
+    replay(*forded, {0, GROUND_Y, 0});
+    for (const auto& step : forded->steps) {
+        if (step.pos.x >= 11 && step.pos.x <= 13) {
+            EXPECT_GE(step.pos.z, 29) << "crossed where it's too deep";
+            EXPECT_LE(step.pos.z, 31) << "crossed where it's too deep";
+        }
+    }
+
+    // Without the ford there's no way over
+    for (int x = 11; x <= 13; ++x) {
+        for (int z = 29; z <= 31; ++z) {
+            world.setBlock(x, GROUND_Y - 2, z, BlockTypeId());
+            world.setFluid({x, GROUND_Y - 2, z}, water, 15);
+        }
+    }
+    limited.maxNodes = 6000;
+    EXPECT_FALSE(findNavPath(world, limited).has_value());
 }
 
 TEST_F(NavigationTest, DoesNotSqueezeThroughDiagonalGaps) {

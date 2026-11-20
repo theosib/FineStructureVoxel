@@ -45,6 +45,9 @@ struct NavQuery {
     float goalRange = 0.0f;    ///< Accept any standable cell this close (horizontally) to goal
     int maxNodes = 12000;      ///< Expansion cap
     int maxFall = 3;           ///< Largest drop taken without building
+    /// Deepest water walked through, in blocks: a cell with water at the feet and this many
+    /// cells above them is no place to stand. -1 for any depth.
+    int maxWade = -1;
     /// Drops up to this are ordinary walking. Each block past it costs fallPenalty, so
     /// a longer maxFall is a way down when there's no other, not a shortcut.
     int comfortableFall = 3;
@@ -127,6 +130,9 @@ public:
     /// that ends up on anything tall has no way back to the ground.
     void setMaxFall(int blocks) { maxFall_ = blocks; }
 
+    /// Deepest water agents walk through (NavQuery::maxWade)
+    void setMaxWade(int blocks) { maxWade_ = blocks; }
+
     /// Cancel orders and stop the agent
     void stop(EntityId id);
 
@@ -168,6 +174,7 @@ private:
 
     World& world_;
     int maxFall_ = NavQuery{}.maxFall;
+    int maxWade_ = NavQuery{}.maxWade;
     EntityManager& entities_;
     std::unordered_map<EntityId, Agent> agents_;
     std::deque<EntityId> searchQueue_;

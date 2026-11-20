@@ -75,6 +75,8 @@ struct BiomeProperties {
     int32_t fillerDepth = 3;
     std::string stoneBlock = "stone";
     std::string underwaterBlock = "sand";
+    /// Ground just above the water (SurfacePass's shore band). Empty means underwaterBlock.
+    std::string shoreBlock;
 
     /// Where a terrain's fields must fall for this biome (`range:<field>: lo hi`), for a
     /// terrain that chooses biomes by them (DensityTerrainPass)

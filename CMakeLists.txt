@@ -757,6 +757,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_fluid_actions.cpp
         tests/test_fluid_sound.cpp
         tests/test_fluid_worldgen.cpp
+        tests/test_waterways.cpp
         tests/test_fluid_performance.cpp
         tests/test_event_journal.cpp
         tests/test_tick_journal.cpp

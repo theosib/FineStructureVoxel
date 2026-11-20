@@ -230,6 +230,7 @@ void GameRuntime::load() {
 
     navigation_ = std::make_shared<NavigationSystem>(world, session_->entities());
     navigation_->setMaxFall(manifest_.navMaxFall);
+    navigation_->setMaxWade(manifest_.navMaxWade);
     scripts_->setNavigation(navigation_.get());
     session_->addSubsystem(navigation_);
     session_->addSubsystem(std::make_shared<WorkClaimClock>(workClaims_));
@@ -807,11 +808,21 @@ void GameRuntime::generateWorld() {
             std::cerr << "[worldgen] " << manifest_.terrain << ": " << error << "; using the built-in terrain\n";
         }
     }
+    std::shared_ptr<const worldgen::Waterways> waterways;
+    if (manifest_.waterways.any()) {
+        waterways = std::make_shared<const worldgen::Waterways>(seed, manifest_.seaLevel, manifest_.waterways);
+        pipeline.addPass(std::make_unique<worldgen::WaterwayPass>(waterways));
+    }
     if (graph) {
         pipeline.addPass(std::make_unique<worldgen::DensityTerrainPass>(graph));
-        pipeline.addPass(std::make_unique<worldgen::SurfacePass>(manifest_.seaLevel));
     } else {
         pipeline.addPass(std::make_unique<worldgen::TerrainPass>(seed));
+    }
+    if (graph || waterways || manifest_.shoreHeight > 0) {
+        auto surface = std::make_unique<worldgen::SurfacePass>(manifest_.seaLevel, manifest_.shoreHeight);
+        surface->setWaterways(waterways);
+        pipeline.addPass(std::move(surface));
+    } else {
         pipeline.addPass(std::make_unique<worldgen::SurfacePass>());
     }
     if (manifest_.caves) pipeline.addPass(std::make_unique<worldgen::CavePass>(seed));

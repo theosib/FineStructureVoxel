@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace finevox::worldgen {
 
@@ -40,6 +41,8 @@ private:
     std::unique_ptr<Noise3D> densityNoise_;     ///< 3D density for overhangs
 };
 
+class Waterways;
+
 // ============================================================================
 // SurfacePass — replaces top layers with biome-specific blocks
 // ============================================================================
@@ -47,8 +50,13 @@ private:
 class SurfacePass : public GenerationPass {
 public:
     SurfacePass() = default;
-    /// With a sea level, ground under water gets the biome's `underwater` block instead
-    explicit SurfacePass(int32_t seaLevel) : seaLevel_(seaLevel) {}
+    /// With a sea level, ground under water gets the biome's `underwater` block instead, and
+    /// ground less than shoreHeight blocks above it gets the biome's `shore` block
+    explicit SurfacePass(int32_t seaLevel, int32_t shoreHeight = 0)
+        : seaLevel_(seaLevel), shoreHeight_(shoreHeight) {}
+
+    /// Marshes and fords take their own ground
+    void setWaterways(std::shared_ptr<const Waterways> waterways) { waterways_ = std::move(waterways); }
 
     [[nodiscard]] std::string_view name() const override { return "core:surface"; }
     [[nodiscard]] int32_t priority() const override {
@@ -58,6 +66,89 @@ public:
 
 private:
     std::optional<int32_t> seaLevel_;
+    int32_t shoreHeight_ = 0;
+    std::shared_ptr<const Waterways> waterways_;
+};
+
+// ============================================================================
+// Waterways — rivers and lakes, and WaterwayPass, which cuts them
+// ============================================================================
+
+/// Where rivers and lakes go, and their shape. All at sea level, so FluidPass fills them and
+/// they meet where they cross. A scale of 0 leaves that kind out.
+struct WaterwaySettings {
+    float riverScale = 0.0f;   ///< Noise frequency: lower is fewer, longer rivers
+    float riverWidth = 6.0f;   ///< Blocks across at the surface
+    int32_t riverDepth = 3;    ///< Blocks of water at the middle
+    /// Rivers spread into a marsh where a noise is below this (-1..1): wider, a block deep,
+    /// with tussocks standing out of it. -1 never, 0 about half their length.
+    float riverMarshes = -0.5f;
+    float marshWidth = 3.0f;   ///< How many times wider than the river a marsh is
+    std::string marshBlock;    ///< Ground in a marsh, under water or not. Empty: as elsewhere.
+    /// Rivers run a block deep, at their usual width, where the same noise is above this:
+    /// 1 never. Marshes and fords are at opposite ends of it, so never in the same place.
+    float riverFords = 1.0f;
+    std::string fordBlock;     ///< A ford's bed. Empty: as elsewhere.
+    float lakeScale = 0.0f;    ///< Noise frequency: lower is fewer, bigger lakes
+    /// A lake where its noise is above this (-1..1): higher is fewer and smaller
+    float lakeThreshold = 0.45f;
+    int32_t lakeDepth = 5;     ///< Deepest a lake gets, in blocks
+    /// How fast the land rises from the water, in blocks per block across. Land is only ever
+    /// lowered, so this sets the width of the valley a river cuts through high ground.
+    float bankSlope = 0.5f;
+
+    [[nodiscard]] bool any() const { return riverScale > 0.0f || lakeScale > 0.0f; }
+};
+
+/// The shape of the water, anywhere, worked out from noise alone: distance from water is
+/// estimated from each noise's gradient, so a column costs a few samples and needs no
+/// neighbours. Shared by the passes that cut it and that surface it.
+class Waterways {
+public:
+    Waterways(uint64_t worldSeed, int32_t seaLevel, WaterwaySettings settings);
+
+    /// The highest the ground may be at a point, or nothing where water doesn't reach it
+    [[nodiscard]] std::optional<int32_t> ceilingAt(float x, float z) const;
+
+    /// Inside a marsh, tussocks and all
+    [[nodiscard]] bool marshAt(float x, float z) const;
+    /// In a ford's bed
+    [[nodiscard]] bool fordAt(float x, float z) const;
+
+    [[nodiscard]] const WaterwaySettings& settings() const { return settings_; }
+    [[nodiscard]] int32_t seaLevel() const { return seaLevel_; }
+
+private:
+    struct River {
+        float fromMiddle;   ///< Blocks from the middle of the channel
+        float half;         ///< Half its width here
+        float marsh;        ///< 0 a river, 1 a marsh, between them in the change
+        bool ford;
+    };
+    [[nodiscard]] River riverAt(float x, float z) const;
+
+    int32_t seaLevel_;
+    WaterwaySettings settings_;
+    std::unique_ptr<Noise2D> river_;
+    std::unique_ptr<Noise2D> marsh_;
+    std::unique_ptr<Noise2D> tussocks_;
+    std::unique_ptr<Noise2D> lake_;
+};
+
+/// After the terrain and before its surface: cuts each column down to the river or lake bed
+/// it lies in, or to the bank rising from one.
+class WaterwayPass : public GenerationPass {
+public:
+    explicit WaterwayPass(std::shared_ptr<const Waterways> waterways) : waterways_(std::move(waterways)) {}
+
+    [[nodiscard]] std::string_view name() const override { return "core:waterways"; }
+    [[nodiscard]] int32_t priority() const override {
+        return static_cast<int32_t>(GenerationPriority::TerrainShape) + 500;
+    }
+    void generate(GenerationContext& ctx) override;
+
+private:
+    std::shared_ptr<const Waterways> waterways_;
 };
 
 // ============================================================================

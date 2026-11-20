@@ -39,6 +39,20 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.seaLevel = doc->getInt("sea_level", m.seaLevel);
     m.caves = doc->getBool("caves", m.caves);
     m.terrain = std::string(doc->getString("terrain", m.terrain));
+    auto& w = m.waterways;
+    w.riverScale = doc->getFloat("river_scale", w.riverScale);
+    w.riverWidth = doc->getFloat("river_width", w.riverWidth);
+    w.riverDepth = doc->getInt("river_depth", w.riverDepth);
+    w.riverMarshes = doc->getFloat("river_marshes", w.riverMarshes);
+    w.marshWidth = doc->getFloat("marsh_width", w.marshWidth);
+    w.marshBlock = std::string(doc->getString("marsh_block", w.marshBlock));
+    w.riverFords = doc->getFloat("river_fords", w.riverFords);
+    w.fordBlock = std::string(doc->getString("ford_block", w.fordBlock));
+    w.lakeScale = doc->getFloat("lake_scale", w.lakeScale);
+    w.lakeThreshold = doc->getFloat("lake_threshold", w.lakeThreshold);
+    w.lakeDepth = doc->getInt("lake_depth", w.lakeDepth);
+    w.bankSlope = doc->getFloat("bank_slope", w.bankSlope);
+    m.shoreHeight = doc->getInt("shore_height", m.shoreHeight);
     m.tickRate = static_cast<uint32_t>(doc->getInt("tick_rate", static_cast<int>(m.tickRate)));
     m.randomTicks = static_cast<uint32_t>(doc->getInt("random_ticks", static_cast<int>(m.randomTicks)));
     m.signalMaxLevel = static_cast<uint32_t>(std::clamp(doc->getInt("signal_max_level", 0), 0, 255));
@@ -56,6 +70,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.cloudCell = doc->getFloat("cloud_cell", m.cloudCell);
     m.cloudSpeed = doc->getFloat("cloud_speed", m.cloudSpeed);
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
+    m.navMaxWade = doc->getInt("nav_max_wade", m.navMaxWade);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
     m.walkSpeed = doc->getFloat("walk_speed", m.walkSpeed);
     m.jumpVelocity = doc->getFloat("jump_velocity", m.jumpVelocity);
@@ -87,6 +102,15 @@ bool GameManifest::applyOverride(std::string_view key, std::string_view value) {
     if (key == "world_seed") return number(worldSeed);
     if (key == "world_radius") return number(worldRadius);
     if (key == "sea_level") return number(seaLevel);
+    if (key == "river_scale") return number(waterways.riverScale);
+    if (key == "river_width") return number(waterways.riverWidth);
+    if (key == "river_depth") return number(waterways.riverDepth);
+    if (key == "river_marshes") return number(waterways.riverMarshes);
+    if (key == "river_fords") return number(waterways.riverFords);
+    if (key == "lake_scale") return number(waterways.lakeScale);
+    if (key == "lake_threshold") return number(waterways.lakeThreshold);
+    if (key == "lake_depth") return number(waterways.lakeDepth);
+    if (key == "bank_slope") return number(waterways.bankSlope);
     if (key == "terrain") {
         terrain = std::string(value);
         return true;

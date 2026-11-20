@@ -167,6 +167,7 @@ struct GenerationContext {
 | Priority | Pass | Purpose |
 |----------|------|---------|
 | 1000 | `TerrainPass` | Noise heightmap + 3D density; fills heightmap[] |
+| 1500 | `WaterwayPass` | Cuts rivers, lakes and their banks down from the terrain (optional) |
 | 2000 | `SurfacePass` | Biome-specific surface layers (grass, sand, etc.) |
 | 3000 | `CavePass` | 3D noise carving |
 | 4000 | `OrePass` | Configurable ore blob placement |
@@ -311,6 +312,25 @@ with `range:<field>: lo hi`, and a column takes the biome whose ranges it falls 
 typical one if several, or the nearest if none. With no biome giving ranges, the `BiomeMap`
 chooses as before. The pipeline's `SurfacePass` then gets the sea level, and ground under water
 takes the biome's `underwater` block.
+
+## Rivers and Lakes
+
+`Waterways` (in `generation_passes.hpp`) says how high the ground may be anywhere, from noise alone:
+a river is where one noise crosses zero, a lake where another is above a threshold, and how far a
+point is from either is estimated from the noise's gradient, so a column needs no neighbours.
+`WaterwayPass` cuts each column down to that. Everything is cut to sea level, so `FluidPass` fills
+it, and rivers and lakes join where they meet. Land is only ever lowered: through high ground a
+river cuts a valley as wide as `bank_slope` needs.
+
+A second noise along a river makes its crossings, at either end of its range: marshes, wider and a
+block deep with tussocks standing out of them, and fords, a block deep at the river's own width.
+`marsh_block` and `ford_block` are their ground. A game that wants water to stop walkers sets
+`nav_max_wade` (`NavQuery::maxWade`): with 1, a cell with water at the feet and at the head is no
+place to stand, so crossings are the only way over. The `game.conf` keys are listed on
+`GameManifest::waterways`, and the lobby can change them as it can `world_seed`.
+
+With a sea level, `SurfacePass` gives ground under water the biome's `underwater` block, and ground
+less than `shore_height` above it the biome's `shore` (the `underwater` block if it has none): a beach.
 
 ## Biomes in the World
 

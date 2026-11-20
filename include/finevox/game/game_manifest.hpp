@@ -5,6 +5,8 @@
  * @brief game.conf: what makes a content directory a game
  */
 
+#include "finevox/worldgen/generation_passes.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -32,6 +34,11 @@ struct GameManifest {
     bool caves = false;
     std::string terrain;  ///< A .terrain file (density_graph.hpp) in place of the built-in terrain
     std::vector<std::string> worldBiomes;  ///< Only these biomes. Empty means all of them.
+    /// Rivers and lakes (`river_scale`, `river_width`, `river_depth`, `river_marshes`,
+    /// `marsh_width`, `marsh_block`, `river_fords`, `ford_block`, `lake_scale`, `lake_threshold`, `lake_depth`, `bank_slope`):
+    /// see WaterwaySettings
+    worldgen::WaterwaySettings waterways;
+    int32_t shoreHeight = 0;    ///< Ground this many blocks above sea level takes a biome's `shore`
 
     uint32_t tickRate = 30;
     uint32_t randomTicks = 4;     ///< Per subchunk per tick; 0 if no block wants them
@@ -51,6 +58,7 @@ struct GameManifest {
     /// 0 draws everything in full.
     float detailPixels = 0.0f;
     int navMaxFall = 3;           ///< Largest drop path-following units will take
+    int navMaxWade = -1;          ///< Deepest water they walk through, in blocks; -1 for any
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
     float walkSpeed = 4.5f;       ///< First-person walking speed in blocks/second
     float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second

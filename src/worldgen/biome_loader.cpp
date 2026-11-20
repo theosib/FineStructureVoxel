@@ -53,6 +53,7 @@ std::optional<BiomeProperties> BiomeLoader::loadFromConfig(
     if (auto* e = doc.get("filler_depth")) props.fillerDepth = e->value.asInt();
     if (auto* e = doc.get("stone")) props.stoneBlock = e->value.asStringOwned();
     if (auto* e = doc.get("underwater")) props.underwaterBlock = e->value.asStringOwned();
+    if (auto* e = doc.get("shore")) props.shoreBlock = e->value.asStringOwned();
 
     for (const auto* e : doc.getAll("range")) {
         if (!e->hasSuffix()) continue;

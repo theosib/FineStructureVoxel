@@ -16,6 +16,7 @@
 #include "finevox/worldgen/feature_tree.hpp"
 #include "finevox/core/fluid_type_id.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <queue>
@@ -248,6 +249,18 @@ void SurfacePass::generate(GenerationContext& ctx) {
             BlockTypeId fillerBlock = BlockTypeId::fromName(props->fillerBlock);
             if (seaLevel_ && surfaceY < *seaLevel_) {
                 surfaceBlock = fillerBlock = BlockTypeId::fromName(props->underwaterBlock);
+            } else if (seaLevel_ && surfaceY < *seaLevel_ + shoreHeight_) {
+                const std::string& shore = props->shoreBlock.empty() ? props->underwaterBlock : props->shoreBlock;
+                surfaceBlock = fillerBlock = BlockTypeId::fromName(shore);
+            }
+            if (waterways_) {
+                const WaterwaySettings& w = waterways_->settings();
+                const float wx = static_cast<float>(ctx.pos.x * 16 + lx), wz = static_cast<float>(ctx.pos.z * 16 + lz);
+                if (!w.marshBlock.empty() && waterways_->marshAt(wx, wz)) {
+                    surfaceBlock = BlockTypeId::fromName(w.marshBlock);
+                } else if (!w.fordBlock.empty() && surfaceY < *seaLevel_ && waterways_->fordAt(wx, wz)) {
+                    surfaceBlock = BlockTypeId::fromName(w.fordBlock);
+                }
             }
             BlockTypeId stoneBlock = BlockTypeId::fromName(props->stoneBlock);
 
@@ -265,6 +278,116 @@ void SurfacePass::generate(GenerationContext& ctx) {
                     ctx.column.setBlock(lx, y, lz, stoneBlock);
                 }
             }
+        }
+    }
+}
+
+// ============================================================================
+// WaterwayPass
+// ============================================================================
+
+namespace {
+
+struct ContourSample {
+    float value;
+    float gradient;  ///< How fast value changes per block, at least a little above zero
+};
+
+/// A noise's value and the length of its gradient, by central differences. value / gradient
+/// is about how many blocks it is to where the noise crosses zero.
+ContourSample sampleContour(const Noise2D& noise, float x, float z) {
+    float v = noise.evaluate(x, z);
+    float gx = (noise.evaluate(x + 1.0f, z) - noise.evaluate(x - 1.0f, z)) * 0.5f;
+    float gz = (noise.evaluate(x, z + 1.0f) - noise.evaluate(x, z - 1.0f)) * 0.5f;
+    return {v, std::max(std::sqrt(gx * gx + gz * gz), 1e-5f)};
+}
+
+}  // namespace
+
+Waterways::Waterways(uint64_t worldSeed, int32_t seaLevel, WaterwaySettings settings)
+    : seaLevel_(seaLevel), settings_(std::move(settings)) {
+    // Few octaves: the finer ones would make the gradient, and so a river's width, jitter
+    if (settings_.riverScale > 0.0f) {
+        river_ = NoiseFactory::simplexFBM(NoiseHash::deriveSeed(worldSeed, 700), 2, settings_.riverScale);
+        marsh_ = NoiseFactory::simplexFBM(NoiseHash::deriveSeed(worldSeed, 710), 2, settings_.riverScale * 4.0f);
+        tussocks_ = NoiseFactory::simplexFBM(NoiseHash::deriveSeed(worldSeed, 715), 2, 0.08f);
+    }
+    if (settings_.lakeScale > 0.0f) {
+        lake_ = NoiseFactory::simplexFBM(NoiseHash::deriveSeed(worldSeed, 720), 3, settings_.lakeScale);
+    }
+}
+
+Waterways::River Waterways::riverAt(float x, float z) const {
+    ContourSample r = sampleContour(*river_, x, z);
+    float stretch = marsh_->evaluate(x, z);
+    float marsh = std::clamp((settings_.riverMarshes - stretch) / 0.1f, 0.0f, 1.0f);
+    float half = std::max(settings_.riverWidth * 0.5f, 0.5f) * (1.0f + (std::max(settings_.marshWidth, 1.0f) - 1.0f) * marsh);
+    return {std::fabs(r.value) / r.gradient, half, marsh, stretch > settings_.riverFords};
+}
+
+bool Waterways::fordAt(float x, float z) const {
+    if (!river_) return false;
+    River r = riverAt(x, z);
+    return r.fromMiddle < r.half && r.ford;
+}
+
+bool Waterways::marshAt(float x, float z) const {
+    if (!river_) return false;
+    River r = riverAt(x, z);
+    return r.fromMiddle < r.half && r.marsh >= 0.5f;
+}
+
+std::optional<int32_t> Waterways::ceilingAt(float x, float z) const {
+    std::optional<int32_t> ceiling;
+    auto lower = [&](float h) {
+        int32_t y = static_cast<int32_t>(std::floor(std::min(h, 4096.0f)));
+        if (!ceiling || y < *ceiling) ceiling = y;
+    };
+    const float sea = static_cast<float>(seaLevel_);
+    const float slope = std::max(settings_.bankSlope, 0.01f);
+
+    if (river_) {
+        River r = riverAt(x, z);
+        if (r.fromMiddle >= r.half) {
+            lower(sea + (r.fromMiddle - r.half) * slope);
+        } else if (r.marsh >= 0.5f) {
+            // A block deep, so it can be waded, with tussocks standing out of it
+            lower(tussocks_->evaluate(x, z) > 0.35f ? sea : sea - 1.0f);
+        } else if (r.ford) {
+            lower(sea - 1.0f);
+        } else {
+            float across = r.fromMiddle / r.half;
+            float depth = static_cast<float>(std::max(settings_.riverDepth, 1));
+            lower(sea - std::max(1.0f, std::ceil(depth * (1.0f - across * across))));
+        }
+    }
+    if (lake_) {
+        ContourSample l = sampleContour(*lake_, x, z);
+        float past = (l.value - settings_.lakeThreshold) / l.gradient;  // blocks inside the shore
+        if (past > 0.0f) {
+            float depth = std::min(1.0f + std::floor(past * 0.25f), static_cast<float>(std::max(settings_.lakeDepth, 1)));
+            lower(sea - depth);
+        } else {
+            lower(sea - past * slope);
+        }
+    }
+    return ceiling;
+}
+
+void WaterwayPass::generate(GenerationContext& ctx) {
+    const int32_t baseX = ctx.pos.x * 16, baseZ = ctx.pos.z * 16;
+    for (int32_t lx = 0; lx < 16; ++lx) {
+        for (int32_t lz = 0; lz < 16; ++lz) {
+            const int32_t idx = GenerationContext::hmIndex(lx, lz);
+            std::optional<int32_t> ceiling =
+                waterways_->ceilingAt(static_cast<float>(baseX + lx), static_cast<float>(baseZ + lz));
+            if (!ceiling) continue;
+            int32_t top = std::max(*ceiling, 1);
+            if (top >= ctx.heightmap[idx]) continue;
+            for (int32_t y = ctx.heightmap[idx]; y > top; --y) {
+                ctx.column.setBlock(lx, y, lz, AIR_BLOCK_TYPE);
+            }
+            ctx.heightmap[idx] = top;
         }
     }
 }

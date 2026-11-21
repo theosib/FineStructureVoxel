@@ -206,6 +206,8 @@ private:
     void onContentChunk(const finenet::Message& message);
     void onGameStarting(const finenet::Message& message);
     void onBound(const finenet::Message& message);
+    /// This process's id for a block the server named by a BlockName id; 0 if it hasn't
+    [[nodiscard]] uint32_t wireBlock(uint32_t id) const;
     void onEntitySpawn(const finenet::Message& message);
     void onEntityGone(const finenet::Message& message);
     void onEntityBatch(const finenet::Message& message);
@@ -260,7 +262,7 @@ private:
     // Sync thread only
     std::unique_ptr<ContentSync> contentSync_;
     std::unordered_map<uint32_t, std::string> entityTypeNames_;
-    std::unordered_map<uint32_t, BlockTypeId> ghostBlocks_;
+    std::unordered_map<uint32_t, BlockTypeId> wireBlocks_;  ///< BlockName ids, for ghosts and what's held
 };
 
 }  // namespace finevox::net

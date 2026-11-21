@@ -492,6 +492,33 @@ void GameScriptEngine::registerUnitNativeFunctions() {
         return Value::nil();
     });
 
+    // ent_hold id block: shows it holding that block (a symbol or a name), as its model's `held:`
+    // part draws it. nil or :air for nothing. For show only: it's saved, and does nothing else.
+    e.registerFunction("ent_hold", [](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        EntityId id = entityArg(args, 0);
+        Entity* entity = ud && ud->entityManager && id != INVALID_ENTITY_ID ? ud->entityManager->getEntity(id) : nullptr;
+        if (!entity) return Value::nil();
+        BlockTypeId block;
+        if (args.size() > 1 && args[1].isSymbol()) {
+            block = BlockTypeId::fromName(StringInterner::global().lookup(args[1].asSymbol()));
+        } else if (args.size() > 1 && args[1].isString()) {
+            block = BlockTypeId::fromName(args[1].asString());
+        }
+        if (block.name() == "air") block = BlockTypeId();
+        entity->setHeldBlock(block);
+        return Value::nil();
+    });
+
+    // ent_held id -> the block it's shown holding, as a symbol, or nil
+    e.registerFunction("ent_held", [](ExecutionContext& ctx, const Args& args) -> Value {
+        auto* ud = scriptData(ctx);
+        EntityId id = entityArg(args, 0);
+        Entity* entity = ud && ud->entityManager && id != INVALID_ENTITY_ID ? ud->entityManager->getEntity(id) : nullptr;
+        if (!entity || !entity->heldBlock().isRealBlock()) return Value::nil();
+        return Value::symbol(StringInterner::global().intern(entity->heldBlock().name()));
+    });
+
     e.registerFunction("ent_look_at", [](ExecutionContext& ctx, const Args& args) -> Value {
         MobEntity* mob = mobArg(ctx, args);
         double x, y, z;

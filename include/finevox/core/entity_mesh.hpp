@@ -10,6 +10,7 @@
  */
 
 #include <glm/glm.hpp>
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -62,6 +63,9 @@ struct EntityMeshPart {
     /// these (the same tool put away). Empty means always, and never.
     std::vector<std::string> onlyIn;
     std::vector<std::string> hiddenIn;
+    /// Drawn as the block the entity holds, with that block's face textures tinted by `color`,
+    /// and not at all while it holds nothing
+    bool held = false;
 
     [[nodiscard]] bool shownDuring(std::string_view animation) const;
 };
@@ -78,13 +82,19 @@ public:
     /// Each part produces 24 vertices (4 per face × 6 faces) and 36 indices
     /// Textured parts map into `atlas` (minU minV maxU maxV) of a texture `textureSize`
     /// pixels across, and are marked skinned; others keep uvOffset + uvSize per face.
+    /// `heldFaces` is the held block's texture on each face, by Face (minU minV maxU maxV), as a
+    /// block shows it in the world. Without it, held parts are left out.
     void buildVertices(const std::vector<glm::mat4>& worldPoses,
                        std::vector<EntityVertex>& vertices,
                        std::vector<uint32_t>& indices,
                        const glm::vec3& teamColor = glm::vec3(1.0f),
                        std::string_view animation = {},
                        const glm::vec4& atlas = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
-                       const glm::vec2& textureSize = glm::vec2(64.0f, 64.0f)) const;
+                       const glm::vec2& textureSize = glm::vec2(64.0f, 64.0f),
+                       const std::array<glm::vec4, 6>* heldFaces = nullptr) const;
+
+    /// Is a held part showing during this animation? Then the model's hold pose applies.
+    [[nodiscard]] bool showsHeld(std::string_view animation) const;
 
     [[nodiscard]] size_t partCount() const { return parts.size(); }
     [[nodiscard]] bool isEmpty() const { return parts.empty(); }

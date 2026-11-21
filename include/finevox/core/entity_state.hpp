@@ -50,6 +50,10 @@ struct EntityState {
     uint8_t animationId = 0;
     float animationTime = 0.0f;
 
+    /// What it holds, a BlockTypeId's id in this process (0 for nothing). Not in the CBOR form:
+    /// the wire names it.
+    uint32_t heldBlock = 0;
+
     // Client prediction
     uint64_t inputSequence = 0;
 

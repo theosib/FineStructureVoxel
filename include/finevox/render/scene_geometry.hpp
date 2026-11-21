@@ -26,9 +26,12 @@ struct SceneVertex {
 };
 
 /// Axis-aligned box. `lit` false gives a flat, unlit marker. `faces` has a bit per side, in
-/// the order of finevox::Face, so stacked boxes can leave out the sides they share.
+/// the order of finevox::Face, so stacked boxes can leave out the sides they share. With
+/// `texture` (an entity atlas rect), each face shows all of it, times `color`: sides upright, and
+/// running along +X or +Z on both faces of a pair, as if it went through the box.
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& center, const glm::vec3& halfExtents,
-               const glm::vec4& color, bool lit = true, uint8_t faces = 0x3F);
+               const glm::vec4& color, bool lit = true, uint8_t faces = 0x3F,
+               const glm::vec4* texture = nullptr);
 
 /// A layer of cloud from a picture: each pixel that isn't clear is a cell of cloud, the picture
 /// repeating across the sky
@@ -85,6 +88,6 @@ struct EntityPoseScratch {
 void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
                   const EntityRenderState& state, const glm::dvec3& cameraPos,
                   const glm::vec3& teamColor, float light, float tickRate,
-                  EntityPoseScratch& scratch);
+                  EntityPoseScratch& scratch, const std::array<glm::vec4, 6>* heldFaces = nullptr);
 
 }  // namespace finevox::render

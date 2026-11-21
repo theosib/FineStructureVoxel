@@ -336,6 +336,13 @@ void ReplicationServer::sendEntities(ClientView& view) {
         now.animation = state.animationId;
         now.onGround = state.onGround;
         now.health = healthByte(entities.getMob(id));
+        now.held = state.heldBlock;
+        // Named on this channel, which the spawn or batch follows in order: a world channel
+        // that's backed up would leave the client holding a number
+        if (now.held != 0 && view.heldNames_.insert(now.held).second) {
+            send(view, net::CH_ENTITIES, net::msg::BlockName,
+                 net::encodeName({now.held, std::string(BlockTypeId(now.held).name())}));
+        }
 
         auto known = view.known_.find(id);
         if (known == view.known_.end()) {
@@ -353,6 +360,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
             spawn.yaw = state.yaw;
             spawn.pitch = state.pitch;
             spawn.health = now.health;
+            spawn.held = now.held;
             if (const auto* drop = dynamic_cast<const ItemDropEntity*>(entity.get())) {
                 spawn.item = std::string(drop->item().type.name());
             }
@@ -368,7 +376,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
                     std::abs(sent.position.z - now.position.z) < EPSILON &&
                     std::abs(sent.yaw - now.yaw) < EPSILON && std::abs(sent.pitch - now.pitch) < EPSILON &&
                     sent.animation == now.animation && sent.onGround == now.onGround &&
-                    sent.health == now.health;
+                    sent.health == now.health && sent.held == now.held;
         if (same) continue;
         known->second = now;
         moved.emplace_back(id, std::move(state));
@@ -400,6 +408,7 @@ void ReplicationServer::sendEntities(ClientView& view) {
         move.animation = state.animationId;
         move.onGround = state.onGround;
         move.health = movedHealth[i];
+        move.held = state.heldBlock;
         batch.entities.push_back(move);
     }
     send(view, net::CH_ENTITIES, net::msg::EntityBatch, net::encodeEntityBatch(batch));

@@ -10,6 +10,7 @@
 
 #include "finevox/core/entity_state.hpp"
 #include "finevox/core/entity_type_id.hpp"
+#include "finevox/core/string_interner.hpp"
 #include "finevox/core/animation_controller.hpp"
 #include <glm/glm.hpp>
 #include <string>
@@ -20,6 +21,7 @@ struct EntityRenderState {
     EntityId id = INVALID_ENTITY_ID;
     EntityTypeId typeId;
     std::string item;  ///< An item lying in the world: which, drawn as its picture
+    BlockTypeId heldBlock;  ///< A block it holds, drawn in its model's `held:` part; air for none
 
     // Position interpolation (double precision for large worlds)
     glm::dvec3 prevPosition{0.0};

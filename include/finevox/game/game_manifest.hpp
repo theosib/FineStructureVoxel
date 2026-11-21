@@ -69,6 +69,9 @@ struct GameManifest {
     /// Pictures of items, one per item named for it, in this folder under textures/: an item
     /// lying in the world is drawn as its picture. Empty draws them as small boxes.
     std::string itemPictures;
+    /// Textures a UI script can put on its markers, in this folder under textures/, by file name
+    /// (`marker_box ... =texture "cloth"`). Empty for none.
+    std::string markerTextures;
     float playerWidth = 0.7f;     ///< A player's body, on the server and in its own client
     float playerHeight = 1.85f;
     float flySpeed = 2.0f;        ///< Flying speed, as a multiple of walkSpeed

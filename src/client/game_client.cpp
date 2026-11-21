@@ -314,6 +314,8 @@ struct GameClient::Impl {
     render::EntityRenderer entityRenderer;
     EntityModelRegistry models;
     render::EntityPoseScratch poseScratch;
+    /// Each block's face textures in the entity atlas, by Face, for an entity holding one
+    std::unordered_map<uint32_t, std::array<glm::vec4, 6>> heldFaces;
 
     finevk::Camera camera;
     TacticalCamera tactical;
@@ -895,10 +897,38 @@ void GameClient::Impl::enterWorld() {
 
     models.loadDirectory(contentRoot / "models");
     {
-        std::vector<std::string> skyBodies = manifest.skyMoon;
-        if (!manifest.skySun.empty()) skyBodies.push_back(manifest.skySun);
+        std::vector<std::string> more = manifest.skyMoon;
+        if (!manifest.skySun.empty()) more.push_back(manifest.skySun);
+        // Every block's faces, for whatever an entity holds. Unturned: a held block is small.
+        auto unturned = [](const std::string& name) { return name.substr(0, name.find('@')); };
+        for (const auto& [id, set] : content->blockTextures()) {
+            for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
+                const std::string& name = set.forFace(face);
+                if (!name.empty()) more.push_back(unturned(name));
+            }
+        }
+        if (!manifest.markerTextures.empty()) {
+            std::error_code ec;
+            for (const auto& entry : fs::directory_iterator(contentRoot / "textures" / manifest.markerTextures, ec)) {
+                if (entry.path().extension() == ".png") {
+                    more.push_back(manifest.markerTextures + "/" + entry.path().stem().string());
+                }
+            }
+        }
+        std::sort(more.begin(), more.end());
+        more.erase(std::unique(more.begin(), more.end()), more.end());
         sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models,
-                                        skyBodies, manifest.itemPictures);
+                                        more, manifest.itemPictures);
+        for (const auto& [id, set] : content->blockTextures()) {
+            std::array<glm::vec4, 6> faces{};
+            bool all = true;
+            for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
+                auto rect = sceneRenderer->atlasRect(unturned(set.forFace(face)));
+                if (rect) faces[static_cast<size_t>(face)] = *rect;
+                all = all && rect.has_value();
+            }
+            if (all) heldFaces[id] = faces;
+        }
         if (!manifest.skyClouds.empty()) {
             render::SceneRenderer::loadCloudMask((contentRoot / "textures" / (manifest.skyClouds + ".png")).string(),
                                                  clouds);
@@ -1655,8 +1685,12 @@ void GameClient::Impl::buildScene() {
                 render::appendBox(opaque, center, glm::vec3(0.12f), glm::vec4(team * brightness, 1.0f));
             }
         } else if (model) {
+            const std::array<glm::vec4, 6>* held = nullptr;
+            if (state.heldBlock.isRealBlock()) {
+                if (auto it = heldFaces.find(state.heldBlock.id); it != heldFaces.end()) held = &it->second;
+            }
             render::appendEntity(opaque, *model, state, cameraPos, team, brightness, tickRate,
-                                 poseScratch);
+                                 poseScratch, held);
         } else {
             glm::vec3 half = def ? def->halfExtents : glm::vec3(0.3f, 0.9f, 0.3f);
             glm::vec3 center(pos - cameraPos);
@@ -1723,10 +1757,16 @@ void GameClient::Impl::flushMarkers() {
     // difference: with the camera coming down, it would sink out of sight.
     glm::dvec3 now = camera.positionD();
     glm::vec3 shift(markerCamera - now);
-    auto& out = sceneRenderer->translucent();
-    for (render::SceneVertex vertex : markers) {
-        vertex.position += shift;
-        out.push_back(vertex);
+    // A solid one is drawn with the bodies, so that it hides what's behind it. The see-through
+    // pass doesn't write depth: in it, a ring drawn after a pole stood in it would show across it.
+    for (size_t i = 0; i + 3 <= markers.size(); i += 3) {
+        bool solid = markers[i].color.a >= 1.0f && markers[i + 1].color.a >= 1.0f && markers[i + 2].color.a >= 1.0f;
+        auto& out = solid ? sceneRenderer->opaque() : sceneRenderer->translucent();
+        for (size_t j = i; j < i + 3; ++j) {
+            render::SceneVertex vertex = markers[j];
+            vertex.position += shift;
+            out.push_back(vertex);
+        }
     }
     markers.clear();
     markerCamera = now;
@@ -2212,6 +2252,14 @@ void GameClient::Impl::registerNatives() {
         return state ? Value::symbol(state->typeId.id) : Value::nil();
     });
 
+    // entity_held id -> the block it's holding, as a symbol, or nil
+    e.registerFunction("entity_held", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.empty()) return Value::nil();
+        const auto* state = entityRenderer.getEntity(static_cast<EntityId>(number(args[0])));
+        if (!state || !state->heldBlock.isRealBlock()) return Value::nil();
+        return Value::symbol(StringInterner::global().intern(state->heldBlock.name()));
+    });
+
     // entity_health id -> 0 to 1, as last received. 1 for anything unhurt, or not known.
     e.registerFunction("entity_health", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty() || !session) return Value::number(1.0);
@@ -2226,23 +2274,60 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
-    // marker_ring x y z radius r g b [a]
+    // marker_ring x y z radius r g b [a] [=width w]: w across (0.12); as wide as twice the
+    // radius, it's a disc
     e.registerFunction("marker_ring", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 7) return Value::nil();
         glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
                          camera.positionD());
         float radius = static_cast<float>(number(args[3]));
-        render::appendRing(markers, center, radius, 0.12f, colorArg(args, 4));
+        float width = 0.12f;
+        if (args.back().isMap()) {
+            Value w = args.back().asMap().get(StringInterner::global().intern("width"));
+            if (w.isNumeric()) width = static_cast<float>(w.asNumber());
+        }
+        render::appendRing(markers, center, radius, width, colorArg(args, 4));
         return Value::nil();
     });
 
-    // marker_box x y z sx sy sz r g b [a]: min corner and size, unlit
+    // marker_box x y z sx sy sz r g b [a] [=shaded b] [=texture name] [=uv [u0 v0 u1 v1]]: min
+    // corner and size. Shaded, each face is as much darker as a block's (top full, bottom 0.55),
+    // but never by the time of day, so it reads at night as any marker does. A texture is one of
+    // the game's `marker_textures`, by file name, on every face, times the colour, running along
+    // +X or +Z through the box. `uv` takes only that part of it, in fractions: boxes in a row can
+    // each take their slice of one picture.
     e.registerFunction("marker_box", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 9) return Value::nil();
         glm::vec3 size(number(args[3]), number(args[4]), number(args[5]));
         glm::vec3 center(glm::dvec3(number(args[0]), number(args[1]), number(args[2])) -
                          camera.positionD());
-        render::appendBox(markers, center + size * 0.5f, size * 0.5f, colorArg(args, 6), false);
+        bool shaded = false;
+        std::optional<glm::vec4> texture;
+        if (args.back().isMap()) {
+            const auto& options = args.back().asMap();
+            shaded = options.get(StringInterner::global().intern("shaded")).truthy();
+            Value name = options.get(StringInterner::global().intern("texture"));
+            if (name.isString() && !manifest.markerTextures.empty()) {
+                texture = sceneRenderer->atlasRect(manifest.markerTextures + "/" + std::string(name.asString()));
+            }
+            Value part = options.get(StringInterner::global().intern("uv"));
+            if (texture && part.isArray() && part.asArray().size() == 4) {
+                const auto& f = part.asArray();
+                glm::vec4 r = *texture;
+                glm::vec2 lo(r.x, r.y), span(r.z - r.x, r.w - r.y);
+                texture = glm::vec4(lo + glm::vec2(number(f[0]), number(f[1])) * span,
+                                    lo + glm::vec2(number(f[2]), number(f[3])) * span);
+            }
+        }
+        size_t first = markers.size();
+        render::appendBox(markers, center + size * 0.5f, size * 0.5f, colorArg(args, 6), shaded, 0x3F,
+                          texture ? &*texture : nullptr);
+        for (size_t i = first; shaded && i < markers.size(); ++i) {
+            auto& v = markers[i];
+            float shade = v.normal.y > 0.5f ? 1.0f : v.normal.y < -0.5f ? 0.55f : std::abs(v.normal.z) > 0.5f ? 0.85f : 0.7f;
+            v.color = glm::vec4(glm::vec3(v.color) * shade, v.color.a);
+            v.normal = glm::vec3(0.0f);
+        }
         return Value::nil();
     });
 

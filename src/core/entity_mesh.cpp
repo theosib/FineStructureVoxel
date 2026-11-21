@@ -1,5 +1,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include "finevox/core/entity_mesh.hpp"
+#include "finevox/core/position.hpp"
 
 #include <algorithm>
 
@@ -11,6 +12,13 @@ bool EntityMeshPart::shownDuring(std::string_view animation) const {
     };
     if (!onlyIn.empty() && !names(onlyIn)) return false;
     return !names(hiddenIn);
+}
+
+bool EntityMesh::showsHeld(std::string_view animation) const {
+    for (const auto& part : parts) {
+        if (part.held && part.shownDuring(animation)) return true;
+    }
+    return false;
 }
 
 namespace {
@@ -44,6 +52,22 @@ glm::vec2 boxUV(const EntityMeshPart& part, int f, glm::vec3 c, const glm::vec4&
     return {atlas.x + t.x * (atlas.z - atlas.x), atlas.y + t.y * (atlas.w - atlas.y)};
 }
 
+// A whole block face on a corner of a unit box, as the world draws it: sides upright (v = 0 at the
+// top) and read from outside, top and bottom along X and Z. Mesh faces go +X -X +Y -Y +Z -Z.
+glm::vec2 heldUV(int f, glm::vec3 c, const std::array<glm::vec4, 6>& faces) {
+    static const Face byFace[6] = {Face::PosX, Face::NegX, Face::PosY, Face::NegY, Face::PosZ, Face::NegZ};
+    glm::vec2 t;
+    switch (f) {
+        case 0: t = {0.5f - c.z, 0.5f - c.y}; break;
+        case 1: t = {c.z + 0.5f, 0.5f - c.y}; break;
+        case 2: case 3: t = {c.x + 0.5f, c.z + 0.5f}; break;
+        case 4: t = {c.x + 0.5f, 0.5f - c.y}; break;
+        default: t = {0.5f - c.x, 0.5f - c.y}; break;
+    }
+    const glm::vec4& r = faces[static_cast<size_t>(byFace[f])];
+    return {r.x + t.x * (r.z - r.x), r.y + t.y * (r.w - r.y)};
+}
+
 }  // namespace
 
 void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
@@ -52,7 +76,8 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                                 const glm::vec3& teamColor,
                                 std::string_view animation,
                                 const glm::vec4& atlas,
-                                const glm::vec2& textureSize) const
+                                const glm::vec2& textureSize,
+                                const std::array<glm::vec4, 6>* heldFaces) const
 {
     vertices.clear();
     indices.clear();
@@ -95,6 +120,7 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
 
     for (const auto& part : parts) {
         if (!part.shownDuring(animation)) continue;
+        if (part.held && !heldFaces) continue;
 
         // Get bone transform (or identity if out of range)
         glm::mat4 boneTransform(1.0f);
@@ -133,11 +159,16 @@ void EntityMesh::buildVertices(const std::vector<glm::mat4>& worldPoses,
                 v.position = glm::vec3(worldPos);
                 v.normal = transformedNormal;
                 const bool own = part.atlas.z > part.atlas.x;
-                v.texCoord = part.textured ? boxUV(part, f, face.corners[c], own ? part.atlas : atlas,
-                                                   own ? part.textureSize : textureSize)
-                                           : part.uvOffset + faceUVs[c] * part.uvSize;
-                v.skinned = part.textured;
-                v.color = glm::mix(part.color, teamColor, part.teamTint);
+                if (part.held) {
+                    v.texCoord = heldUV(f, face.corners[c], *heldFaces);
+                } else if (part.textured) {
+                    v.texCoord = boxUV(part, f, face.corners[c], own ? part.atlas : atlas,
+                                       own ? part.textureSize : textureSize);
+                } else {
+                    v.texCoord = part.uvOffset + faceUVs[c] * part.uvSize;
+                }
+                v.skinned = part.textured || part.held;
+                v.color = part.held ? part.color : glm::mix(part.color, teamColor, part.teamTint);
                 vertices.push_back(v);
             }
 

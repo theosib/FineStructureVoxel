@@ -43,6 +43,7 @@ sky.conf
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
 | `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
 | `item_pictures` | none | A folder under `textures/` with a picture per item, named for it: an item lying in the world is drawn as its picture, turning. Without one, as a small box |
+| `marker_textures` | none | A folder under `textures/` whose pictures a UI script can put on `marker_box`, by file name |
 | `player_width`, `player_height` | `0.7`, `1.85` | A player's body, the same on the server and in its own client |
 | `walk_speed`, `jump_velocity` | `4.5`, `7` | On foot: blocks per second, and the upward speed a jump starts with |
 | `sneak_speed`, `sneak_eye_drop`, `sneak_shrink` | `0.4`, `0.25`, `0.25` | Sneaking (`begin_sneak`/`end_sneak`) crouches: a fraction of `walk_speed`, how far the eye lowers, and how much shorter the body is (on the server too, which tells others). Letting go stands up only where there's room. A sneaking body won't walk off a drop deeper than `step_height`. A player's entity type can have `crouch` and `crouch_walk` animations beside `idle` and `walk` |
@@ -152,6 +153,8 @@ ent_pos id   ent_set_pos id x y z           ent_type id       ent_faction id
 ent_health id   ent_max_health id   ent_set_health id hp
 ent_damage id amount [source]               ent_last_attacker id
 ent_speed id mult    ent_anim id :state     ent_look_at id x y z
+ent_hold id block    shows it holding that block (nil for nothing), in its model's `held:` part
+ent_held id          the block it's shown holding, or nil
 ent_find x y z radius [=faction f] [=enemy_of f] [=type t] [=max n] -> ids, nearest first
 cell_occupied x y z [=except id] -> an entity whose body is in that cell, or nil
 ```
@@ -304,8 +307,12 @@ do_action name     gui_click x y   gui_hover x y   input_text "abc"   input_scro
                    (for scripted UI tests)
 ui_texture name "ui/x.png"   loads an image for ui.image to show by name
 entity_pos id   entity_faction id  entity_health id -> 0..1   set_faction_color id r g b
-entity_type id -> :militia, or nil if not known
-marker_ring x y z radius r g b [a]     marker_box x y z sx sy sz r g b [a]
+entity_type id -> :militia, or nil if not known     entity_held id -> the block it holds, or nil
+marker_ring x y z radius r g b [a] [=width w]   as wide as twice the radius, it's a disc
+marker_box x y z sx sy sz r g b [a] [=shaded true] [=texture name] [=uv [u0 v0 u1 v1]]
+                   shaded: faces darker as a block's are, whatever the time of day. texture: one
+                   of the game's `marker_textures` (game.conf, a folder under textures/), on every
+                   face, running along +X or +Z right through the box. uv: only that part of it
 marker_edges x y z sx sy sz r g b [a] [=points 1.5]   a box's edges as lines, as thick on screen
                    near as far, a hair nearer the eye than the faces they lie on
 block_shape block [:collision] -> [[x0 y0 z0 x1 y1 z1] ...]   the state's hit shape (what a
@@ -327,7 +334,10 @@ fluid_at x y z -> the fluid's name there, or nil, as this client knows the world
 request_screenshot path    quit_game    to_menu
 ```
 
-Markers last one frame, so a script that wants one asks again every frame. `marker_xray` copies the
+Markers last one frame, so a script that wants one asks again every frame. One drawn fully
+opaque (alpha 1) goes in with the bodies and hides what's behind it; anything see-through is drawn
+after, testing against them but hiding nothing, so a ring round a pole shows in front of it and
+not behind it. `marker_xray` copies the
 body into a pass drawn only where something nearer has already been drawn, front faces only, and
 only for a body a ray from the camera to its feet, middle or head finds a block in front of.
 
@@ -426,6 +436,14 @@ one atlas, sampled nearest so pixel art stays sharp. A part can wear a skin of i
 `texture:` and `texture_size:` after its `part:` line, for a layer over another (wool, armour),
 with `grow: n` making its box n pixels bigger each way than its unwrap so it sits over the one
 beneath.
+
+A part with `held: true` is the block the entity holds (`ent_hold`), if it holds one: drawn with
+that block's own face textures, sides upright as the world shows them, tinted by its `color:`
+(entities are drawn at 1.6 times their light, so 0.62 shows the block as the world does). It
+takes `only_in` and `hidden_in` like any part. `hold_pose: clip` before the parts names a clip
+laid over whatever plays while a held part shows, for only the bones it has tracks for: arms
+round a load, the legs still walking. The client puts every block's face textures in the entity
+atlas for this, and a held block goes to clients in each entity's snapshot (PROTOCOL.md §6).
 
 Keys must not be indented: `ConfigParser` reads indented lines as continuation data. The
 entity needs `model: name` and `anim:name: slot`. `only_in` and `hidden_in` go by those names.

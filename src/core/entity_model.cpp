@@ -64,6 +64,10 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
             if (clip) {
                 model.clips[entry.suffix] = std::make_shared<const AnimationClip>(std::move(*clip));
             }
+        } else if (entry.key == "hold_pose" && !part) {
+            auto text = readFile(entry.value.asStringOwned() + ".anim");
+            auto clip = text ? SkeletonLoader::loadAnimationFromString(*text, *model.skeleton) : std::nullopt;
+            if (clip) model.holdPose = std::make_shared<const AnimationClip>(std::move(*clip));
         } else if (entry.key == "texture" && !part) {
             model.texture = entry.value.asStringOwned();
         } else if (entry.key == "texture_size" && !part) {
@@ -105,6 +109,8 @@ std::optional<EntityModel> EntityModelRegistry::parse(std::string_view name, std
                 part->onlyIn = words(entry.value.asString());
             } else if (entry.key == "hidden_in") {
                 part->hiddenIn = words(entry.value.asString());
+            } else if (entry.key == "held") {
+                part->held = entry.value.asBool(false);
             }
         }
     }

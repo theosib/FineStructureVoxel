@@ -171,6 +171,10 @@ public:
 
     void advanceAnimation(float dt) { animationTime_ += dt; }
 
+    /// A block it's holding, for show only: a model draws it in its `held:` part. Air for none.
+    [[nodiscard]] BlockTypeId heldBlock() const { return heldBlock_; }
+    void setHeldBlock(BlockTypeId block) { heldBlock_ = block; }
+
     // ========================================================================
     // Fluid State
     // ========================================================================
@@ -258,6 +262,7 @@ protected:
     // Animation
     float animationTime_ = 0.0f;
     uint8_t animationId_ = 0;
+    BlockTypeId heldBlock_;
 
     // Lifecycle
     bool markedForRemoval_ = false;

@@ -69,6 +69,7 @@ struct EntitySpawnWire {
     float pitch = 0.0f;
     uint8_t health = FULL_HEALTH;
     std::string item;  ///< What an item lying in the world is; empty for anything else
+    uint32_t held = 0;  ///< A BlockName id: the block it holds, 0 for none
 };
 [[nodiscard]] std::vector<uint8_t> encodeEntitySpawn(const EntitySpawnWire& spawn);
 [[nodiscard]] std::optional<EntitySpawnWire> decodeEntitySpawn(std::span<const uint8_t> body);
@@ -89,6 +90,7 @@ struct EntityMoveWire {
     uint8_t animation = 0;
     bool onGround = false;
     uint8_t health = FULL_HEALTH;
+    uint32_t held = 0;  ///< A BlockName id: the block it holds, 0 for none
 };
 struct EntityBatchWire {
     uint64_t tick = 0;

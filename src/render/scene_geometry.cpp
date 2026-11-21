@@ -29,7 +29,7 @@ constexpr glm::vec3 DEATH_PALE_COLOR(0.92f, 0.92f, 0.88f);
 }  // namespace
 
 void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec3& h,
-               const glm::vec4& color, bool lit, uint8_t faces) {
+               const glm::vec4& color, bool lit, uint8_t faces, const glm::vec4* texture) {
     glm::vec3 p[8] = {
         {c.x - h.x, c.y - h.y, c.z - h.z}, {c.x + h.x, c.y - h.y, c.z - h.z},
         {c.x + h.x, c.y + h.y, c.z - h.z}, {c.x - h.x, c.y + h.y, c.z - h.z},
@@ -40,12 +40,26 @@ void appendBox(std::vector<SceneVertex>& out, const glm::vec3& c, const glm::vec
         return lit ? glm::vec3(x, y, z) : glm::vec3(0.0f);
     };
     auto side = [faces](Face face) { return (faces >> static_cast<uint8_t>(face)) & 1; };
-    if (side(Face::PosX)) pushQuad(out, p[1], p[5], p[6], p[2], normal(1, 0, 0), color);
-    if (side(Face::NegX)) pushQuad(out, p[4], p[0], p[3], p[7], normal(-1, 0, 0), color);
-    if (side(Face::PosY)) pushQuad(out, p[3], p[2], p[6], p[7], normal(0, 1, 0), color);
-    if (side(Face::NegY)) pushQuad(out, p[4], p[5], p[1], p[0], normal(0, -1, 0), color);
-    if (side(Face::PosZ)) pushQuad(out, p[5], p[4], p[7], p[6], normal(0, 0, 1), color);
-    if (side(Face::NegZ)) pushQuad(out, p[0], p[1], p[2], p[3], normal(0, 0, -1), color);
+    // Through the box, as a stencil would go: across a side along +X or +Z, whichever it runs
+    // along, so that the faces opposite each other agree and boxes in a row can carry one picture
+    auto quad = [&](int a, int b, int cc, int d, glm::vec3 n) {
+        pushQuad(out, p[a], p[b], p[cc], p[d], n, color);
+        if (!texture) return;
+        const glm::vec4& r = *texture;
+        for (size_t i = out.size() - 6; i < out.size(); ++i) {
+            glm::vec3 t = (out[i].position - (c - h)) / (2.0f * glm::max(h, glm::vec3(1e-6f)));
+            glm::vec2 st = std::abs(n.y) > 0.5f ? glm::vec2(t.x, t.z)
+                         : std::abs(n.x) > 0.5f ? glm::vec2(t.z, 1.0f - t.y)
+                                                : glm::vec2(t.x, 1.0f - t.y);
+            out[i].uv = glm::vec2(r.x + st.x * (r.z - r.x), r.y + st.y * (r.w - r.y));
+        }
+    };
+    if (side(Face::PosX)) quad(1, 5, 6, 2, normal(1, 0, 0));
+    if (side(Face::NegX)) quad(4, 0, 3, 7, normal(-1, 0, 0));
+    if (side(Face::PosY)) quad(3, 2, 6, 7, normal(0, 1, 0));
+    if (side(Face::NegY)) quad(4, 5, 1, 0, normal(0, -1, 0));
+    if (side(Face::PosZ)) quad(5, 4, 7, 6, normal(0, 0, 1));
+    if (side(Face::NegZ)) quad(0, 1, 2, 3, normal(0, 0, -1));
 }
 
 void appendCloudLayer(std::vector<SceneVertex>& out, const CloudMask& mask, const glm::dvec3& cameraPos,
@@ -131,10 +145,19 @@ void appendBoxEdges(std::vector<SceneVertex>& out, const glm::vec3& minCorner, c
 void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
                   const EntityRenderState& state, const glm::dvec3& cameraPos,
                   const glm::vec3& teamColor, float light, float tickRate,
-                  EntityPoseScratch& scratch) {
+                  EntityPoseScratch& scratch, const std::array<glm::vec4, 6>* heldFaces) {
+    // Which clip is playing, by the name the model's parts know it by
+    std::string_view animation;
+    if (const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId)) {
+        for (const auto& [name, slot] : def->animationStates) {
+            if (slot == state.currentAnimationId) animation = name;
+        }
+    }
+
     const Skeleton& skeleton = *model.skeleton;
     skeleton.computeRestPose(scratch.local);
     state.animator.sample(scratch.local);
+    if (heldFaces && model.holdPose && model.mesh.showsHeld(animation)) model.holdPose->sample(0.0f, scratch.local);
     skeleton.computeWorldTransforms(scratch.local, scratch.world);
 
     float alpha = state.interpolationAlpha(tickRate);
@@ -159,17 +182,11 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
     }
     for (auto& pose : scratch.world) pose = root * pose;
 
-    // Which clip is playing, by the name the model's parts know it by
-    std::string_view animation;
-    if (const EntityTypeDef* def = EntityTypeRegistry::global().getType(state.typeId)) {
-        for (const auto& [name, slot] : def->animationStates) {
-            if (slot == state.currentAnimationId) animation = name;
-        }
-    }
     model.mesh.buildVertices(scratch.world, scratch.vertices, scratch.indices, teamColor, animation,
-                             model.atlasRect, model.textureSize);
+                             model.atlasRect, model.textureSize, heldFaces);
     bool placed = model.atlasRect.z > model.atlasRect.x;
     for (const auto& part : model.mesh.parts) placed = placed || part.atlas.z > part.atlas.x;
+    placed = placed || heldFaces;
 
     out.reserve(out.size() + scratch.indices.size());
     for (uint32_t index : scratch.indices) {

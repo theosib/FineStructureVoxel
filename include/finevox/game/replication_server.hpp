@@ -66,6 +66,7 @@ private:
         uint8_t animation = 0;
         bool onGround = false;
         uint8_t health = net::FULL_HEALTH;
+        uint32_t held = 0;
     };
 
     int64_t player_;
@@ -84,6 +85,7 @@ private:
     std::unordered_set<uint32_t> blockNames_;
     std::unordered_set<uint32_t> fluidNames_;
     std::unordered_set<uint32_t> typeNames_;
+    std::unordered_set<uint32_t> heldNames_;  ///< Blocks named on the entities channel, for what's held
     std::unordered_map<EntityId, SentEntity> known_;
     std::vector<uint8_t> lastVision_;
     const void* lastGhosts_ = nullptr;

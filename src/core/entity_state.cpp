@@ -24,6 +24,7 @@ EntityState::EntityState(const EntityState& other)
     , pitch(other.pitch)
     , animationId(other.animationId)
     , animationTime(other.animationTime)
+    , heldBlock(other.heldBlock)
     , inputSequence(other.inputSequence)
     , extra(other.extra ? other.extra->clone() : nullptr)
 {}
@@ -41,6 +42,7 @@ EntityState& EntityState::operator=(const EntityState& other) {
         pitch = other.pitch;
         animationId = other.animationId;
         animationTime = other.animationTime;
+        heldBlock = other.heldBlock;
         inputSequence = other.inputSequence;
         extra = other.extra ? other.extra->clone() : nullptr;
     }
@@ -66,6 +68,7 @@ EntityState EntityState::fromEntity(const Entity& entity) {
     state.pitch = entity.pitch();
     state.animationId = entity.animationId();
     state.animationTime = entity.animationTime();
+    state.heldBlock = entity.heldBlock().id;
 
     // Copy entity's extensible data if present
     if (entity.entityData()) {

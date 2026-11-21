@@ -82,6 +82,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.sneakShrink = doc->getFloat("sneak_shrink", m.sneakShrink);
     m.playerWidth = doc->getFloat("player_width", m.playerWidth);
     m.itemPictures = std::string(doc->getString("item_pictures", m.itemPictures));
+    m.markerTextures = std::string(doc->getString("marker_textures", m.markerTextures));
     m.playerHeight = doc->getFloat("player_height", m.playerHeight);
     m.flySpeed = doc->getFloat("fly_speed", m.flySpeed);
     m.flyClimb = doc->getFloat("fly_climb", m.flyClimb);

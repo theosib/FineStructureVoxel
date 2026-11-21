@@ -23,6 +23,11 @@
  * `texture_size:` after its `part:` line, for a layer over another (wool, armour), and `grow: n`
  * makes its box n pixels bigger each way than its unwrap, to sit over the one beneath.
  *
+ * A part with `held: true` is the block the entity holds, if any (a load in its arms): drawn with
+ * that block's own face textures, tinted by its `color:`. `hold_pose: clip` at the top names a
+ * clip laid over whatever plays while a held part shows, for only the bones it has tracks for
+ * (arms reaching round the load, with the legs still walking).
+ *
  * Keys following `part:` apply to that part. They must not be indented: the
  * config parser reads indented lines as continuation data.
  *
@@ -50,6 +55,8 @@ struct EntityModel {
     EntityMesh mesh;
     /// Animation state name -> clip, as named by the entity's `anim:` keys
     std::unordered_map<std::string, std::shared_ptr<const AnimationClip>> clips;
+    /// Over the playing clip while it holds something; null for none
+    std::shared_ptr<const AnimationClip> holdPose;
 
     std::string texture;                   ///< Under textures/, no extension; empty for colours
     glm::vec2 textureSize{64.0f, 64.0f};   ///< Pixels, as the parts' uv: are measured in

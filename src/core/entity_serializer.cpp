@@ -19,6 +19,7 @@ std::unique_ptr<DataContainer> EntitySerializer::entityToData(const Entity& enti
     // Entity type - stored as the EntityType enum value
     dc->set<int64_t>("entity_type", static_cast<int64_t>(entity.type()));
     dc->set<int64_t>("faction", static_cast<int64_t>(entity.faction()));
+    if (!entity.heldBlock().isAir()) dc->set<std::string>("held", std::string(entity.heldBlock().name()));
 
     // Position
     dc->set<double>("x", entity.position().x);
@@ -131,6 +132,7 @@ std::unique_ptr<Entity> EntitySerializer::entityFromData(const DataContainer& da
     }
 
     entity->setFaction(static_cast<uint16_t>(data.get<int64_t>("faction", 0)));
+    if (auto held = data.get<std::string>("held"); !held.empty()) entity->setHeldBlock(BlockTypeId::fromName(held));
 
     // Position
     entity->setPosition(Vec3(

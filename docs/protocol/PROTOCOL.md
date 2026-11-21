@@ -261,7 +261,7 @@ All on channel 3, in the order the server made them.
 
 | Type | Name | Body |
 |---|---|---|
-| 0x30 | EntitySpawn | `0 id: uint`, `1 type: uint` (EntityTypeName id), `2 faction?: uint = 0`, `3 x, 4 y, 5 z: float` (double, for precision far out), `6 yaw?, 7 pitch?: float = 0`, `8 health?: uint = 255`, `9 item?: text` (an item lying in the world: which) |
+| 0x30 | EntitySpawn | `0 id: uint`, `1 type: uint` (EntityTypeName id), `2 faction?: uint = 0`, `3 x, 4 y, 5 z: float` (double, for precision far out), `6 yaw?, 7 pitch?: float = 0`, `8 health?: uint = 255`, `9 item?: text` (an item lying in the world: which), `10 held?: uint = 0` (as in Entity) |
 | 0x31 | EntityGone | `0 id: uint`, `1 died?: bool = false` |
 | 0x32 | EntityBatch | `0 tick: uint`, `1 entities: [Entity]` |
 | 0x33 | Projectiles | `0 shots: [Shot]`. Shot: `0 x, 1 y, 2 z: float`, `3 vx?, 4 vy?, 5 vz?: float = 0` |
@@ -276,9 +276,12 @@ Entity:
 9 animation?: uint = 0          Slot, as the entity's `.entity` file lists them
 10 on_ground?: bool = false
 11 health?: uint = 255          In 255ths of its most. 255 only when nothing's missing, so a scratch shows
+12 held?: uint = 0              A block it holds (a BlockName id), for its model to draw. 0 for none.
 ```
 
-A change of health alone is enough to send an entity again. Anything that isn't a mob reads 255.
+A change of health alone is enough to send an entity again, and so is a change of what it holds.
+Anything that isn't a mob reads 255. A held block's BlockName comes on this channel too, before the
+first spawn or batch that uses it, so that it's never behind on channel 5.
 
 An entity the client has been told about stays exactly where it is until told otherwise. Silence
 means it hasn't moved, and an entity that leaves the player's sight is `EntityGone` with `died` 0. A

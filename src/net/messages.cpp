@@ -16,14 +16,14 @@ namespace time_key { enum : uint32_t { TICKS = 0, HELD = 1, PAUSED = 2 }; }
 namespace ghosts_key { enum : uint32_t { GROUPS = 0 }; }
 namespace ghost_key { enum : uint32_t { BUILT = 0, CELLS = 1 }; }
 namespace spawn_key {
-enum : uint32_t { ID = 0, TYPE = 1, FACTION = 2, X = 3, Y = 4, Z = 5, YAW = 6, PITCH = 7, HEALTH = 8, ITEM = 9 };
+enum : uint32_t { ID = 0, TYPE = 1, FACTION = 2, X = 3, Y = 4, Z = 5, YAW = 6, PITCH = 7, HEALTH = 8, ITEM = 9, HELD = 10 };
 }
 namespace gone_key { enum : uint32_t { ID = 0, DIED = 1 }; }
 namespace batch_key { enum : uint32_t { TICK = 0, ENTITIES = 1 }; }
 namespace move_key {
 enum : uint32_t {
     ID = 0, X = 1, Y = 2, Z = 3, VX = 4, VY = 5, VZ = 6, YAW = 7, PITCH = 8, ANIMATION = 9, ON_GROUND = 10,
-    HEALTH = 11,
+    HEALTH = 11, HELD = 12,
 };
 }
 namespace shots_key { enum : uint32_t { SHOTS = 0 }; }
@@ -185,6 +185,7 @@ std::vector<uint8_t> encodeEntitySpawn(const EntitySpawnWire& spawn) {
     f32Unless0(w, spawn_key::PITCH, spawn.pitch);
     if (spawn.health != FULL_HEALTH) w.uint(spawn_key::HEALTH, spawn.health);
     if (!spawn.item.empty()) w.text(spawn_key::ITEM, spawn.item);
+    if (spawn.held != 0) w.uint(spawn_key::HELD, spawn.held);
     return w.finish();
 }
 
@@ -204,6 +205,7 @@ std::optional<EntitySpawnWire> decodeEntitySpawn(std::span<const uint8_t> body) 
             case spawn_key::PITCH: spawn.pitch = readF32(in); return true;
             case spawn_key::HEALTH: spawn.health = static_cast<uint8_t>(in.uint()); return true;
             case spawn_key::ITEM: spawn.item = in.text(); return true;
+            case spawn_key::HELD: spawn.held = static_cast<uint32_t>(in.uint()); return true;
             default: return false;
         }
     });
@@ -250,6 +252,7 @@ std::vector<uint8_t> encodeEntityBatch(const EntityBatchWire& batch) {
         if (move.animation != 0) e.uint(move_key::ANIMATION, move.animation);
         if (move.onGround) e.boolean(move_key::ON_GROUND, true);
         if (move.health != FULL_HEALTH) e.uint(move_key::HEALTH, move.health);
+        if (move.held != 0) e.uint(move_key::HELD, move.held);
     });
     return w.finish();
 }
@@ -281,6 +284,7 @@ std::optional<EntityBatchWire> decodeEntityBatch(std::span<const uint8_t> body) 
                             case move_key::ANIMATION: move.animation = static_cast<uint8_t>(in.uint()); return true;
                             case move_key::ON_GROUND: move.onGround = in.boolean(); return true;
                             case move_key::HEALTH: move.health = static_cast<uint8_t>(in.uint()); return true;
+                            case move_key::HELD: move.held = static_cast<uint32_t>(in.uint()); return true;
                             default: return false;
                         }
                     });

@@ -79,6 +79,7 @@ TEST(Wire, EachMessageRoundTrips) {
     move.animation = 3;
     move.onGround = true;
     move.health = 40;
+    move.held = 77;
     batch.entities = {move, EntityMoveWire{}};
     auto back = decodeEntityBatch(encodeEntityBatch(batch));
     ASSERT_TRUE(back.has_value());
@@ -93,6 +94,8 @@ TEST(Wire, EachMessageRoundTrips) {
     EXPECT_TRUE(back->entities[0].onGround);
     EXPECT_EQ(back->entities[0].health, 40);
     EXPECT_EQ(back->entities[1].health, FULL_HEALTH);
+    EXPECT_EQ(back->entities[0].held, 77u);
+    EXPECT_EQ(back->entities[1].held, 0u);
     EXPECT_FALSE(back->entities[1].onGround);
 
     EntitySpawnWire spawn{12, 7, 3, {1e6 + 0.25, -64.0, 3.5}, 0.5f, -0.25f, 200};
@@ -151,9 +154,11 @@ TEST(Wire, EachMessageRoundTrips) {
     lying.id = 5;
     lying.type = 9;
     lying.item = "gem";
+    lying.held = 31;
     auto lyingBack = decodeEntitySpawn(encodeEntitySpawn(lying));
     ASSERT_TRUE(lyingBack.has_value());
     EXPECT_EQ(lyingBack->item, "gem");
+    EXPECT_EQ(lyingBack->held, 31u);
     auto crouchedBack = decodePlayerState(encodePlayerState(crouched));
     ASSERT_TRUE(crouchedBack.has_value());
     EXPECT_TRUE(crouchedBack->crouch);

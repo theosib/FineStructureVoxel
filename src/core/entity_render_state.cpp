@@ -44,6 +44,7 @@ void EntityRenderState::applySnapshot(const EntityState& state) {
     currentPitch = state.pitch;
     velocity = state.velocity;
     faction = state.faction;
+    heldBlock = BlockTypeId(state.heldBlock);
     timeSinceSnapshot = 0.0f;
 }
 

@@ -354,7 +354,7 @@ void ClientSession::registerHandlers() {
         auto name = decodeName(m.payload());
         if (!name) return;
         world_.nameBlock(name->id, name->name);
-        ghostBlocks_[name->id] = BlockTypeId::fromName(name->name);
+        wireBlocks_[name->id] = BlockTypeId::fromName(name->name);
     });
     c.onMessage(msg::FluidName, [this](const Message& m) {
         if (auto name = decodeName(m.payload())) world_.nameFluid(name->id, name->name);
@@ -687,6 +687,11 @@ std::optional<glm::dvec3> ClientSession::takeMove() {
     return std::exchange(pendingMove_, std::nullopt);
 }
 
+uint32_t ClientSession::wireBlock(uint32_t id) const {
+    auto name = wireBlocks_.find(id);
+    return name == wireBlocks_.end() ? 0 : name->second.id;
+}
+
 void ClientSession::onEntitySpawn(const Message& message) {
     auto spawn = decodeEntitySpawn(message.payload());
     if (!spawn) return;
@@ -698,6 +703,7 @@ void ClientSession::onEntitySpawn(const Message& message) {
     state.yaw = spawn->yaw;
     state.pitch = spawn->pitch;
     uint8_t health = spawn->health;
+    state.heldBlock = wireBlock(spawn->held);
 
     auto name = entityTypeNames_.find(type);
     graphics_.push(GraphicsMessage::fromEvent(script::makeEntitySpawnValue(
@@ -744,6 +750,7 @@ void ClientSession::onEntityBatch(const Message& message) {
         parsed.pitch = move.pitch;
         parsed.animationId = move.animation;
         parsed.onGround = move.onGround;
+        parsed.heldBlock = wireBlock(move.held);
         if (known == entities_.end()) continue;  // It's since gone
         health_[id] = move.health;
         parsed.faction = known->second.faction;
@@ -802,8 +809,7 @@ void ClientSession::onGhosts(const Message& message) {
             const GhostCellWire& from = group.cells[c];
             auto& cell = ghost.cells[c];
             cell.pos = BlockCoord(from.x, from.y, from.z);
-            auto name = ghostBlocks_.find(from.block);
-            cell.block = name == ghostBlocks_.end() ? BlockTypeId() : name->second;
+            cell.block = BlockTypeId(wireBlock(from.block));
         }
     }
     std::lock_guard lock(mutex_);

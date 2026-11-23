@@ -309,3 +309,29 @@ TEST(WorldReplicaChanges, LightABlockChangeSpreadsIntoTheNextColumnArrivesSoon) 
     ASSERT_NE(copy, nullptr);
     EXPECT_EQ(copy->getBlockLight(0, GROUND_Y & 15, lamp.z & 15), 9) << "not left for the sweep";
 }
+
+TEST_F(WorldReplicaTest, GroundRunsACellPastEverythingInSight) {
+    // The fog blends halfway into the next cell: ground a client doesn't hold, next to a cell in
+    // sight, would leave a half-lit wall down to the bottom of the world. Sight ends at every
+    // offset to a column's edge somewhere in this sweep.
+    constexpr int CELL = FactionVision::CELL_SIZE;
+    for (int x = 20; x <= 108; ++x) {
+        replica = std::make_unique<WorldReplica>(world, *vision, VIEWER);
+        lookFrom(x);
+        for (int cz = 0; cz < 32; cz += CELL) {
+            for (int cx = 0; cx < 128; cx += CELL) {
+                if (!vision->isVisible(VIEWER, cx, cz)) continue;
+                for (int dz = -CELL; dz <= CELL; dz += CELL) {
+                    for (int dx = -CELL; dx <= CELL; dx += CELL) {
+                        int nx = cx + dx;
+                        int nz = cz + dz;
+                        if (nx < 0 || nz < 0 || nx >= 128 || nz >= 32) continue;
+                        ASSERT_EQ(replica->world().getBlock(nx, GROUND_Y - 1, nz), stone)
+                            << "looking from " << x << ", cell " << nx << "," << nz
+                            << " next to one in sight at " << cx << "," << cz;
+                    }
+                }
+            }
+        }
+    }
+}

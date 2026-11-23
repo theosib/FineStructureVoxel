@@ -82,8 +82,12 @@ bool WorldReplica::columnVisible(ColumnPos pos) const {
     if (revealAll_) return true;
     int32_t originX = pos.x * 16;
     int32_t originZ = pos.z * 16;
-    for (int32_t dz = 0; dz < 16; dz += FactionVision::CELL_SIZE) {
-        for (int32_t dx = 0; dx < 16; dx += FactionVision::CELL_SIZE) {
+    // A cell in sight counts for the columns round it too. The fog blends halfway into the next
+    // cell, so where sight ended at a column's edge, the wall against the column the client
+    // didn't hold showed half-lit down to the bottom of the world. A cell more puts it in full fog.
+    constexpr int32_t CELL = FactionVision::CELL_SIZE;
+    for (int32_t dz = -CELL; dz < 16 + CELL; dz += CELL) {
+        for (int32_t dx = -CELL; dx < 16 + CELL; dx += CELL) {
             if (vision_.isVisible(viewer_, originX + dx, originZ + dz)) return true;
         }
     }

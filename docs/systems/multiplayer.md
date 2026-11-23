@@ -71,6 +71,10 @@ circuit or a machine, reaches clients as it happens. A sweep walks the map a few
 the rest: columns coming into sight, and light and fluid that change on their own. On a big map a
 lap of the sweep takes seconds, so anything that has to show promptly must come as a block change.
 
+"Can see" a column means a cell in sight in it or next to it. The fog blends halfway into the next
+cell, so a client that held only the columns with a cell in sight would draw a half-lit wall down to
+the bottom of the world wherever its sight ended at a column's edge.
+
 Each `ClientView` sends subchunks from its faction's replica, entities its faction can see now, its
 faction's vision cells, and only its faction's ghosts. Tests assert on the bytes the client holds,
 not on what it draws.

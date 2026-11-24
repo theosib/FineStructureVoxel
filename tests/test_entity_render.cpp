@@ -350,6 +350,38 @@ TEST(EntityRenderStateTest, InterpolateYawWrappingReverse) {
     EXPECT_NEAR(mid, 0.0f, 0.01f);
 }
 
+TEST(EntityRenderStateTest, TurnSwingsRoundOverAQuarterSecond) {
+    // The server turns a body a quarter turn in one tick; the drawn body takes its time
+    constexpr float QUARTER = 1.5707963f;
+    EntityRenderState state;
+    state.currentYaw = QUARTER;
+    state.turn(1.0f / 30.0f);
+    EXPECT_GT(state.shownYaw, 0.0f);
+    EXPECT_LT(state.shownYaw, QUARTER * 0.5f) << "one frame at 30fps is not most of the turn";
+
+    float last = state.shownYaw;
+    for (int frame = 0; frame < 60; ++frame) {
+        state.turn(1.0f / 240.0f);
+        EXPECT_GE(state.shownYaw, last) << "turns one way only";
+        EXPECT_LE(state.shownYaw, QUARTER) << "never overshoots";
+        last = state.shownYaw;
+    }
+    EXPECT_GT(state.shownYaw, QUARTER * 0.9f) << "most of the way in a quarter second";
+}
+
+TEST(EntityRenderStateTest, TurnGoesTheShortWayRound) {
+    // From just short of a half turn one way to just past it the other: the short way is
+    // through pi, not back through 0
+    EntityRenderState state;
+    state.shownYaw = 3.0f;
+    state.currentYaw = -3.0f;
+    for (int frame = 0; frame < 120; ++frame) {
+        state.turn(1.0f / 60.0f);
+        EXPECT_GT(std::abs(state.shownYaw), 2.9f) << "frame " << frame;
+    }
+    EXPECT_NEAR(state.shownYaw, -3.0f, 0.01f);
+}
+
 TEST(EntityRenderStateTest, ApplySnapshot) {
     EntityRenderState state;
     state.currentPosition = glm::dvec3(1, 2, 3);

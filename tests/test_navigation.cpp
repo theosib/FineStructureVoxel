@@ -335,6 +335,19 @@ TEST_F(NavigationTest, RangedGoalStopsNextToTheTarget) {
     EXPECT_NE(end, BlockCoord(10, GROUND_Y, 0));
 }
 
+TEST_F(NavigationTest, RangedGoalIsMeasuredToTheGoalNotItsCell) {
+    // Something on the move is seldom in the middle of its cell. Coming at this one from the
+    // diagonal, the cell before its own is in range of the cell but not of where it stands.
+    glm::dvec3 goal(10.05, GROUND_Y + 0.05, 0.05);
+    NavQuery q = query(cell(20, GROUND_Y, 10), goal);
+    q.goalRange = 1.0f;
+    auto path = findNavPath(world, q);
+    ASSERT_TRUE(path.has_value());
+    BlockCoord end = path->steps.back().pos;
+    double off = std::hypot(end.x + 0.5 - goal.x, end.z + 0.5 - goal.z);
+    EXPECT_LE(off, q.goalRange + 0.5) << "stopped at " << end.x << "," << end.z;
+}
+
 TEST_F(NavigationTest, PrefersRoadsWhenTheDetourIsWorthIt) {
     for (int x = 0; x <= 30; ++x) world.setBlock(x, GROUND_Y - 1, 3, road);
     auto path = findNavPath(world, query(cell(0, GROUND_Y, 0), cell(30, GROUND_Y, 0)));
@@ -478,6 +491,70 @@ TEST_F(NavigationAgentTest, WalksAlongAPathAndArrives) {
     EXPECT_NEAR(pos.x, 30.5f, 1.0f);
     EXPECT_NEAR(pos.z, 20.5f, 1.0f);
     EXPECT_FALSE(entities->getMob(id)->hasMoveTarget());
+}
+
+TEST_F(NavigationAgentTest, WalksStraightAtAnyAngleOverOpenGround) {
+    // The search moves in eighths of a turn: 20 diagonal steps and 10 straight, which strays
+    // over 5 blocks from the line. Walked, it's the line.
+    EntityId id = spawn(0, 0);
+    tick(5);
+    NavOrder order;
+    order.goal = cell(30, GROUND_Y, 20);
+    nav->order(id, order);
+
+    glm::dvec2 a(0.5, 0.5);
+    glm::dvec2 along = glm::normalize(glm::dvec2(30.5, 20.5) - a);
+    double farthest = 0.0;
+    for (int i = 0; i < int(20.0f / DT) && nav->state(id) != NavState::Arrived; ++i) {
+        tick();
+        Vec3 pos = entities->getMob(id)->position();
+        glm::dvec2 off = glm::dvec2(pos.x, pos.z) - a;
+        farthest = std::max(farthest, std::abs(off.x * along.y - off.y * along.x));
+    }
+    EXPECT_EQ(nav->state(id), NavState::Arrived);
+    EXPECT_LT(farthest, 0.3) << "it strayed from the straight line";
+}
+
+TEST_F(NavigationAgentTest, CutsCornersRoundAWallWithoutTouchingIt) {
+    wall(10, -8, 20, 3);
+    EntityId id = spawn(0, 0);
+    tick(5);
+    NavOrder order;
+    order.goal = cell(20, GROUND_Y, 0);
+    nav->order(id, order);
+
+    // Round the end of the wall on the grid is about 50 blocks, and the shortest way 45
+    MobEntity* mob = entities->getMob(id);
+    Vec3 last = mob->position();
+    double walked = 0.0;
+    for (int i = 0; i < int(30.0f / DT) && nav->state(id) != NavState::Arrived; ++i) {
+        tick();
+        Vec3 pos = mob->position();
+        walked += std::hypot(pos.x - last.x, pos.z - last.z);
+        last = pos;
+        EXPECT_FALSE(pos.x + 0.3f > 10.0f && pos.x - 0.3f < 11.0f && pos.z - 0.3f < 21.0f)
+            << "in the wall at " << pos.x << "," << pos.z;
+    }
+    EXPECT_EQ(nav->state(id), NavState::Arrived);
+    EXPECT_LT(walked, 47.5);
+}
+
+TEST_F(NavigationAgentTest, KeepsToARoadItWasRoutedAlong) {
+    for (int x = 0; x <= 40; ++x) world.setBlock(x, GROUND_Y - 1, 3, road);
+    EntityId id = spawn(0, 0);
+    tick(5);
+    NavOrder order;
+    order.goal = cell(40, GROUND_Y, 0);
+    nav->order(id, order);
+
+    int ticks = 0;
+    int onRoad = 0;
+    for (; ticks < int(30.0f / DT) && nav->state(id) != NavState::Arrived; ++ticks) {
+        tick();
+        onRoad += std::floor(entities->getMob(id)->position().z) == 3.0f;
+    }
+    EXPECT_EQ(nav->state(id), NavState::Arrived);
+    EXPECT_GT(onRoad, ticks / 2) << "a straight line across the grass is slower";
 }
 
 TEST_F(NavigationAgentTest, ClimbsAStepUnderRealPhysics) {

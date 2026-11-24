@@ -58,6 +58,7 @@ void EntityRenderer::update(float dt, const glm::dvec3& /*cameraPos*/) {
                 }
             } else {
                 state.animator.update(dt);
+                state.turn(dt);
             }
         }
         ++it;
@@ -121,6 +122,7 @@ void EntityRenderer::handleEvent(const finescript::Value& event) {
         state.currentPosition = pos;
         state.prevYaw = yaw;
         state.currentYaw = yaw;
+        state.shownYaw = yaw;
         state.prevPitch = pitch;
         state.currentPitch = pitch;
         state.visible = true;

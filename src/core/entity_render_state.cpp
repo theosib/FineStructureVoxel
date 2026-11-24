@@ -24,12 +24,13 @@ float EntityRenderState::interpolationAlpha(float tickRate) const {
     return std::min(1.0f, timeSinceSnapshot * tickRate);
 }
 
-float EntityRenderState::interpolatedYawRadians(float alpha) const {
-    constexpr float PI = 3.14159265f;
-    float diff = currentYaw - prevYaw;
-    while (diff > PI) diff -= 2.0f * PI;
-    while (diff < -PI) diff += 2.0f * PI;
-    return prevYaw + diff * alpha;
+void EntityRenderState::turn(float dt) {
+    // Most of the way in a quarter of a second, whatever the angle: a body swings round
+    // faster for a bigger turn
+    constexpr float TURN_RATE = 12.0f;
+    constexpr float TWO_PI = 6.28318531f;
+    float diff = std::remainder(currentYaw - shownYaw, TWO_PI);
+    shownYaw = std::remainder(shownYaw + diff * (1.0f - std::exp(-TURN_RATE * dt)), TWO_PI);
 }
 
 void EntityRenderState::applySnapshot(const EntityState& state) {

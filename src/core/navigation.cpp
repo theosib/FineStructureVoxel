@@ -5,6 +5,7 @@
 #include "finevox/core/world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <queue>
 
@@ -29,6 +30,13 @@ constexpr float BUILD_STANCE_RADIUS = 0.2f;
 constexpr float STUCK_SECONDS = 2.0f;
 constexpr int MAX_REPATHS = 2;
 constexpr float MIN_HOP_PROGRESS = 2.0f;
+
+/// How many steps ahead an agent looks for one it can walk to in a straight line
+constexpr size_t SHORTCUT_STEPS = 64;
+/// Room kept between a body cutting across and anything in the way
+constexpr double SHORTCUT_MARGIN = 0.05;
+/// How finely a straight line is checked, in blocks. With the margin, nothing slips between.
+constexpr double SHORTCUT_SAMPLE = 0.1;
 
 uint64_t packCoord(const BlockCoord& p) {
     // 24 bits each is ±8M blocks, far beyond any loaded column in practice
@@ -82,14 +90,33 @@ public:
     bool clear(const BlockCoord& pos) { return !(flags(pos) & Blocked); }
 
     float floorSpeed(const BlockCoord& below) {
+        auto [it, inserted] = speeds_.try_emplace(packCoord(below), 1.0f);
+        if (!inserted) return it->second;
         BlockTypeId block = world_.getBlock(below);
-        return block.isAir() ? 1.0f : BlockRegistry::global().getType(block).walkSpeed();
+        if (!block.isAir()) it->second = BlockRegistry::global().getType(block).walkSpeed();
+        return it->second;
+    }
+
+    /// Too deep to stand in, wading no deeper than maxWade (-1 for any depth)
+    bool tooDeep(const BlockCoord& feet, int maxWade) {
+        if (maxWade < 0 || !(flags(feet) & Fluid)) return false;
+        return flags(BlockCoord(feet.x, feet.y + maxWade, feet.z)) & Fluid;
+    }
+
+    /// What it costs to walk `base` with the feet in this cell. Wading costs extra, a step's
+    /// worth for each `wade`.
+    float walkCost(const BlockCoord& feet, float base, float wade = 1.0f) {
+        float speed = std::max(0.25f, floorSpeed(BlockCoord(feet.x, feet.y - 1, feet.z)));
+        float cost = base / speed;
+        if (flags(feet) & Fluid) cost += WADE_PENALTY * wade;
+        return cost;
     }
 
 private:
     const World& world_;
     std::unordered_map<uint64_t, uint8_t> cells_;
     std::unordered_map<uint64_t, float> tops_;
+    std::unordered_map<uint64_t, float> speeds_;
 };
 
 BlockCoord up(BlockCoord p, int n = 1) { return BlockCoord(p.x, p.y + n, p.z); }
@@ -184,10 +211,7 @@ private:
         return probe_.solid(down(feet)) && bodyClear(feet) && !tooDeep(feet);
     }
 
-    bool tooDeep(const BlockCoord& feet) {
-        if (query_.maxWade < 0 || !(probe_.flags(feet) & CellProbe::Fluid)) return false;
-        return probe_.flags(up(feet, query_.maxWade)) & CellProbe::Fluid;
-    }
+    bool tooDeep(const BlockCoord& feet) { return probe_.tooDeep(feet, query_.maxWade); }
 
     /// Where the feet are, standing in this cell: on top of what's below
     float floorHeight(const BlockCoord& feet) {
@@ -199,14 +223,15 @@ private:
     bool canRise(const BlockCoord& from, float floor) { return floor - floorHeight(from) <= MAX_RISE; }
 
     bool closeEnough(const BlockCoord& cell) {
-        int dx = cell.x - goalCell_.x;
-        int dz = cell.z - goalCell_.z;
         int dy = cell.y - goalCell_.y;
-        if (query_.goalRange <= 0.0f) return dx == 0 && dy == 0 && dz == 0;
+        if (query_.goalRange <= 0.0f) return cell == goalCell_;
         // Ranged goals are for interacting with something: reach past it at the
-        // same level, or a little above or below.
-        float reach = query_.goalRange + 0.5f;
-        return float(dx * dx + dz * dz) <= reach * reach && dy <= 2 && -dy <= query_.goalReachUp;
+        // same level, or a little above or below. Measured to the goal itself, which for
+        // something on the move is seldom the middle of its cell.
+        double dx = cell.x + 0.5 - query_.goal.x;
+        double dz = cell.z + 0.5 - query_.goal.z;
+        double reach = query_.goalRange + 0.5;
+        return dx * dx + dz * dz <= reach * reach && dy <= 2 && -dy <= query_.goalReachUp;
     }
 
     float heuristic(const BlockCoord& cell) const {
@@ -238,12 +263,7 @@ private:
         open_.push({g + heuristic(cell), key});
     }
 
-    float walkCost(const BlockCoord& feet, float base) {
-        float speed = std::max(0.25f, probe_.floorSpeed(down(feet)));
-        float cost = base / speed;
-        if (probe_.flags(feet) & CellProbe::Fluid) cost += WADE_PENALTY;
-        return cost;
-    }
+    float walkCost(const BlockCoord& feet, float base) { return probe_.walkCost(feet, base); }
 
     void expand(uint64_t key, const NodeInfo& current) {
         // nodes_ may rehash below; everything needed is copied out here
@@ -368,6 +388,49 @@ private:
     std::priority_queue<OpenEntry, std::vector<OpenEntry>, std::greater<>> open_;
 };
 
+/// What it costs a body to walk in a straight line from `from` to the middle of `to`, all on
+/// the floor at `to`'s level, or nothing if it can't. Every cell under any part of it must be one
+/// it could stand in, on a floor as high. The cost is the search's, by the ground underfoot.
+std::optional<float> straightWalk(CellProbe& probe, const glm::dvec3& from, const BlockCoord& to,
+                                  double radius, int clearance, int maxWade) {
+    float floorTop = probe.top(down(to));
+    auto walkable = [&](const BlockCoord& feet) {
+        if (!probe.solid(down(feet)) || probe.top(down(feet)) != floorTop) return false;
+        for (int i = 0; i < clearance; ++i) {
+            if (!probe.clear(up(feet, i))) return false;
+        }
+        return !probe.tooDeep(feet, maxWade);
+    };
+
+    glm::dvec2 a(from.x, from.z);
+    glm::dvec2 b(to.x + 0.5, to.z + 0.5);
+    double length = glm::length(b - a);
+    int samples = std::max(1, static_cast<int>(std::ceil(length / SHORTCUT_SAMPLE)));
+    float each = static_cast<float>(length / samples);
+    float cost = 0.0f;
+    glm::ivec4 covered(1, 0, 0, 0);
+    for (int i = 0; i <= samples; ++i) {
+        glm::dvec2 p = a + (b - a) * (static_cast<double>(i) / samples);
+        if (i > 0) {
+            BlockCoord under(static_cast<int>(std::floor(p.x)), to.y, static_cast<int>(std::floor(p.y)));
+            cost += probe.walkCost(under, each, each);
+        }
+        int x0 = static_cast<int>(std::floor(p.x - radius));
+        int x1 = static_cast<int>(std::floor(p.x + radius));
+        int z0 = static_cast<int>(std::floor(p.y - radius));
+        int z1 = static_cast<int>(std::floor(p.y + radius));
+        // Most samples stand over the same cells as the one before
+        if (glm::ivec4(x0, x1, z0, z1) == covered) continue;
+        covered = glm::ivec4(x0, x1, z0, z1);
+        for (int x = x0; x <= x1; ++x) {
+            for (int z = z0; z <= z1; ++z) {
+                if (!walkable(BlockCoord(x, to.y, z))) return std::nullopt;
+            }
+        }
+    }
+    return cost;
+}
+
 }  // namespace
 
 bool isStandable(const World& world, BlockCoord pos, float entityHeight) {
@@ -398,6 +461,7 @@ void NavigationSystem::order(EntityId id, const NavOrder& order) {
     agent.state = NavState::Pending;
     agent.steps.clear();
     agent.next = 0;
+    agent.aimed = false;
     agent.repaths = 0;
     agent.stuckTime = 0.0f;
     agent.bestDistance = 1e9f;
@@ -439,6 +503,7 @@ void NavigationSystem::resume(EntityId id) {
     if (it == agents_.end() || it->second.state != NavState::Blocked) return;
     Agent& agent = it->second;
     ++agent.next;
+    agent.aimed = false;
     agent.state = NavState::Moving;
     agent.stuckTime = 0.0f;
     agent.bestDistance = 1e9f;
@@ -500,6 +565,7 @@ void NavigationSystem::runSearches() {
         agent.partialPath = path->partial;
         agent.steps = std::move(path->steps);
         agent.next = 0;
+        agent.aimed = false;
         agent.state = NavState::Moving;
         agent.stuckTime = 0.0f;
         agent.bestDistance = 1e9f;
@@ -534,6 +600,68 @@ void NavigationSystem::beginNextHop(EntityId id, Agent& agent, MobEntity& mob) {
     searchQueue_.push_back(id);
 }
 
+void NavigationSystem::aim(Agent& agent, const MobEntity& mob) {
+    const std::vector<NavStep>& steps = agent.steps;
+    size_t first = agent.next;
+    if (first >= steps.size() || steps[first].action != NavAction::Walk) return;
+
+    // Only from the floor the route is on: not partway up a step or down a drop
+    Vec3 pos = mob.position();
+    int level = steps[first].pos.y;
+    if (!mob.isOnGround() || std::abs(pos.y - static_cast<float>(level)) > 0.55f) return;
+
+    CellProbe probe(world_);
+    Vec3 half = mob.halfExtents();
+    double radius = std::max(half.x, half.z) + SHORTCUT_MARGIN;
+    int clearance = std::max(1, static_cast<int>(std::ceil(half.y * 2.0f)));
+    glm::dvec3 from(pos.x, pos.y, pos.z);
+
+    // The steps that stay a walk on this level, and what it costs to follow them to each one
+    std::array<float, SHORTCUT_STEPS> along{};
+    size_t count = 0;
+    for (size_t k = first; k < steps.size() && count < SHORTCUT_STEPS; ++k, ++count) {
+        if (steps[k].action != NavAction::Walk || steps[k].pos.y != level) break;
+        glm::dvec2 centre(steps[k].pos.x + 0.5, steps[k].pos.z + 0.5);
+        glm::dvec2 before = count == 0 ? glm::dvec2(from.x, from.z)
+                                       : glm::dvec2(steps[k - 1].pos.x + 0.5, steps[k - 1].pos.z + 0.5);
+        float length = static_cast<float>(glm::length(centre - before));
+        float leg = probe.walkCost(steps[k].pos, length, length);
+        along[count] = count == 0 ? leg : along[count - 1] + leg;
+    }
+    // A straight line that's no dearer than the route: one that kept to a road stays on it
+    auto inSight = [&](size_t ahead) {
+        auto straight = straightWalk(probe, from, steps[first + ahead].pos, radius, clearance, maxWade_);
+        return straight && *straight <= along[ahead] + 0.01f;
+    };
+
+    // Over open ground the last is in sight, and one look settles it. Otherwise look out
+    // twice as far each time until a step is hidden, then narrow down on the last in sight.
+    // Sight along a route seldom comes back once lost, and anything chosen has been checked.
+    if (count < 2) return;
+    if (inSight(count - 1)) {
+        agent.next = first + count - 1;
+        return;
+    }
+    size_t seen = 0;
+    size_t hidden = count - 1;
+    for (size_t ahead = 1; ahead < hidden; ahead *= 2) {
+        if (!inSight(ahead)) {
+            hidden = ahead;
+            break;
+        }
+        seen = ahead;
+    }
+    while (hidden - seen > 1) {
+        size_t mid = (seen + hidden) / 2;
+        if (inSight(mid)) {
+            seen = mid;
+        } else {
+            hidden = mid;
+        }
+    }
+    agent.next = first + seen;
+}
+
 void NavigationSystem::followPath(EntityId id, Agent& agent, MobEntity& mob, float dt) {
     if (agent.next >= agent.steps.size()) {
         if (agent.partialPath) {
@@ -542,6 +670,10 @@ void NavigationSystem::followPath(EntityId id, Agent& agent, MobEntity& mob, flo
             finish(agent, mob, NavState::Arrived);
         }
         return;
+    }
+    if (!agent.aimed) {
+        aim(agent, mob);
+        agent.aimed = true;
     }
 
     Vec3 pos = mob.position();
@@ -574,8 +706,11 @@ void NavigationSystem::followPath(EntityId id, Agent& agent, MobEntity& mob, flo
             }
             return;
         }
+        aim(agent, mob);
         const NavStep& upcoming = agent.steps[agent.next];
         target = glm::dvec3(upcoming.pos.x + 0.5, upcoming.pos.y, upcoming.pos.z + 0.5);
+        // Progress is toward this one now, which can be a long way off
+        distance = static_cast<float>(std::hypot(target.x - pos.x, target.z - pos.z));
     }
 
     mob.moveTo(target);

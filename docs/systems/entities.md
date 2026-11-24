@@ -33,7 +33,7 @@ Phase 24A/B complete (2099 tests). Entities use `EntityTypeId` (interned), loade
 | `Skeleton` | Bone hierarchy with parent-relative transforms |
 | `AnimationClip` | Frame-based bone keyframes; sample at arbitrary time |
 | `AnimationController` | Manages clips with crossfade blending; updates bone transforms each tick |
-| `EntityRenderer` | Graphics thread; processes `GraphicsEventQueue`; interpolates between snapshots |
+| `EntityRenderer` | Graphics thread; processes `GraphicsEventQueue`; interpolates position between snapshots, and turns a body toward its yaw over about a quarter second (`EntityRenderState::turn`), since the server turns it in one tick |
 | `GraphicsEventQueue` | `Queue<GraphicsMessage>` — POD snapshots + `finescript::Value` events; `AlarmQueue`-based |
 | `SpawnManager` | Rules-based surface spawning; mob cap per region; evaluates `SpawnPredicateRegistry` |
 | `SpawnPredicateRegistry` | Extensible spawn conditions; named predicates with AND logic; `SpawnPredicateRegistry::global()` |

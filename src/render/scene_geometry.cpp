@@ -162,8 +162,8 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
 
     float alpha = state.interpolationAlpha(tickRate);
     glm::vec3 viewPos(state.interpolatedPosition(alpha) - cameraPos);
-    glm::mat4 root = glm::rotate(glm::translate(glm::mat4(1.0f), viewPos),
-                                 state.interpolatedYawRadians(alpha), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 root = glm::rotate(glm::translate(glm::mat4(1.0f), viewPos), state.shownYaw,
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
 
     float pale = 0.0f;
     if (state.isDying()) {

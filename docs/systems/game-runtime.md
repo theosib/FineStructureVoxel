@@ -183,6 +183,15 @@ for a half slab) is what's underfoot, and no step may rise more than the agents'
 on a slab, a one-cell step is a step and a half, so a route from there goes down and builds up
 from the ground instead. Anything the route places counts as a full block.
 
+The search moves in eighths of a turn, but agents don't walk it that way. At each step reached, an
+agent heads straight for the farthest step ahead (up to 64) that it can reach in a straight line
+on the same floor, with every cell under its body one it could stand in, and no dearer to cross
+than the route's own steps, so a route along a road stays on it. A build step or a change of level
+ends the line. Over open ground that's the straight line to the goal, at any angle.
+
+A `=range` is measured to the goal point itself, not the middle of its cell: a target on the move
+is seldom there.
+
 Budget the searches: an unreachable goal costs the full `max_nodes` every attempt, so
 agents should back off after `:failed`. Chasing a moving target should re-search only once
 the old route has stopped being useful.

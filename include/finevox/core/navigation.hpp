@@ -164,6 +164,8 @@ private:
         NavState state = NavState::Idle;
         std::vector<NavStep> steps;
         size_t next = 0;
+        /// Looked past `next` for a step to walk to straight; see aim()
+        bool aimed = false;
         float stuckTime = 0.0f;
         float bestDistance = 1e9f;
         int repaths = 0;
@@ -172,6 +174,9 @@ private:
     };
 
     void runSearches();
+    /// Move `next` on to the farthest step ahead that the agent can walk to in a straight
+    /// line, so it goes at any angle rather than the search's eight
+    void aim(Agent& agent, const MobEntity& mob);
     void followPath(EntityId id, Agent& agent, MobEntity& mob, float dt);
     void finish(Agent& agent, MobEntity& mob, NavState state);
     void beginNextHop(EntityId id, Agent& agent, MobEntity& mob);

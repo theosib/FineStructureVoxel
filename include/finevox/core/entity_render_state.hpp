@@ -30,6 +30,9 @@ struct EntityRenderState {
     float currentYaw = 0.0f;
     float prevPitch = 0.0f;
     float currentPitch = 0.0f;
+    /// Radians: the way it's drawn facing. The server turns a body in a single tick, so this
+    /// follows currentYaw at the pace of a body turning (turn()).
+    float shownYaw = 0.0f;
     glm::dvec3 velocity{0.0};
     uint16_t faction = 0;
 
@@ -68,8 +71,8 @@ struct EntityRenderState {
     /// Blend factor between the last two snapshots at the given tick rate
     [[nodiscard]] float interpolationAlpha(float tickRate) const;
 
-    /// Interpolated yaw in radians, the unit MobEntity stores (wraps at pi)
-    [[nodiscard]] float interpolatedYawRadians(float alpha) const;
+    /// Bring shownYaw round toward currentYaw over a frame of dt seconds
+    void turn(float dt);
 
     /// Update from a new entity state snapshot
     void applySnapshot(const EntityState& state);

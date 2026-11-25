@@ -4,6 +4,7 @@
 #include "finevox/core/world.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace finevox {
@@ -376,8 +377,12 @@ void MeshBuilder::buildSimpleMesh(
                         }
 
                         // Add the face to the mesh
+                        glm::uvec4 blend(0u);
+                        if (!buildTransparent) {
+                            blend = faceBlend(blockType, blockWorldPos, face, opaqueProvider, textureProvider);
+                        }
                         addFace(mesh, localPos, face, uvBounds, aoValues, skyLightValues, blockLightValues,
-                                cubeTint(blockType, face, blockWorldPos));
+                                cubeTint(blockType, face, blockWorldPos), blend);
                     }
                 }
             }
@@ -606,6 +611,9 @@ void MeshBuilder::greedyMeshFace(
                 mask[maskIdx].blockType = blockType;
                 mask[maskIdx].uvBounds = textureProvider(blockType, face);
                 mask[maskIdx].tint = cubeTint(blockType, face, blockWorldPos);
+                if (!buildTransparent) {
+                    mask[maskIdx].blend = faceBlend(blockType, blockWorldPos, face, opaqueProvider, textureProvider);
+                }
 
                 if (calculateAO_) {
                     mask[maskIdx].aoValues = getFaceAO(blockWorldPos, face, opaqueProvider);
@@ -829,6 +837,7 @@ void MeshBuilder::addGreedyQuad(
         vertex.skyLight = skyLightValues[i];
         vertex.blockLight = blockLightValues[i];
         vertex.tint = entry.tint;
+        vertex.blend = entry.blend;
         mesh.vertices.push_back(vertex);
     }
 
@@ -854,7 +863,8 @@ void MeshBuilder::addFace(
     const std::array<float, 4>& aoValues,
     const std::array<float, 4>& skyLightValues,
     const std::array<float, 4>& blockLightValues,
-    uint32_t tint
+    uint32_t tint,
+    const glm::uvec4& blend
 ) {
     const FaceData& faceData = FACE_DATA[static_cast<int>(face)];
     uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
@@ -884,10 +894,132 @@ void MeshBuilder::addFace(
         vertex.skyLight = skyLightValues[i];
         vertex.blockLight = blockLightValues[i];
         vertex.tint = tint;
+        vertex.blend = blend;
         mesh.vertices.push_back(vertex);
     }
 
     pushQuadIndices(mesh, baseVertex, aoValues, skyLightValues, blockLightValues);
+}
+
+namespace {
+
+// The world steps a face's texture runs along: +u and +v, from where FACE_DATA puts its corners
+struct FaceAxes {
+    BlockCoord u, v;
+};
+
+const std::array<FaceAxes, 6>& faceAxes() {
+    static const std::array<FaceAxes, 6> axes = [] {
+        std::array<FaceAxes, 6> result{};
+        for (int f = 0; f < 6; ++f) {
+            const auto& data = MeshBuilder::FACE_DATA[f];
+            glm::vec3 at[2][2];
+            for (int i = 0; i < 4; ++i) {
+                at[int(data.uvOffsets[i].x)][int(data.uvOffsets[i].y)] = data.positions[i];
+            }
+            auto step = [](glm::vec3 d) {
+                return BlockCoord(int32_t(std::lround(d.x)), int32_t(std::lround(d.y)), int32_t(std::lround(d.z)));
+            };
+            result[f] = {step(at[1][0] - at[0][0]), step(at[0][1] - at[0][0])};
+        }
+        return result;
+    }();
+    return axes;
+}
+
+BlockCoord offset(const BlockCoord& pos, const FaceAxes& axes, int du, int dv) {
+    return BlockCoord(pos.x + du * axes.u.x + dv * axes.v.x,
+                      pos.y + du * axes.u.y + dv * axes.v.y,
+                      pos.z + du * axes.u.z + dv * axes.v.z);
+}
+
+uint32_t packUV(float u, float v) {
+    auto half = [](float x) { return static_cast<uint32_t>(std::clamp(x, 0.0f, 1.0f) * 65535.0f + 0.5f); };
+    return half(u) | half(v) << 16;
+}
+
+uint32_t rgb565(uint32_t rgba) {
+    return ((rgba & 0xFF) >> 3) | (((rgba >> 8) & 0xFF) >> 2) << 5 | (((rgba >> 16) & 0xFF) >> 3) << 11;
+}
+
+}  // namespace
+
+bool MeshBuilder::faceHidden(const BlockCoord& pos, Face face, const BlockOpaqueProvider& opaqueProvider) const {
+    BlockCoord front = pos.neighbor(face);
+    if (faceOccludesProvider_) return faceOccludesProvider_(front, oppositeFace(face));
+    return opaqueProvider(front);
+}
+
+// A neighbour spreads over this face if it blends at a higher priority, is a plain cube, and shows
+// a face the same way in the same plane. Anything else, a step up or down included, leaves the
+// edge as it is, so nothing is ever drawn over anything else. A diagonal reaching in only past a
+// corner where both straight neighbours are covered over is left out: it would show grass in the
+// inside corner of a wall that the grass is outside of.
+glm::uvec4 MeshBuilder::faceBlend(BlockTypeId type, const BlockCoord& pos, Face face,
+                                  const BlockOpaqueProvider& opaqueProvider,
+                                  const BlockTextureProvider& textureProvider) const {
+    if (!blendProvider_ || !blockAt_) return glm::uvec4(0u);
+    const std::optional<BlockBlend> own = blendProvider_(type);
+    if (!own) return glm::uvec4(0u);
+
+    // Mask bit order, as BLEND_*: four edges, then four corners
+    static constexpr int STEPS[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+    const FaceAxes& axes = faceAxes()[static_cast<int>(face)];
+
+    struct Spill {
+        BlockTypeId type;
+        BlockBlend blend;
+        uint32_t mask = 0;
+    };
+    std::array<Spill, 8> spills;
+    int count = 0;
+    for (int bit = 0; bit < 8; ++bit) {
+        const int du = STEPS[bit][0], dv = STEPS[bit][1];
+        const BlockCoord at = offset(pos, axes, du, dv);
+        const BlockTypeId other = blockAt_(at);
+        if (other == AIR_BLOCK_TYPE || other == type) continue;
+        const std::optional<BlockBlend> blend = blendProvider_(other);
+        if (!blend || blend->priority <= own->priority || blend->width <= 0.0f) continue;
+        if (const BlockGeometry* geometry = geometryFor(other); geometry && !geometry->isEmpty()) continue;
+        if (faceHidden(at, face, opaqueProvider)) continue;
+        if (du != 0 && dv != 0 && faceHidden(offset(pos, axes, du, 0), face, opaqueProvider) &&
+            faceHidden(offset(pos, axes, 0, dv), face, opaqueProvider)) {
+            continue;
+        }
+        int i = 0;
+        while (i < count && spills[i].type != other) ++i;
+        if (i == count) spills[count++] = {other, *blend, 0};
+        spills[i].mask |= 1u << bit;
+    }
+    if (count == 0) return glm::uvec4(0u);
+
+    // A corner beside an edge of the same spread is nearer the edge everywhere, so adds nothing,
+    // and leaving it out lets a row of faces along a border merge
+    static constexpr uint32_t CORNER_EDGES[4] = {BLEND_LOW_U | BLEND_LOW_V, BLEND_HIGH_U | BLEND_LOW_V,
+                                                 BLEND_LOW_U | BLEND_HIGH_V, BLEND_HIGH_U | BLEND_HIGH_V};
+    for (int i = 0; i < count; ++i) {
+        for (int c = 0; c < 4; ++c) {
+            if (spills[i].mask & CORNER_EDGES[c]) spills[i].mask &= ~(1u << (4 + c));
+        }
+    }
+
+    // The two of highest priority, the higher drawn last; the type breaks ties so a face always
+    // comes out the same
+    std::sort(spills.begin(), spills.begin() + count, [](const Spill& a, const Spill& b) {
+        if (a.blend.priority != b.blend.priority) return a.blend.priority > b.blend.priority;
+        return a.type.id < b.type.id;
+    });
+    glm::uvec4 packed(0u);
+    for (int i = 0; i < std::min(count, 2); ++i) {
+        const Spill& spill = spills[i];
+        const int layer = 1 - i;
+        const glm::vec4 uv = textureProvider(spill.type, face);
+        const uint32_t width = static_cast<uint32_t>(std::clamp(spill.blend.width, 0.0f, 1.0f) * 255.0f + 0.5f);
+        packed[layer] = packUV(uv.x, uv.y);
+        packed.z |= (spill.mask << (8 * layer)) | (width << (16 + 8 * layer));
+        packed.w |= rgb565(cubeTint(spill.type, face, pos)) << (16 * layer);
+    }
+    return packed;
 }
 
 // A diagonal only joins where neither straight neighbour beside it does: three blocks in an L

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <array>
+#include <optional>
 
 namespace finevox {
 
@@ -37,6 +38,11 @@ struct ChunkVertex {
     float skyLight;       // Sky light (0-1, from LightEngine sky channel)
     float blockLight;     // Block light (0-1, from LightEngine block channel)
     uint32_t tint = 0xFFFFFFFFu;  // Colour the texture is multiplied by, RGBA8 (R in the low byte)
+    // Neighbours' textures spread over this face (BlockBlend), two layers, the second on top:
+    // x, y: each layer's tile, its top-left UV as two 16-bit fractions (U in the low half);
+    // z: each layer's edges and corners (8 bits each, BLEND_* below), then each width x 255;
+    // w: each layer's tint, RGB565. All zero for none.
+    glm::uvec4 blend{0u};
 
     ChunkVertex() = default;
     ChunkVertex(const glm::vec3& pos, const glm::vec3& norm, const glm::vec2& tex,
@@ -53,7 +59,8 @@ struct ChunkVertex {
                ao == other.ao &&
                skyLight == other.skyLight &&
                blockLight == other.blockLight &&
-               tint == other.tint;
+               tint == other.tint &&
+               blend == other.blend;
     }
 
     /// Get combined brightness (AO * max light) for final rendering
@@ -182,6 +189,23 @@ constexpr uint32_t TINT_NONE = 0xFFFFFFFFu;
 // Does the block at this position join up with a block of this type?
 using BlockConnectsProvider = std::function<bool(const BlockCoord& pos, BlockTypeId type)>;
 
+// A block's blend, or nullopt for one that keeps hard edges
+using BlockBlendProvider = std::function<std::optional<BlockBlend>(BlockTypeId type)>;
+
+// The block at a position, for looking at neighbours past the subchunk being built
+using BlockTypeProvider = std::function<BlockTypeId(const BlockCoord& pos)>;
+
+// The bits of a blend layer's mask in ChunkVertex::blend: which of a face's neighbours, in its
+// texture's directions, spread over it. An edge's bit covers the corners at its ends too.
+constexpr uint32_t BLEND_LOW_U = 1u << 0;
+constexpr uint32_t BLEND_HIGH_U = 1u << 1;
+constexpr uint32_t BLEND_LOW_V = 1u << 2;
+constexpr uint32_t BLEND_HIGH_V = 1u << 3;
+constexpr uint32_t BLEND_LOW_U_LOW_V = 1u << 4;
+constexpr uint32_t BLEND_HIGH_U_LOW_V = 1u << 5;
+constexpr uint32_t BLEND_LOW_U_HIGH_V = 1u << 6;
+constexpr uint32_t BLEND_HIGH_U_HIGH_V = 1u << 7;
+
 // ============================================================================
 // MeshBuilder - Generates mesh data from subchunk blocks
 // ============================================================================
@@ -292,6 +316,12 @@ public:
     // Colours faces by where they are, as foliage by its biome. Null draws everything as it is.
     void setTintProvider(BlockTintProvider provider) { tintProvider_ = std::move(provider); }
 
+    // Spreads cube faces over their neighbours' (BlockBlend). Either null turns it off.
+    void setBlending(BlockBlendProvider blend, BlockTypeProvider blockAt) {
+        blendProvider_ = std::move(blend);
+        blockAt_ = std::move(blockAt);
+    }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -353,6 +383,16 @@ private:
     BlockFaceOccludesProvider faceOccludesProvider_;  // Optional provider for per-face occlusion
     BlockConnectsProvider connectsProvider_;
     BlockTintProvider tintProvider_;
+    BlockBlendProvider blendProvider_;
+    BlockTypeProvider blockAt_;
+
+    // Whether the cube face of the block at `pos` is hidden by what's in front of it
+    [[nodiscard]] bool faceHidden(const BlockCoord& pos, Face face, const BlockOpaqueProvider& opaqueProvider) const;
+
+    // What neighbours spread over this visible face, as ChunkVertex::blend
+    [[nodiscard]] glm::uvec4 faceBlend(BlockTypeId type, const BlockCoord& pos, Face face,
+                                       const BlockOpaqueProvider& opaqueProvider,
+                                       const BlockTextureProvider& textureProvider) const;
 
     [[nodiscard]] uint32_t cubeTint(BlockTypeId type, Face face, const BlockCoord& pos) const {
         return tintProvider_ ? tintProvider_(type, static_cast<int>(face), -1, pos) : TINT_NONE;
@@ -373,7 +413,8 @@ private:
         const std::array<float, 4>& aoValues,  // AO for each corner (CCW from bottom-left)
         const std::array<float, 4>& skyLightValues = {1.0f, 1.0f, 1.0f, 1.0f},
         const std::array<float, 4>& blockLightValues = {0.0f, 0.0f, 0.0f, 0.0f},
-        uint32_t tint = TINT_NONE
+        uint32_t tint = TINT_NONE,
+        const glm::uvec4& blend = glm::uvec4(0u)
     );
 
     // Which directions a block joins up in: bit N for FaceGeometry::connection N
@@ -455,12 +496,15 @@ private:
         std::array<float, 4> skyLightValues{1.0f, 1.0f, 1.0f, 1.0f};  // Sky light per corner
         std::array<float, 4> blockLightValues{0.0f, 0.0f, 0.0f, 0.0f};// Block light per corner
         uint32_t tint = TINT_NONE;
+        glm::uvec4 blend{0u};
 
         bool operator==(const FaceMaskEntry& other) const {
             // For greedy meshing, faces can merge if they have same block type, AO, and light
-            // UVs will be tiled, so we don't check them
+            // UVs will be tiled, so we don't check them. Blending is worked out per cell from
+            // where it is in the tile, so cells blended alike can merge too.
             return blockType == other.blockType &&
                    tint == other.tint &&
+                   blend == other.blend &&
                    aoValues == other.aoValues &&
                    skyLightValues == other.skyLightValues &&
                    blockLightValues == other.blockLightValues;

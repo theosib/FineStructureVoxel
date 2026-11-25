@@ -405,6 +405,8 @@ struct GameClient::Impl {
     double cloudDrift = 0.0;
     float clock = 0.0f;  ///< Seconds the world has run here, for things that turn and bob
     void applyDetail();
+    void applyBlend();
+    bool groundBlend = false;  ///< Whether faces spread over their neighbours' (BlockBlend), as a UI script set
     std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
     void buildGhosts(float dt);
@@ -870,6 +872,7 @@ void GameClient::Impl::enterWorld() {
     worldRenderer->setFaceOccludesProvider(content->faceOccludesProvider(world));
     worldRenderer->setConnectsProvider(content->connectsProvider(world));
     if (auto tint = content->tintProvider(world)) worldRenderer->setTintProvider(std::move(tint));
+    if (groundBlend) worldRenderer->setBlendProvider(content->blendProvider());
     worldRenderer->initialize();
 
     particleAtlas = std::make_unique<render::ParticleAtlas>();
@@ -1410,6 +1413,12 @@ void GameClient::Impl::applyDetail() {
     float pixels = detailPixels.value_or(manifest.detailPixels);
     float height = static_cast<float>(engine->window().height());
     worldRenderer->setDetailDistance(DetailRange::forPixels(pixels, height, FOV_DEGREES));
+}
+
+void GameClient::Impl::applyBlend() {
+    if (!worldRenderer || !content) return;
+    worldRenderer->setBlendProvider(groundBlend ? content->blendProvider() : nullptr);
+    worldRenderer->rebuildAllMeshesNear(camera.positionD());
 }
 
 void GameClient::Impl::setEmbodied(bool on) {
@@ -1964,6 +1973,16 @@ void GameClient::Impl::registerNatives() {
             applyDetail();
         }
         return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
+    });
+
+    // ground_blend [on] -> whether it's on. With on, spreads block faces over their neighbours'
+    // where the blocks have a `blend:` from now on, in this game and the next.
+    e.registerFunction("ground_blend", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty() && args[0].truthy() != groundBlend) {
+            groundBlend = args[0].truthy();
+            applyBlend();
+        }
+        return Value::boolean(groundBlend);
     });
 
     e.registerFunction("cam_pos", [this](ExecutionContext&, const Args&) -> Value {

@@ -206,6 +206,10 @@ void WorldRenderer::initialize() {
         meshWorkerPool_->setTintProvider(tintProvider_);
     }
 
+    if (blendProvider_) {
+        meshWorkerPool_->setBlendProvider(blendProvider_);
+    }
+
     if (farGeometryProvider_) {
         meshWorkerPool_->setFarGeometryProvider(farGeometryProvider_);
     }
@@ -968,6 +972,18 @@ void WorldRenderer::setTintProvider(BlockTintProvider provider) {
     meshBuilder_.setTintProvider(provider);
     if (meshWorkerPool_) {
         meshWorkerPool_->setTintProvider(std::move(provider));
+    }
+}
+
+void WorldRenderer::setBlendProvider(BlockBlendProvider provider) {
+    blendProvider_ = provider;
+    if (provider) {
+        meshBuilder_.setBlending(provider, [this](const BlockCoord& p) { return world_.getBlock(p); });
+    } else {
+        meshBuilder_.setBlending(nullptr, nullptr);
+    }
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setBlendProvider(std::move(provider));
     }
 }
 

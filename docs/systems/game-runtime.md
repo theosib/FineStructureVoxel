@@ -334,6 +334,7 @@ can_fly [b]   flying [b]   on foot: whether a double-tapped jump may fly, and wh
 ui_image name x0 y0 x1 y1 [u0 v0 u1 v1] [=tint [r g b a]]   a ui_texture, for a HUD
 marker_xray id r g b [a]    where blocks hide that entity, its shape shows through in that colour
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt
+ground_blend [b] -> b   faces spread over their neighbours' (`blend:`), remeshing; kept between games
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil
@@ -474,7 +475,7 @@ couldn't see shows nothing, and `despawnEntity` on a living one removes it at on
 ### .model additions
 
 `texture-top`, `texture-bottom`, `texture-side`, `walk-speed`, `connects`, `opaque`,
-`blocks-sky-light`, `far-geometry`, `move` and `move-grip` (how a block mover treats it: world.md,
+`blocks-sky-light`, `far-geometry`, `blend`, `move` and `move-grip` (how a block mover treats it: world.md,
 "Block movers"). With `opaque: false` a block lets light through, its `light-attenuation`
 defaulting to 1, and sky light falls past it. `blocks-sky-light: true` stops the sky light while
 letting the rest through, for leaves that shade the ground under them.
@@ -527,6 +528,11 @@ neighbour of the same group at the same height. A diagonal joins only where neit
 neighbour beside it does, so three blocks in an L make a corner, not a triangle. `up` and `down`
 are directions too, and `open_<dir>_<anything>` shows only where nothing of the group is: a rock
 under another can have a flat top to carry it, and a rounded one with nothing on it.
+
+`blend: <priority> [width]` lets a cube's faces spread over the faces of neighbours level with
+them that have a lower priority, `width` blocks in (0.35 if not given), with a ragged edge. Only
+blocks that have it take part: a block with none keeps hard edges both ways. It's drawn only while
+a UI script has `ground_blend true`. See rendering.md, "Blending".
 
 `far-geometry: <shape>` is a cheaper shape for where a block's detail is too small to see, as set
 by `detail_pixels`. A subchunk switches as a whole, once all of it is past the distance where a

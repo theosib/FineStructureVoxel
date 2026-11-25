@@ -513,6 +513,16 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
     if (const ConfigEntry* connectsEntry = doc.get("connects")) {
         model.setConnects(connectsEntry->value.asStringOwned());
     }
+    // blend: <priority> [width], width in blocks
+    if (const ConfigEntry* blendEntry = doc.get("blend")) {
+        std::istringstream iss(blendEntry->value.asStringOwned());
+        int priority = 0;
+        float width = 0.35f;
+        if (iss >> priority) {
+            iss >> width;
+            model.setBlend({priority, std::clamp(width, 0.0f, 1.0f)});
+        }
+    }
     if (const ConfigEntry* moveEntry = doc.get("move")) model.setMove(moveEntry->value.asStringOwned());
     if (const ConfigEntry* gripEntry = doc.get("move-grip")) model.setMoveGrip(gripEntry->value.asStringOwned());
 }

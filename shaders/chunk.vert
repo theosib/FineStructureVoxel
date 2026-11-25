@@ -16,6 +16,7 @@ layout(location = 4) in float inAO;        // Ambient occlusion (0-1)
 layout(location = 5) in float inSkyLight;  // Sky light (0-1)
 layout(location = 6) in float inBlockLight;// Block light (0-1)
 layout(location = 7) in vec4 inTint;       // Colour the texture is multiplied by
+layout(location = 8) in uvec4 inBlend;     // Neighbours' textures spread over the face (ChunkVertex::blend)
 
 // Outputs to fragment shader
 layout(location = 0) out vec3 fragWorldPos;    // World position (for lighting)
@@ -28,6 +29,8 @@ layout(location = 6) out float fragDistance;   // Distance from camera (for fog)
 layout(location = 7) out float fragSkyLight;   // Sky light value
 layout(location = 8) out float fragBlockLight; // Block light value
 layout(location = 9) out vec3 fragTint;        // Colour the texture is multiplied by
+layout(location = 10) flat out uvec4 fragBlend; // Neighbours' textures spread over the face
+layout(location = 11) centroid out vec2 fragCellTexCoord;  // fragTexCoord, never past the face's edge
 
 // Camera uniform (binding 0)
 layout(set = 0, binding = 0) uniform CameraUBO {
@@ -79,4 +82,6 @@ void main() {
     // Colours are given as they look: multiplying in that space, as artists expect, means
     // bringing the tint to linear like the texture it multiplies
     fragTint = pow(inTint.rgb, vec3(2.2));
+    fragBlend = inBlend;
+    fragCellTexCoord = inTexCoord;
 }

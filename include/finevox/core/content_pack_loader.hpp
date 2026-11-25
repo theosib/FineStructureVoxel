@@ -210,6 +210,10 @@ public:
     [[nodiscard]] std::function<uint32_t(BlockTypeId, int, int, const BlockCoord&)> tintProvider(
         const World& world) const;
 
+    /// Callback suitable for WorldRenderer::setBlendProvider(...), or null if no block blends.
+    /// Gives nullopt for a block with no `blend:`.
+    [[nodiscard]] std::function<std::optional<BlockBlend>(BlockTypeId)> blendProvider() const;
+
     /// Load the `tint:<source>: r g b` lines of biomes/*.biome, by biome id (namespace:file)
     size_t loadBiomeTints(const std::filesystem::path& rootDir);
 
@@ -271,6 +275,7 @@ private:
         uint8_t cubeMask = 0;         ///< Which cube faces are tinted, by Face
     };
     std::unordered_map<uint32_t, BlockTint> blockTints_;
+    std::unordered_map<uint32_t, BlockBlend> blockBlends_;
     /// Biome id -> (source, colour) pairs
     std::unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> biomeTints_;
     size_t customGeometryModelCount_ = 0;

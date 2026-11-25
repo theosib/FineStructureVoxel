@@ -310,6 +310,11 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             if (!error.empty()) std::cerr << "[ContentPackLoader] " << name << ": " << error << "\n";
         }
 
+        if (m.blend()) {
+            blockBlends_[bareId.id] = *m.blend();
+            blockBlends_[qualifiedId.id] = *m.blend();
+        }
+
         if (!m.connects().empty()) {
                 const uint32_t group = StringInterner::global().intern(m.connects());
                 blockConnects_[bareId.id] = group;
@@ -652,6 +657,15 @@ std::function<uint32_t(BlockTypeId, int, int, const BlockCoord&)> ContentPackLoa
         // Nothing known here yet means the subchunks around haven't arrived: ask again later
         if (allKnown) cache[key] = blended;
         return blended;
+    };
+}
+
+std::function<std::optional<BlockBlend>(BlockTypeId)> ContentPackLoader::blendProvider() const {
+    if (blockBlends_.empty()) return nullptr;
+    return [this](BlockTypeId type) -> std::optional<BlockBlend> {
+        auto it = blockBlends_.find(type.id);
+        if (it == blockBlends_.end()) return std::nullopt;
+        return it->second;
     };
 }
 

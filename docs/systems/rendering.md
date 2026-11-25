@@ -64,6 +64,7 @@ struct ChunkVertex {
     float blockLight;     // 0.0-1.0
     glm::vec4 tileBounds; // for custom/fluid: used as tint color
     uint32_t tint;        // RGBA8, R in the low byte, multiplies the texture; white if unused
+    glm::uvec4 blend;     // neighbours' textures spread over the face, two layers; zero if none
 };
 ```
 
@@ -71,6 +72,35 @@ struct ChunkVertex {
 `MeshBuilder`) gives a face its colour; `ContentPackLoader::tintProvider` blends biome colours from
 the subchunks' biome ids. The shader brings it to linear before multiplying, so a colour multiplies
 as it looks. Greedy meshing only merges faces whose tints match.
+
+**Blending**: where a cube's face meets a neighbour's face in the same plane, the block with the
+higher `blend:` priority (`BlockBlend`, a `.model` key) spreads its texture up to its width over the
+other's, with a ragged border. Nothing is drawn over anything: each face is drawn once, and
+`chunk.frag` mixes a neighbour's tile into it near the shared edge, so there is no z-fighting to
+manage. `MeshBuilder::faceBlend` decides what spreads onto each visible face:
+
+- only a strictly higher priority spreads, so two of a kind, or two of equal priority, meet as before;
+- the neighbour must be a plain cube showing a face the same way, at the same level. A step up or
+  down, or a neighbour covered over, is a hard edge, which falls on a real edge of the geometry;
+- a diagonal neighbour counts only if one of the two cells beside both is open, or grass outside a
+  wall's corner would show in the corner inside it;
+- the two highest priorities are kept, the higher drawn on top.
+
+The vertex carries, per layer, the tile's top-left UV, which of the 8 neighbours spread (`BLEND_*`,
+in the texture's own directions, so the shader needs no face table), the width, and the tint as
+RGB565. The shader takes the distance from each fragment to the nearest of those neighbours'
+cells: across to an edge, straight to a corner. Both sides of a border work out the same distance,
+and the ragged edge is value noise in world space with some of the texture's own shading, so the
+spread runs on unbroken across faces and subchunks. Faces blended alike still merge, as the shader
+works per cell (`cellCoord`), and a corner beside an edge of the same layer is dropped as
+redundant so a straight border's row merges. The cell coordinate is read `centroid`: under MSAA an
+edge pixel is shaded at its centre, past the face, where a coordinate just over 1 wraps to 0 and
+drew a dotted line of the neighbour's texture along the edge.
+
+It's off unless a client sets a provider (`WorldRenderer::setBlendProvider`, from
+`ContentPackLoader::blendProvider`); the `ground_blend` UI native switches it and remeshes.
+Meshing a face costs 8 more block lookups, about what AO costs. Every vertex is 16 bytes bigger
+whether it's on or not. LOD meshes and fluids don't blend.
 
 **View-relative rendering**: all vertex positions are `worldPos - cameraPos` (double-precision subtraction, then stored as float). Eliminates float precision jitter at large world coordinates.
 

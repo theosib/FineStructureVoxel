@@ -180,6 +180,14 @@ enum class RotationSet {
 // Block states - a block whose look and behaviour vary with a few properties
 // ============================================================================
 
+/// How a cube's faces spread over the faces of its neighbours level with them: `blend: 50 0.4`.
+/// A face takes the texture of a neighbour of higher priority up to `width` blocks in from their
+/// shared edge, with a ragged border. Same or lower priority leaves a hard edge.
+struct BlockBlend {
+    int priority = 0;
+    float width = 0.0f;  ///< In blocks, at most 1
+};
+
 /// A property a block can be in: `state:half: bottom top`. The first value is the default.
 struct BlockProperty {
     std::string name;
@@ -289,6 +297,9 @@ public:
 
     /// Blocks naming the same group join up, showing their connect_* faces
     BlockModel& setConnects(std::string group);
+
+    /// How its cube faces spread over its neighbours' (BlockBlend). Blocks with none keep hard edges.
+    BlockModel& setBlend(BlockBlend blend) { blend_ = blend; return *this; }
 
     /// How a block mover treats it: `moves`, `fixed`, `breaks` or `no-drag` (MoveRule)
     BlockModel& setMove(std::string rule) { move_ = std::move(rule); return *this; }
@@ -407,6 +418,7 @@ public:
     [[nodiscard]] float walkSpeed() const { return walkSpeed_; }
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
     [[nodiscard]] const std::string& connects() const { return connects_; }
+    [[nodiscard]] const std::optional<BlockBlend>& blend() const { return blend_; }
     [[nodiscard]] const std::string& move() const { return move_; }
     [[nodiscard]] const std::string& moveGrip() const { return moveGrip_; }
     [[nodiscard]] bool opaque() const { return opaque_; }
@@ -473,6 +485,7 @@ private:
     bool hasBlocksSkyLightOverride_ = false;
     bool blocksSkyLight_ = true;
     std::string connects_;
+    std::optional<BlockBlend> blend_;
     std::string move_;
     std::string moveGrip_;
     std::string sounds_;

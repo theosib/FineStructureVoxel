@@ -170,6 +170,12 @@ public:
         tintProvider_ = std::move(provider);
     }
 
+    // Spreads faces over their neighbours' (BlockBlend), or null for hard edges. Thread-safe.
+    void setBlendProvider(BlockBlendProvider provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        blendProvider_ = std::move(provider);
+    }
+
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
         std::lock_guard<std::mutex> lock(providerMutex_);
         faceOccludesProvider_ = std::move(provider);
@@ -242,6 +248,7 @@ private:
     BlockFaceOccludesProvider faceOccludesProvider_;
     BlockConnectsProvider connectsProvider_;
     BlockTintProvider tintProvider_;
+    BlockBlendProvider blendProvider_;
     BlockGeometryProvider farGeometryProvider_;
 
     std::atomic<double> detailCameraX_{0.0}, detailCameraY_{0.0}, detailCameraZ_{0.0};

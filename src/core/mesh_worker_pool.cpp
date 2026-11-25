@@ -129,6 +129,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         BlockFaceOccludesProvider faceOccludesProvider;
         BlockConnectsProvider connectsProvider;
         BlockTintProvider tintProvider;
+        BlockBlendProvider blendProvider;
         BlockGeometryProvider farGeometryProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
@@ -138,6 +139,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             faceOccludesProvider = faceOccludesProvider_;
             connectsProvider = connectsProvider_;
             tintProvider = tintProvider_;
+            blendProvider = blendProvider_;
             farGeometryProvider = farGeometryProvider_;
         }
 
@@ -164,6 +166,9 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         }
         if (tintProvider) {
             builder.setTintProvider(tintProvider);
+        }
+        if (blendProvider) {
+            builder.setBlending(blendProvider, [this](const BlockCoord& p) { return world_.getBlock(p); });
         }
         if (faceOccludesProvider) {
             builder.setFaceOccludesProvider(faceOccludesProvider);

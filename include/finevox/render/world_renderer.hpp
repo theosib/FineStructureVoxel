@@ -537,6 +537,10 @@ public:
     /// Colours faces by where they are, as foliage by its biome
     void setTintProvider(BlockTintProvider provider);
 
+    /// Spreads faces over their neighbours' where the blocks say so (BlockBlend), or null for
+    /// hard edges everywhere. Takes effect as meshes are rebuilt.
+    void setBlendProvider(BlockBlendProvider provider);
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================
@@ -768,6 +772,7 @@ private:
     BlockFaceOccludesProvider faceOccludesProvider_;  // For directional face culling
     BlockConnectsProvider connectsProvider_;  // For blocks that join up
     BlockTintProvider tintProvider_;
+    BlockBlendProvider blendProvider_;
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

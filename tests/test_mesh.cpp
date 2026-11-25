@@ -7,6 +7,7 @@
 #include "finevox/core/block_model_loader.hpp"
 #include "finevox/core/detail_range.hpp"
 #include <cmath>
+#include <map>
 #include <set>
 #include <filesystem>
 #include <fstream>
@@ -1871,4 +1872,212 @@ TEST(MeshWorldAO, APartialShapeDoesNot) {
     stack.setOpaque(false).setHasCustomMesh(true);
     BlockRegistry::global().registerType(BlockTypeId::fromName("test_ao_stack"), stack);
     EXPECT_FLOAT_EQ(groundAOBeside(BlockTypeId::fromName("test_ao_stack")), 1.0f);
+}
+
+// ============================================================================
+// Blending: faces spread over their neighbours' (BlockBlend)
+// ============================================================================
+
+class BlendMeshTest : public ::testing::Test {
+protected:
+    const BlockTypeId grass = BlockTypeId::fromName("test_blend_grass");
+    const BlockTypeId sand = BlockTypeId::fromName("test_blend_sand");
+    const BlockTypeId stone = BlockTypeId::fromName("test_blend_stone");  // keeps hard edges
+    const glm::vec4 grassTile{0.5f, 0.0f, 0.75f, 0.25f};
+    const glm::vec4 sandTile{0.0f, 0.25f, 0.25f, 0.5f};
+
+    std::map<BlockCoord, BlockTypeId> blocks;
+    MeshBuilder builder;
+
+    void SetUp() override {
+        builder.setGreedyMeshing(false);
+        builder.setBlending(
+            [this](BlockTypeId type) -> std::optional<BlockBlend> {
+                if (type == grass) return BlockBlend{50, 0.4f};
+                if (type == sand) return BlockBlend{10, 0.3f};
+                return std::nullopt;
+            },
+            [this](const BlockCoord& pos) {
+                auto it = blocks.find(pos);
+                return it == blocks.end() ? AIR_BLOCK_TYPE : it->second;
+            });
+    }
+
+    void put(int x, int y, int z, BlockTypeId type) { blocks[BlockCoord(x, y, z)] = type; }
+
+    MeshData build() {
+        SubChunk subChunk;
+        for (const auto& [pos, type] : blocks) subChunk.setBlock(pos.x, pos.y, pos.z, type);
+        BlockOpaqueProvider opaque = [this](const BlockCoord& pos) { return blocks.count(pos) > 0; };
+        BlockTextureProvider texture = [this](BlockTypeId type, Face) {
+            return type == grass ? grassTile : sandTile;
+        };
+        return builder.buildSubChunkMesh(subChunk, ChunkPos(0, 0, 0), opaque, texture);
+    }
+
+    // The blend on the face of the cell at `cell` facing `normal`, and its first vertex
+    static const ChunkVertex* faceAt(const MeshData& mesh, glm::ivec3 cell, glm::vec3 normal) {
+        for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+            if (mesh.vertices[i].normal != normal) continue;
+            glm::vec3 centre(0.0f);
+            for (int j = 0; j < 4; ++j) centre += mesh.vertices[i + j].position * 0.25f;
+            if (glm::ivec3(glm::floor(centre - normal * 0.5f)) == cell) return &mesh.vertices[i];
+        }
+        return nullptr;
+    }
+
+    static uint32_t topMask(const ChunkVertex& v) { return (v.blend.z >> 8) & 0xFFu; }
+};
+
+// Every face, with a higher neighbour on each of its four edges in turn: the edge the mask names is
+// the edge the vertices put that neighbour on, in the texture coordinates the shader works from.
+TEST_F(BlendMeshTest, TheMaskNamesTheSharedEdgeForEveryFaceAndSide) {
+    const glm::ivec3 P(8, 8, 8);
+    int checked = 0;
+    for (int f = 0; f < 6; ++f) {
+        const glm::vec3 normal = faceNormalVec3(static_cast<Face>(f));
+        for (int axis = 0; axis < 3; ++axis) {
+            if (normal[axis] != 0.0f) continue;
+            for (int sign : {-1, 1}) {
+                glm::ivec3 step(0);
+                step[axis] = sign;
+                blocks.clear();
+                put(P.x, P.y, P.z, sand);
+                put(P.x + step.x, P.y + step.y, P.z + step.z, grass);
+
+                MeshData mesh = build();
+                const ChunkVertex* face = faceAt(mesh, P, normal);
+                ASSERT_NE(face, nullptr) << "face " << f;
+                const uint32_t mask = topMask(*face);
+                ASSERT_EQ(__builtin_popcount(mask), 1) << "face " << f << " axis " << axis << " sign " << sign;
+                ASSERT_LT(mask, 16u) << "an edge, not a corner";
+
+                // Which texture coordinate, and which end of it, the mask says the neighbour is at
+                const int uvAxis = (mask & (BLEND_LOW_U | BLEND_HIGH_U)) ? 0 : 1;
+                const float expected = (mask & (BLEND_HIGH_U | BLEND_HIGH_V)) ? 1.0f : 0.0f;
+                const float edgeAt = float(P[axis]) + (sign > 0 ? 1.0f : 0.0f);
+                int onEdge = 0;
+                for (int j = 0; j < 4; ++j) {
+                    const ChunkVertex& v = face[j];
+                    if (std::abs(v.position[axis] - edgeAt) > 1e-4f) continue;
+                    const float t = (v.texCoord[uvAxis] - sandTile[uvAxis]) / (sandTile[uvAxis + 2] - sandTile[uvAxis]);
+                    EXPECT_NEAR(t, expected, 1e-5f) << "face " << f << " axis " << axis << " sign " << sign;
+                    ++onEdge;
+                }
+                EXPECT_EQ(onEdge, 2);
+
+                // The layer points at the grass tile, with grass's width, untinted
+                const uint32_t packedMin = face->blend.y;
+                EXPECT_NEAR((packedMin & 0xFFFFu) / 65535.0f, grassTile.x, 1e-4f);
+                EXPECT_NEAR((packedMin >> 16) / 65535.0f, grassTile.y, 1e-4f);
+                EXPECT_EQ((face->blend.z >> 24) & 0xFFu, uint32_t(0.4f * 255.0f + 0.5f));
+                EXPECT_EQ(face->blend.w >> 16, 0xFFFFu);
+                EXPECT_EQ(face->blend.z & 0xFFFFu & 0xFFu, 0u) << "one layer, on top";
+                ++checked;
+            }
+        }
+    }
+    EXPECT_EQ(checked, 24);
+}
+
+TEST_F(BlendMeshTest, OnlyAHigherPrioritySpreads) {
+    put(4, 4, 4, grass);
+    put(5, 4, 4, sand);
+    put(6, 4, 4, sand);
+    put(7, 4, 4, stone);
+    MeshData mesh = build();
+    const glm::vec3 up(0, 1, 0);
+    EXPECT_EQ(faceAt(mesh, {4, 4, 4}, up)->blend, glm::uvec4(0u)) << "grass takes nothing from sand";
+    EXPECT_NE(faceAt(mesh, {5, 4, 4}, up)->blend, glm::uvec4(0u)) << "sand takes grass";
+    EXPECT_EQ(faceAt(mesh, {6, 4, 4}, up)->blend, glm::uvec4(0u)) << "sand beside sand stays sand";
+    EXPECT_EQ(faceAt(mesh, {7, 4, 4}, up)->blend, glm::uvec4(0u)) << "a block with no blend keeps its edges";
+}
+
+TEST_F(BlendMeshTest, ASameKindNeighbourChangesNothing) {
+    put(4, 4, 4, grass);
+    put(5, 4, 4, grass);
+    MeshData mesh = build();
+    for (const ChunkVertex& v : mesh.vertices) EXPECT_EQ(v.blend, glm::uvec4(0u));
+}
+
+// Spreading only ever happens within one plane, so nothing is drawn over anything else
+TEST_F(BlendMeshTest, AStepUpOrDownIsAHardEdge) {
+    put(5, 4, 4, sand);
+    put(4, 5, 4, grass);  // a block higher, beside it
+    put(6, 3, 4, grass);  // a block lower, on the other side
+    MeshData mesh = build();
+    EXPECT_EQ(faceAt(mesh, {5, 4, 4}, {0, 1, 0})->blend, glm::uvec4(0u));
+}
+
+TEST_F(BlendMeshTest, ANeighbourWithItsFaceCoveredDoesntSpread) {
+    put(4, 4, 4, grass);
+    put(4, 5, 4, stone);  // on the grass
+    put(5, 4, 4, sand);
+    MeshData mesh = build();
+    EXPECT_EQ(faceAt(mesh, {5, 4, 4}, {0, 1, 0})->blend, glm::uvec4(0u));
+}
+
+TEST_F(BlendMeshTest, ACornerReachesInOnlyPastAnOpenSide) {
+    put(5, 4, 5, sand);
+    put(4, 4, 4, grass);  // diagonal only
+    put(4, 4, 5, sand);
+    put(5, 4, 4, sand);
+    MeshData mesh = build();
+    const uint32_t mask = topMask(*faceAt(mesh, {5, 4, 5}, {0, 1, 0}));
+    EXPECT_EQ(__builtin_popcount(mask), 1);
+    EXPECT_GE(mask, 16u) << "a corner";
+
+    // A wall on both sides between them: the grass is outside its corner
+    put(4, 5, 5, stone);
+    put(5, 5, 4, stone);
+    mesh = build();
+    EXPECT_EQ(faceAt(mesh, {5, 4, 5}, {0, 1, 0})->blend, glm::uvec4(0u));
+
+    // Open on one side, it reaches round
+    blocks.erase(BlockCoord(5, 5, 4));
+    mesh = build();
+    EXPECT_NE(faceAt(mesh, {5, 4, 5}, {0, 1, 0})->blend, glm::uvec4(0u));
+}
+
+TEST_F(BlendMeshTest, AStraightBorderStillMerges) {
+    builder.setGreedyMeshing(true);
+    for (int z = 0; z < 8; ++z) {
+        put(4, 4, z, grass);
+        put(5, 4, z, sand);
+    }
+    MeshData mesh = build();
+    int sandTops = 0;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        const ChunkVertex& v = mesh.vertices[i];
+        if (v.normal.y > 0.5f && v.position.x >= 5.0f - 1e-4f) {
+            ++sandTops;
+            EXPECT_EQ(__builtin_popcount(topMask(v)), 1) << "the edge alone, its corners implied";
+        }
+    }
+    EXPECT_EQ(sandTops, 1);
+}
+
+// Two kinds spread over one face: the higher is drawn last
+TEST_F(BlendMeshTest, TheHigherOfTwoIsOnTop) {
+    const BlockTypeId loam = BlockTypeId::fromName("test_blend_loam");
+    builder.setBlending(
+        [&](BlockTypeId type) -> std::optional<BlockBlend> {
+            if (type == grass) return BlockBlend{50, 0.4f};
+            if (type == loam) return BlockBlend{30, 0.2f};
+            if (type == sand) return BlockBlend{10, 0.3f};
+            return std::nullopt;
+        },
+        [this](const BlockCoord& pos) {
+            auto it = blocks.find(pos);
+            return it == blocks.end() ? AIR_BLOCK_TYPE : it->second;
+        });
+    put(5, 4, 5, sand);
+    put(4, 4, 5, loam);
+    put(6, 4, 5, grass);
+    MeshData mesh = build();
+    const ChunkVertex& v = *faceAt(mesh, {5, 4, 5}, {0, 1, 0});
+    EXPECT_NE(v.blend.z & 0xFFu, 0u);
+    EXPECT_NE((v.blend.z >> 8) & 0xFFu, 0u);
+    EXPECT_EQ((v.blend.z >> 16) & 0xFFu, uint32_t(0.2f * 255.0f + 0.5f)) << "loam underneath";
+    EXPECT_EQ((v.blend.z >> 24) & 0xFFu, uint32_t(0.4f * 255.0f + 0.5f)) << "grass on top";
 }

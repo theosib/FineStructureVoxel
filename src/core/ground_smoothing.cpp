@@ -17,7 +17,6 @@ struct Frame {
     const GroundCellProvider& cells;
     BlockCoord block;
     int up;
-    GroundCell open;  // What the face looks into: Open or Wet. Only the same counts as open.
 
     [[nodiscard]] GroundCell at(int dx, int k, int dz) const {
         return cells(BlockCoord(block.x + dx, block.y + up * k, block.z + dz));
@@ -29,22 +28,26 @@ struct EdgeView {
     int8_t link;
 };
 
+// Water is as open as air: ground runs down into it as into air, and the fluid mesh draws water
+// over the part of a bank that dips under it (fluid_mesh.hpp)
+bool isOpen(GroundCell cell) { return cell == GroundCell::Open || cell == GroundCell::Wet; }
+
 // What lies past the face's edge toward (dx, dz). Two faces call each other a Link, or neither
 // does: a step up from one is a step down from the other, by the same cells.
 EdgeView classify(const Frame& f, int dx, int dz) {
     const GroundCell beside = f.at(dx, 1, dz);
-    if (beside != f.open) {
+    if (!isOpen(beside)) {
         if (beside != GroundCell::Ground) return {GroundEdge::Pin, 0};
         // Ground level with what this face looks into: a step up, if it has room above as this
         // face does. Otherwise a wall.
         const GroundCell above = f.at(dx, 2, dz);
-        if (above == f.open && f.at(0, 2, 0) == f.open) return {GroundEdge::Link, 1};
-        if (above == GroundCell::Ground || above == f.open) return {GroundEdge::Up, 0};
+        if (isOpen(above) && isOpen(f.at(0, 2, 0))) return {GroundEdge::Link, 1};
+        if (above == GroundCell::Ground || isOpen(above)) return {GroundEdge::Up, 0};
         return {GroundEdge::Pin, 0};
     }
     const GroundCell level = f.at(dx, 0, dz);
     if (level == GroundCell::Ground) return {GroundEdge::Link, 0};
-    if (level != f.open) return {GroundEdge::Pin, 0};
+    if (!isOpen(level)) return {GroundEdge::Pin, 0};
     if (f.at(dx, -1, dz) == GroundCell::Ground) return {GroundEdge::Link, -1};
     return {GroundEdge::Down, 0};
 }
@@ -78,8 +81,7 @@ float cornerHeight(const Frame& f, int sx, int sz) {
     int head = 0, tail = 1;
     while (head < tail) {
         const int p = queue[head++];
-        const Frame here{f.cells, BlockCoord(f.block.x + OX[p] * sx, *level[p], f.block.z + OZ[p] * sz), f.up,
-                         f.open};
+        const Frame here{f.cells, BlockCoord(f.block.x + OX[p] * sx, *level[p], f.block.z + OZ[p] * sz), f.up};
         for (int q : BESIDE[p]) {
             const EdgeView v = classify(here, (OX[q] - OX[p]) * sx, (OZ[q] - OZ[p]) * sz);
             view[p][q] = v;
@@ -197,13 +199,12 @@ glm::vec3 GroundPatch::normal(float u, float v) const {
 
 std::optional<GroundPatch> groundPatch(const GroundCellProvider& cells, BlockCoord block, int up) {
     if (cells(block) != GroundCell::Ground) return std::nullopt;
-    const GroundCell open = cells(BlockCoord(block.x, block.y + up, block.z));
-    if (open != GroundCell::Open && open != GroundCell::Wet) return std::nullopt;
+    if (!isOpen(cells(BlockCoord(block.x, block.y + up, block.z)))) return std::nullopt;
 
     GroundPatch patch;
     patch.block = block;
     patch.up = up;
-    const Frame frame{cells, block, up, open};
+    const Frame frame{cells, block, up};
 
     EdgeView views[4];
     float standIns[4];
@@ -240,7 +241,7 @@ std::optional<GroundPatch> groundPatch(const GroundCellProvider& cells, BlockCoo
         return true;
     };
     const GroundCell behind = frame.at(0, -1, 0);
-    if (behind == GroundCell::Open || behind == GroundCell::Wet) patch.lowest = -0.5f;
+    if (isOpen(behind)) patch.lowest = -0.5f;
     if (frame.at(0, 2, 0) == GroundCell::Ground) patch.highest = 0.5f;
 
     patch.steps[0] = straight(true) ? 1 : GROUND_CURVED_STEPS;

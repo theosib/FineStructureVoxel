@@ -3,6 +3,8 @@
 #include "finevox/core/fluid_layer.hpp"
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
+#include <algorithm>
+#include <optional>
 
 namespace finevox {
 
@@ -207,6 +209,67 @@ void FluidMeshBuilder::addFluidFace(
 }
 
 // ============================================================================
+// Banks
+// ============================================================================
+
+namespace {
+
+// The eight cells round one at its level, in the order that settles which water draws a bank
+constexpr int32_t AROUND[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+
+}  // namespace
+
+void FluidMeshBuilder::addBankCovers(
+    MeshData& mesh,
+    BlockCoord worldPos,
+    BlockCoord origin,
+    FluidTypeId type,
+    const glm::vec4& tintColor,
+    const FluidNeighborProvider& fluidNeighbor,
+    const BlockSolidProvider& solidProvider
+) {
+    // The water's surface: this fluid with none of it over it. Its height, or nothing.
+    auto surface = [&](BlockCoord pos) -> std::optional<float> {
+        auto [fluid, level] = fluidNeighbor(pos);
+        if (fluid != type || level == 0) return std::nullopt;
+        auto [over, overLevel] = fluidNeighbor(BlockCoord(pos.x, pos.y + 1, pos.z));
+        if (over == type && overLevel > 0) return std::nullopt;
+        const FluidType* ft = FluidRegistry::global().getType(type);
+        return ft ? std::optional<float>(surfaceHeight(level, ft->maxLevel)) : std::nullopt;
+    };
+    auto dry = [&](BlockCoord pos) { return fluidNeighbor(pos).first.isEmpty(); };
+
+    for (const auto& step : AROUND) {
+        const BlockCoord bank(worldPos.x + step[0], worldPos.y, worldPos.z + step[1]);
+        const BlockCoord over(bank.x, bank.y + 1, bank.z);
+        if (!dry(bank) || !solidProvider(bank) || !dry(over) || solidProvider(over)) continue;
+
+        // The first water round it draws it, as high as the highest
+        std::optional<BlockCoord> first;
+        float height = 0.0f;
+        for (const auto& around : AROUND) {
+            const BlockCoord water(bank.x + around[0], bank.y, bank.z + around[1]);
+            if (auto h = surface(water)) {
+                if (!first) first = water;
+                height = std::max(height, *h);
+            }
+        }
+        if (!first || *first != worldPos) continue;
+
+        float skyLight = 1.0f;
+        float blockLight = 0.0f;
+        if (lightProvider_) {
+            uint8_t packed = lightProvider_(over);
+            skyLight = static_cast<float>(packed >> 4) / 15.0f;
+            blockLight = static_cast<float>(packed & 0x0F) / 15.0f;
+        }
+        const glm::vec3 local(static_cast<float>(bank.x - origin.x), static_cast<float>(bank.y - origin.y),
+                              static_cast<float>(bank.z - origin.z));
+        addFluidFace(mesh, local, Face::PosY, {height, height, height, height}, tintColor, skyLight, blockLight);
+    }
+}
+
+// ============================================================================
 // Main Mesh Building
 // ============================================================================
 
@@ -291,6 +354,7 @@ MeshData FluidMeshBuilder::buildFluidMesh(
 
                     addFluidFace(mesh, localPos, face, cornerHeights, tintColor, skyLight, blockLight);
                 }
+                addBankCovers(mesh, worldPos, origin, fluidType, tintColor, fluidNeighbor, solidProvider);
             }
         }
     }

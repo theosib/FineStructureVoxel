@@ -119,8 +119,10 @@ drawn as the cubes it collides as.
 - **What's across an edge** (`GroundEdge`): a `Link` is another smooth face a block up, level or
   down, with room over it. `Up` and `Down` are steps of two or more: the face goes half a block
   toward them, so both sides round off and a block of wall stays between. `Pin` is anything else
-  (built blocks, or water against dry ground): the edge stays level, with a wall wherever the corners
-  dip below or rise above it. Plants count as open, and are raised to the surface under them.
+  (built blocks): the edge stays level, with a wall wherever the corners dip below or rise above it.
+  Plants count as open, and are raised to the surface under them. So does water: a bank runs down
+  into it, and the fluid mesh draws the water's surface over the bank where it dips below it
+  (fluids.md, "Banks").
 - **Faces meet exactly.** A corner is worked out by the columns' link group, which is the same from
   every face in it (`cornerHeight`), so linked faces share their edges bit for bit. Any difference
   left (thin layers, which keep their top and bottom on their own halves) is closed by a strip on

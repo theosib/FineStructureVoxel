@@ -129,12 +129,22 @@ TEST(GroundSmoothing, BuiltThingsPinTheEdge) {
 }
 
 // Water against a dry bank leaves the bank's edge where it is
-TEST(GroundSmoothing, WaterPinsADryBank) {
+// A bank runs down into the water as into air: the fluid mesh draws water over what's under it
+TEST(GroundSmoothing, BanksSlopeIntoWater) {
     Terrain t{[](int x, int) { return x < 0 ? 6 : 4; },
               [](const BlockCoord& p) { return p.x >= 0 && p.y >= 4 && p.y < 6 ? GroundCell::Wet : GroundCell::Open; }};
     GroundPatch bank = topOf(t, -1, 0);
-    EXPECT_EQ(bank.edge[GROUND_EDGE_X_HIGH], GroundEdge::Pin);
-    EXPECT_NEAR(worldHeight(bank, 1.0f, 0.5f), 6.0f, 1e-5f);
+    EXPECT_EQ(bank.edge[GROUND_EDGE_X_HIGH], GroundEdge::Down) << "two deep: it rounds off, as into air";
+    EXPECT_NEAR(worldHeight(bank, 1.0f, 0.5f), 5.5f, 1e-5f);
+
+    // A block lower, the bank and the bed meet in one slope
+    Terrain shallow{[](int x, int) { return x < 0 ? 6 : 5; },
+                    [](const BlockCoord& p) { return p.x >= 0 && p.y == 5 ? GroundCell::Wet : GroundCell::Open; }};
+    GroundPatch shore = topOf(shallow, -1, 0);
+    GroundPatch bed = topOf(shallow, 0, 0);
+    EXPECT_EQ(shore.edge[GROUND_EDGE_X_HIGH], GroundEdge::Link);
+    EXPECT_EQ(bed.edge[GROUND_EDGE_X_LOW], GroundEdge::Link);
+    EXPECT_NEAR(worldHeight(shore, 1.0f, 0.5f), worldHeight(bed, 0.0f, 0.5f), 1e-5f);
 }
 
 // An underside is the same shape, upside down

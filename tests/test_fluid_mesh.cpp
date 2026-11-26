@@ -4,6 +4,8 @@
 #include "finevox/core/fluid_type.hpp"
 #include "finevox/core/fluid_registry.hpp"
 #include "finevox/core/subchunk.hpp"
+#include <cmath>
+#include <map>
 
 using namespace finevox;
 
@@ -291,4 +293,58 @@ TEST(FluidMeshBuilderTest, CrossSubChunkNeighborQuery) {
     // = 5 faces
     EXPECT_EQ(mesh.vertexCount(), 5u * 4u);
     EXPECT_EQ(mesh.indexCount(), 5u * 6u);
+}
+
+// ============================================================================
+// Banks
+// ============================================================================
+
+// A pond at y = 5, in a bank of solid ground a block higher. Every bank cell beside it, straight or
+// across a corner, has the water's surface drawn over it once, at the water's height; the ones
+// further off, or with something on them, have none.
+TEST(FluidMeshBuilderTest, BanksBesideWaterHaveItsSurfaceDrawnOverThem) {
+    FluidTypeId water = ensureWaterRegistered();
+    auto inPond = [](int x, int z) { return x >= 4 && x <= 7 && z >= 4 && z <= 6; };
+    SubChunk sc;
+    for (int x = 4; x <= 7; ++x) {
+        for (int z = 4; z <= 6; ++z) sc.setFluid(x, 5, z, water, FLUID_SOURCE_LEVEL);
+    }
+    FluidNeighborProvider fluid = [&](BlockCoord p) {
+        if (p.y == 5 && inPond(p.x, p.z)) return std::make_pair(water, FLUID_SOURCE_LEVEL);
+        return std::make_pair(EMPTY_FLUID_TYPE, uint8_t(0));
+    };
+    // Ground up to y = 5 everywhere but the pond; a post on the bank at (3, 6, 5)
+    BlockSolidProvider solid = [&](BlockCoord p) {
+        if (p.x == 3 && p.y == 6 && p.z == 5) return true;
+        return p.y <= 5 && !(p.y == 5 && inPond(p.x, p.z));
+    };
+
+    FluidMeshBuilder builder;
+    MeshData mesh = builder.buildFluidMesh(sc, ChunkPos(0, 0, 0), fluid, solid);
+
+    std::map<std::pair<int, int>, int> covers;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        const ChunkVertex& v = mesh.vertices[i];
+        if (v.normal.y < 0.5f) continue;
+        float x = 0, z = 0;
+        for (int j = 0; j < 4; ++j) {
+            x += mesh.vertices[i + j].position.x * 0.25f;
+            z += mesh.vertices[i + j].position.z * 0.25f;
+            EXPECT_NEAR(mesh.vertices[i + j].position.y, 5.0f + 14.0f / 16.0f, 1e-5f);
+        }
+        const int cx = int(std::floor(x)), cz = int(std::floor(z));
+        if (!inPond(cx, cz)) ++covers[{cx, cz}];
+    }
+    int expected = 0;
+    for (int x = 2; x <= 9; ++x) {
+        for (int z = 2; z <= 8; ++z) {
+            if (inPond(x, z)) continue;
+            const bool beside = x >= 3 && x <= 8 && z >= 3 && z <= 7;
+            const bool built = x == 3 && z == 5;
+            const int want = beside && !built ? 1 : 0;
+            expected += want;
+            EXPECT_EQ(covers[std::make_pair(x, z)], want) << "bank at " << x << "," << z;
+        }
+    }
+    EXPECT_EQ(expected, 6 * 5 - 12 - 1);
 }

@@ -32,7 +32,7 @@ constexpr int GROUND_REACH_UP_DOWN = 6;
 /// What a cell is to the smoothing
 enum class GroundCell : uint8_t {
     Open,    ///< Air, or a plant: nothing that fills the cell or stops a body
-    Wet,     ///< Open, with fluid in it
+    Wet,     ///< Open, with fluid in it: shaped as Open, but where water is drawn
     Ground,  ///< A block that smooths
     Solid,   ///< Anything else
 };
@@ -50,7 +50,7 @@ enum class GroundEdge : uint8_t {
     Link,  ///< Another smoothed face up to a block further out or in: the surface runs on
     Up,    ///< A wall of ground two or more high: the face curves up half a block to meet it
     Down,  ///< A drop of two or more: the face rounds off half a block toward it
-    Pin,   ///< Something built, or water: the face meets it level, with a wall where it doesn't
+    Pin,   ///< Something built: the face meets it level, with a wall where it doesn't
 };
 
 /// The edges of a face, in this order: -x, +x, -z, +z

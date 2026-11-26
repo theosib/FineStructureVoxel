@@ -100,6 +100,15 @@ if (type != EMPTY_FLUID_TYPE) {
 
 **Pipeline settings:** `alphaBlending()` + `depthWrite(false)` + `cullNone()`. Shares `pipelineLayout_` with opaque pipeline.
 
+**Banks.** Smoothed ground runs down into water as into air (rendering.md, "Smooth ground"), so
+part of a bank can dip below the waterline. `FluidMeshBuilder::addBankCovers` draws the water's
+surface over every solid block beside surface water at its level, straight or across a corner, that
+is dry with open air over it: a flat top at the highest of those waters' heights, lit from the cell
+above. The first such water in a fixed order draws it, so a bank between two is covered once.
+Where the bank is above it the ground hides it, and where it dips the bank is under water. It's only
+drawn: there's no fluid in the block, so the simulation never sees it and digging beside a lake
+doesn't flood. A source's surface is at 14/16, under a bank's flat top, so nothing z-fights.
+
 ---
 
 ## Light Integration

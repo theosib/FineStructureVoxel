@@ -11,6 +11,12 @@
  * This allows reuse of the same vertex input layout and SubChunkView
  * upload code as block meshes, while fluid shaders interpret the
  * fields differently.
+ *
+ * Banks: smoothed ground runs down into water as into air (ground_smoothing.hpp), so part of a
+ * bank can dip under the waterline. A solid block beside water at the water's level, dry, with open
+ * air over it, has the water's surface drawn over it too, at the water's height. Where the bank is
+ * above that, the ground hides it; where it dips, it's under water. Nothing is in the block: it's
+ * only drawn, and the fluid simulation never sees it.
  */
 
 #include "finevox/core/mesh.hpp"
@@ -94,6 +100,17 @@ private:
         const FluidType& ft,
         const FluidNeighborProvider& fluidNeighbor
     ) const;
+
+    /// Draw the water's surface over each bank beside this cell that it's the one to draw for
+    void addBankCovers(
+        MeshData& mesh,
+        BlockCoord worldPos,
+        BlockCoord origin,
+        FluidTypeId type,
+        const glm::vec4& tintColor,
+        const FluidNeighborProvider& fluidNeighbor,
+        const BlockSolidProvider& solidProvider
+    );
 
     /// Check if a fluid face should be culled
     /// @return true if the face should NOT be rendered

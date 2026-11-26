@@ -140,3 +140,47 @@ TEST_F(FluidWorldgenTest, FluidPassPriority7000) {
     FluidPass fluid(62);
     EXPECT_EQ(fluid.priority(), 7000);
 }
+
+// A column a neighbour's structure made early has no ground when the neighbour's water floods
+// next door, so all of it below sea level fills. Generated after, its ground keeps none of that
+// water inside: only what's open is under water.
+TEST_F(FluidWorldgenTest, GroundMadeAfterANeighbourFloodedHasNoWaterInIt) {
+    const int32_t SEA_LEVEL = 62;
+    BlockTypeId stoneId = BlockTypeId::fromName("stone");
+
+    // Ground to y = 50 at x < 16, a pond's floor, and to y = 60 beyond
+    struct Ground : GenerationPass {
+        BlockTypeId stone;
+        explicit Ground(BlockTypeId s) : stone(s) {}
+        std::string_view name() const override { return "ground"; }
+        int32_t priority() const override { return static_cast<int32_t>(GenerationPriority::TerrainShape); }
+        void generate(GenerationContext& ctx) override {
+            const int32_t top = ctx.pos.x == 0 ? 50 : 60;
+            for (int32_t lx = 0; lx < 16; ++lx) {
+                for (int32_t lz = 0; lz < 16; ++lz) {
+                    for (int32_t y = 0; y <= top; ++y) ctx.column.setBlock(lx, y, lz, stone);
+                }
+            }
+        }
+    };
+    GenerationPipeline pipeline;
+    pipeline.addPass(std::make_unique<Ground>(stoneId));
+    pipeline.addPass(std::make_unique<FluidPass>(SEA_LEVEL));
+
+    World world;
+    BiomeMap biomeMap(42, BiomeRegistry::global());
+    ChunkColumn& early = world.getOrCreateColumn({1, 0});
+    early.setBlock(0, 70, 0, stoneId);  // What made it: a branch over the line
+    pipeline.generateColumn(world.getOrCreateColumn({0, 0}), world, biomeMap);
+    ASSERT_EQ(early.getSubChunk(ChunkColumn::worldYToChunkY(55))->getFluid(4, ChunkColumn::worldYToLocalY(55), 4),
+              waterId_)
+        << "the pond floods next door";
+
+    pipeline.generateColumn(early, world, biomeMap);
+    for (int32_t y = 40; y <= SEA_LEVEL; ++y) {
+        const SubChunk* sc = early.getSubChunk(ChunkColumn::worldYToChunkY(y));
+        ASSERT_NE(sc, nullptr);
+        const FluidTypeId want = y > 60 ? waterId_ : FluidTypeId();
+        EXPECT_EQ(sc->getFluid(4, ChunkColumn::worldYToLocalY(y), 4), want) << "y=" << y;
+    }
+}

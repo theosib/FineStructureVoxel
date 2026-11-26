@@ -64,6 +64,11 @@ void GenerationPipeline::generateColumn(ChunkColumn& column, World& world,
         {},  // biomes
     };
 
+    // A neighbour's water can have flooded in already, where a structure of theirs made the column
+    // early: with no ground yet, all of it below sea level. The ground would be laid over it, and
+    // keep it inside. The column's own fluid pass floods what's open again.
+    column.forEachSubChunk([](int32_t, SubChunk& subchunk) { subchunk.removeFluidLayer(); });
+
     for (auto& pass : passes_) {
         pass->generate(ctx);
     }

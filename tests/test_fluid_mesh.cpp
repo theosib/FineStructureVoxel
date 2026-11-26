@@ -313,9 +313,9 @@ TEST(FluidMeshBuilderTest, BanksBesideWaterHaveItsSurfaceDrawnOverThem) {
         if (p.y == 5 && inPond(p.x, p.z)) return std::make_pair(water, FLUID_SOURCE_LEVEL);
         return std::make_pair(EMPTY_FLUID_TYPE, uint8_t(0));
     };
-    // Ground up to y = 5 everywhere but the pond; a post on the bank at (3, 6, 5)
+    // Ground up to y = 5 everywhere but the pond; a post two high on the bank at (3, 6..7, 5)
     BlockSolidProvider solid = [&](BlockCoord p) {
-        if (p.x == 3 && p.y == 6 && p.z == 5) return true;
+        if (p.x == 3 && (p.y == 6 || p.y == 7) && p.z == 5) return true;
         return p.y <= 5 && !(p.y == 5 && inPond(p.x, p.z));
     };
 
@@ -347,4 +347,46 @@ TEST(FluidMeshBuilderTest, BanksBesideWaterHaveItsSurfaceDrawnOverThem) {
         }
     }
     EXPECT_EQ(expected, 6 * 5 - 12 - 1);
+}
+
+// A bank a block above the water runs down under it too, so it has the water's surface drawn over
+// it, lit from the open air over the block on it
+TEST(FluidMeshBuilderTest, BanksABlockAboveTheWaterAreCoveredToo) {
+    FluidTypeId water = ensureWaterRegistered();
+    auto inPond = [](int x, int z) { return x >= 4 && x <= 7 && z >= 4 && z <= 6; };
+    SubChunk sc;
+    for (int x = 4; x <= 7; ++x) {
+        for (int z = 4; z <= 6; ++z) sc.setFluid(x, 5, z, water, FLUID_SOURCE_LEVEL);
+    }
+    FluidNeighborProvider fluid = [&](BlockCoord p) {
+        if (p.y == 5 && inPond(p.x, p.z)) return std::make_pair(water, FLUID_SOURCE_LEVEL);
+        return std::make_pair(EMPTY_FLUID_TYPE, uint8_t(0));
+    };
+    // Ground to y = 6 west of the pond, to y = 5 elsewhere, and a tower two high at (8, 6..7, 5)
+    BlockSolidProvider solid = [&](BlockCoord p) {
+        if (p.x == 8 && p.z == 5 && p.y <= 7) return true;
+        if (p.y == 5 && inPond(p.x, p.z)) return false;
+        return p.y <= (p.x < 4 ? 6 : 5);
+    };
+
+    FluidMeshBuilder builder;
+    builder.setLightProvider([](const BlockCoord& p) -> uint8_t { return p.y >= 7 ? 0xF0 : 0x00; });
+    MeshData mesh = builder.buildFluidMesh(sc, ChunkPos(0, 0, 0), fluid, solid);
+
+    std::map<std::pair<int, int>, int> covers;
+    for (size_t i = 0; i + 3 < mesh.vertices.size(); i += 4) {
+        if (mesh.vertices[i].normal.y < 0.5f) continue;
+        float x = 0, z = 0;
+        for (int j = 0; j < 4; ++j) {
+            x += mesh.vertices[i + j].position.x * 0.25f;
+            z += mesh.vertices[i + j].position.z * 0.25f;
+        }
+        const int cx = int(std::floor(x)), cz = int(std::floor(z));
+        if (inPond(cx, cz)) continue;
+        ++covers[{cx, cz}];
+        if (cx == 3) EXPECT_FLOAT_EQ(mesh.vertices[i].skyLight, 1.0f) << "lit from over the block on it";
+    }
+    for (int z = 3; z <= 7; ++z) EXPECT_EQ(covers[std::make_pair(3, z)], 1) << "bank a block up at 3," << z;
+    EXPECT_EQ(covers[std::make_pair(8, 4)], 1);
+    EXPECT_EQ(covers[std::make_pair(8, 5)], 0) << "two blocks on it: a tower, not a bank";
 }

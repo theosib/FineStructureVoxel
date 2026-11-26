@@ -12,6 +12,11 @@ namespace {
 
 constexpr int EDGE_STEP[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
 
+// How far under its face a shore goes: a little past a source's surface, 14/16 up the block beside
+// it, so the water drawn over it never meets it. No further, since a body only stands on ground
+// within a block of its face (ground_surface.hpp), and under water it isn't seen.
+constexpr float SHORE_DEPTH = 1.0f + 3.0f / 16.0f;
+
 // A face seen from its own block, with k counted outward: 0 the block, 1 the cell it looks into
 struct Frame {
     const GroundCellProvider& cells;
@@ -49,6 +54,9 @@ EdgeView classify(const Frame& f, int dx, int dz) {
     if (level == GroundCell::Ground) return {GroundEdge::Link, 0};
     if (!isOpen(level)) return {GroundEdge::Pin, 0};
     if (f.at(dx, -1, dz) == GroundCell::Ground) return {GroundEdge::Link, -1};
+    // Water's surface a block under this face: rounded off half a block, it would stand as a wall
+    // over the waterline, where the drop under it is hidden anyway
+    if (f.up > 0 && level == GroundCell::Open && f.at(dx, -1, dz) == GroundCell::Wet) return {GroundEdge::Shore, 0};
     return {GroundEdge::Down, 0};
 }
 
@@ -59,6 +67,8 @@ float standIn(const EdgeView& e) {
         case GroundEdge::Link: return float(e.link);
         case GroundEdge::Up: return 1.0f;
         case GroundEdge::Down: return -1.0f;
+        // Steeply, down under the water's surface, so that the edge is at SHORE_DEPTH
+        case GroundEdge::Shore: return -2.0f * SHORE_DEPTH;
         case GroundEdge::Pin: return 0.0f;
     }
     return 0.0f;
@@ -112,7 +122,13 @@ float cornerHeight(const Frame& f, int sx, int sz) {
     // which goes between the two beside it
     if (!value[3]) value[3] = (*value[1] + *value[2]) * 0.5f;
 
-    return (*value[0] + *value[1] + *value[2] + *value[3]) * 0.25f;
+    // A shore goes no further under the water than SHORE_DEPTH below the lowest face here, the
+    // same from every face in the group. Nothing else gets as low.
+    float lowest = 0.0f;
+    for (int q = 0; q < 4; ++q) {
+        if (level[q]) lowest = std::min(lowest, own(q));
+    }
+    return std::max((*value[0] + *value[1] + *value[2] + *value[3]) * 0.25f, lowest - SHORE_DEPTH);
 }
 
 float bernstein(int i, float t) {

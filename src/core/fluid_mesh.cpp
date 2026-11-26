@@ -241,8 +241,12 @@ void FluidMeshBuilder::addBankCovers(
 
     for (const auto& step : AROUND) {
         const BlockCoord bank(worldPos.x + step[0], worldPos.y, worldPos.z + step[1]);
+        // Open air over it, or over a block on it: smoothed ground a block above the water runs
+        // down under it too. Where a block on it doesn't, that block hides this.
         const BlockCoord over(bank.x, bank.y + 1, bank.z);
-        if (!dry(bank) || !solidProvider(bank) || !dry(over) || solidProvider(over)) continue;
+        BlockCoord open = over;
+        if (solidProvider(open)) ++open.y;
+        if (!dry(bank) || !solidProvider(bank) || !dry(over) || !dry(open) || solidProvider(open)) continue;
 
         // The first water round it draws it, as high as the highest
         std::optional<BlockCoord> first;
@@ -259,7 +263,7 @@ void FluidMeshBuilder::addBankCovers(
         float skyLight = 1.0f;
         float blockLight = 0.0f;
         if (lightProvider_) {
-            uint8_t packed = lightProvider_(over);
+            uint8_t packed = lightProvider_(open);
             skyLight = static_cast<float>(packed >> 4) / 15.0f;
             blockLight = static_cast<float>(packed & 0x0F) / 15.0f;
         }

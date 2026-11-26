@@ -50,6 +50,7 @@ enum class GroundEdge : uint8_t {
     Link,  ///< Another smoothed face up to a block further out or in: the surface runs on
     Up,    ///< A wall of ground two or more high: the face curves up half a block to meet it
     Down,  ///< A drop of two or more: the face rounds off half a block toward it
+    Shore, ///< A drop to water a block below: the face runs down a little under its surface
     Pin,   ///< Something built: the face meets it level, with a wall where it doesn't
 };
 

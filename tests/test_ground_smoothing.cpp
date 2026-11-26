@@ -148,6 +148,31 @@ TEST(GroundSmoothing, BanksSlopeIntoWater) {
     EXPECT_NEAR(worldHeight(shore, 1.0f, 0.5f), worldHeight(bed, 0.0f, 0.5f), 1e-5f);
 }
 
+// A bank a block above the water doesn't round off and stand as a wall over the waterline: it runs
+// down under the water
+TEST(GroundSmoothing, BanksAboveTheWaterRunUnderIt) {
+    Terrain t{[](int x, int) { return x < 0 ? 6 : 4; },
+              [](const BlockCoord& p) { return p.x >= 0 && p.y == 4 ? GroundCell::Wet : GroundCell::Open; }};
+    GroundPatch bank = topOf(t, -1, 0);
+    GroundPatch bed = topOf(t, 0, 0);
+    EXPECT_EQ(bank.edge[GROUND_EDGE_X_HIGH], GroundEdge::Shore);
+    EXPECT_EQ(bed.edge[GROUND_EDGE_X_LOW], GroundEdge::Up);
+    // Down under the waterline, but only a little: past a block from its face, a body wouldn't
+    // stand on it as drawn
+    const float waterline = 4.0f + 14.0f / 16.0f;
+    for (float v : {0.0f, 0.5f, 1.0f}) {
+        EXPECT_LT(worldHeight(bank, 1.0f, v), waterline - 0.05f) << v;
+        EXPECT_GE(worldHeight(bank, 1.0f, v), 4.8f) << v;
+    }
+    EXPECT_LT(worldHeight(bed, 0.0f, 0.5f), worldHeight(bank, 1.0f, 0.5f)) << "the wall between is under water";
+
+    // Over dry ground the same drop still rounds off, with a wall
+    Terrain dry{[](int x, int) { return x < 0 ? 6 : 4; }, nullptr};
+    GroundPatch cliff = topOf(dry, -1, 0);
+    EXPECT_EQ(cliff.edge[GROUND_EDGE_X_HIGH], GroundEdge::Down);
+    EXPECT_NEAR(worldHeight(cliff, 1.0f, 0.5f), 5.5f, 1e-5f);
+}
+
 // An underside is the same shape, upside down
 TEST(GroundSmoothing, CeilingsSmoothToo) {
     // Solid ground from y = 20 up to the sky, its underside stepping up in x

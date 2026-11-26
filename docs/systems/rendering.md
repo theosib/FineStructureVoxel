@@ -124,7 +124,10 @@ drawn as the cubes it collides as.
   texture (`setGroundSmoothing`'s block lookup), not the ground's.
   Plants count as open, and are raised to the surface under them. So does water: a bank runs down
   into it, and the fluid mesh draws the water's surface over the bank where it dips below it
-  (fluids.md, "Banks").
+  (fluids.md, "Banks"). A bank a block above the water would round off half a block and stand as a
+  wall over the waterline, so it's a `Shore` instead: it runs steeply down to just under the water's
+  surface and levels off there, a little more than a block below its face, since a body only stands
+  on ground within a block of its face. The wall down to the bed is under water.
 - **Faces meet exactly.** A corner is worked out by the columns' link group, which is the same from
   every face in it (`cornerHeight`), so linked faces share their edges bit for bit. Any difference
   left (thin layers, which keep their top and bottom on their own halves) is closed by a strip on

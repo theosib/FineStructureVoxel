@@ -14,9 +14,9 @@
  *
  * Banks: smoothed ground runs down into water as into air (ground_smoothing.hpp), so part of a
  * bank can dip under the waterline. A solid block beside water at the water's level, dry, with open
- * air over it, has the water's surface drawn over it too, at the water's height. Where the bank is
- * above that, the ground hides it; where it dips, it's under water. Nothing is in the block: it's
- * only drawn, and the fluid simulation never sees it.
+ * air over it or over a block on it, has the water's surface drawn over it too, at the water's
+ * height. Where the bank is above that, the ground hides it; where it dips, it's under water. Nothing
+ * is in the block: it's only drawn, and the fluid simulation never sees it.
  */
 
 #include "finevox/core/mesh.hpp"

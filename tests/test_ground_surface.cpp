@@ -247,6 +247,11 @@ TEST_F(GroundSurfaceTest, OneBlockHoleIsAShallowDip) {
     EXPECT_GT(body.position().y, bottom - KEPT_WITHIN) << "it sank below the drawn surface";
     EXPECT_LT(body.position().y, 9.8f) << "it's held up by the ground round the hole";
     EXPECT_GT(body.position().y, 9.3f) << "it fell to the bottom of the hole, at 9";
+
+    // The dip's ground takes up part of the hole's cell; open air over level ground has none in it
+    EXPECT_TRUE(world->groundSurface()->reachesInto(BlockCoord(8, 9, 8)));
+    EXPECT_FALSE(world->groundSurface()->reachesInto(BlockCoord(3, 10, 3)));
+    EXPECT_FALSE(world->groundSurface()->reachesInto(BlockCoord(3, 9, 3))) << "a ground block isn't open";
 }
 
 // Without one, the world collides as cubes, as it always did

@@ -66,6 +66,10 @@ public:
     /// this thread's own that the next call reuses.
     [[nodiscard]] const CollisionShape* shape(BlockCoord pos, BlockTypeId type);
 
+    /// Whether the surface takes up part of a cell whose block leaves it open: ground rising into
+    /// it from below or hanging into it from above
+    [[nodiscard]] bool reachesInto(BlockCoord pos);
+
     /// Whether a point is under the surface, or nullopt where there's no surface in its cell
     [[nodiscard]] std::optional<bool> solidAt(const glm::dvec3& point);
 

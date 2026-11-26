@@ -323,9 +323,11 @@ marker_ring x y z radius r g b [a] [=width w]   as wide as twice the radius, it'
 marker_box x y z sx sy sz r g b [a] [=shaded true] [=texture name] [=uv [u0 v0 u1 v1]]
                    shaded: faces darker as a block's are, whatever the time of day. texture: one
                    of the game's `marker_textures` (game.conf, a folder under textures/), on every
-                   face, running along +X or +Z right through the box. uv: only that part of it
-marker_edges x y z sx sy sz r g b [a] [=points 1.5]   a box's edges as lines, as thick on screen
-                   near as far, a hair nearer the eye than the faces they lie on
+                   face, running along +X or +Z right through the box. uv: only that part of it.
+                   [=through a]: what the world hides of it shows through at alpha a (true:
+                   0.35), its faces towards the eye only, in the pass marker_xray uses
+marker_edges x y z sx sy sz r g b [a] [=points 1.5] [=through a]   a box's edges as lines, as
+                   thick on screen near as far, a hair nearer the eye than the faces they lie on
 block_shape block [:collision] -> [[x0 y0 z0 x1 y1 z1] ...]   the state's hit shape (what a
                    click hits), or what a body bumps into, as that state is turned
 marker_bar x y z width fraction        ui_rect x0 y0 x1 y1 r g b a   (an outline)
@@ -340,6 +342,8 @@ texture_packs -> [{=id =name =description}]   texture_pack [id] -> id   the pack
                    none; with an id, changes to it next frame and remembers it (texture-packs.md)
 ground_solid -> b  whether the game in progress has bodies stand on the slopes (solid_slopes),
                    which is also whether it draws `smooth: true` ground as slopes (rendering.md)
+ground_reaches x y z -> b   whether smoothed ground takes up part of that cell though its block
+                   leaves it open: a block put there would cut into a slope
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil

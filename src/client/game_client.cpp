@@ -348,6 +348,9 @@ struct GameClient::Impl {
     float groundCheckIn = 0.0f;     ///< Seconds until the camera next looks at the ground
     float stepLag = 0.0f;           ///< How far the eye is still to rise after a step up
     std::vector<render::SceneVertex> markers;  ///< From the UI, relative to markerCamera
+    std::vector<render::SceneVertex> markersThrough;  ///< Their `through` copies: drawn where hidden
+    /// With a marker's `through` option, its shape again for the x-ray pass, from `first` on, at that alpha
+    void markThrough(const Args& args, size_t first);
     std::map<std::string, Value> prefs;  ///< The player's own settings, kept in prefs.txt
     std::unordered_map<EntityId, glm::vec4> xrayNext;  ///< marker_xray, for the next frame
     std::unordered_map<EntityId, glm::vec4> xray;      ///< And for this one
@@ -1210,6 +1213,7 @@ void GameClient::Impl::leaveGame(bool startNew) {
     markers.clear();
     xray.clear();
     xrayNext.clear();
+    markersThrough.clear();
     factionColors.clear();
     camera = finevk::Camera{};
     tactical = TacticalCamera{};
@@ -1947,7 +1951,25 @@ void GameClient::Impl::flushMarkers() {
         }
     }
     markers.clear();
+    auto& hidden = sceneRenderer->xray();
+    for (render::SceneVertex vertex : markersThrough) {
+        vertex.position += shift;
+        hidden.push_back(vertex);
+    }
+    markersThrough.clear();
     markerCamera = now;
+}
+
+void GameClient::Impl::markThrough(const Args& args, size_t first) {
+    if (args.empty() || !args.back().isMap()) return;
+    Value through = args.back().asMap().get(StringInterner::global().intern("through"));
+    if (!through.truthy()) return;
+    const float alpha = through.isNumeric() ? static_cast<float>(through.asNumber()) : 0.35f;
+    for (size_t i = first; i < markers.size(); ++i) {
+        render::SceneVertex vertex = markers[i];
+        vertex.color.a = alpha;
+        markersThrough.push_back(vertex);
+    }
 }
 
 void GameClient::Impl::buildGhosts(float dt) {
@@ -2133,6 +2155,16 @@ void GameClient::Impl::registerNatives() {
             applyDetail();
         }
         return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
+    });
+
+    // ground_reaches x y z -> whether smoothed ground takes up part of that cell though its block
+    // leaves it open: a block put there would cut into a slope (solid_slopes only)
+    e.registerFunction("ground_reaches", [this](ExecutionContext&, const Args& args) -> Value {
+        if (args.size() < 3 || !inWorld) return Value::boolean(false);
+        GroundSurface* ground = session->world().world().groundSurface();
+        BlockCoord cell(static_cast<int32_t>(std::floor(number(args[0]))), static_cast<int32_t>(std::floor(number(args[1]))),
+                        static_cast<int32_t>(std::floor(number(args[2]))));
+        return Value::boolean(ground && ground->reachesInto(cell));
     });
 
     // ground_solid -> whether the game in progress has bodies stand on the slopes (solid_slopes),
@@ -2490,8 +2522,9 @@ void GameClient::Impl::registerNatives() {
         return Value::nil();
     });
 
-    // marker_box x y z sx sy sz r g b [a] [=shaded b] [=texture name] [=uv [u0 v0 u1 v1]]: min
-    // corner and size. Shaded, each face is as much darker as a block's (top full, bottom 0.55),
+    // marker_box x y z sx sy sz r g b [a] [=shaded b] [=texture name] [=uv [u0 v0 u1 v1]]
+    // [=through a]: min corner and size. With `through`, what the world hides of it shows through
+    // at alpha a (true: 0.35), its faces towards the eye only. Shaded, each face is as much darker as a block's (top full, bottom 0.55),
     // but never by the time of day, so it reads at night as any marker does. A texture is one of
     // the game's `marker_textures`, by file name, on every face, times the colour, running along
     // +X or +Z through the box. `uv` takes only that part of it, in fractions: boxes in a row can
@@ -2528,11 +2561,13 @@ void GameClient::Impl::registerNatives() {
             v.color = glm::vec4(glm::vec3(v.color) * shade, v.color.a);
             v.normal = glm::vec3(0.0f);
         }
+        markThrough(args, first);
         return Value::nil();
     });
 
-    // marker_edges x y z sx sy sz r g b [a] [=points n]: the edges of that box as lines, n screen
-    // points thick (1.5) however far away, drawn a hair nearer the eye than the faces they lie on
+    // marker_edges x y z sx sy sz r g b [a] [=points n] [=through a]: the edges of that box as
+    // lines, n screen points thick (1.5) however far away, drawn a hair nearer the eye than the faces
+    // they lie on. `through` as marker_box.
     e.registerFunction("marker_edges", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.size() < 9) return Value::nil();
         float points = 1.5f;
@@ -2545,7 +2580,9 @@ void GameClient::Impl::registerNatives() {
         // A point's height at one unit away, from the vertical field of view (the viewport is the
         // window in points, as the UI is)
         float perPoint = 2.0f * std::tan(glm::radians(FOV_DEGREES) * 0.5f) / std::max(viewport.y, 1.0f);
+        const size_t first = markers.size();
         render::appendBoxEdges(markers, lo, hi, points * perPoint, colorArg(args, 6));
+        markThrough(args, first);
         return Value::nil();
     });
 

@@ -246,6 +246,12 @@ std::optional<bool> GroundSurface::solidAt(const glm::dvec3& point) {
     return false;
 }
 
+bool GroundSurface::reachesInto(BlockCoord pos) {
+    const BlockTypeId type = world_.getBlock(pos);
+    if (typeClass(type) != GroundCell::Open) return false;
+    return solidIn(pos, type).has_value();
+}
+
 size_t GroundSurface::facesKept() const {
     size_t count = 0;
     for (const auto& [key, column] : columns_) count += column.tops.size() + column.undersides.size();

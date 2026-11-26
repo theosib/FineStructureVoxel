@@ -314,6 +314,10 @@ size_t ContentPackLoader::loadBlocks(const fs::path& rootDir,
             blockBlends_[bareId.id] = *m.blend();
             blockBlends_[qualifiedId.id] = *m.blend();
         }
+        if (m.smooth()) {
+            smoothBlocks_.insert(bareId.id);
+            smoothBlocks_.insert(qualifiedId.id);
+        }
 
         if (!m.connects().empty()) {
                 const uint32_t group = StringInterner::global().intern(m.connects());
@@ -667,6 +671,11 @@ std::function<std::optional<BlockBlend>(BlockTypeId)> ContentPackLoader::blendPr
         if (it == blockBlends_.end()) return std::nullopt;
         return it->second;
     };
+}
+
+std::function<bool(BlockTypeId)> ContentPackLoader::smoothProvider() const {
+    if (smoothBlocks_.empty()) return nullptr;
+    return [this](BlockTypeId type) { return smoothBlocks_.count(type.id) > 0; };
 }
 
 std::vector<std::string> ContentPackLoader::faceTextureNames() const {

@@ -12,6 +12,7 @@
 #include "finevox/core/entity_type_id.hpp"
 #include "finevox/core/string_interner.hpp"
 #include "finevox/core/animation_controller.hpp"
+#include "finevox/core/ground_smoothing.hpp"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -34,7 +35,13 @@ struct EntityRenderState {
     /// follows currentYaw at the pace of a body turning (turn()).
     float shownYaw = 0.0f;
     glm::dvec3 velocity{0.0};
+    bool onGround = false;
     uint16_t faction = 0;
+
+    /// How far above where the server has it it's drawn, to stand on smoothed ground
+    /// (followGround). groundWeight eases between 0 in the air and 1 on the ground.
+    float groundLift = 0.0f;
+    float groundWeight = 0.0f;
 
     /// Seconds since the last snapshot; drives interpolation between ticks
     float timeSinceSnapshot = 0.0f;
@@ -73,6 +80,11 @@ struct EntityRenderState {
 
     /// Bring shownYaw round toward currentYaw over a frame of dt seconds
     void turn(float dt);
+
+    /// Work out groundLift for a frame of dt seconds at this interpolation alpha: on the ground,
+    /// or stepping down off a block, it's drawn on the smoothed surface under it. Null cells
+    /// draw it where it is.
+    void followGround(const GroundCellProvider& cells, float alpha, float dt);
 
     /// Update from a new entity state snapshot
     void applySnapshot(const EntityState& state);

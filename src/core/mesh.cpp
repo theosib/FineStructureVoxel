@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <unordered_map>
 
 namespace finevox {
 
@@ -119,6 +120,75 @@ const std::array<MeshBuilder::FaceData, 6> MeshBuilder::FACE_DATA = {{
 }};
 
 // ============================================================================
+// Smoothed ground: what a build knows of the cells around its subchunk
+// ============================================================================
+
+namespace {
+struct SmoothWall;
+}  // namespace
+
+struct MeshBuilder::SmoothState {
+    // What the faces in the subchunk read is kept; past it, the world is asked
+    static constexpr int MARGIN_XZ = GROUND_REACH_ACROSS;
+    static constexpr int MARGIN_Y = GROUND_REACH_UP_DOWN;
+    static constexpr int SPAN_XZ = SubChunk::SIZE + 2 * MARGIN_XZ;
+    static constexpr int SPAN_Y = SubChunk::SIZE + 2 * MARGIN_Y;
+    static constexpr uint8_t UNKNOWN = 0xFF;
+
+    const GroundCellProvider& source;
+    BlockCoord low;
+    mutable std::vector<uint8_t> grid;
+    GroundCellProvider cells;
+    mutable std::unordered_map<BlockCoord, std::optional<GroundPatch>> tops, undersides;
+
+    SmoothState(const GroundCellProvider& world, ChunkPos chunk)
+        : source(world),
+          low(chunk.x * SubChunk::SIZE - MARGIN_XZ, chunk.y * SubChunk::SIZE - MARGIN_Y,
+              chunk.z * SubChunk::SIZE - MARGIN_XZ),
+          grid(size_t(SPAN_XZ) * SPAN_XZ * SPAN_Y, UNKNOWN),
+          cells([this](const BlockCoord& pos) { return cell(pos); }) {}
+    SmoothState(const SmoothState&) = delete;
+    SmoothState& operator=(const SmoothState&) = delete;
+
+    [[nodiscard]] GroundCell cell(const BlockCoord& pos) const {
+        const int x = pos.x - low.x, y = pos.y - low.y, z = pos.z - low.z;
+        if (x < 0 || y < 0 || z < 0 || x >= SPAN_XZ || y >= SPAN_Y || z >= SPAN_XZ) return source(pos);
+        uint8_t& known = grid[(size_t(y) * SPAN_XZ + z) * SPAN_XZ + x];
+        if (known == UNKNOWN) known = static_cast<uint8_t>(source(pos));
+        return static_cast<GroundCell>(known);
+    }
+
+    [[nodiscard]] const std::optional<GroundPatch>& patch(const BlockCoord& block, int up) const {
+        auto& cache = up > 0 ? tops : undersides;
+        auto it = cache.find(block);
+        if (it == cache.end()) it = cache.emplace(block, groundPatch(cells, block, up)).first;
+        return it->second;
+    }
+
+    // The part of a ground block's side face that shows, between the surfaces around it. False
+    // where that's the whole cube face.
+    bool sideWall(const BlockCoord& pos, Face face, SmoothWall& wall) const;
+};
+
+class MeshBuilder::SmoothScope {
+public:
+    SmoothScope(MeshBuilder& builder, ChunkPos chunk) : builder_(builder) {
+        if (!builder.groundCells_ || builder.smoothing_) return;
+        state_.emplace(builder.groundCells_, chunk);
+        builder.smoothing_ = &*state_;
+    }
+    ~SmoothScope() {
+        if (state_) builder_.smoothing_ = nullptr;
+    }
+    SmoothScope(const SmoothScope&) = delete;
+    SmoothScope& operator=(const SmoothScope&) = delete;
+
+private:
+    MeshBuilder& builder_;
+    std::optional<SmoothState> state_;
+};
+
+// ============================================================================
 // MeshBuilder implementation
 // ============================================================================
 
@@ -136,6 +206,7 @@ MeshData MeshBuilder::buildSubChunkMesh(
     if (subChunk.isEmpty()) {
         return mesh;
     }
+    SmoothScope smoothScope(*this, chunkPos);
 
     // Reserve approximate space (assume ~1/6 of faces are visible on average)
     // Each visible face = 4 vertices + 6 indices
@@ -167,6 +238,7 @@ SubChunkMeshData MeshBuilder::buildSubChunkMeshSplit(
     if (subChunk.isEmpty()) {
         return result;
     }
+    SmoothScope smoothScope(*this, chunkPos);
 
     // Reserve approximate space
     size_t estimatedFaces = subChunk.nonAirCount();
@@ -281,6 +353,7 @@ void MeshBuilder::buildSimpleMesh(
                     }
 
                     const uint16_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+                    localPos.y += smoothLift(blockWorldPos);
 
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
@@ -343,6 +416,7 @@ void MeshBuilder::buildSimpleMesh(
                                 continue;
                             }
                         }
+                        if (smoothReplaces(blockWorldPos, face)) continue;
 
                         // Get texture UVs for this face
                         glm::vec4 uvBounds = textureProvider(blockType, face);
@@ -388,6 +462,7 @@ void MeshBuilder::buildSimpleMesh(
             }
         }
     }
+    if (!buildTransparent) buildSmoothGround(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
 }
 
 void MeshBuilder::buildGreedyMesh(
@@ -405,6 +480,7 @@ void MeshBuilder::buildGreedyMesh(
         greedyMeshFace(mesh, face, subChunk, chunkPos, opaqueProvider, textureProvider,
                        transparentProvider, buildTransparent);
     }
+    if (!buildTransparent) buildSmoothGround(mesh, subChunk, chunkPos, opaqueProvider, textureProvider);
 
     // Second pass: render custom geometry blocks (can't be greedy-merged)
     if (geometryProvider_) {
@@ -461,6 +537,7 @@ void MeshBuilder::buildGreedyMesh(
                     }
 
                     const uint16_t joined = customGeom->hasConnections() ? connectionMask(blockWorldPos, blockType) : 0;
+                    localPos.y += smoothLift(blockWorldPos);
 
                     // Render each face in the custom geometry
                     for (const auto& faceGeom : customGeom->faces()) {
@@ -605,6 +682,7 @@ void MeshBuilder::greedyMeshFace(
                         continue;  // Face is hidden
                     }
                 }
+                if (smoothReplaces(blockWorldPos, face)) continue;
 
                 // This face is visible - add to mask
                 int maskIdx = v * SIZE + u;
@@ -1307,6 +1385,407 @@ MeshBuilder::FaceLightResult MeshBuilder::getFaceSkyBlockLight(
     }
 
     return result;
+}
+
+// ============================================================================
+// Smoothed ground (ground_smoothing.hpp)
+// ============================================================================
+
+namespace {
+
+constexpr float SMOOTH_EPSILON = 1e-4f;
+
+// The edge of a face on each side of a block, as GroundPatch numbers them, or -1 for top and bottom
+int smoothEdge(Face face) {
+    switch (face) {
+        case Face::NegX: return GROUND_EDGE_X_LOW;
+        case Face::PosX: return GROUND_EDGE_X_HIGH;
+        case Face::NegZ: return GROUND_EDGE_Z_LOW;
+        case Face::PosZ: return GROUND_EDGE_Z_HIGH;
+        default: return -1;
+    }
+}
+
+constexpr Face EDGE_FACE[4] = {Face::NegX, Face::PosX, Face::NegZ, Face::PosZ};
+constexpr int EDGE_STEP[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+
+template <typename T>
+T bilerp(const std::array<T, 4>& corner, float s, float t) {
+    return corner[0] * ((1.0f - s) * (1.0f - t)) + corner[1] * (s * (1.0f - t)) + corner[2] * (s * t) +
+           corner[3] * ((1.0f - s) * t);
+}
+
+// A point on a face, (s, t) from its first corner toward the second and the fourth, in FACE_DATA's
+// corners: each face is a parallelogram there
+glm::vec3 facePoint(const MeshBuilder::FaceData& data, float s, float t) {
+    return data.positions[0] + (data.positions[1] - data.positions[0]) * s +
+           (data.positions[3] - data.positions[0]) * t;
+}
+
+// Whether a side face runs against its edge's s, from its first corner to its second
+bool runsBack(const MeshBuilder::FaceData& data) {
+    const glm::vec3 run = data.positions[1] - data.positions[0];
+    return run.x + run.z < 0.0f;
+}
+
+// A vertical strip of a side face between two heights that vary along it
+// A vertical strip of a side face between heights that vary along it: from the highest of its
+// lower bounds up to the lowest of its upper bounds, each sampled at steps + 1 points evenly along
+// it and straight between. A bound is a surface's edge as that surface is drawn, or a block's
+// top or bottom.
+struct SmoothWall {
+    using Line = std::array<float, GROUND_CURVED_STEPS + 1>;
+    int steps = 1;
+    int uppers = 0, lowers = 0;
+    std::array<Line, 3> upper{}, lower{};
+
+    Line& addUpper() { return upper[uppers++]; }
+    Line& addLower() { return lower[lowers++]; }
+};
+
+// What a face's vertices share, and the face's light at its corners
+struct SmoothLook {
+    glm::vec4 uv{0.0f};
+    uint32_t tint = TINT_NONE;
+    glm::uvec4 blend{0u};
+    std::array<float, 4> ao{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> sky{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> block{0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+ChunkVertex smoothVertex(const MeshBuilder::FaceData& data, const SmoothLook& look, glm::vec3 position,
+                         glm::vec3 normal, float s, float t) {
+    const float lt = std::clamp(t, 0.0f, 1.0f);
+    const glm::vec2 uv = bilerp(data.uvOffsets, s, lt);
+    ChunkVertex v;
+    v.position = position;
+    v.normal = normal;
+    v.texCoord = glm::vec2(look.uv.x + uv.x * (look.uv.z - look.uv.x), look.uv.y + uv.y * (look.uv.w - look.uv.y));
+    v.tileBounds = look.uv;
+    v.ao = bilerp(look.ao, s, lt);
+    v.skyLight = bilerp(look.sky, s, lt);
+    v.blockLight = bilerp(look.block, s, lt);
+    v.tint = look.tint;
+    v.blend = look.blend;
+    return v;
+}
+
+// Four vertices in FACE_DATA's winding, as two triangles
+void pushSmoothQuad(MeshData& mesh, const std::array<ChunkVertex, 4>& quad) {
+    const uint32_t base = static_cast<uint32_t>(mesh.vertices.size());
+    std::array<float, 4> ao, sky, block;
+    for (int i = 0; i < 4; ++i) {
+        mesh.vertices.push_back(quad[i]);
+        ao[i] = quad[i].ao;
+        sky[i] = quad[i].skyLight;
+        block[i] = quad[i].blockLight;
+    }
+    pushQuadIndices(mesh, base, ao, sky, block);
+}
+
+// One piece of a wall, s0 to s1 along its edge, with straight top and bottom: height(f, top) at
+// f = 0 and 1
+template <typename Height>
+void emitSmoothWallPiece(MeshData& mesh, glm::vec3 local, int32_t baseY, const MeshBuilder::FaceData& data,
+                         bool back, const SmoothLook& look, float s0, float s1, Height height) {
+    float lo0 = height(0.0f, false), hi0 = height(0.0f, true), lo1 = height(1.0f, false), hi1 = height(1.0f, true);
+    const float d0 = hi0 - lo0, d1 = hi1 - lo1;
+    if (d0 <= SMOOTH_EPSILON && d1 <= SMOOTH_EPSILON) return;
+    // Filled at one end only: it comes to a point where the two heights cross
+    if (d0 < 0.0f || d1 < 0.0f) {
+        const float f = d0 / (d0 - d1);
+        const float sc = s0 + (s1 - s0) * f;
+        const float yc = lo0 + (lo1 - lo0) * f;
+        if (d0 < 0.0f) {
+            s0 = sc;
+            lo0 = hi0 = yc;
+        } else {
+            s1 = sc;
+            lo1 = hi1 = yc;
+        }
+    }
+    // In the face's own corner order: first along it at the bottom, then back along the top
+    float sa = back ? 1.0f - s1 : s0, sb = back ? 1.0f - s0 : s1;
+    float loA = back ? lo1 : lo0, loB = back ? lo0 : lo1, hiA = back ? hi1 : hi0, hiB = back ? hi0 : hi1;
+    auto corner = [&](float s, float y) {
+        const float t = y - float(baseY);
+        return smoothVertex(data, look, local + facePoint(data, s, t), data.normal, s, t);
+    };
+    pushSmoothQuad(mesh, {corner(sa, loA), corner(sb, loB), corner(sb, hiB), corner(sa, hiA)});
+}
+
+// Draws a strip of the side `face` of the block at `local` (world y `baseY`), filled between the
+// wall's bounds wherever its top is above its bottom
+void emitSmoothWall(MeshData& mesh, glm::vec3 local, int32_t baseY, Face face, const SmoothWall& wall,
+                    const SmoothLook& look) {
+    const MeshBuilder::FaceData& data = MeshBuilder::FACE_DATA[static_cast<int>(face)];
+    const bool back = runsBack(data);
+    for (int k = 0; k < wall.steps; ++k) {
+        // Each bound is straight across this piece, so the top and bottom bend only where two
+        // bounds cross: split it there, and each part has a straight top and bottom
+        auto at = [&](const SmoothWall::Line& line, float f) { return line[k] + (line[k + 1] - line[k]) * f; };
+        std::array<float, 8> cuts;
+        int ncuts = 0;
+        cuts[ncuts++] = 0.0f;
+        auto crossings = [&](const auto& lines, int n) {
+            for (int i = 0; i < n; ++i) {
+                for (int j = i + 1; j < n; ++j) {
+                    const float d0 = lines[i][k] - lines[j][k], d1 = lines[i][k + 1] - lines[j][k + 1];
+                    if ((d0 < 0.0f) != (d1 < 0.0f) && std::abs(d0 - d1) > 1e-9f && ncuts < 7) {
+                        cuts[ncuts++] = d0 / (d0 - d1);
+                    }
+                }
+            }
+        };
+        crossings(wall.upper, wall.uppers);
+        crossings(wall.lower, wall.lowers);
+        cuts[ncuts++] = 1.0f;
+        std::sort(cuts.begin(), cuts.begin() + ncuts);
+        for (int c = 0; c + 1 < ncuts; ++c) {
+            if (cuts[c + 1] - cuts[c] < 1e-6f) continue;
+            const float base = float(k) / float(wall.steps), width = 1.0f / float(wall.steps);
+            emitSmoothWallPiece(mesh, local, baseY, data, back, look, base + cuts[c] * width,
+                                base + cuts[c + 1] * width, [&](float f, bool top) {
+                                    const float g = cuts[c] + (cuts[c + 1] - cuts[c]) * f;
+                                    float y = top ? 1e9f : -1e9f;
+                                    if (top) {
+                                        for (int i = 0; i < wall.uppers; ++i) y = std::min(y, at(wall.upper[i], g));
+                                    } else {
+                                        for (int i = 0; i < wall.lowers; ++i) y = std::max(y, at(wall.lower[i], g));
+                                    }
+                                    return y;
+                                });
+        }
+    }
+}
+
+}  // namespace
+
+bool MeshBuilder::smoothReplaces(const BlockCoord& pos, Face face) const {
+    if (!smoothing_ || smoothing_->cell(pos) != GroundCell::Ground) return false;
+    if (face == Face::PosY || face == Face::NegY) {
+        const auto& patch = smoothing_->patch(pos, face == Face::PosY ? 1 : -1);
+        return patch && !patch->flat();
+    }
+    SmoothWall wall;
+    return smoothing_->sideWall(pos, face, wall);
+}
+
+bool MeshBuilder::SmoothState::sideWall(const BlockCoord& pos, Face face, SmoothWall& wall) const {
+    const int e = smoothEdge(face);
+    const int across = e ^ 1;
+    const BlockCoord front = pos.neighbor(face);
+    const auto& top = patch(pos, 1);
+    const auto& under = patch(pos, -1);
+    const auto& floor = patch(BlockCoord(front.x, front.y - 1, front.z), 1);
+    const auto& ceiling = patch(BlockCoord(front.x, front.y + 1, front.z), -1);
+    // Where steps wind round a corner, the surface of the ground over this block can dip past
+    // its top, by up to a block and a half, and the face stops at it. Likewise underneath.
+    auto nearest = [&](int up) -> const GroundPatch* {
+        for (int k = 1; k <= 2; ++k) {
+            const BlockCoord at(pos.x, pos.y + up * k, pos.z);
+            if (cell(at) != GroundCell::Ground) return nullptr;
+            if (const auto& found = patch(at, up)) return &*found;
+        }
+        return nullptr;
+    };
+    const GroundPatch* overhead = top ? nullptr : nearest(1);
+    const GroundPatch* underneath = under ? nullptr : nearest(-1);
+
+    wall.steps = 1;
+    for (const GroundPatch* p : {top ? &*top : nullptr, under ? &*under : nullptr, overhead, underneath}) {
+        if (p) wall.steps = std::max(wall.steps, p->edgeSteps(e));
+    }
+    for (const GroundPatch* p : {floor ? &*floor : nullptr, ceiling ? &*ceiling : nullptr}) {
+        if (p) wall.steps = std::max(wall.steps, p->edgeSteps(across));
+    }
+    // Its top: its own surface, or else the cell's top; but the ceiling over the cell in front
+    // takes over from the cell's top, up or down. And never past the surface over it.
+    auto line = [&](SmoothWall::Line& out, const GroundPatch* p, int edge, float level) {
+        for (int k = 0; k <= wall.steps; ++k) {
+            const float s = float(k) / float(wall.steps);
+            out[k] = p ? float(p->faceLevel()) + float(p->up) * p->edgeHeight(edge, s) : level;
+        }
+    };
+    wall.uppers = wall.lowers = 0;
+    if (top || !ceiling) line(wall.addUpper(), top ? &*top : nullptr, e, float(pos.y + 1));
+    if (ceiling) line(wall.addUpper(), &*ceiling, across, 0.0f);
+    if (overhead) line(wall.addUpper(), overhead, e, 0.0f);
+    if (under || !floor) line(wall.addLower(), under ? &*under : nullptr, e, float(pos.y));
+    if (floor) line(wall.addLower(), &*floor, across, 0.0f);
+    if (underneath) line(wall.addLower(), underneath, e, 0.0f);
+
+    for (int k = 0; k <= wall.steps; ++k) {
+        float high = 1e9f, low = -1e9f;
+        for (int i = 0; i < wall.uppers; ++i) high = std::min(high, wall.upper[i][k]);
+        for (int i = 0; i < wall.lowers; ++i) low = std::max(low, wall.lower[i][k]);
+        if (std::abs(high - float(pos.y + 1)) > 1e-6f || std::abs(low - float(pos.y)) > 1e-6f) return true;
+    }
+    return false;
+}
+
+float MeshBuilder::smoothLift(const BlockCoord& pos) const {
+    if (!smoothing_) return 0.0f;
+    const GroundCell cell = smoothing_->cell(pos);
+    if (cell != GroundCell::Open && cell != GroundCell::Wet) return 0.0f;
+    const auto& patch = smoothing_->patch(BlockCoord(pos.x, pos.y - 1, pos.z), 1);
+    return patch ? patch->height(0.5f, 0.5f) : 0.0f;
+}
+
+void MeshBuilder::buildSmoothGround(MeshData& mesh, const SubChunk& subChunk, ChunkPos chunkPos,
+                                    const BlockOpaqueProvider& opaqueProvider,
+                                    const BlockTextureProvider& textureProvider) {
+    if (!smoothing_) return;
+    const SmoothState& smooth = *smoothing_;
+    const BlockCoord origin(chunkPos.x * SubChunk::SIZE, chunkPos.y * SubChunk::SIZE, chunkPos.z * SubChunk::SIZE);
+
+    // Slopes shade only by what stands over them: ground under a face is the face itself bent,
+    // so counting it would crease every step of a slope
+    const BlockOpaqueProvider builtOver = [&](const BlockCoord& p) {
+        return opaqueProvider(p) && smooth.cell(p) != GroundCell::Ground;
+    };
+    // Light at a face's corners from the open cells around them, solid ones left out: under a
+    // slope's rise is a block, dark inside
+    auto openLight = [&](const BlockCoord& block, Face face, SmoothLook& look) {
+        if (!lightProvider_ || !(smoothLighting_ || flatLighting_)) return;
+        const FaceCorners c = faceCorners(face, FACE_DATA);
+        const BlockCoord facing = block.neighbor(face);
+        for (int i = 0; i < 4; ++i) {
+            float sky = 0.0f, light = 0.0f;
+            int n = 0;
+            for (int da : {0, c.side[i].x}) {
+                for (int db : {0, c.side[i].y}) {
+                    const BlockCoord at(facing.x + c.across.x * da + c.up.x * db,
+                                        facing.y + c.across.y * da + c.up.y * db,
+                                        facing.z + c.across.z * da + c.up.z * db);
+                    if ((da != 0 || db != 0) && opaqueProvider(at)) continue;
+                    const uint8_t packed = lightProvider_(at);
+                    sky += float(packed >> 4) / 15.0f;
+                    light += float(packed & 0x0F) / 15.0f;
+                    ++n;
+                }
+            }
+            look.sky[i] = sky / float(n);
+            look.block[i] = light / float(n);
+        }
+    };
+    auto cubeLook = [&](BlockTypeId type, const BlockCoord& block, Face face) {
+        SmoothLook look;
+        look.uv = textureProvider(type, face);
+        look.tint = cubeTint(type, face, block);
+        if (calculateAO_) look.ao = getFaceAO(block, face, opaqueProvider);
+        if (smoothLighting_ && lightProvider_) {
+            const FaceLightResult light = getFaceSkyBlockLight(block, face);
+            look.sky = light.sky;
+            look.block = light.block;
+        } else if (flatLighting_ && lightProvider_) {
+            const uint8_t packed = lightProvider_(block.neighbor(face));
+            look.sky.fill(float(packed >> 4) / 15.0f);
+            look.block.fill(float(packed & 0x0F) / 15.0f);
+        }
+        return look;
+    };
+
+    for (int32_t y = 0; y < SubChunk::SIZE; ++y) {
+        for (int32_t z = 0; z < SubChunk::SIZE; ++z) {
+            for (int32_t x = 0; x < SubChunk::SIZE; ++x) {
+                const BlockTypeId type = subChunk.getBlock(x, y, z);
+                if (type == AIR_BLOCK_TYPE) continue;
+                const BlockCoord pos(origin.x + x, origin.y + y, origin.z + z);
+                if (smooth.cell(pos) != GroundCell::Ground) continue;
+                const glm::vec3 local{float(x), float(y), float(z)};
+
+                // Side faces the surfaces above and below cut into or stand out from
+                for (int e = 0; e < 4; ++e) {
+                    const Face face = EDGE_FACE[e];
+                    SmoothWall wall;
+                    if (faceHidden(pos, face, opaqueProvider) || !smooth.sideWall(pos, face, wall)) continue;
+                    emitSmoothWall(mesh, local, pos.y, face, wall, cubeLook(type, pos, face));
+                }
+
+                for (int up : {1, -1}) {
+                    const Face face = up > 0 ? Face::PosY : Face::NegY;
+                    const auto& found = smooth.patch(pos, up);
+                    if (!found || faceHidden(pos, face, opaqueProvider)) continue;
+                    const GroundPatch& patch = *found;
+                    const BlockCoord open(pos.x, pos.y + up, pos.z);
+
+                    // The face itself, bent
+                    if (!patch.flat()) {
+                        SmoothLook look = cubeLook(type, pos, face);
+                        if (calculateAO_) look.ao = getFaceAO(pos, face, builtOver);
+                        openLight(pos, face, look);
+                        look.blend = faceBlend(type, pos, face, opaqueProvider, textureProvider);
+                        const FaceData& data = FACE_DATA[static_cast<int>(face)];
+                        const int ns = patch.steps[0], nt = patch.steps[1];
+                        auto corner = [&](int i, int j) {
+                            const float s = float(i) / float(ns), t = float(j) / float(nt);
+                            const float u = s, v = up > 0 ? t : 1.0f - t;
+                            glm::vec3 p = facePoint(data, s, t);
+                            p.y = float(patch.faceLevel() - pos.y) + float(up) * patch.height(u, v);
+                            return smoothVertex(data, look, local + p, patch.normal(u, v), s, t);
+                        };
+                        for (int i = 0; i < ns; ++i) {
+                            for (int j = 0; j < nt; ++j) {
+                                pushSmoothQuad(mesh, {corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1)});
+                            }
+                        }
+                    }
+
+                    // Where it comes out past what's beside it, a strip down to that. A face a
+                    // step in from its neighbour is met by that block's own side face instead.
+                    // Beside something built it can also dip below it: a strip up to it, facing
+                    // back over this face, as if the built thing's side went down to meet it.
+                    SmoothLook strip;
+                    bool lit = false;
+                    for (int e = 0; e < 4; ++e) {
+                        const GroundEdge kind = patch.edge[e];
+                        const bool linked = kind == GroundEdge::Link && patch.link[e] >= 0;
+                        if (!linked && kind != GroundEdge::Pin) continue;
+                        const GroundPatch* next = nullptr;
+                        if (linked) {
+                            const auto& other = smooth.patch(
+                                BlockCoord(pos.x + EDGE_STEP[e][0], pos.y + up * patch.link[e], pos.z + EDGE_STEP[e][1]), up);
+                            if (!other) continue;
+                            next = &*other;
+                        }
+                        const int across = e ^ 1;
+                        SmoothWall out, back;
+                        out.steps = back.steps = std::max(patch.edgeSteps(e), next ? next->edgeSteps(across) : 1);
+                        SmoothWall::Line &outLow = out.addLower(), &outHigh = out.addUpper();
+                        SmoothWall::Line &backLow = back.addLower(), &backHigh = back.addUpper();
+                        bool outward = false, inward = false;
+                        for (int k = 0; k <= out.steps; ++k) {
+                            const float s = float(k) / float(out.steps);
+                            const float mine = patch.edgeHeight(e, s);
+                            // Theirs, in this face's heights
+                            const float theirs = next ? float(patch.link[e]) + next->edgeHeight(across, s) : 0.0f;
+                            const float outer = float(patch.faceLevel()) + float(up) * mine;
+                            const float inner = float(patch.faceLevel()) + float(up) * theirs;
+                            outLow[k] = backHigh[k] = up > 0 ? inner : outer;
+                            outHigh[k] = backLow[k] = up > 0 ? outer : inner;
+                            outward = outward || mine > theirs + SMOOTH_EPSILON;
+                            inward = inward || (!next && mine < theirs - SMOOTH_EPSILON);
+                        }
+                        if (!outward && !inward) continue;
+                        if (!lit) {
+                            const uint8_t packed = lightProvider_ ? lightProvider_(open) : uint8_t(0xF0);
+                            strip.sky.fill(float(packed >> 4) / 15.0f);
+                            strip.block.fill(float(packed & 0x0F) / 15.0f);
+                            lit = true;
+                        }
+                        strip.uv = textureProvider(type, EDGE_FACE[e]);
+                        strip.tint = cubeTint(type, EDGE_FACE[e], pos);
+                        if (outward) emitSmoothWall(mesh, local, pos.y, EDGE_FACE[e], out, strip);
+                        if (inward) {
+                            const glm::vec3 beside = local + glm::vec3(float(EDGE_STEP[e][0]), 0.0f, float(EDGE_STEP[e][1]));
+                            emitSmoothWall(mesh, beside, pos.y, oppositeFace(EDGE_FACE[e]), back, strip);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================

@@ -60,6 +60,7 @@ void EntityRenderer::update(float dt, const glm::dvec3& /*cameraPos*/) {
                 state.animator.update(dt);
                 state.turn(dt);
             }
+            state.followGround(groundCells_, state.interpolationAlpha(tickRate_), dt);
         }
         ++it;
     }

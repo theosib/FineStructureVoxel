@@ -543,6 +543,10 @@ public:
     /// hard edges everywhere. Takes effect as meshes are rebuilt.
     void setBlendProvider(BlockBlendProvider provider);
 
+    /// Which blocks are drawn as smooth ground over their steps (ground_smoothing.hpp), or null
+    /// for cubes everywhere. Takes effect as meshes are rebuilt.
+    void setSmoothProvider(std::function<bool(BlockTypeId)> provider);
+
     // ========================================================================
     // Fog Configuration
     // ========================================================================
@@ -775,6 +779,7 @@ private:
     BlockConnectsProvider connectsProvider_;  // For blocks that join up
     BlockTintProvider tintProvider_;
     BlockBlendProvider blendProvider_;
+    std::function<bool(BlockTypeId)> smoothProvider_;
 
     // SubChunk views (GPU meshes)
     std::unordered_map<ChunkPos, std::unique_ptr<SubChunkView>> views_;

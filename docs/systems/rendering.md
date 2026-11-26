@@ -103,6 +103,39 @@ over them (texture-packs.md).
 Meshing a face costs 8 more block lookups, about what AO costs. Every vertex is 16 bytes bigger
 whether it's on or not. LOD meshes and fluids don't blend.
 
+**Smooth ground** (`ground_smoothing.hpp`): a cube with `smooth: true` in its `.model` has its open
+top and underside drawn as a curved surface over the steps around it. It's drawing only: collision,
+paths and the server keep the blocks, so a step of two still can't be walked up.
+
+- **The shape.** Each face is a quadratic B-spline over the column heights, held as a 3x3 Bezier
+  patch (`GroundPatch`): the middle is the face's own height, each edge the mean of it and the
+  neighbour across, each corner the mean of the four columns there. A staircase comes out a
+  straight 45 degree slope through the middle of every tread, one step an S-curve two blocks long
+  at 45 degrees at the riser, and a single face's patch is a parabola, drawn in 3 pieces each way
+  it curves (`GROUND_CURVED_STEPS`) and 1 where it's straight.
+- **What's across an edge** (`GroundEdge`): a `Link` is another smooth face a block up, level or
+  down, with room over it. `Up` and `Down` are steps of two or more: the face goes half a block
+  toward them, so both sides round off and a block of wall stays between. `Pin` is anything else
+  (built blocks, or water against dry ground): the edge stays level, with a wall wherever the corners
+  dip below or rise above it. Plants count as open, and are raised to the surface under them.
+- **Faces meet exactly.** A corner is worked out by the columns' link group, which is the same from
+  every face in it (`cornerHeight`), so linked faces share their edges bit for bit. Any difference
+  left (thin layers, which keep their top and bottom on their own halves) is closed by a strip on
+  the higher side. Side faces of ground blocks are cut to run between the surfaces around them,
+  including the surface over them, which can dip a block and a half where steps wind round a corner.
+  `GroundSmoothing.MeshHasNoHolesOnRandomGround` checks with rays from open air on random hills,
+  overhangs, posts and ponds: whatever they hit first faces them (`SMOOTH_SEEDS=1-1000` runs more).
+- **What a face reads** reaches 3 cells across and 6 up or down (`GROUND_REACH_*`). The mesher keeps
+  that much around a subchunk in a lazily filled grid, and `ClientWorld::setMeshReach` rebuilds the
+  meshes that far from changed cells, not only the six face neighbours.
+- **Bodies** are drawn on it: `EntityRenderState::followGround` lifts a body on the ground, or coming
+  down a step, to `groundSurfaceY` under its middle, which looks two cells down so one that has just
+  stepped up onto a block's edge stays on the slope. In the air it eases back to where it is.
+
+`WorldRenderer::setSmoothProvider` turns it on, and `GameClient` does that for the `ground_smooth`
+UI native (the `smooth_ground` pref). On a hilly Keystone view it costs about a fifth more triangles.
+LOD meshes don't smooth.
+
 **View-relative rendering**: all vertex positions are `worldPos - cameraPos` (double-precision subtraction, then stored as float). Eliminates float precision jitter at large world coordinates.
 
 ---
@@ -432,6 +465,9 @@ rides in the general test bucket.
 - Frustum culling uses double-precision AABB for view-relative math
 - `BlockAtlas` must be initialized with all block textures before first `buildMesh()` call
 - `MeshWorkerPool` reads SubChunk with lock-free access (palette indices are stable — no writes during mesh gen)
+- Two workers can build the same subchunk at once, when it's asked for again mid-build. Each upload
+  carries the ticket its build began with (`MeshUploadData::ticket`), and one older than the mesh
+  shown is dropped: before that, a slow stale build could land last and stay
 
 ---
 

@@ -336,6 +336,8 @@ marker_xray id r g b [a]    where blocks hide that entity, its shape shows throu
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt
 texture_packs -> [{=id =name =description}]   texture_pack [id] -> id   the pack in use, "" for
                    none; with an id, changes to it next frame and remembers it (texture-packs.md)
+ground_smooth [b] -> b   whether `smooth: true` blocks are drawn as slopes over their steps; with b,
+                   changes it, remeshes, and remembers it as the smooth_ground pref (rendering.md)
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil

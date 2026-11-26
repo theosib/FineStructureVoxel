@@ -56,6 +56,14 @@ public:
 
     [[nodiscard]] size_t subchunksReceived() const { return subchunksReceived_.load(); }
 
+    /// How far a changed cell reaches into the meshes around it, in cells across and up or down.
+    /// 1 by default: a face against its neighbour. Smoothed ground reads further
+    /// (ground_smoothing.hpp), so the meshes that far off are rebuilt too.
+    void setMeshReach(int across, int upDown) {
+        reachAcross_ = across;
+        reachUpDown_ = upDown;
+    }
+
 private:
     struct Prediction {
         BlockTypeId before;     ///< What's there if the server never says anything
@@ -71,7 +79,16 @@ private:
         }
     };
 
-    void remesh(ChunkPos chunk, bool neighbours);
+    // The cells of a subchunk that changed, as a box
+    struct Changed {
+        int low[3] = {16, 16, 16};
+        int high[3] = {-1, -1, -1};
+        void add(int32_t index);
+        void all();
+    };
+
+    // Rebuild a subchunk's mesh, and with `changed`, the meshes around it that those cells reach
+    void remesh(ChunkPos chunk, const Changed* changed);
 
     World world_;
 
@@ -80,6 +97,8 @@ private:
     std::unordered_map<uint32_t, FluidTypeId> fluidNames_;
 
     std::atomic<size_t> subchunksReceived_{0};
+    std::atomic<int> reachAcross_{1};
+    std::atomic<int> reachUpDown_{1};
 
     std::mutex predictionMutex_;
     std::unordered_map<BlockCoord, Prediction> predictions_;

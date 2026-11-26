@@ -96,6 +96,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/resource_locator.cpp
     src/core/physics.cpp
     src/core/mesh.cpp
+    src/core/ground_smoothing.cpp
     src/core/texture_packs.cpp
     src/core/block_type.cpp
     src/core/block_model.cpp
@@ -711,6 +712,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_resource_locator.cpp
         tests/test_physics.cpp
         tests/test_mesh.cpp
+        tests/test_ground_smoothing.cpp
         tests/test_texture_packs.cpp
         tests/test_block_type.cpp
         tests/test_block_model.cpp

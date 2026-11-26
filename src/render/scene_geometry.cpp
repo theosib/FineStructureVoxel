@@ -162,6 +162,7 @@ void appendEntity(std::vector<SceneVertex>& out, const EntityModel& model,
 
     float alpha = state.interpolationAlpha(tickRate);
     glm::vec3 viewPos(state.interpolatedPosition(alpha) - cameraPos);
+    viewPos.y += state.groundLift;
     glm::mat4 root = glm::rotate(glm::translate(glm::mat4(1.0f), viewPos), state.shownYaw,
                                  glm::vec3(0.0f, 1.0f, 0.0f));
 

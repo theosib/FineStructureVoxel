@@ -301,6 +301,9 @@ public:
     /// How its cube faces spread over its neighbours' (BlockBlend). Blocks with none keep hard edges.
     BlockModel& setBlend(BlockBlend blend) { blend_ = blend; return *this; }
 
+    /// Whether its open top and underside are drawn as smooth ground over steps (`smooth: true`)
+    BlockModel& setSmooth(bool smooth) { smooth_ = smooth; return *this; }
+
     /// How a block mover treats it: `moves`, `fixed`, `breaks` or `no-drag` (MoveRule)
     BlockModel& setMove(std::string rule) { move_ = std::move(rule); return *this; }
     /// The grip group it drags its neighbours with when moved (empty: grips nothing)
@@ -419,6 +422,7 @@ public:
     [[nodiscard]] bool hasOpaqueOverride() const { return hasOpaqueOverride_; }
     [[nodiscard]] const std::string& connects() const { return connects_; }
     [[nodiscard]] const std::optional<BlockBlend>& blend() const { return blend_; }
+    [[nodiscard]] bool smooth() const { return smooth_; }
     [[nodiscard]] const std::string& move() const { return move_; }
     [[nodiscard]] const std::string& moveGrip() const { return moveGrip_; }
     [[nodiscard]] bool opaque() const { return opaque_; }
@@ -486,6 +490,7 @@ private:
     bool blocksSkyLight_ = true;
     std::string connects_;
     std::optional<BlockBlend> blend_;
+    bool smooth_ = false;
     std::string move_;
     std::string moveGrip_;
     std::string sounds_;

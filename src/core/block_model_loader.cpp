@@ -523,6 +523,7 @@ void BlockModelLoader::parseSurfaceProperties(const ConfigDocument& doc, BlockMo
             model.setBlend({priority, std::clamp(width, 0.0f, 1.0f)});
         }
     }
+    if (const ConfigEntry* smoothEntry = doc.get("smooth")) model.setSmooth(smoothEntry->value.asBool(false));
     if (const ConfigEntry* moveEntry = doc.get("move")) model.setMove(moveEntry->value.asStringOwned());
     if (const ConfigEntry* gripEntry = doc.get("move-grip")) model.setMoveGrip(gripEntry->value.asStringOwned());
 }

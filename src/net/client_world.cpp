@@ -1,5 +1,8 @@
 #include "finevox/net/client_world.hpp"
 
+#include <algorithm>
+#include <cstdlib>
+
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/subchunk.hpp"
@@ -14,15 +17,48 @@ void ClientWorld::nameFluid(uint32_t wireId, std::string_view name) {
     fluidNames_[wireId] = FluidTypeId::fromName(name);
 }
 
-void ClientWorld::remesh(ChunkPos chunk, bool neighbours) {
+void ClientWorld::Changed::add(int32_t index) {
+    const int at[3] = {index & 0xF, (index >> 8) & 0xF, (index >> 4) & 0xF};
+    for (int axis = 0; axis < 3; ++axis) {
+        low[axis] = std::min(low[axis], at[axis]);
+        high[axis] = std::max(high[axis], at[axis]);
+    }
+}
+
+void ClientWorld::Changed::all() {
+    for (int axis = 0; axis < 3; ++axis) {
+        low[axis] = 0;
+        high[axis] = 15;
+    }
+}
+
+void ClientWorld::remesh(ChunkPos chunk, const Changed* changed) {
     auto* queue = world_.meshRebuildQueue();
     if (!queue) return;
     queue->push(chunk, MeshRebuildRequest::immediate());
-    if (!neighbours) return;
-    // Their border faces were drawn against what used to be here
+    if (!changed) return;
+    // Their border faces were drawn against what used to be here, light included
     for (Face face : {Face::PosX, Face::NegX, Face::PosZ, Face::NegZ, Face::PosY, Face::NegY}) {
         auto n = faceNormal(face);
         queue->push(ChunkPos(chunk.x + n[0], chunk.y + n[1], chunk.z + n[2]), MeshRebuildRequest(1));
+    }
+    // And past them, any the changed cells reach: x, y, z
+    const int reach[3] = {reachAcross_.load(), reachUpDown_.load(), reachAcross_.load()};
+    if (reach[0] <= 1 && reach[1] <= 1) return;
+    auto touches = [&](int axis, int side) {
+        if (side < 0) return changed->low[axis] - reach[axis] < 0;
+        if (side > 0) return changed->high[axis] + reach[axis] > 15;
+        return true;
+    };
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (std::abs(dx) + std::abs(dy) + std::abs(dz) < 2) continue;
+                if (touches(0, dx) && touches(1, dy) && touches(2, dz)) {
+                    queue->push(ChunkPos(chunk.x + dx, chunk.y + dy, chunk.z + dz), MeshRebuildRequest(1));
+                }
+            }
+        }
     }
 }
 
@@ -38,21 +74,31 @@ void ClientWorld::apply(const SubchunkData& data) {
     }
 
     SubChunk& subchunk = world_.getOrCreateColumn(ColumnPos(chunk.x, chunk.z)).getOrCreateSubChunk(chunk.y);
+    Changed changed;
     {
         std::lock_guard lock(predictionMutex_);
         if (predictions_.empty()) {
             if (data.indices.empty()) {
                 BlockTypeId fill = palette.empty() ? BlockTypeId() : palette[0];
-                if (!fill.isAir() || !subchunk.isAirOnly()) subchunk.fill(fill);
+                if (!fill.isAir() || !subchunk.isAirOnly()) {
+                    subchunk.fill(fill);
+                    changed.all();
+                }
             } else if (subchunk.isAirOnly()) {
                 for (uint16_t index = 0; index < static_cast<uint16_t>(SubchunkData::CELLS); ++index) {
                     BlockTypeId block = palette[data.indices[index]];
-                    if (!block.isAir()) subchunk.setBlock(index, block);
+                    if (!block.isAir()) {
+                        subchunk.setBlock(index, block);
+                        changed.add(index);
+                    }
                 }
             } else {
                 for (uint16_t index = 0; index < static_cast<uint16_t>(SubchunkData::CELLS); ++index) {
                     BlockTypeId block = palette[data.indices[index]];
-                    if (subchunk.getBlock(index) != block) subchunk.setBlock(index, block);
+                    if (subchunk.getBlock(index) != block) {
+                        subchunk.setBlock(index, block);
+                        changed.add(index);
+                    }
                 }
             }
         } else {
@@ -72,6 +118,7 @@ void ClientWorld::apply(const SubchunkData& data) {
                 }
                 if (subchunk.getBlock(static_cast<uint16_t>(index)) != block) {
                     subchunk.setBlock(static_cast<uint16_t>(index), block);
+                    changed.add(index);
                 }
             }
         }
@@ -81,6 +128,7 @@ void ClientWorld::apply(const SubchunkData& data) {
 
     bool hadFluid = subchunk.fluidLayer() != nullptr;
     if (hadFluid || !data.fluids.empty()) {
+        changed.all();  // Not worth finding which: it's how far smoothing reaches that cares
         std::array<bool, SubchunkData::CELLS> wet{};
         for (const auto& fluid : data.fluids) {
             wet[fluid.index] = true;
@@ -94,7 +142,7 @@ void ClientWorld::apply(const SubchunkData& data) {
         }
     }
 
-    remesh(chunk, true);
+    remesh(chunk, &changed);
 }
 
 void ClientWorld::predict(BlockCoord pos, BlockTypeId block, std::chrono::milliseconds hold) {

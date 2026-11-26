@@ -423,6 +423,8 @@ struct GameClient::Impl {
     /// has been drawn, and nothing being recorded still holds the old atlases
     std::optional<std::string> packRequested;
     bool blending = false;                        ///< Whether the world is meshed with a blend provider
+    bool groundSmooth = false;  ///< Whether ground is drawn smooth over its steps: the smooth_ground pref
+    void applySmooth(bool remesh);
     [[nodiscard]] fs::path texturePath(const std::string& relative) const {
         return texturePacks.resolve(contentRoot, relative);
     }
@@ -471,6 +473,7 @@ void GameClient::Impl::setupShell() {
     if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
     playerName = options.playerName;
     loadPrefs();
+    if (auto smooth = prefs.find("smooth_ground"); smooth != prefs.end()) groundSmooth = smooth->second.truthy();
     {
         std::vector<fs::path> folders{options.gameRoot / "packs"};
         if (options.userRoot != options.gameRoot) folders.push_back(options.userRoot / "packs");
@@ -906,6 +909,7 @@ void GameClient::Impl::enterWorld() {
         blending = bool(blend);
         worldRenderer->setBlendProvider(std::move(blend));
     }
+    applySmooth(false);
     worldRenderer->initialize();
 
     buildParticleAtlas();
@@ -1562,6 +1566,17 @@ bool GameClient::Impl::loadSkin(const std::string& relative) {
     return true;
 }
 
+// Ground drawn smooth or as cubes, and bodies drawn on it, from now on
+void GameClient::Impl::applySmooth(bool remesh) {
+    if (!inWorld || !worldRenderer || !content) return;
+    auto smooth = groundSmooth ? content->smoothProvider() : nullptr;
+    session->world().setMeshReach(smooth ? GROUND_REACH_ACROSS : 1, smooth ? GROUND_REACH_UP_DOWN : 1);
+    entityRenderer.setGroundFollow(smooth ? groundCells(session->world().world(), smooth) : nullptr,
+                                   static_cast<float>(worldInfo.entityRate));
+    worldRenderer->setSmoothProvider(std::move(smooth));
+    if (remesh) worldRenderer->rebuildAllMeshesNear(camera.positionD());
+}
+
 void GameClient::Impl::applyDetail() {
     if (!worldRenderer) return;
     float pixels = detailPixels.value_or(manifest.detailPixels);
@@ -1823,7 +1838,7 @@ void GameClient::Impl::buildScene() {
             // An item lying about: its picture, turning slowly and bobbing, seen from both sides
             glm::vec3 center(pos - cameraPos);
             float age = clock + static_cast<float>(id % 97);
-            center.y += 0.3f + 0.08f * std::sin(age * 2.0f);
+            center.y += state.groundLift + 0.3f + 0.08f * std::sin(age * 2.0f);
             float turn = age * 1.5f;
             glm::vec3 side(std::cos(turn), 0.0f, std::sin(turn));
             glm::vec4 shade(glm::vec3(std::min(brightness, 1.0f)), 1.0f);
@@ -2112,6 +2127,19 @@ void GameClient::Impl::registerNatives() {
             applyDetail();
         }
         return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
+    });
+
+    // ground_smooth [on] -> whether it's on. With on, draws the blocks that have `smooth: true`
+    // as a smooth surface over their steps, and the bodies on them following it. The choice is
+    // kept for this player, as the smooth_ground pref.
+    e.registerFunction("ground_smooth", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty() && args[0].truthy() != groundSmooth) {
+            groundSmooth = args[0].truthy();
+            prefs["smooth_ground"] = Value::boolean(groundSmooth);
+            savePrefs();
+            applySmooth(true);
+        }
+        return Value::boolean(groundSmooth);
     });
 
     // texture_packs -> [{=id =name =description}], the packs there are to choose from

@@ -40,6 +40,13 @@ public:
     /// Advance animations, update interpolation state
     void update(float dt, const glm::dvec3& cameraPos);
 
+    /// Draw bodies on the ground these cells smooth (EntityRenderState::followGround), with
+    /// snapshots coming `tickRate` a second. Null draws them where they are.
+    void setGroundFollow(GroundCellProvider cells, float tickRate) {
+        groundCells_ = std::move(cells);
+        tickRate_ = tickRate;
+    }
+
     /// A dying body turning to its burst of particles
     struct DeathBurst {
         std::string emitter;
@@ -94,6 +101,8 @@ private:
     std::vector<DeathBurst> deathBursts_;
     std::unordered_map<uint64_t, const AnimationClip*> animationClips_;
     PlayerCorrectionCallback playerCorrectionCallback_;
+    GroundCellProvider groundCells_;
+    float tickRate_ = 20.0f;
 
     static uint64_t makeClipKey(EntityTypeId typeId, uint8_t slotId) {
         return (static_cast<uint64_t>(typeId.id) << 8) | static_cast<uint64_t>(slotId);

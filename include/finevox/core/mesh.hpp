@@ -12,6 +12,7 @@
 #include "finevox/core/physics.hpp"
 #include "finevox/core/lod.hpp"
 #include "finevox/core/block_model.hpp"
+#include "finevox/core/ground_smoothing.hpp"
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
@@ -322,6 +323,10 @@ public:
         blockAt_ = std::move(blockAt);
     }
 
+    // Draws the open tops and undersides of ground blocks as a smooth surface over their steps
+    // (ground_smoothing.hpp), and plants on them at its height. Null draws cubes.
+    void setGroundSmoothing(GroundCellProvider cells) { groundCells_ = std::move(cells); }
+
     // ========================================================================
     // LOD Mesh Generation
     // ========================================================================
@@ -385,6 +390,21 @@ private:
     BlockTintProvider tintProvider_;
     BlockBlendProvider blendProvider_;
     BlockTypeProvider blockAt_;
+    GroundCellProvider groundCells_;
+
+    // The ground around the subchunk being built, while a build with smoothing on runs
+    struct SmoothState;
+    class SmoothScope;  // Sets smoothing_ for the length of a build
+    const SmoothState* smoothing_ = nullptr;
+
+    // Whether the smoothing draws this visible cube face itself, so it isn't drawn as a cube
+    [[nodiscard]] bool smoothReplaces(const BlockCoord& pos, Face face) const;
+    // How far a plant at `pos` is raised to stand on the smoothed ground under it
+    [[nodiscard]] float smoothLift(const BlockCoord& pos) const;
+    // Draws every smoothed face in the subchunk, and the walls they need
+    void buildSmoothGround(MeshData& mesh, const SubChunk& subChunk, ChunkPos chunkPos,
+                           const BlockOpaqueProvider& opaqueProvider,
+                           const BlockTextureProvider& textureProvider);
 
     // Whether the cube face of the block at `pos` is hidden by what's in front of it
     [[nodiscard]] bool faceHidden(const BlockCoord& pos, Face face, const BlockOpaqueProvider& opaqueProvider) const;

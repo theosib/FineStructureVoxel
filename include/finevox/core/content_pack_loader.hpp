@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace finevox {
@@ -214,6 +215,10 @@ public:
     /// Gives nullopt for a block with no `blend:`.
     [[nodiscard]] std::function<std::optional<BlockBlend>(BlockTypeId)> blendProvider() const;
 
+    /// Callback suitable for WorldRenderer::setSmoothProvider(...): whether a block is drawn as
+    /// smooth ground (`smooth: true`). Null if none is.
+    [[nodiscard]] std::function<bool(BlockTypeId)> smoothProvider() const;
+
     /// Load the `tint:<source>: r g b` lines of biomes/*.biome, by biome id (namespace:file)
     size_t loadBiomeTints(const std::filesystem::path& rootDir);
 
@@ -276,6 +281,7 @@ private:
     };
     std::unordered_map<uint32_t, BlockTint> blockTints_;
     std::unordered_map<uint32_t, BlockBlend> blockBlends_;
+    std::unordered_set<uint32_t> smoothBlocks_;
     /// Biome id -> (source, colour) pairs
     std::unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> biomeTints_;
     size_t customGeometryModelCount_ = 0;

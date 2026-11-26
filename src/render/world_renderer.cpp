@@ -217,6 +217,10 @@ void WorldRenderer::initialize() {
         meshWorkerPool_->setBlendProvider(blendProvider_);
     }
 
+    if (smoothProvider_) {
+        meshWorkerPool_->setSmoothProvider(smoothProvider_);
+    }
+
     if (farGeometryProvider_) {
         meshWorkerPool_->setFarGeometryProvider(farGeometryProvider_);
     }
@@ -407,6 +411,9 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
 
         const ChunkPos& pos = uploadData->pos;
         SubChunkView* view = getOrCreateView(pos);
+        // A build begun before the one already shown saw an older world
+        if (uploadData->ticket < view->builtTicket()) continue;
+        view->setBuiltTicket(uploadData->ticket);
 
         // Frames in flight may still draw the old mesh, so it must outlive them
         auto retire = [this](finevk::RawMeshPtr mesh) {
@@ -991,6 +998,14 @@ void WorldRenderer::setBlendProvider(BlockBlendProvider provider) {
     }
     if (meshWorkerPool_) {
         meshWorkerPool_->setBlendProvider(std::move(provider));
+    }
+}
+
+void WorldRenderer::setSmoothProvider(std::function<bool(BlockTypeId)> provider) {
+    smoothProvider_ = provider;
+    meshBuilder_.setGroundSmoothing(provider ? groundCells(world_, provider) : nullptr);
+    if (meshWorkerPool_) {
+        meshWorkerPool_->setSmoothProvider(std::move(provider));
     }
 }
 

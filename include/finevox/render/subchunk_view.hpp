@@ -288,6 +288,10 @@ public:
     /// Set the LOD level after building a mesh
     void setLastBuiltLOD(LODLevel lod) { lastBuiltLOD_ = lod; }
 
+    /// The ticket of the build it shows (MeshUploadData::ticket)
+    [[nodiscard]] uint64_t builtTicket() const { return builtTicket_; }
+    void setBuiltTicket(uint64_t ticket) { builtTicket_ = ticket; }
+
     /// Whether the mesh was built in full or in far forms, and whether that made a difference
     [[nodiscard]] bool builtDetailed() const { return builtDetailed_; }
     [[nodiscard]] bool hasFarForms() const { return hasFarForms_; }
@@ -318,6 +322,7 @@ private:
     size_t fluidGpuMemoryBytes_ = 0;
 
     LODLevel lastBuiltLOD_ = LODLevel::LOD0;
+    uint64_t builtTicket_ = 0;
     bool builtDetailed_ = true;
     bool hasFarForms_ = false;
 };

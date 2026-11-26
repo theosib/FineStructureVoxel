@@ -42,6 +42,9 @@ struct MeshUploadData {
     LODLevel lodLevel = LODLevel::LOD0;     // LOD level of the mesh
     bool detailed = true;                   // Built in full, not in far forms
     bool hasFarForms = false;               // Something in it would draw differently the other way
+    // When its build began, counting up. Two workers can build one subchunk at once, and the
+    // one begun later saw the newer world, whichever finishes first.
+    uint64_t ticket = 0;
 
     MeshUploadData() = default;
     MeshUploadData(ChunkPos p, MeshData m, LODLevel lod)
@@ -176,6 +179,12 @@ public:
         blendProvider_ = std::move(provider);
     }
 
+    // Which blocks are drawn as smooth ground (ground_smoothing.hpp), or null for cubes. Thread-safe.
+    void setSmoothProvider(std::function<bool(BlockTypeId)> provider) {
+        std::lock_guard<std::mutex> lock(providerMutex_);
+        smoothProvider_ = std::move(provider);
+    }
+
     void setFaceOccludesProvider(BlockFaceOccludesProvider provider) {
         std::lock_guard<std::mutex> lock(providerMutex_);
         faceOccludesProvider_ = std::move(provider);
@@ -229,6 +238,7 @@ private:
     // Worker threads
     std::vector<std::thread> workers_;
     std::atomic<bool> running_{false};
+    std::atomic<uint64_t> nextTicket_{1};  // For MeshUploadData::ticket
 
     // Texture provider (optional)
     BlockTextureProvider textureProvider_;
@@ -249,6 +259,7 @@ private:
     BlockConnectsProvider connectsProvider_;
     BlockTintProvider tintProvider_;
     BlockBlendProvider blendProvider_;
+    std::function<bool(BlockTypeId)> smoothProvider_;
     BlockGeometryProvider farGeometryProvider_;
 
     std::atomic<double> detailCameraX_{0.0}, detailCameraY_{0.0}, detailCameraZ_{0.0};

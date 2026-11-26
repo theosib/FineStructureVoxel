@@ -98,6 +98,7 @@ void MeshWorkerPool::workerLoop() {
 bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) {
     // Get the actual LOD level to build from the request
     LODLevel buildLOD = request.lodRequest.buildLevel();
+    const uint64_t ticket = nextTicket_.fetch_add(1, std::memory_order_relaxed);
 
     MeshData meshData;
     MeshData fluidData;
@@ -112,13 +113,17 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         if (!subchunk) {
             // Subchunk doesn't exist (might have been unloaded)
             // Push empty mesh to upload queue - graphics thread will detect via isEmpty()
-            uploadQueue_.push(MeshUploadData(pos, MeshData{}, buildLOD));
+            MeshUploadData empty(pos, MeshData{}, buildLOD);
+            empty.ticket = ticket;
+            uploadQueue_.push(std::move(empty));
             return true;
         }
 
         if (subchunk->isEmpty() && !subchunk->hasFluidLayer()) {
             // Empty subchunk with no fluid - push empty mesh to upload queue
-            uploadQueue_.push(MeshUploadData(pos, MeshData{}, buildLOD));
+            MeshUploadData empty(pos, MeshData{}, buildLOD);
+            empty.ticket = ticket;
+            uploadQueue_.push(std::move(empty));
             return true;
         }
 
@@ -130,6 +135,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         BlockConnectsProvider connectsProvider;
         BlockTintProvider tintProvider;
         BlockBlendProvider blendProvider;
+        std::function<bool(BlockTypeId)> smoothProvider;
         BlockGeometryProvider farGeometryProvider;
         {
             std::lock_guard<std::mutex> lock(providerMutex_);
@@ -140,6 +146,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             connectsProvider = connectsProvider_;
             tintProvider = tintProvider_;
             blendProvider = blendProvider_;
+            smoothProvider = smoothProvider_;
             farGeometryProvider = farGeometryProvider_;
         }
 
@@ -169,6 +176,9 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         }
         if (blendProvider) {
             builder.setBlending(blendProvider, [this](const BlockCoord& p) { return world_.getBlock(p); });
+        }
+        if (smoothProvider) {
+            builder.setGroundSmoothing(groundCells(world_, std::move(smoothProvider)));
         }
         if (faceOccludesProvider) {
             builder.setFaceOccludesProvider(faceOccludesProvider);
@@ -247,6 +257,7 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
         MeshUploadData upload(pos, std::move(meshData), std::move(fluidData), buildLOD);
         upload.detailed = detailed;
         upload.hasFarForms = hasFarForms;
+        upload.ticket = ticket;
         uploadQueue_.push(std::move(upload));
     }
 

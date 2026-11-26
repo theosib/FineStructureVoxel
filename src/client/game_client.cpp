@@ -424,8 +424,7 @@ struct GameClient::Impl {
     /// has been drawn, and nothing being recorded still holds the old atlases
     std::optional<std::string> packRequested;
     bool blending = false;                        ///< Whether the world is meshed with a blend provider
-    bool groundSmooth = false;  ///< Whether ground is drawn smooth over its steps: the smooth_ground pref
-    void applySmooth(bool remesh);
+    void applySmooth();
     [[nodiscard]] fs::path texturePath(const std::string& relative) const {
         return texturePacks.resolve(contentRoot, relative);
     }
@@ -474,7 +473,6 @@ void GameClient::Impl::setupShell() {
     if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
     playerName = options.playerName;
     loadPrefs();
-    if (auto smooth = prefs.find("smooth_ground"); smooth != prefs.end()) groundSmooth = smooth->second.truthy();
     {
         std::vector<fs::path> folders{options.gameRoot / "packs"};
         if (options.userRoot != options.gameRoot) folders.push_back(options.userRoot / "packs");
@@ -914,7 +912,7 @@ void GameClient::Impl::enterWorld() {
     if (auto smooth = content->smoothProvider(); smooth && worldInfo.solidSlopes) {
         world.setGroundSurface(std::make_shared<GroundSurface>(world, std::move(smooth)));
     }
-    applySmooth(false);
+    applySmooth();
     worldRenderer->initialize();
 
     buildParticleAtlas();
@@ -1487,16 +1485,19 @@ void GameClient::Impl::buildEntityAtlas() {
     }
 }
 
-// The game's blends, with the pack's over them, or none if the pack doesn't blend
+// The game's blends, with the pack's over them, or none where neither the pack nor the game blends
 BlockBlendProvider GameClient::Impl::blendProvider() const {
     const TexturePack* pack = texturePacks.active();
-    if (!pack || !pack->blending || !content) return nullptr;
+    const bool on = pack && pack->blending ? *pack->blending : manifest.blending;
+    if (!on || !content) return nullptr;
     auto own = content->blendProvider();
     auto overrides = std::make_shared<std::unordered_map<uint32_t, std::optional<BlockBlend>>>();
-    for (const auto& [name, blend] : pack->blends) {
-        (*overrides)[BlockTypeId::fromName(name).id] = blend;
-        if (!manifest.contentNamespace.empty() && name.find(':') == std::string::npos) {
-            (*overrides)[BlockTypeId::fromName(manifest.contentNamespace + ":" + name).id] = blend;
+    if (pack) {
+        for (const auto& [name, blend] : pack->blends) {
+            (*overrides)[BlockTypeId::fromName(name).id] = blend;
+            if (!manifest.contentNamespace.empty() && name.find(':') == std::string::npos) {
+                (*overrides)[BlockTypeId::fromName(manifest.contentNamespace + ":" + name).id] = blend;
+            }
         }
     }
     if (!own && overrides->empty()) return nullptr;
@@ -1572,16 +1573,14 @@ bool GameClient::Impl::loadSkin(const std::string& relative) {
     return true;
 }
 
-// Ground drawn smooth or as cubes, and bodies drawn on it, from now on. Where bodies stand on the
-// slopes, it's drawn smooth whatever the player chose.
-void GameClient::Impl::applySmooth(bool remesh) {
+// Ground drawn as it collides: smooth with solid slopes, as cubes without, and bodies drawn on it
+void GameClient::Impl::applySmooth() {
     if (!inWorld || !worldRenderer || !content) return;
-    auto smooth = groundSmooth || worldInfo.solidSlopes ? content->smoothProvider() : nullptr;
+    auto smooth = worldInfo.solidSlopes ? content->smoothProvider() : nullptr;
     session->world().setMeshReach(smooth ? GROUND_REACH_ACROSS : 1, smooth ? GROUND_REACH_UP_DOWN : 1);
     entityRenderer.setGroundFollow(smooth ? groundCells(session->world().world(), smooth) : nullptr,
                                    static_cast<float>(worldInfo.entityRate));
     worldRenderer->setSmoothProvider(std::move(smooth));
-    if (remesh) worldRenderer->rebuildAllMeshesNear(camera.positionD());
 }
 
 void GameClient::Impl::applyDetail() {
@@ -2136,21 +2135,8 @@ void GameClient::Impl::registerNatives() {
         return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
     });
 
-    // ground_smooth [on] -> whether it's on. With on, draws the blocks that have `smooth: true`
-    // as a smooth surface over their steps, and the bodies on them following it. The choice is
-    // kept for this player, as the smooth_ground pref. A game with solid slopes is drawn smooth
-    // whatever it is (ground_solid).
-    e.registerFunction("ground_smooth", [this](ExecutionContext&, const Args& args) -> Value {
-        if (!args.empty() && args[0].truthy() != groundSmooth) {
-            groundSmooth = args[0].truthy();
-            prefs["smooth_ground"] = Value::boolean(groundSmooth);
-            savePrefs();
-            applySmooth(true);
-        }
-        return Value::boolean(groundSmooth || (inWorld && worldInfo.solidSlopes));
-    });
-
-    // ground_solid -> whether the game in progress has bodies stand on the slopes (solid_slopes)
+    // ground_solid -> whether the game in progress has bodies stand on the slopes (solid_slopes),
+    // which is also whether its ground is drawn as slopes
     e.registerFunction("ground_solid", [this](ExecutionContext&, const Args&) -> Value {
         return Value::boolean(inWorld && worldInfo.solidSlopes);
     });

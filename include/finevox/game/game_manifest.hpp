@@ -64,6 +64,9 @@ struct GameManifest {
     /// Bodies stand on `smooth` ground as it's drawn smoothed, not on its cubes, and every client
     /// draws it so (ground_surface.hpp)
     bool solidSlopes = false;
+    /// Faces spread over their neighbours' at the edges, by each block's `blend:` (rendering.md,
+    /// "Blending"). A texture pack can say otherwise.
+    bool blending = false;
     float walkSpeed = 4.5f;       ///< First-person walking speed in blocks/second
     float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second
     float sneakSpeed = 0.4f;      ///< Walking speed while sneaking, as a fraction of walkSpeed

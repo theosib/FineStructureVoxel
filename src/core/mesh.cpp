@@ -1032,7 +1032,8 @@ bool MeshBuilder::faceHidden(const BlockCoord& pos, Face face, const BlockOpaque
 // a face the same way in the same plane. Anything else, a step up or down included, leaves the
 // edge as it is, so nothing is ever drawn over anything else. A diagonal reaching in only past a
 // corner where both straight neighbours are covered over is left out: it would show grass in the
-// inside corner of a wall that the grass is outside of.
+// inside corner of a wall that the grass is outside of. On smoothed ground a step a block up or down
+// that the surface runs over (a Link) is the same plane: the face across it is the neighbour.
 glm::uvec4 MeshBuilder::faceBlend(BlockTypeId type, const BlockCoord& pos, Face face,
                                   const BlockOpaqueProvider& opaqueProvider,
                                   const BlockTextureProvider& textureProvider) const {
@@ -1044,6 +1045,41 @@ glm::uvec4 MeshBuilder::faceBlend(BlockTypeId type, const BlockCoord& pos, Face 
     static constexpr int STEPS[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
     const FaceAxes& axes = faceAxes()[static_cast<int>(face)];
 
+    // A smoothed face's neighbour across a linked edge is where the link says, a block up or down
+    const int up = face == Face::PosY ? 1 : face == Face::NegY ? -1 : 0;
+    const GroundPatch* patch = nullptr;
+    if (smoothing_ && up != 0) {
+        if (const auto& found = smoothing_->patch(pos, up)) patch = &*found;
+    }
+    auto linked = [&](const GroundPatch& from, int dx, int dz) -> std::optional<int> {
+        const int e = dx < 0 ? GROUND_EDGE_X_LOW : dx > 0 ? GROUND_EDGE_X_HIGH : dz < 0 ? GROUND_EDGE_Z_LOW
+                                                                                          : GROUND_EDGE_Z_HIGH;
+        if (from.edge[e] != GroundEdge::Link) return std::nullopt;
+        return up * from.link[e];
+    };
+    auto neighbour = [&](int du, int dv) {
+        BlockCoord at = offset(pos, axes, du, dv);
+        if (!patch) return at;
+        const int dx = at.x - pos.x, dz = at.z - pos.z;
+        if (dx == 0 || dz == 0) {
+            if (auto rise = linked(*patch, dx, dz)) at.y += *rise;
+            return at;
+        }
+        // Past a corner: through either neighbour it links to, on to the diagonal
+        for (const auto& [sx, sz] : {std::pair{dx, 0}, std::pair{0, dz}}) {
+            const auto rise = linked(*patch, sx, sz);
+            if (!rise) continue;
+            const BlockCoord beside(pos.x + sx, pos.y + *rise, pos.z + sz);
+            const auto& next = smoothing_->patch(beside, up);
+            if (!next) continue;
+            if (auto more = linked(*next, dx - sx, dz - sz)) {
+                at.y = beside.y + *more;
+                return at;
+            }
+        }
+        return at;
+    };
+
     struct Spill {
         BlockTypeId type;
         BlockBlend blend;
@@ -1053,15 +1089,15 @@ glm::uvec4 MeshBuilder::faceBlend(BlockTypeId type, const BlockCoord& pos, Face 
     int count = 0;
     for (int bit = 0; bit < 8; ++bit) {
         const int du = STEPS[bit][0], dv = STEPS[bit][1];
-        const BlockCoord at = offset(pos, axes, du, dv);
+        const BlockCoord at = neighbour(du, dv);
         const BlockTypeId other = blockAt_(at);
         if (other == AIR_BLOCK_TYPE || other == type) continue;
         const std::optional<BlockBlend> blend = blendProvider_(other);
         if (!blend || blend->priority <= own->priority || blend->width <= 0.0f) continue;
         if (const BlockGeometry* geometry = geometryFor(other); geometry && !geometry->isEmpty()) continue;
         if (faceHidden(at, face, opaqueProvider)) continue;
-        if (du != 0 && dv != 0 && faceHidden(offset(pos, axes, du, 0), face, opaqueProvider) &&
-            faceHidden(offset(pos, axes, 0, dv), face, opaqueProvider)) {
+        if (du != 0 && dv != 0 && faceHidden(neighbour(du, 0), face, opaqueProvider) &&
+            faceHidden(neighbour(0, dv), face, opaqueProvider)) {
             continue;
         }
         int i = 0;

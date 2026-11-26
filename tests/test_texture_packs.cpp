@@ -56,7 +56,7 @@ TEST_F(TexturePacksTest, FindsPacksAndReadsTheirConf) {
     ASSERT_NE(smooth, nullptr);
     EXPECT_EQ(smooth->name, "Smooth ground");
     EXPECT_EQ(smooth->description, "Edges blend");
-    EXPECT_TRUE(smooth->blending);
+    EXPECT_EQ(smooth->blending, std::optional<bool>(true));
     ASSERT_EQ(smooth->blends.size(), 3u);
     ASSERT_TRUE(smooth->blends.at("sand"));
     EXPECT_EQ(smooth->blends.at("sand")->priority, 30);
@@ -66,7 +66,7 @@ TEST_F(TexturePacksTest, FindsPacksAndReadsTheirConf) {
     for (const auto& pack : packs.available()) {
         if (pack.id == "bare") {
             EXPECT_EQ(pack.name, "bare") << "named by its folder";
-            EXPECT_FALSE(pack.blending);
+            EXPECT_FALSE(pack.blending.has_value()) << "says nothing, so the game's own stands";
         }
     }
 }

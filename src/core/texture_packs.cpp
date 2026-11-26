@@ -23,6 +23,7 @@ TexturePack TexturePack::load(const fs::path& root) {
         pack.description = description->value.asStringOwned();
     }
     if (const ConfigEntry* blending = doc->get("blending")) pack.blending = blending->value.asBool(false);
+    // (Left unset, the game's own `blending` stands)
     // blend:<block>: <priority> [width], or none
     for (const ConfigEntry* entry : doc->getAll("blend")) {
         if (!entry->hasSuffix()) continue;

@@ -41,7 +41,8 @@ sky.conf
 | `saves` | `false` | Keep the game in `saves/autosave`, resume it on launch, and save on exit |
 | `autosave_minutes` | `0` | Also save during play this often |
 | `nav_max_fall` | `3` | Largest drop path-following units will take. Past 3 blocks each one costs extra, so it's a way down and not a shortcut. Raise it where falling doesn't hurt, or a unit on anything tall has no way back |
-| `solid_slopes` | `false` | Bodies stand on `smooth` ground as it's drawn smoothed, not on its cubes, and every client draws it smoothed whatever its own setting. Placing and breaking keep to the grid. See physics.md, "Solid slopes" |
+| `solid_slopes` | `false` | `smooth` ground is drawn as slopes over its steps, and bodies stand on them as drawn, not on its cubes. Placing and breaking keep to the grid. See physics.md, "Solid slopes" |
+| `blending` | `false` | Faces spread over their neighbours' at the edges, by each block's `blend:` (rendering.md, "Blending"). A texture pack's `blending:` says otherwise |
 | `step_height` | `0.6` | Highest ledge the player walks up without jumping. Just over 1 walks up whole blocks, as path-following units do. The eye rises after the body, so it reads as a stair |
 | `item_pictures` | none | A folder under `textures/` with a picture per item, named for it: an item lying in the world is drawn as its picture, turning. Without one, as a small box |
 | `marker_textures` | none | A folder under `textures/` whose pictures a UI script can put on `marker_box`, by file name |
@@ -337,10 +338,8 @@ marker_xray id r g b [a]    where blocks hide that entity, its shape shows throu
 pref name [default]    set_pref name value   the player's own settings, in prefs.txt
 texture_packs -> [{=id =name =description}]   texture_pack [id] -> id   the pack in use, "" for
                    none; with an id, changes to it next frame and remembers it (texture-packs.md)
-ground_smooth [b] -> b   whether `smooth: true` blocks are drawn as slopes over their steps; with b,
-                   changes it, remeshes, and remembers it as the smooth_ground pref (rendering.md).
-                   A game with solid slopes draws them whatever the pref says
-ground_solid -> b  whether the game in progress has bodies stand on the slopes (solid_slopes)
+ground_solid -> b  whether the game in progress has bodies stand on the slopes (solid_slopes),
+                   which is also whether it draws `smooth: true` ground as slopes (rendering.md)
 cam_focus x z   cam_set distance yaw pitch   blueprint_size name -> [x y z]
 cam_pivot -> [x y z]
 pick_block mx my, pick_view -> {=x =y =z =nx =ny =nz =distance =block name} or nil
@@ -537,8 +536,9 @@ under another can have a flat top to carry it, and a rounded one with nothing on
 
 `blend: <priority> [width]` lets a cube's faces spread over the faces of neighbours level with
 them that have a lower priority, `width` blocks in (0.35 if not given), with a ragged edge. Only
-blocks that have it take part: a block with none keeps hard edges both ways. It's drawn only while
-the texture pack in use has `blending: true`, which can change blocks' blends too. See
+blocks that have it take part: a block with none keeps hard edges both ways. It's drawn only where
+the game has `blending: true`, or the texture pack in use does; a pack can change blocks' blends
+too, or say `blending: false`. See
 rendering.md, "Blending", and texture-packs.md.
 
 `far-geometry: <shape>` is a cheaper shape for where a block's detail is too small to see, as set

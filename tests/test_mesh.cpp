@@ -2009,6 +2009,41 @@ TEST_F(BlendMeshTest, AStepUpOrDownIsAHardEdge) {
     EXPECT_EQ(faceAt(mesh, {5, 4, 4}, {0, 1, 0})->blend, glm::uvec4(0u));
 }
 
+// Smoothed, a step the surface runs over is one slope, and grass a block up spreads down onto the
+// sand below it as it would on the level. A step of two keeps its wall, and its hard edge.
+TEST_F(BlendMeshTest, SmoothedStepsBlendAcrossLinksButNotWalls) {
+    // Sand to x = 4, a block lower than the grass from x = 5 on; and at z >= 10, two blocks lower
+    auto height = [](int x, int z) { return x < 5 ? (z < 10 ? 5 : 4) : 6; };
+    for (int x = 0; x < 10; ++x) {
+        for (int z = 0; z < 14; ++z) {
+            for (int y = 0; y < height(x, z); ++y) put(x, y, z, x < 5 ? sand : grass);
+        }
+    }
+    builder.setGroundSmoothing([this](const BlockCoord& p) {
+        return blocks.count(p) ? GroundCell::Ground : GroundCell::Open;
+    });
+    MeshData mesh = build();
+
+    // The blend on the sand's top at (4, z), from any of its curved pieces
+    auto sandTop = [&](int z) {
+        glm::uvec4 found(0u);
+        int pieces = 0;
+        for (const ChunkVertex& v : mesh.vertices) {
+            if (v.normal.y <= 0.0f || v.tileBounds != sandTile) continue;
+            if (v.position.x < 4.0f || v.position.x > 5.0f || v.position.z < float(z) || v.position.z > z + 1.0f) continue;
+            if (v.position.y < 3.5f) continue;
+            ++pieces;
+            found |= v.blend;
+        }
+        EXPECT_GT(pieces, 0) << "no top on the sand at z " << z;
+        return found;
+    };
+    ChunkVertex linked;
+    linked.blend = sandTop(4);
+    EXPECT_NE(topMask(linked), 0u) << "the grass up the slope didn't spread onto it";
+    EXPECT_EQ(sandTop(12), glm::uvec4(0u)) << "the grass spread down a wall";
+}
+
 TEST_F(BlendMeshTest, ANeighbourWithItsFaceCoveredDoesntSpread) {
     put(4, 4, 4, grass);
     put(4, 5, 4, stone);  // on the grass

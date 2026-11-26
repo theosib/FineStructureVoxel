@@ -4,8 +4,8 @@
 
 A texture pack changes how a game looks and nothing else. The player picks one in a running game
 and everything is redrawn with it on the next frame. Packs can be drawn at higher resolution than
-the game, up to 128×128 a block face, and a pack can also switch on blending at block edges
-(rendering.md, "Blending").
+the game, up to 128×128 a block face, and a pack can also switch blending at block edges on or off
+over the game's own `blending` (rendering.md, "Blending").
 
 ---
 
@@ -23,7 +23,7 @@ packs/smooth/
 ```
 name: Smooth ground
 description: Grass, earth, sand and stone blend into each other at their edges
-blending: true              # faces spread over their neighbours' (BlockBlend)
+blending: true              # faces spread over their neighbours' (BlockBlend); false for hard edges
 blend:sand: 30 0.25         # over sand's own `blend:` while this pack is on
 blend:flagstone: none       # no blending for this block
 ```

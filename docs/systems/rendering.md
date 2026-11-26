@@ -98,16 +98,17 @@ edge pixel is shaded at its centre, past the face, where a coordinate just over 
 drew a dotted line of the neighbour's texture along the edge.
 
 It's off unless a client sets a provider (`WorldRenderer::setBlendProvider`). `GameClient` sets one
-while the texture pack in use says `blending: true`, from the blocks' own `blend:` with the pack's
-over them (texture-packs.md).
+where the game has `blending: true` in `game.conf`, or the texture pack in use says so, from the
+blocks' own `blend:` with the pack's over them (texture-packs.md). A pack's `blending: false` turns
+it off. On smoothed ground a step the surface runs over (a `Link`) isn't a hard edge: the face
+across it, a block up or down, is the neighbour.
 Meshing a face costs 8 more block lookups, about what AO costs. Every vertex is 16 bytes bigger
 whether it's on or not. LOD meshes and fluids don't blend.
 
 **Smooth ground** (`ground_smoothing.hpp`): a cube with `smooth: true` in its `.model` has its open
-top and underside drawn as a curved surface over the steps around it. On its own it's drawing only:
-collision, paths and the server keep the blocks, so a step of two still can't be walked up. A game
-with `solid_slopes` makes the tops solid as well (physics.md, "Solid slopes"), and then every client
-draws them smoothed.
+top and underside drawn as a curved surface over the steps around it, in a game with `solid_slopes`
+(physics.md, "Solid slopes"), whose bodies stand on the tops as drawn. Without it the ground is
+drawn as the cubes it collides as.
 
 - **The shape.** Each face is a quadratic B-spline over the column heights, held as a 3x3 Bezier
   patch (`GroundPatch`): the middle is the face's own height, each edge the mean of it and the
@@ -134,8 +135,8 @@ draws them smoothed.
   down a step, to `groundSurfaceY` under its middle, which looks two cells down so one that has just
   stepped up onto a block's edge stays on the slope. In the air it eases back to where it is.
 
-`WorldRenderer::setSmoothProvider` turns it on, and `GameClient` does that for the `ground_smooth`
-UI native (the `smooth_ground` pref). On a hilly Keystone view it costs about a fifth more triangles.
+`WorldRenderer::setSmoothProvider` turns it on, and `GameClient` does that where the game has
+`solid_slopes`. On a hilly Keystone view it costs about a fifth more triangles.
 LOD meshes don't smooth.
 
 **View-relative rendering**: all vertex positions are `worldPos - cameraPos` (double-precision subtraction, then stored as float). Eliminates float precision jitter at large world coordinates.

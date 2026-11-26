@@ -24,8 +24,9 @@ struct TexturePack {
     std::string name;         ///< As pack.conf gives it, or the id
     std::string description;
     std::filesystem::path root;
-    /// Whether faces spread over their neighbours' (BlockBlend) while it's on
-    bool blending = false;
+    /// Whether faces spread over their neighbours' (BlockBlend) while it's on, over the game's own
+    /// `blending`; nullopt where it doesn't say
+    std::optional<bool> blending;
     /// Blends by block name, over the blocks' own `blend:`; nullopt for a block that keeps hard edges
     std::unordered_map<std::string, std::optional<BlockBlend>> blends;
 

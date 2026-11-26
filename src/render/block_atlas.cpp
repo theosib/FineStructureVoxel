@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <optional>
 #include <random>
 
 namespace finevox::render {
@@ -131,50 +133,74 @@ void BlockAtlas::createPlaceholderAtlas(
 
 namespace {
 
-constexpr int ATLAS_TILE = 32;
-constexpr int ATLAS_BORDER = 2;
+struct Image {
+    int width = 0, height = 0;
+    std::vector<uint8_t> pixels;
+};
 
-void magenta(std::vector<uint8_t>& pixels) {
-    pixels.resize(ATLAS_TILE * ATLAS_TILE * 4);
-    for (int i = 0; i < ATLAS_TILE * ATLAS_TILE; ++i) {
-        pixels[i * 4 + 0] = 255;
-        pixels[i * 4 + 1] = 0;
-        pixels[i * 4 + 2] = 255;
-        pixels[i * 4 + 3] = 255;
-    }
-}
-
-bool loadTile(const std::string& path, std::vector<uint8_t>& pixels, int turns) {
+// A vertical strip of square frames gives its first one
+std::optional<Image> loadImage(const std::string& path) {
     int width = 0, height = 0, channels = 0;
     unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
-    if (!data) return false;
-    // A vertical strip of square frames: the first one
+    if (!data) return std::nullopt;
     if (height > width && width > 0 && height % width == 0) height = width;
+    Image image;
+    image.width = width;
+    image.height = height;
+    image.pixels.assign(data, data + static_cast<size_t>(width) * height * 4);
+    stbi_image_free(data);
+    return image;
+}
 
-    // Nearest-neighbour resample, so a stray size can't corrupt the grid
-    pixels.resize(ATLAS_TILE * ATLAS_TILE * 4);
-    for (int y = 0; y < ATLAS_TILE; ++y) {
-        for (int x = 0; x < ATLAS_TILE; ++x) {
-            // Turned clockwise: what shows at (x, y) comes from (y, N-1-x), once per turn
+// Nearest-neighbour resample to a square tile, so a stray size can't corrupt the grid, turned
+// clockwise: what shows at (x, y) comes from (y, N-1-x), once per turn
+void toTile(const Image& image, int turns, int tile, std::vector<uint8_t>& pixels) {
+    pixels.resize(static_cast<size_t>(tile) * tile * 4);
+    for (int y = 0; y < tile; ++y) {
+        for (int x = 0; x < tile; ++x) {
             int tx = x, ty = y;
             for (int t = 0; t < turns; ++t) {
                 int nx = ty;
-                ty = ATLAS_TILE - 1 - tx;
+                ty = tile - 1 - tx;
                 tx = nx;
             }
-            int sx = tx * width / ATLAS_TILE;
-            int sy = ty * height / ATLAS_TILE;
-            std::memcpy(&pixels[(y * ATLAS_TILE + x) * 4], &data[(sy * width + sx) * 4], 4);
+            int sx = tx * image.width / tile;
+            int sy = ty * image.height / tile;
+            std::memcpy(&pixels[(static_cast<size_t>(y) * tile + x) * 4],
+                        &image.pixels[(static_cast<size_t>(sy) * image.width + sx) * 4], 4);
         }
     }
-    stbi_image_free(data);
-    return true;
+}
+
+void magenta(int tile, std::vector<uint8_t>& pixels) {
+    pixels.resize(static_cast<size_t>(tile) * tile * 4);
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i + 0] = 255;
+        pixels[i + 1] = 0;
+        pixels[i + 2] = 255;
+        pixels[i + 3] = 255;
+    }
 }
 
 }  // namespace
 
+int BlockAtlas::tileSizeFor(int largestSide) {
+    int tile = MIN_TILE;
+    while (tile < largestSide && tile < MAX_TILE) tile *= 2;
+    return tile;
+}
+
 void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::CommandPool* commandPool,
                                    const std::string& textureRoot,
+                                   const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
+                                   const std::vector<std::string>& moreTextures) {
+    buildFromTextures(device, commandPool,
+                      [&](const std::string& name) { return (std::filesystem::path(textureRoot) / (name + ".png")).string(); },
+                      blocks, moreTextures);
+}
+
+void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::CommandPool* commandPool,
+                                   const TexturePath& pathOf,
                                    const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
                                    const std::vector<std::string>& moreTextures) {
     // std::map: stable tile order regardless of registry iteration
@@ -186,15 +212,36 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
     uint32_t index = 0;
     for (auto& [name, tile] : tiles) tile = index++;
 
+    // Each picture once, however many turns of it are used; the largest sets the tile size
+    std::map<std::string, std::optional<Image>> images;
+    int largest = 0;
+    for (const auto& [name, tile] : tiles) {
+        std::string base;
+        int degrees = 0;
+        splitTextureTurn(name, base, degrees);
+        auto [it, added] = images.try_emplace(base);
+        if (!added) continue;
+        std::string path = pathOf(base);
+        it->second = loadImage(path);
+        if (!it->second) {
+            std::cerr << "[BlockAtlas] missing texture: " << path << "\n";
+            continue;
+        }
+        largest = std::max({largest, it->second->width, it->second->height});
+    }
+    const int size = tileSizeFor(largest);
+    const int border = size / 16;
+
     uint32_t grid = std::max<uint32_t>(
         1, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(tiles.size())))));
-    const int cell = ATLAS_TILE + ATLAS_BORDER * 2;
+    const int cell = size + border * 2;
 
+    tileSize_ = size;
     atlasWidth_ = grid * cell;
     atlasHeight_ = grid * cell;
     gridWidth_ = grid;
     gridHeight_ = grid;
-    borderPixels_ = ATLAS_BORDER;
+    borderPixels_ = static_cast<float>(border);
     cellWidth_ = 1.0f / static_cast<float>(grid);
     cellHeight_ = 1.0f / static_cast<float>(grid);
 
@@ -204,11 +251,9 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
         std::string base;
         int degrees = 0;
         splitTextureTurn(name, base, degrees);
-        std::string path = (std::filesystem::path(textureRoot) / (base + ".png")).string();
-        if (!loadTile(path, pixels, degrees / 90)) {
-            std::cerr << "[BlockAtlas] missing texture: " << path << "\n";
-            magenta(pixels);
-        }
+        const auto& image = images.at(base);
+        if (image) toTile(*image, degrees / 90, size, pixels);
+        else magenta(size, pixels);
 
         int originX = static_cast<int>(tile % grid) * cell;
         int originY = static_cast<int>(tile / grid) * cell;
@@ -216,10 +261,10 @@ void BlockAtlas::buildFromTextures(finevk::LogicalDevice* device, finevk::Comman
         // edge, which is what a repeating surface should show.
         for (int y = 0; y < cell; ++y) {
             for (int x = 0; x < cell; ++x) {
-                int sx = (x - ATLAS_BORDER + ATLAS_TILE) % ATLAS_TILE;
-                int sy = (y - ATLAS_BORDER + ATLAS_TILE) % ATLAS_TILE;
+                int sx = (x - border + size) % size;
+                int sy = (y - border + size) % size;
                 size_t dest = (static_cast<size_t>(originY + y) * atlasWidth_ + originX + x) * 4;
-                std::memcpy(&atlas[dest], &pixels[(sy * ATLAS_TILE + sx) * 4], 4);
+                std::memcpy(&atlas[dest], &pixels[(static_cast<size_t>(sy) * size + sx) * 4], 4);
             }
         }
     }
@@ -330,10 +375,37 @@ std::optional<glm::vec4> BlockAtlas::textureUV(const std::string& name) const {
     return it->second.bounds();
 }
 
+// A copy of the mappings, not this atlas: a mesh worker may still be building with it after the
+// atlas has been replaced
 BlockTextureProvider BlockAtlas::createProvider() const {
-    return [this](BlockTypeId id, Face face) {
-        return this->getUV(id, face);
+    auto textures = std::make_shared<const std::unordered_map<uint32_t, BlockTextureInfo>>(blockTextures_);
+    auto fallback = defaultTexture_;
+    return [textures, fallback](BlockTypeId id, Face face) {
+        auto it = textures->find(id.id);
+        return (it != textures->end() ? it->second : fallback).get(face).bounds();
     };
+}
+
+bool BlockAtlas::sameLayout(const BlockAtlas& other) const {
+    auto same = [](const BlockFaceTexture& a, const BlockFaceTexture& b) {
+        return a.uvMin == b.uvMin && a.uvMax == b.uvMax;
+    };
+    if (blockTextures_.size() != other.blockTextures_.size() ||
+        namedTextures_.size() != other.namedTextures_.size()) {
+        return false;
+    }
+    for (const auto& [id, info] : blockTextures_) {
+        auto it = other.blockTextures_.find(id);
+        if (it == other.blockTextures_.end()) return false;
+        for (int f = 0; f < 6; ++f) {
+            if (!same(info.faces[f], it->second.faces[f])) return false;
+        }
+    }
+    for (const auto& [name, tex] : namedTextures_) {
+        auto it = other.namedTextures_.find(name);
+        if (it == other.namedTextures_.end() || !same(tex, it->second)) return false;
+    }
+    return true;
 }
 
 }  // namespace finevox::render

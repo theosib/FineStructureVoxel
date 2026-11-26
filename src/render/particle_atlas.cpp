@@ -78,18 +78,26 @@ size_t ParticleAtlas::loadFromDirectory(
     namespace fs = std::filesystem;
     if (!fs::exists(dirPath) || !fs::is_directory(dirPath)) return 0;
 
-    // Collect PNG files (sorted for reproducible packing).
-    std::vector<fs::path> pngs;
+    std::vector<std::pair<std::string, std::string>> files;
     for (const auto& e : fs::directory_iterator(dirPath)) {
         if (!e.is_regular_file()) continue;
         if (e.path().extension() != ".png" && e.path().extension() != ".PNG") continue;
-        pngs.push_back(e.path());
+        files.emplace_back(e.path().stem().string(), e.path().string());
     }
-    if (pngs.empty()) return 0;
-    std::sort(pngs.begin(), pngs.end());
+    return loadFromFiles(device, commandPool, std::move(files));
+}
+
+size_t ParticleAtlas::loadFromFiles(
+    finevk::LogicalDevice* device,
+    finevk::CommandPool* commandPool,
+    std::vector<std::pair<std::string, std::string>> files)
+{
+    if (files.empty()) return 0;
+    // Sorted for reproducible packing
+    std::sort(files.begin(), files.end());
 
     // Square-ish grid that fits every tile.
-    uint32_t tileCount = static_cast<uint32_t>(pngs.size());
+    uint32_t tileCount = static_cast<uint32_t>(files.size());
     uint32_t gridW = static_cast<uint32_t>(std::ceil(std::sqrt(
         static_cast<double>(tileCount))));
     uint32_t gridH = (tileCount + gridW - 1) / gridW;
@@ -103,7 +111,7 @@ size_t ParticleAtlas::loadFromDirectory(
     size_t loaded = 0;
     for (uint32_t i = 0; i < tileCount; ++i) {
         LoadedImage img;
-        if (!loadPng(pngs[i].string(), img)) continue;
+        if (!loadPng(files[i].second, img)) continue;
 
         uint32_t gx = i % gridW;
         uint32_t gy = i / gridW;
@@ -148,7 +156,7 @@ size_t ParticleAtlas::loadFromDirectory(
             cellMaxU - borderU,
             cellMaxV - borderV);
 
-        regions_[pngs[i].stem().string()] = uv;
+        regions_[files[i].first] = uv;
         ++loaded;
     }
 

@@ -96,6 +96,7 @@ add_library(finevox ${FINEVOX_LIB_TYPE}
     src/core/resource_locator.cpp
     src/core/physics.cpp
     src/core/mesh.cpp
+    src/core/texture_packs.cpp
     src/core/block_type.cpp
     src/core/block_model.cpp
     src/core/block_model_loader.cpp
@@ -710,6 +711,7 @@ if(FINEVOX_BUILD_TESTS)
         tests/test_resource_locator.cpp
         tests/test_physics.cpp
         tests/test_mesh.cpp
+        tests/test_texture_packs.cpp
         tests/test_block_type.cpp
         tests/test_block_model.cpp
         tests/test_block_properties.cpp
@@ -844,6 +846,7 @@ if(FINEVOX_BUILD_TESTS)
     # Render tests (separate binary, links finevox_render)
     if(TARGET finevox_render)
         add_executable(finevox_render_tests
+            tests/test_block_atlas.cpp
             tests/test_box_edges.cpp
             tests/test_camera_depth.cpp
             tests/test_cloud_layer.cpp
@@ -859,6 +862,8 @@ if(FINEVOX_BUILD_TESTS)
             finevox_render
             GTest::gtest_main
         )
+        # Tests write PNGs to load (the implementation is in frame_capture.cpp)
+        target_include_directories(finevox_render_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/stb)
 
         # Visual test needs shader SPIR-V built by finevox_shaders and knows
         # the repo source dir so it can locate tests/golden/*.png regardless

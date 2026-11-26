@@ -55,10 +55,17 @@ void WorldRenderer::loadFluidShader(const std::string& fragPath) {
 
 void WorldRenderer::setBlockAtlas(finevk::Texture* atlas) {
     blockAtlas_ = atlas;
+    if (!initialized_ || !blockAtlas_) return;
+    finevk::DescriptorWriter writer(device_);
+    for (VkDescriptorSet set : descriptorSets_) {
+        writer.writeImage(set, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, blockAtlas_->view(), blockSampler_.get());
+    }
+    writer.update();
 }
 
 void WorldRenderer::setTextureProvider(BlockTextureProvider provider) {
-    textureProvider_ = std::move(provider);
+    textureProvider_ = provider;
+    if (meshWorkerPool_) meshWorkerPool_->setBlockTextureProvider(std::move(provider));
 }
 
 namespace {

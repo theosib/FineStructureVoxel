@@ -32,6 +32,7 @@
 | [systems/world.md](systems/world.md) | Block data, chunks, world | `finevox` | Blocks, chunk lifecycle, World API |
 | [systems/persistence.md](systems/persistence.md) | CBOR, region files, IO | `finevox` | Save/load, DataContainer, ResourceLocator |
 | [systems/rendering.md](systems/rendering.md) | WorldRenderer, mesh gen, LOD | `finevox_render` | Rendering, mesh pipeline, fluids rendering |
+| [systems/texture-packs.md](systems/texture-packs.md) | `TexturePacks`, `BlockAtlas` tile sizes, live pack changes | `finevox` / client | Texture packs, higher-resolution art, blending on or off |
 | [systems/lighting.md](systems/lighting.md) | LightEngine, sky/block light, AO | `finevox` | Light propagation, vertex lighting |
 | [systems/physics.md](systems/physics.md) | AABB, collision, raycasting | `finevox` | Entity movement, block raycasting |
 | [systems/events.md](systems/events.md) | UpdateScheduler, BlockHandler, event flow | `finevox` | Block behavior, game tick logic |

@@ -4,6 +4,7 @@
 #include "finevox/core/block_properties.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/content_pack_loader.hpp"
+#include "finevox/core/texture_packs.hpp"
 #include "finevox/core/entity_model.hpp"
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/global_registries.hpp"
@@ -405,8 +406,33 @@ struct GameClient::Impl {
     double cloudDrift = 0.0;
     float clock = 0.0f;  ///< Seconds the world has run here, for things that turn and bob
     void applyDetail();
-    void applyBlend();
-    bool groundBlend = false;  ///< Whether faces spread over their neighbours' (BlockBlend), as a UI script set
+
+    // Texture packs (docs/systems/texture-packs.md)
+    TexturePacks texturePacks;  ///< What the player can draw the game with, and what they chose
+    struct UiTexture {
+        std::string relative;  ///< As the UI script named it
+        fs::path file;         ///< What that was read from, through the pack
+        finegui::TextureHandle handle;
+        finegui::Lifetime lifetime = finegui::FOREVER;  ///< Of the script that loaded it
+    };
+    std::map<std::string, UiTexture> uiTextures;  ///< What ui_texture loaded, by name, to load again with a pack
+    std::string skinRelative;                     ///< What ui_skin last loaded, likewise
+    fs::path skinFile;
+    finegui::Lifetime skinLifetime = finegui::FOREVER;
+    /// A pack a UI script chose, to change to between frames: by then the frame it was chosen in
+    /// has been drawn, and nothing being recorded still holds the old atlases
+    std::optional<std::string> packRequested;
+    bool blending = false;                        ///< Whether the world is meshed with a blend provider
+    [[nodiscard]] fs::path texturePath(const std::string& relative) const {
+        return texturePacks.resolve(contentRoot, relative);
+    }
+    void selectTexturePack(const std::string& id);
+    bool buildBlockAtlas();
+    void buildParticleAtlas();
+    void buildEntityAtlas();
+    void reloadUiTextures();
+    bool loadSkin(const std::string& relative);
+    [[nodiscard]] BlockBlendProvider blendProvider() const;
     std::optional<float> detailPixels;  ///< What a UI script set, over the game's own
     void updateStewardView(float dt);
     void buildGhosts(float dt);
@@ -445,6 +471,13 @@ void GameClient::Impl::setupShell() {
     if (auto loaded = game::GameManifest::load(contentRoot)) manifest = *loaded;
     playerName = options.playerName;
     loadPrefs();
+    {
+        std::vector<fs::path> folders{options.gameRoot / "packs"};
+        if (options.userRoot != options.gameRoot) folders.push_back(options.userRoot / "packs");
+        texturePacks.scan(folders);
+        auto chosen = prefs.find("texture_pack");
+        if (chosen != prefs.end() && chosen->second.isString()) texturePacks.select(chosen->second.toString());
+    }
 
     EngineConfig engineConfig;
     engineConfig.windowTitle = manifest.windowTitle;
@@ -530,6 +563,7 @@ void GameClient::Impl::setupShell() {
             leaveGame(startNew);
             return;
         }
+        if (packRequested) selectTexturePack(*std::exchange(packRequested, std::nullopt));
 
         pumpSession();
 
@@ -861,26 +895,20 @@ void GameClient::Impl::enterWorld() {
     worldRenderer->loadShaders(shaderDir + "chunk.vert.spv", shaderDir + "chunk.frag.spv");
     worldRenderer->loadFluidShader(shaderDir + "fluid.frag.spv");
 
-    atlas = std::make_unique<render::BlockAtlas>();
-    atlas->buildFromTextures(&device, renderer.commandPool(), (contentRoot / "textures").string(),
-                             content->blockTextures(), content->faceTextureNames());
-    content->placeFaceTextures([this](const std::string& name) { return atlas->textureUV(name); });
-    worldRenderer->setBlockAtlas(atlas->texture());
-    worldRenderer->setTextureProvider(atlas->createProvider());
+    buildBlockAtlas();
     worldRenderer->setGeometryProvider(content->geometryProvider());
     worldRenderer->setFarGeometryProvider(content->farGeometryProvider());
     worldRenderer->setFaceOccludesProvider(content->faceOccludesProvider(world));
     worldRenderer->setConnectsProvider(content->connectsProvider(world));
     if (auto tint = content->tintProvider(world)) worldRenderer->setTintProvider(std::move(tint));
-    if (groundBlend) worldRenderer->setBlendProvider(content->blendProvider());
+    {
+        auto blend = blendProvider();
+        blending = bool(blend);
+        worldRenderer->setBlendProvider(std::move(blend));
+    }
     worldRenderer->initialize();
 
-    particleAtlas = std::make_unique<render::ParticleAtlas>();
-    fs::path particleDir = contentRoot / "textures" / "particles";
-    if (particleAtlas->loadFromDirectory(&device, renderer.commandPool(), particleDir.string()) == 0) {
-        particleAtlas->createPlaceholder(&device, renderer.commandPool());
-    }
-    particleAtlas->applyToRegistry(ParticleTypeRegistry::global(), nullptr);
+    buildParticleAtlas();
     particleRenderer = std::make_unique<render::ParticleRenderer>(&device, &renderer, *particles);
     particleRenderer->loadShaders(shaderDir + "particle.vert.spv", shaderDir + "particle.frag.spv");
     particleRenderer->setAtlas(particleAtlas.get());
@@ -899,44 +927,7 @@ void GameClient::Impl::enterWorld() {
         });
 
     models.loadDirectory(contentRoot / "models");
-    {
-        std::vector<std::string> more = manifest.skyMoon;
-        if (!manifest.skySun.empty()) more.push_back(manifest.skySun);
-        // Every block's faces, for whatever an entity holds. Unturned: a held block is small.
-        auto unturned = [](const std::string& name) { return name.substr(0, name.find('@')); };
-        for (const auto& [id, set] : content->blockTextures()) {
-            for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
-                const std::string& name = set.forFace(face);
-                if (!name.empty()) more.push_back(unturned(name));
-            }
-        }
-        if (!manifest.markerTextures.empty()) {
-            std::error_code ec;
-            for (const auto& entry : fs::directory_iterator(contentRoot / "textures" / manifest.markerTextures, ec)) {
-                if (entry.path().extension() == ".png") {
-                    more.push_back(manifest.markerTextures + "/" + entry.path().stem().string());
-                }
-            }
-        }
-        std::sort(more.begin(), more.end());
-        more.erase(std::unique(more.begin(), more.end()), more.end());
-        sceneRenderer->buildEntityAtlas(renderer.commandPool(), (contentRoot / "textures").string(), models,
-                                        more, manifest.itemPictures);
-        for (const auto& [id, set] : content->blockTextures()) {
-            std::array<glm::vec4, 6> faces{};
-            bool all = true;
-            for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
-                auto rect = sceneRenderer->atlasRect(unturned(set.forFace(face)));
-                if (rect) faces[static_cast<size_t>(face)] = *rect;
-                all = all && rect.has_value();
-            }
-            if (all) heldFaces[id] = faces;
-        }
-        if (!manifest.skyClouds.empty()) {
-            render::SceneRenderer::loadCloudMask((contentRoot / "textures" / (manifest.skyClouds + ".png")).string(),
-                                                 clouds);
-        }
-    }
+    buildEntityAtlas();
     EntityTypeRegistry::global().forEachType([this](EntityTypeId id, const EntityTypeDef& def) {
         if (def.model == 0) return;
         const EntityModel* model = models.find(StringInterner::global().lookup(def.model));
@@ -1069,7 +1060,7 @@ void GameClient::Impl::pumpSession() {
 
 std::optional<fs::path> GameClient::Impl::contentPath(std::string_view relative) const {
     if (!net::isSafeContentPath(relative)) return std::nullopt;
-    return contentRoot / std::string(relative);
+    return texturePacks.resolve(contentRoot, relative);
 }
 
 fs::path GameClient::Impl::recentPath() const {
@@ -1408,17 +1399,174 @@ bool GameClient::Impl::handleAction(const ActionResult& result) {
 }
 
 // On a bigger or sharper screen a block is more pixels tall, so detail reaches further
+// Every block face's picture, through the texture pack. True if a texture landed somewhere else
+// than in the atlas it replaces, which can't happen with the same content: tiles go by name
+// (BlockAtlas::sameLayout), so a new pack needs no new meshes.
+bool GameClient::Impl::buildBlockAtlas() {
+    auto built = std::make_unique<render::BlockAtlas>();
+    built->buildFromTextures(&engine->device(), engine->renderer().commandPool(),
+                             [this](const std::string& name) { return texturePath("textures/" + name + ".png").string(); },
+                             content->blockTextures(), content->faceTextureNames());
+    bool moved = false;
+    if (!atlas) {
+        content->placeFaceTextures([&built](const std::string& name) { return built->textureUV(name); });
+        worldRenderer->setTextureProvider(built->createProvider());
+    } else if (!built->sameLayout(*atlas)) {
+        std::cerr << "[client] block textures moved in the atlas with the texture pack\n";
+        worldRenderer->setTextureProvider(built->createProvider());
+        moved = true;
+    }
+    atlas = std::move(built);
+    worldRenderer->setBlockAtlas(atlas->texture());
+    return moved;
+}
+
+void GameClient::Impl::buildParticleAtlas() {
+    auto& renderer = engine->renderer();
+    auto built = std::make_unique<render::ParticleAtlas>();
+    std::vector<std::pair<std::string, std::string>> files;
+    for (const auto& name : texturePacks.list(contentRoot, "textures/particles", ".png")) {
+        files.emplace_back(name, texturePath("textures/particles/" + name + ".png").string());
+    }
+    if (built->loadFromFiles(&engine->device(), renderer.commandPool(), std::move(files)) == 0) {
+        built->createPlaceholder(&engine->device(), renderer.commandPool());
+    }
+    built->applyToRegistry(ParticleTypeRegistry::global(), nullptr);
+    if (particleRenderer) particleRenderer->setAtlas(built.get());
+    particleAtlas = std::move(built);
+}
+
+// Entity skins, sun and moon, held blocks, markers, item pictures, and clouds
+void GameClient::Impl::buildEntityAtlas() {
+    std::vector<std::string> more = manifest.skyMoon;
+    if (!manifest.skySun.empty()) more.push_back(manifest.skySun);
+    // Every block's faces, for whatever an entity holds. Unturned: a held block is small.
+    auto unturned = [](const std::string& name) { return name.substr(0, name.find('@')); };
+    for (const auto& [id, set] : content->blockTextures()) {
+        for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
+            const std::string& name = set.forFace(face);
+            if (!name.empty()) more.push_back(unturned(name));
+        }
+    }
+    if (!manifest.markerTextures.empty()) {
+        for (const auto& name : texturePacks.list(contentRoot, "textures/" + manifest.markerTextures, ".png")) {
+            more.push_back(manifest.markerTextures + "/" + name);
+        }
+    }
+    std::sort(more.begin(), more.end());
+    more.erase(std::unique(more.begin(), more.end()), more.end());
+    render::SceneRenderer::TextureFiles files;
+    files.path = [this](const std::string& name) { return texturePath("textures/" + name + ".png").string(); };
+    files.list = [this](const std::string& folder) {
+        return texturePacks.list(contentRoot, "textures/" + folder, ".png");
+    };
+    sceneRenderer->buildEntityAtlas(engine->renderer().commandPool(), files, models, more, manifest.itemPictures);
+    heldFaces.clear();
+    for (const auto& [id, set] : content->blockTextures()) {
+        std::array<glm::vec4, 6> faces{};
+        bool all = true;
+        for (Face face : {Face::NegX, Face::PosX, Face::NegY, Face::PosY, Face::NegZ, Face::PosZ}) {
+            auto rect = sceneRenderer->atlasRect(unturned(set.forFace(face)));
+            if (rect) faces[static_cast<size_t>(face)] = *rect;
+            all = all && rect.has_value();
+        }
+        if (all) heldFaces[id] = faces;
+    }
+    if (!manifest.skyClouds.empty()) {
+        render::SceneRenderer::loadCloudMask(texturePath("textures/" + manifest.skyClouds + ".png").string(), clouds);
+    }
+}
+
+// The game's blends, with the pack's over them, or none if the pack doesn't blend
+BlockBlendProvider GameClient::Impl::blendProvider() const {
+    const TexturePack* pack = texturePacks.active();
+    if (!pack || !pack->blending || !content) return nullptr;
+    auto own = content->blendProvider();
+    auto overrides = std::make_shared<std::unordered_map<uint32_t, std::optional<BlockBlend>>>();
+    for (const auto& [name, blend] : pack->blends) {
+        (*overrides)[BlockTypeId::fromName(name).id] = blend;
+        if (!manifest.contentNamespace.empty() && name.find(':') == std::string::npos) {
+            (*overrides)[BlockTypeId::fromName(manifest.contentNamespace + ":" + name).id] = blend;
+        }
+    }
+    if (!own && overrides->empty()) return nullptr;
+    return [own, overrides](BlockTypeId type) -> std::optional<BlockBlend> {
+        if (auto it = overrides->find(type.id); it != overrides->end()) return it->second;
+        return own ? own(type) : std::nullopt;
+    };
+}
+
+// Use a pack from now on, redrawing everything it changes. Between frames only (packRequested): the
+// GPU is idle while the atlases are swapped, so nothing in flight still reads them. A hitch, once.
+void GameClient::Impl::selectTexturePack(const std::string& id) {
+    const TexturePack* before = texturePacks.active();
+    if (id == (before ? before->id : std::string())) return;
+    texturePacks.select(id);
+    const TexturePack* pack = texturePacks.active();
+    prefs["texture_pack"] = Value::string(pack ? pack->id : std::string());
+    savePrefs();
+
+    engine->device().waitIdle();
+    if (inWorld && worldRenderer && content) {
+        bool moved = buildBlockAtlas();
+        buildParticleAtlas();
+        buildEntityAtlas();
+        auto blend = blendProvider();
+        bool remesh = moved || blending || blend;
+        blending = bool(blend);
+        worldRenderer->setBlendProvider(std::move(blend));
+        if (remesh) worldRenderer->rebuildAllMeshesNear(camera.positionD());
+    }
+    reloadUiTextures();
+}
+
+// Load again each picture the UI scripts loaded that the pack changes. What's let go of stays in
+// memory until its script's lifetime ends, as every skin image does.
+void GameClient::Impl::reloadUiTextures() {
+    for (auto& [name, texture] : uiTextures) {
+        fs::path file = texturePath(texture.relative);
+        if (file == texture.file) continue;
+        finegui::LifetimeScope scope(texture.lifetime);
+        finegui::TextureHandle handle;
+        try {
+            handle = gui->loadSkinAtlas(file.string());
+        } catch (const std::exception& error) {
+            std::cerr << "[ui script] texture " << file.string() << " didn't load: " << error.what() << "\n";
+        }
+        if (!handle.valid()) continue;
+        gui->unregisterTexture(texture.handle);
+        textureRegistry->registerTexture(name, handle);
+        texture.file = file;
+        texture.handle = handle;
+    }
+    if (!skinRelative.empty() && texturePath(skinRelative) != skinFile) {
+        finegui::LifetimeScope scope(skinLifetime);
+        loadSkin(skinRelative);
+    }
+}
+
+bool GameClient::Impl::loadSkin(const std::string& relative) {
+    auto found = contentPath(relative);
+    if (!found) return false;
+    std::string error;
+    auto skin = finegui::loadSkin(*gui, *found, *uiEngine, *uiCtx, error);
+    if (!skin) {
+        std::cerr << "[ui script] skin " << found->string() << ": " << error << "\n";
+        return false;
+    }
+    skins.push_back(LoadedSkin{finegui::currentLifetime(), std::move(skin)});
+    finegui::setActiveSkin(activeSkin = skins.back().skin.get());
+    skinRelative = relative;
+    skinFile = *found;
+    skinLifetime = finegui::currentLifetime();
+    return true;
+}
+
 void GameClient::Impl::applyDetail() {
     if (!worldRenderer) return;
     float pixels = detailPixels.value_or(manifest.detailPixels);
     float height = static_cast<float>(engine->window().height());
     worldRenderer->setDetailDistance(DetailRange::forPixels(pixels, height, FOV_DEGREES));
-}
-
-void GameClient::Impl::applyBlend() {
-    if (!worldRenderer || !content) return;
-    worldRenderer->setBlendProvider(groundBlend ? content->blendProvider() : nullptr);
-    worldRenderer->rebuildAllMeshesNear(camera.positionD());
 }
 
 void GameClient::Impl::setEmbodied(bool on) {
@@ -1864,20 +2012,10 @@ void GameClient::Impl::registerNatives() {
     e.registerFunction("ui_skin", [this](ExecutionContext&, const Args& args) -> Value {
         if (args.empty() || !args[0].isString()) {
             finegui::setActiveSkin(activeSkin = nullptr);
+            skinRelative.clear();
             return Value::boolean(true);
         }
-        std::string error;
-        auto found = contentPath(args[0].asString());
-        if (!found) return Value::boolean(false);
-        fs::path path = *found;
-        auto skin = finegui::loadSkin(*gui, path, *uiEngine, *uiCtx, error);
-        if (!skin) {
-            std::cerr << "[ui script] skin " << path.string() << ": " << error << "\n";
-            return Value::boolean(false);
-        }
-        skins.push_back(LoadedSkin{finegui::currentLifetime(), std::move(skin)});
-        finegui::setActiveSkin(activeSkin = skins.back().skin.get());
-        return Value::boolean(true);
+        return Value::boolean(loadSkin(args[0].asString()));
     });
 
     // ui_texture name "ui/x.png" -> true if loaded, for ui.image to show by name
@@ -1899,6 +2037,7 @@ void GameClient::Impl::registerNatives() {
             return Value::boolean(false);
         }
         textureRegistry->registerTexture(args[0].toString(), handle);
+        uiTextures[args[0].toString()] = UiTexture{args[1].toString(), path, handle, finegui::currentLifetime()};
         return Value::boolean(true);
     });
 
@@ -1975,14 +2114,29 @@ void GameClient::Impl::registerNatives() {
         return Value::number(worldRenderer ? worldRenderer->detailDistance() : 0.0);
     });
 
-    // ground_blend [on] -> whether it's on. With on, spreads block faces over their neighbours'
-    // where the blocks have a `blend:` from now on, in this game and the next.
-    e.registerFunction("ground_blend", [this](ExecutionContext&, const Args& args) -> Value {
-        if (!args.empty() && args[0].truthy() != groundBlend) {
-            groundBlend = args[0].truthy();
-            applyBlend();
+    // texture_packs -> [{=id =name =description}], the packs there are to choose from
+    e.registerFunction("texture_packs", [this](ExecutionContext&, const Args&) -> Value {
+        std::vector<Value> list;
+        for (const auto& pack : texturePacks.available()) {
+            Value entry = Value::map();
+            net::setField(entry, "id", Value::string(pack.id));
+            net::setField(entry, "name", Value::string(pack.name));
+            net::setField(entry, "description", Value::string(pack.description));
+            list.push_back(std::move(entry));
         }
-        return Value::boolean(groundBlend);
+        return Value::array(std::move(list));
+    });
+
+    // texture_pack [id] -> the pack in use, "" for none. With an id, draws with that pack from the
+    // next frame on and remembers it, "" going back to the game's own pictures.
+    e.registerFunction("texture_pack", [this](ExecutionContext&, const Args& args) -> Value {
+        if (!args.empty()) {
+            std::string id = args[0].isSymbol() ? std::string(StringInterner::global().lookup(args[0].asSymbol()))
+                                                : args[0].toString();
+            packRequested = id;
+        }
+        const TexturePack* pack = texturePacks.active();
+        return Value::string(packRequested.value_or(pack ? pack->id : std::string()));
     });
 
     e.registerFunction("cam_pos", [this](ExecutionContext&, const Args&) -> Value {
@@ -3078,6 +3232,8 @@ void GameClient::Impl::loadUiScript(const std::string& relative) {
         std::cerr << "[ui script] not found: " << path << "\n";
         return;
     }
+    uiTextures.clear();
+    skinRelative.clear();
     auto* script = uiEngine->loadScript(path);
     auto result = uiEngine->execute(*script, *uiCtx);
     if (!result.success) {

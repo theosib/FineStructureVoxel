@@ -11,6 +11,7 @@
  */
 
 #include <unordered_map>
+#include <functional>
 #include <optional>
 #include "finevox/core/entity_model.hpp"
 #include <finevk/device/sampler.hpp>
@@ -52,6 +53,20 @@ public:
     size_t buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
                             EntityModelRegistry& models, const std::vector<std::string>& more = {},
                             const std::string& pictureDir = {}, int pictureSize = 32);
+
+    /// Where textures are read from: the file for a name (no extension), and the names of the
+    /// pictures in a folder. A texture pack gives its own.
+    struct TextureFiles {
+        std::function<std::string(const std::string& name)> path;
+        std::function<std::vector<std::string>(const std::string& folder)> list;
+        /// Plain files under one folder
+        static TextureFiles under(const std::string& root);
+    };
+
+    /// The same, reading through `files`. Can be called again between frames, once the GPU is idle.
+    size_t buildEntityAtlas(finevk::CommandPool* pool, const TextureFiles& files, EntityModelRegistry& models,
+                            const std::vector<std::string>& more = {}, const std::string& pictureDir = {},
+                            int pictureSize = 32);
 
     /// Read a cloud picture: a pixel is cloud where it isn't mostly clear. False if unreadable.
     static bool loadCloudMask(const std::string& path, CloudMask& mask);

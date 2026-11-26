@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <array>
+#include <functional>
 
 namespace finevox::render {
 
@@ -155,6 +156,11 @@ public:
      * geometry faces that name their own (see textureUV). A name ending in `@90`, `@180` or
      * `@270` is that texture turned clockwise. A strip of frames, taller than it is wide,
      * shows its first frame.
+     *
+     * Tiles are square, as big as the largest picture (a power of two from MIN_TILE to
+     * MAX_TILE), with smaller ones scaled up and bigger ones down. Borders are a sixteenth of a
+     * tile, so where a texture lands, in UVs, depends only on the names placed: two atlases
+     * of the same names at different sizes line up exactly (sameLayout).
      */
     void buildFromTextures(
         finevk::LogicalDevice* device,
@@ -163,6 +169,30 @@ public:
         const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
         const std::vector<std::string>& moreTextures = {}
     );
+
+    /// The file to read for a texture name (no `@` turn, no extension)
+    using TexturePath = std::function<std::string(const std::string& name)>;
+
+    /// The same, finding each picture with `pathOf`, as through a texture pack
+    void buildFromTextures(
+        finevk::LogicalDevice* device,
+        finevk::CommandPool* commandPool,
+        const TexturePath& pathOf,
+        const std::unordered_map<uint32_t, BlockTextureSet>& blocks,
+        const std::vector<std::string>& moreTextures = {}
+    );
+
+    static constexpr int MIN_TILE = 32;
+    static constexpr int MAX_TILE = 128;
+
+    /// The tile size for pictures at most this many pixels across
+    [[nodiscard]] static int tileSizeFor(int largestSide);
+
+    /// The pixel size of a tile built by buildFromTextures
+    [[nodiscard]] int tileSize() const { return tileSize_; }
+
+    /// Whether every block face and named texture is at the same UVs in both
+    [[nodiscard]] bool sameLayout(const BlockAtlas& other) const;
 
     // ========================================================================
     // Texture Mapping
@@ -216,7 +246,8 @@ public:
     [[nodiscard]] const BlockTextureInfo* getTextureInfo(BlockTypeId id) const;
 
     /**
-     * @brief Create a BlockTextureProvider for use with MeshBuilder
+     * @brief Create a BlockTextureProvider for use with MeshBuilder. It keeps its own copy of the
+     * mappings, so it can outlive the atlas.
      */
     [[nodiscard]] BlockTextureProvider createProvider() const;
 
@@ -257,6 +288,7 @@ private:
     uint32_t atlasHeight_ = 0;
     uint32_t gridWidth_ = 1;
     uint32_t gridHeight_ = 1;
+    int tileSize_ = MIN_TILE;
     float borderPixels_ = 2.0f;
     float cellWidth_ = 1.0f;   // UV width of one cell
     float cellHeight_ = 1.0f;  // UV height of one cell

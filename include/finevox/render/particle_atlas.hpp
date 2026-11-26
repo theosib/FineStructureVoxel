@@ -45,6 +45,12 @@ public:
         finevk::CommandPool* commandPool,
         const std::string& dirPath);
 
+    /// The same, from named files: each region is named by the first of its pair, read from the second
+    size_t loadFromFiles(
+        finevk::LogicalDevice* device,
+        finevk::CommandPool* commandPool,
+        std::vector<std::pair<std::string, std::string>> files);
+
     /// Build a 1×1 placeholder white texture — usable for tests and for
     /// engine paths that want particles to draw as tinted quads without any
     /// art assets on disk.  Every region returned is the full [0,1]² rect.

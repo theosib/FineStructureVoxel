@@ -145,7 +145,29 @@ void SceneRenderer::writeTexture() {
     writer.update();
 }
 
+SceneRenderer::TextureFiles SceneRenderer::TextureFiles::under(const std::string& root) {
+    TextureFiles files;
+    files.path = [root](const std::string& name) { return root + "/" + name + ".png"; };
+    files.list = [root](const std::string& folder) {
+        std::vector<std::string> names;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(root + "/" + folder, ec)) {
+            if (entry.path().extension() == ".png") names.push_back(entry.path().stem().string());
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+    return files;
+}
+
 size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::string& textureRoot,
+                                       EntityModelRegistry& models,
+                                       const std::vector<std::string>& more,
+                                       const std::string& pictureDir, int pictureSize) {
+    return buildEntityAtlas(pool, TextureFiles::under(textureRoot), models, more, pictureDir, pictureSize);
+}
+
+size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const TextureFiles& files,
                                        EntityModelRegistry& models,
                                        const std::vector<std::string>& more,
                                        const std::string& pictureDir, int pictureSize) {
@@ -160,7 +182,7 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
     std::vector<std::pair<std::string, std::string>> uses;
     auto add = [&](const std::string& texture) {
         if (byTexture.count(texture)) return;
-        std::string path = textureRoot + "/" + texture + ".png";
+        std::string path = files.path(texture);
         int w = 0, h = 0, n = 0;
         unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
         if (!data) {
@@ -193,13 +215,11 @@ size_t SceneRenderer::buildEntityAtlas(finevk::CommandPool* pool, const std::str
     // Every picture in the folder, small: there can be thousands
     std::vector<std::string> pictures;
     if (!pictureDir.empty() && pictureSize > 0) {
-        std::error_code ec;
-        for (const auto& entry : std::filesystem::directory_iterator(textureRoot + "/" + pictureDir, ec)) {
-            if (entry.path().extension() != ".png") continue;
-            std::string key = pictureDir + "/" + entry.path().stem().string();
+        for (const auto& name : files.list(pictureDir)) {
+            std::string key = pictureDir + "/" + name;
             if (byTexture.count(key)) continue;
             int w = 0, h = 0, n = 0;
-            unsigned char* data = stbi_load(entry.path().string().c_str(), &w, &h, &n, 4);
+            unsigned char* data = stbi_load(files.path(key).c_str(), &w, &h, &n, 4);
             if (!data) continue;
             Image img;
             img.model = key;

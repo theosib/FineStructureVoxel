@@ -88,7 +88,11 @@ public:
 
     /// Point at a ParticleAtlas.  The renderer samples this texture every frame
     /// and does not take ownership — the atlas must outlive the renderer.
-    void setAtlas(const ParticleAtlas* atlas) { atlas_ = atlas; }
+    /// Can be changed between frames once the GPU is idle: the next frame binds the new one
+    void setAtlas(const ParticleAtlas* atlas) {
+        atlas_ = atlas;
+        descriptorsWritten_ = false;
+    }
 
     /// Create descriptor sets, pipeline, and initial mesh buffers.
     void initialize();

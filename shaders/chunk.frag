@@ -62,8 +62,12 @@ layout(push_constant) uniform PushConstants {
 // Lighting constants
 const float DIFFUSE = 0.6;  // Diffuse light strength
 
-// Highest mip the atlas's tile borders support
-const float MAX_ATLAS_MIP = 2.0;
+// Highest mip the atlas's tile borders support. They're a sixteenth of a tile (BlockAtlas), so 2
+// pixels around 32 support mip 2, and each doubling of the tile one more.
+float maxAtlasMip(vec4 tileBounds) {
+    float tilePixels = (tileBounds.z - tileBounds.x) * float(textureSize(blockAtlas, 0).x);
+    return max(log2(tilePixels) - 3.0, 0.0);
+}
 
 // Calculate fog factor based on distance
 // Returns 0.0 (no fog) to 1.0 (full fog)
@@ -171,7 +175,7 @@ vec3 applyBlend(vec3 albedo, vec2 st, float mipLevel) {
         uint packedMin = layer == 0 ? fragBlend.x : fragBlend.y;
         vec2 tileMin = vec2(float(packedMin & 0xFFFFu), float(packedMin >> 16)) / 65535.0;
         vec2 uv = clamp(tileMin + st * tileSize, tileMin + halfTexel, tileMin + tileSize - halfTexel);
-        vec3 color = textureLod(blockAtlas, uv, clamp(mipLevel, 0.0, MAX_ATLAS_MIP)).rgb;
+        vec3 color = textureLod(blockAtlas, uv, clamp(mipLevel, 0.0, maxAtlasMip(fragTileBounds))).rgb;
 
         // Two octaves of noise, a little of the texture's own light and dark so the border
         // follows what's drawn, and an offset per layer so two layers don't share a shape
@@ -201,13 +205,13 @@ void main() {
     // fract() creates a UV discontinuity at wrap points, so the GPU's own derivatives
     // would see a huge jump there and pick the wrong level. Taking derivatives of the
     // unwrapped coordinates avoids that. Sampling only mip 0 instead sparkles badly
-    // from a distance. The clamp stops at the level the atlas's 2-pixel tile borders
-    // can support before neighbouring tiles bleed in.
+    // from a distance. The clamp stops at the level the atlas's tile borders can
+    // support before neighbouring tiles bleed in.
     vec2 texelCoord = fragTexCoord * vec2(textureSize(blockAtlas, 0));
     vec2 dx = dFdx(texelCoord);
     vec2 dy = dFdy(texelCoord);
     float mipLevel = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
-    vec4 texColor = textureLod(blockAtlas, tiledTexCoord, clamp(mipLevel, 0.0, MAX_ATLAS_MIP));
+    vec4 texColor = textureLod(blockAtlas, tiledTexCoord, clamp(mipLevel, 0.0, maxAtlasMip(fragTileBounds)));
 
     // Discard fully transparent pixels
     if (texColor.a < 0.01) {

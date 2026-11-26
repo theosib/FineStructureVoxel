@@ -22,7 +22,7 @@
 | `MeshWorkerPool` | Thread pool for parallel CPU mesh generation |
 | `MeshRebuildQueue` | `KeyedQueue<ChunkPos, MeshRebuildRequest>`: deduplicates by key; pops what's ahead of the eye first (`meshViewPriority`: distance, stretched up to 4x for what's behind, except within 24 blocks; requests under priority 100 share one band). `WorldRenderer` moves the focus and calls `reprioritize()` when the view moves 4 blocks or turns 10 degrees, at most every 100 ms |
 | `MeshCacheEntry` | Per-subchunk: pending mesh, uploaded mesh, version/LOD tracking |
-| `BlockAtlas` | Texture atlas for block face textures |
+| `BlockAtlas` | Texture atlas for block face textures; tiles 32 to 128 pixels, as the pictures are (texture-packs.md) |
 | `LODSubChunk` | Downsampled block storage for LOD levels 1-4 |
 | `FrameFenceWaiter` | Overlaps mesh processing with GPU fence wait (dedicated thread) |
 | `FluidMeshBuilder` | CPU-side fluid mesh; reuses ChunkVertex; stored as `fluidMesh_` in SubChunkView |
@@ -97,8 +97,9 @@ redundant so a straight border's row merges. The cell coordinate is read `centro
 edge pixel is shaded at its centre, past the face, where a coordinate just over 1 wraps to 0 and
 drew a dotted line of the neighbour's texture along the edge.
 
-It's off unless a client sets a provider (`WorldRenderer::setBlendProvider`, from
-`ContentPackLoader::blendProvider`); the `ground_blend` UI native switches it and remeshes.
+It's off unless a client sets a provider (`WorldRenderer::setBlendProvider`). `GameClient` sets one
+while the texture pack in use says `blending: true`, from the blocks' own `blend:` with the pack's
+over them (texture-packs.md).
 Meshing a face costs 8 more block lookups, about what AO costs. Every vertex is 16 bytes bigger
 whether it's on or not. LOD meshes and fluids don't blend.
 

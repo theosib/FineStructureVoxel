@@ -194,6 +194,8 @@ public:
     /**
      * @brief Set the block texture atlas
      * @param atlas Texture containing all block face textures
+     *
+     * After initialize(), only with the GPU idle: it rewrites the descriptors in use.
      */
     void setBlockAtlas(finevk::Texture* atlas);
 

@@ -3,7 +3,8 @@
  * @brief Run a game with no window: for scenario tests and simulation
  *
  *   finevox_headless --game-root DIR [--ticks N] [--seed S] [--radius R]
- *                    [--script FILE]... [--define NAME=VALUE]... [--save DIR | --resume DIR]
+ *                    [--script FILE]... [--define NAME=VALUE]... [--set KEY=VALUE]...
+ *                    [--save DIR | --resume DIR]
  *                    [--mcp] [--mcp-port N] [--mcp-player] [--trace FILE]
  *   finevox_headless --game-root DIR --serve [--config FILE] [--port N]
  *
@@ -84,6 +85,15 @@ int main(int argc, char* argv[]) {
                 return 2;
             }
             options.scriptDefines.emplace_back(define.substr(0, eq), define.substr(eq + 1));
+        } else if (arg == "--set") {
+            // A game.conf setting for this run, as a lobby setting would make it
+            std::string setting = value();
+            auto eq = setting.find('=');
+            if (eq == std::string::npos) {
+                std::cerr << "--set expects KEY=VALUE\n";
+                return 2;
+            }
+            options.manifestOverrides[setting.substr(0, eq)] = setting.substr(eq + 1);
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
             return 2;
@@ -103,7 +113,7 @@ int main(int argc, char* argv[]) {
 
     if (options.gameRoot.empty()) {
         std::cerr << "usage: finevox_headless --game-root DIR [--ticks N] [--seed S] [--radius R]"
-                     " [--script FILE]... [--define NAME=VALUE]...\n";
+                     " [--script FILE]... [--define NAME=VALUE]... [--set KEY=VALUE]...\n";
         return 2;
     }
 

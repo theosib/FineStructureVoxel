@@ -1,4 +1,5 @@
 #include "finevox/core/projectile_system.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
@@ -67,7 +68,9 @@ bool ProjectileSystem::step(Projectile& p, float dt) {
                         static_cast<int32_t>(std::floor(next.y)),
                         static_cast<int32_t>(std::floor(next.z)));
         BlockTypeId block = world_.getBlock(cell);
-        if (!block.isAir() && BlockRegistry::global().getType(block).hasCollision()) {
+        std::optional<bool> ground;  // Where slopes are solid, it's the surface that's hit
+        if (GroundSurface* surface = world_.groundSurface()) ground = surface->solidAt(next);
+        if (ground ? *ground : !block.isAir() && BlockRegistry::global().getType(block).hasCollision()) {
             ProjectileHit hit;
             hit.position = next;
             hit.block = cell;

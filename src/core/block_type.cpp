@@ -1,4 +1,5 @@
 #include "finevox/core/block_type.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/global_registries.hpp"
 #include "finevox/core/block_handler.hpp"
 #include "finevox/core/world.hpp"
@@ -482,6 +483,13 @@ BlockShapeProvider createBlockShapeProvider(World& world) {
     return [&world](const BlockCoord& pos, RaycastMode mode) -> const CollisionShape* {
         // Get block type at position
         BlockTypeId blockType = world.getBlock(pos);
+
+        // Solid slopes, where the world has them: what you walk on, not what you click
+        if (mode != RaycastMode::Interaction) {
+            if (GroundSurface* ground = world.groundSurface()) {
+                if (const CollisionShape* surface = ground->shape(pos, blockType)) return surface;
+            }
+        }
 
         // Air has no collision
         if (blockType.isAir()) {

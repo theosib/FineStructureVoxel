@@ -627,9 +627,12 @@ Vec3 PhysicsSystem::tryStepClimbing(
 ) const {
     Vec3 bestMovement(0.0f);
     float bestHorizDist = 0.0f;
+    // Nothing goes further than all the way, so the first height that does is the one
+    const float fullHorizDist = desiredMovement.x * desiredMovement.x + desiredMovement.z * desiredMovement.z;
 
     // Try different step heights
     for (float stepHeight = 0.0f; stepHeight <= maxStepHeight; stepHeight += 0.0625f) {
+        if (bestHorizDist > 0.0f && bestHorizDist >= fullHorizDist) break;
         AABB steppedBox = entityBox.translated(Vec3(0.0f, stepHeight, 0.0f));
 
         // Check if we can move up to this height
@@ -722,7 +725,21 @@ Vec3 PhysicsSystem::moveBody(PhysicsBody& body, const Vec3& desiredMovement) {
     // Update ground state: we're on ground if we wanted to move down but couldn't
     bool wasMovingDown = desiredMovement.y < -COLLISION_MARGIN;
     bool stoppedByGround = finalMovement.y > desiredMovement.y + COLLISION_MARGIN;
+    bool wasOnGround = body.isOnGround();
     body.setOnGround(wasMovingDown && stoppedByGround);
+
+    // Walking off a small step down: onto the floor below, not into the air over it
+    if (groundSnap_ > 0.0f && wasOnGround && !body.isOnGround() && desiredMovement.y <= 0.0f &&
+        (std::abs(finalMovement.x) > 1e-6f || std::abs(finalMovement.z) > 1e-6f)) {
+        float down = resolveAxisCollision(body.boundingBox(), colliders, 1, -groundSnap_);
+        if (down > -groundSnap_ + COLLISION_MARGIN) {
+            body.setPosition(body.position() + Vec3(0.0f, down, 0.0f));
+            finalMovement.y += down;
+            body.setOnGround(true);
+            Vec3 velocity = body.velocity();
+            if (velocity.y < 0.0f) body.setVelocity(Vec3(velocity.x, 0.0f, velocity.z));
+        }
+    }
 
     return finalMovement;
 }

@@ -187,6 +187,8 @@ public:
     // Check if empty (no collision)
     [[nodiscard]] bool isEmpty() const { return boxes_.empty(); }
 
+    void clear() { boxes_.clear(); }
+
     // Get bounding box of entire shape
     [[nodiscard]] AABB bounds() const;
 
@@ -272,7 +274,8 @@ constexpr float DEFAULT_GRAVITY = 20.0f;
 // ============================================================================
 
 // Callback type for getting collision shape at a block position
-// Returns the collision shape for the block, or nullptr/empty if no collision
+// Returns the collision shape for the block, or nullptr/empty if no collision. A shape made for
+// the one cell (solid slopes) is only good until the next call on the same thread.
 using BlockShapeProvider = std::function<const CollisionShape*(const BlockCoord& pos, RaycastMode mode)>;
 
 // ============================================================================
@@ -405,10 +408,17 @@ public:
     void setMaxStepHeight(float h) { maxStepHeight_ = h; }
     [[nodiscard]] float maxStepHeight() const { return maxStepHeight_; }
 
+    /// How far a body walking on the ground is put down onto it each move, rather than falling.
+    /// Ground with many small steps in it (solid slopes, ground_surface.hpp) wants this, so a
+    /// body walking down it stays on its feet. 0, the default, puts nobody down.
+    void setGroundSnap(float distance) { groundSnap_ = distance; }
+    [[nodiscard]] float groundSnap() const { return groundSnap_; }
+
 private:
     BlockShapeProvider shapeProvider_;
     float gravity_ = DEFAULT_GRAVITY;
     float maxStepHeight_ = MAX_STEP_HEIGHT;
+    float groundSnap_ = 0.0f;
 
     // Resolve collision along one axis
     // Returns the actual movement possible while maintaining COLLISION_MARGIN

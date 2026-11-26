@@ -62,14 +62,19 @@ void FootstepTracker::update(float /*dt*/, const PlayerController& player, glm::
 }
 
 SoundSetId FootstepTracker::getSurfaceSoundSet(glm::dvec3 feetPos) const {
-    // Look at the block directly below the feet
+    // Look at the block directly below the feet: in the cell just under them, which on a slab or
+    // where a solid slope dips is the cell they're in, or under that where a solid slope rises
     BlockCoord blockBelow(
         static_cast<int32_t>(std::floor(feetPos.x)),
-        static_cast<int32_t>(std::floor(feetPos.y)) - 1,
+        static_cast<int32_t>(std::floor(feetPos.y - 0.05)),
         static_cast<int32_t>(std::floor(feetPos.z))
     );
 
     BlockTypeId blockType = world_.getBlock(blockBelow);
+    if (blockType.isAir()) {
+        --blockBelow.y;
+        blockType = world_.getBlock(blockBelow);
+    }
     if (blockType.isAir()) {
         return SoundSetId{};
     }

@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "finevox/core/chunk_column.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/core/subchunk.hpp"
 
@@ -142,6 +143,13 @@ void ClientWorld::apply(const SubchunkData& data) {
         }
     }
 
+    // Written straight into the subchunk, which tells nobody: solid slopes have to hear of it
+    if (GroundSurface* ground = world_.groundSurface(); ground && changed.high[0] >= 0) {
+        const BlockCoord origin(chunk.x * 16, chunk.y * 16, chunk.z * 16);
+        ground->regionChanged(
+            BlockCoord(origin.x + changed.low[0], origin.y + changed.low[1], origin.z + changed.low[2]),
+            BlockCoord(origin.x + changed.high[0], origin.y + changed.high[1], origin.z + changed.high[2]));
+    }
     remesh(chunk, &changed);
 }
 

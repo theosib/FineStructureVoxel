@@ -1,6 +1,7 @@
 #include "finevox/game/game_runtime.hpp"
 
 #include "finevox/game/replication_server.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/chunk_column.hpp"
 #include "finevox/core/entity_manager.hpp"
@@ -204,6 +205,12 @@ void GameRuntime::load() {
     }
 
     World& world = session_->world();
+    if (manifest_.solidSlopes) {
+        if (auto smooth = content_->smoothProvider()) {
+            world.setGroundSurface(std::make_shared<GroundSurface>(world, std::move(smooth)));
+            session_->entities().physics().setGroundSnap(GROUND_SNAP);
+        }
+    }
     scripts_ = std::make_unique<script::GameScriptEngine>(world);
     scripts_->setEntityManager(&session_->entities());
     scripts_->setFluidTickManager(&session_->fluidTicks());

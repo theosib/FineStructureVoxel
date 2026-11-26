@@ -642,6 +642,7 @@ void ClientSession::onGameStarting(const Message& message) {
     info.viewDistance = static_cast<float>(numberField(world, "view_distance", 256.0));
     info.lod = boolField(world, "lod", true);
     info.stepHeight = static_cast<float>(numberField(world, "step_height", 0.6));
+    info.solidSlopes = boolField(world, "solid_slopes");
     info.playerEntity = textField(world, "player_entity");
     info.visionCell = static_cast<int32_t>(intField(world, "vision_cell", 4));
     Value minimum = field(world, "vision_min");

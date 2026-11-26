@@ -113,6 +113,10 @@ std::optional<Pathfinder::Path> Pathfinder::findPath(
         static_cast<int32_t>(std::floor(goal.y)),
         static_cast<int32_t>(std::floor(goal.z))
     };
+    // Feet inside what's underfoot, where a solid slope dips: the cell stood in is the one above
+    if (isSolid(world, startBlock) && !isSolid(world, BlockCoord(startBlock.x, startBlock.y + 1, startBlock.z))) {
+        ++startBlock.y;
+    }
 
     // Quick check: if goal is unreachable
     if (!isWalkable(world, goalBlock, entityWidth, entityHeight)) {

@@ -75,6 +75,7 @@ std::optional<GameManifest> GameManifest::load(const std::filesystem::path& game
     m.navMaxFall = doc->getInt("nav_max_fall", m.navMaxFall);
     m.navMaxWade = doc->getInt("nav_max_wade", m.navMaxWade);
     m.stepHeight = doc->getFloat("step_height", m.stepHeight);
+    m.solidSlopes = doc->getBool("solid_slopes", m.solidSlopes);
     m.walkSpeed = doc->getFloat("walk_speed", m.walkSpeed);
     m.jumpVelocity = doc->getFloat("jump_velocity", m.jumpVelocity);
     m.sneakSpeed = doc->getFloat("sneak_speed", m.sneakSpeed);
@@ -131,6 +132,10 @@ bool GameManifest::applyOverride(std::string_view key, std::string_view value) {
     }
     if (key == "fog_of_war") {
         fogOfWar = value == "true";
+        return true;
+    }
+    if (key == "solid_slopes") {
+        solidSlopes = value == "true";
         return true;
     }
     if (key == "world_biomes") {

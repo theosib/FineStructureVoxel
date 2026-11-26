@@ -132,7 +132,7 @@ const CollisionShape& hshape = type.hitShape(rotation);         // for raycastin
 
 Tries step heights from 0.0 → `maxStepHeight()` in 0.0625-block increments. For each step:
 1. Attempt horizontal movement at given step height
-2. Keep result with most horizontal progress
+2. Keep result with most horizontal progress, stopping at the first height that goes all the way
 
 Applies only when entity is on ground AND has horizontal movement intent.
 
@@ -140,6 +140,41 @@ Applies only when entity is on ground AND has horizontal movement intent.
 - Player: 0.6 blocks (standard 1-block step)
 - Mobs with short legs: may be less
 - Horses etc.: may be higher
+
+---
+
+## Solid slopes
+
+With `solid_slopes: true` in `game.conf`, bodies stand on smoothed ground (rendering.md, "Smooth
+ground") as it's drawn, not on its cubes: a hole a block deep is a dip you walk through, not a
+hole you drop into. `GroundSurface` (`ground_surface.hpp`) does it, set on a World with
+`World::setGroundSurface`. `GameRuntime` sets one on the server's world, and `GameClient` on its own
+for the Steward, whose physics runs there.
+
+- **The shape.** Each smoothed top collides as a 4x4 grid of columns (`GROUND_COLUMNS`), each as
+  high as the surface over its middle, to the nearest 1/16 (`GROUND_QUANTUM`). Where it dips, the
+  block's cell is cut down; where it rises, the open cell above gets the rest. Columns stop a block
+  either way from the face: where steps climb diagonally a corner is drawn up to 0.075 past that.
+- **What still keeps to the grid.** Undersides (ceilings) are drawing only, and picking
+  (`RaycastMode::Interaction`) hits the cubes, so placing and breaking work on whole blocks. Paths
+  are still searched over cells (navigation.hpp); a body whose feet are inside a block where the
+  ground dips starts its search from the cell above, as from a slab.
+- **What follows it.** Anything through `createBlockShapeProvider`: movement, `isClear`,
+  `hasFooting`, collision raycasts (`line_of_sight`). Projectiles hit the surface (`solidAt`).
+- **Walking down.** Going down the slope is many small steps. `PhysicsSystem::setGroundSnap` puts a
+  body that was on the ground back on it after each move, up to `GROUND_SNAP` (half a block) below,
+  rather than have it fall each one. Both runtimes turn it on with solid slopes; it's 0 otherwise.
+- **Stepping up.** Where ground meets something built its edge stays level, but the corners beside
+  it can sit up to half a block lower, so a block up onto it is more than a block from there.
+  Path-following bodies step `GROUND_STEP_EXTRA` (half a block) higher with solid slopes. Routes
+  still only climb a cell at a time.
+- **Kept, and forgotten.** A face's columns are worked out when something first collides with it
+  and kept per column. A face reads one cell across, three below and four above
+  (`groundPatch`), so a change in any of those forgets it: World's block writes, a cell getting wet
+  or drying, a column coming or going, and on a client, each subchunk it's sent. Changes may come
+  from any thread; queries come from the one that runs physics. Working out a face costs about 100
+  cell lookups. `GroundSurface.KeepsUpWithChanges` checks that every face stays as drawn through
+  3000 random changes.
 
 ---
 

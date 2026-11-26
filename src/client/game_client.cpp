@@ -9,6 +9,7 @@
 #include "finevox/core/entity_type_registry.hpp"
 #include "finevox/core/global_registries.hpp"
 #include "finevox/core/graphics_event_queue.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/input_action_system.hpp"
 #include "finevox/core/particle_system.hpp"
 #include "finevox/core/physics.hpp"
@@ -909,6 +910,10 @@ void GameClient::Impl::enterWorld() {
         blending = bool(blend);
         worldRenderer->setBlendProvider(std::move(blend));
     }
+    // Slopes the game's bodies stand on: the Steward too, on what this client knows of the world
+    if (auto smooth = content->smoothProvider(); smooth && worldInfo.solidSlopes) {
+        world.setGroundSurface(std::make_shared<GroundSurface>(world, std::move(smooth)));
+    }
     applySmooth(false);
     worldRenderer->initialize();
 
@@ -963,6 +968,7 @@ void GameClient::Impl::enterWorld() {
 
     stewardShapes = createBlockShapeProvider(world);
     stewardPhysics = std::make_unique<PhysicsSystem>(stewardShapes);
+    if (world.groundSurface()) stewardPhysics->setGroundSnap(GROUND_SNAP);
     stewardBody = std::make_unique<SimplePhysicsBody>(
         Vec3(0.0f, float(worldInfo.seaLevel + 16), 0.0f),
         Vec3(manifest.playerWidth, manifest.playerHeight, manifest.playerWidth) * 0.5f);
@@ -1566,10 +1572,11 @@ bool GameClient::Impl::loadSkin(const std::string& relative) {
     return true;
 }
 
-// Ground drawn smooth or as cubes, and bodies drawn on it, from now on
+// Ground drawn smooth or as cubes, and bodies drawn on it, from now on. Where bodies stand on the
+// slopes, it's drawn smooth whatever the player chose.
 void GameClient::Impl::applySmooth(bool remesh) {
     if (!inWorld || !worldRenderer || !content) return;
-    auto smooth = groundSmooth ? content->smoothProvider() : nullptr;
+    auto smooth = groundSmooth || worldInfo.solidSlopes ? content->smoothProvider() : nullptr;
     session->world().setMeshReach(smooth ? GROUND_REACH_ACROSS : 1, smooth ? GROUND_REACH_UP_DOWN : 1);
     entityRenderer.setGroundFollow(smooth ? groundCells(session->world().world(), smooth) : nullptr,
                                    static_cast<float>(worldInfo.entityRate));
@@ -2131,7 +2138,8 @@ void GameClient::Impl::registerNatives() {
 
     // ground_smooth [on] -> whether it's on. With on, draws the blocks that have `smooth: true`
     // as a smooth surface over their steps, and the bodies on them following it. The choice is
-    // kept for this player, as the smooth_ground pref.
+    // kept for this player, as the smooth_ground pref. A game with solid slopes is drawn smooth
+    // whatever it is (ground_solid).
     e.registerFunction("ground_smooth", [this](ExecutionContext&, const Args& args) -> Value {
         if (!args.empty() && args[0].truthy() != groundSmooth) {
             groundSmooth = args[0].truthy();
@@ -2139,7 +2147,12 @@ void GameClient::Impl::registerNatives() {
             savePrefs();
             applySmooth(true);
         }
-        return Value::boolean(groundSmooth);
+        return Value::boolean(groundSmooth || (inWorld && worldInfo.solidSlopes));
+    });
+
+    // ground_solid -> whether the game in progress has bodies stand on the slopes (solid_slopes)
+    e.registerFunction("ground_solid", [this](ExecutionContext&, const Args&) -> Value {
+        return Value::boolean(inWorld && worldInfo.solidSlopes);
     });
 
     // texture_packs -> [{=id =name =description}], the packs there are to choose from

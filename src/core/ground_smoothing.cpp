@@ -131,18 +131,22 @@ float bernsteinSlope(int i, float t) {
 
 }  // namespace
 
+GroundCell groundCellOf(BlockTypeId type, const std::function<bool(BlockTypeId)>& smooth) {
+    if (type == AIR_BLOCK_TYPE) return GroundCell::Open;
+    const BlockType& block = BlockRegistry::global().getType(type);
+    if (block.isOpaque()) {
+        return smooth(type) && !block.hasCustomMesh() ? GroundCell::Ground : GroundCell::Solid;
+    }
+    // A plant: a shape of its own that nothing bumps into
+    if (block.hasCustomMesh() && !block.hasCollision()) return GroundCell::Open;
+    return GroundCell::Solid;
+}
+
 GroundCellProvider groundCells(const World& world, std::function<bool(BlockTypeId)> smooth) {
     return [&world, smooth = std::move(smooth)](const BlockCoord& pos) {
-        const BlockTypeId type = world.getBlock(pos);
-        const GroundCell open = world.hasFluid(pos) ? GroundCell::Wet : GroundCell::Open;
-        if (type == AIR_BLOCK_TYPE) return open;
-        const BlockType& block = BlockRegistry::global().getType(type);
-        if (block.isOpaque()) {
-            return smooth(type) && !block.hasCustomMesh() ? GroundCell::Ground : GroundCell::Solid;
-        }
-        // A plant: a shape of its own that nothing bumps into
-        if (block.hasCustomMesh() && !block.hasCollision()) return open;
-        return GroundCell::Solid;
+        const GroundCell cell = groundCellOf(world.getBlock(pos), smooth);
+        if (cell != GroundCell::Open) return cell;
+        return world.hasFluid(pos) ? GroundCell::Wet : GroundCell::Open;
     };
 }
 

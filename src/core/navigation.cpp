@@ -1,4 +1,5 @@
 #include "finevox/core/navigation.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/block_type.hpp"
 #include "finevox/core/entity_manager.hpp"
 #include "finevox/core/mob_entity.hpp"
@@ -145,9 +146,10 @@ public:
         : query_(query), probe_(world), clearance_(std::max(1, int(std::ceil(query.entityHeight)))) {
         startCell_ = toCell(query.start);
         goalCell_ = toCell(query.goal);
-        // Standing on a slab puts the feet in its cell. Routes stand in the cell above what's
-        // underfoot, so that's where this one starts.
-        if (probe_.solid(startCell_) && probe_.top(startCell_) < 1.0f && probe_.clear(up(startCell_))) {
+        // Standing on a slab puts the feet in its cell, and so does standing where a solid slope
+        // dips (ground_surface.hpp). Routes stand in the cell above what's underfoot, so that's
+        // where this one starts.
+        if (probe_.solid(startCell_) && probe_.clear(up(startCell_))) {
             startCell_ = up(startCell_);
         }
     }
@@ -569,7 +571,7 @@ void NavigationSystem::runSearches() {
         agent.state = NavState::Moving;
         agent.stuckTime = 0.0f;
         agent.bestDistance = 1e9f;
-        mob->setMaxStepHeight(AGENT_STEP_HEIGHT);
+        mob->setMaxStepHeight(AGENT_STEP_HEIGHT + (world_.groundSurface() ? GROUND_STEP_EXTRA : 0.0f));
         mob->setArriveRadius(BUILD_STANCE_RADIUS / 2.0f);
     }
     nodesLastTick_ = spent;

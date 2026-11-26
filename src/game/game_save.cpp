@@ -235,6 +235,7 @@ bool GameRuntime::saveGame(std::string& error) {
         };
         set("version", integer(SAVE_VERSION));
         set("seed", integer(static_cast<int64_t>(manifest_.worldSeed)));
+        set("solid_slopes", Value::boolean(manifest_.solidSlopes));
         set("title", Value::string(options_.worldTitle.empty() ? target.filename().string() : options_.worldTitle));
         set("saved_at", integer(static_cast<int64_t>(std::time(nullptr))));
         set("tick", integer(static_cast<int64_t>(gameScript_->tickCount())));
@@ -326,6 +327,8 @@ void GameRuntime::loadSavedHeader() {
     if (Value title = get("title"); title.isString() && options_.worldTitle.empty()) {
         options_.worldTitle = std::string(title.asString());
     }
+    // The ground's shape is the world's: it carries on as it was played, whatever's asked now
+    if (Value slopes = get("solid_slopes"); slopes.isBool()) manifest_.solidSlopes = slopes.asBool();
 }
 
 void GameRuntime::loadSavedWorld() {

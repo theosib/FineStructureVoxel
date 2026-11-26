@@ -39,6 +39,9 @@ enum class GroundCell : uint8_t {
 
 using GroundCellProvider = std::function<GroundCell(const BlockCoord&)>;
 
+/// What a block type is to the smoothing, with Open standing for Open or Wet as its cell has fluid
+[[nodiscard]] GroundCell groundCellOf(BlockTypeId type, const std::function<bool(BlockTypeId)>& smooth);
+
 /// The cells of a world, with `smooth` saying which block types smooth
 [[nodiscard]] GroundCellProvider groundCells(const World& world, std::function<bool(BlockTypeId)> smooth);
 

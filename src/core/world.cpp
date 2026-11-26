@@ -1,4 +1,5 @@
 #include "finevox/core/world.hpp"
+#include "finevox/core/ground_surface.hpp"
 #include "finevox/core/column_manager.hpp"
 #include "finevox/core/light_engine.hpp"
 #include "finevox/core/event_queue.hpp"
@@ -407,10 +408,13 @@ bool World::setFluid(BlockCoord pos, FluidTypeId type, uint8_t level) {
     SubChunk& sub = it->second->getOrCreateSubChunk(chunkPos.y);
 
     auto local = pos.local();
+    const bool wasWet = !sub.getFluid(local.x, local.y, local.z).isEmpty();
     bool changed = sub.setFluid(local.x, local.y, local.z, type, level);
     if (changed && columnManager_) {
         columnManager_->markDirty(colPos);
     }
+    // Smoothed ground meets water level, so its shape changes where a cell gets wet or dries
+    if (changed && wasWet == type.isEmpty()) groundChanged(pos);
     return changed;
 }
 
@@ -425,6 +429,7 @@ bool World::removeFluid(BlockCoord pos) {
     if (changed && columnManager_) {
         columnManager_->markDirty(blockToColumn(pos));
     }
+    if (changed) groundChanged(pos);
     return changed;
 }
 
@@ -631,13 +636,24 @@ void World::notifyBlocksMoved(std::span<const BlockMove> moves) {
     for (const auto& o : observers_) o->blocksMoved(moves);
 }
 
+void World::setGroundSurface(std::shared_ptr<GroundSurface> surface) {
+    groundSurface_.store(surface.get(), std::memory_order_release);
+    if (surface) groundSurfaces_.push_back(std::move(surface));
+}
+
+void World::groundChanged(BlockCoord pos) {
+    if (GroundSurface* ground = groundSurface()) ground->cellChanged(pos);
+}
+
 void World::notifyColumnAdded(ColumnPos pos) {
+    if (GroundSurface* ground = groundSurface()) ground->columnChanged(pos);
     if (!hasObservers_.load(std::memory_order_acquire)) return;
     std::lock_guard lock(observersMutex_);
     for (const auto& o : observers_) o->columnAdded(pos);
 }
 
 void World::notifyColumnRemoved(ColumnPos pos) {
+    if (GroundSurface* ground = groundSurface()) ground->columnChanged(pos);
     if (!hasObservers_.load(std::memory_order_acquire)) return;
     std::lock_guard lock(observersMutex_);
     for (const auto& o : observers_) o->columnRemoved(pos);

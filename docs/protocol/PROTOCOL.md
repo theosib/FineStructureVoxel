@@ -178,8 +178,9 @@ Lobby     = {start: :lobby/:immediate, launch: :host/:vote/:auto, late_join: :ne
 Setting   = {key: text, type: :choice/:int/:bool/:text, label: text, default: any,
              choices?: [{value: any, label: text}], min?: int, max?: int}
 WorldInfo = {radius: int, sea_level: int, tick_rate: int, entity_rate: int, fog: bool,
-             view_distance: f64, lod: bool, step_height: f64, player_entity: text, vision_cell: int,
-             vision_min: [int,int], vision_cells: [int,int], resumed: bool, client_state?: any}
+             view_distance: f64, lod: bool, step_height: f64, solid_slopes: bool,
+             player_entity: text, vision_cell: int, vision_min: [int,int], vision_cells: [int,int],
+             resumed: bool, client_state?: any}
 ```
 
 `label`s are localization keys, resolved with the game's `lang/` files. `entity_rate` is how often

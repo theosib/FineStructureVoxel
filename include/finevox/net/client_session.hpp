@@ -65,6 +65,7 @@ struct WorldInfo {
     float viewDistance = 256.0f;
     bool lod = true;
     float stepHeight = 0.6f;
+    bool solidSlopes = false;  ///< GameManifest::solidSlopes
     std::string playerEntity;
     int32_t visionCell = 4;
     int32_t visionMinX = 0;

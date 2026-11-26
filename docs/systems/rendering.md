@@ -104,8 +104,10 @@ Meshing a face costs 8 more block lookups, about what AO costs. Every vertex is 
 whether it's on or not. LOD meshes and fluids don't blend.
 
 **Smooth ground** (`ground_smoothing.hpp`): a cube with `smooth: true` in its `.model` has its open
-top and underside drawn as a curved surface over the steps around it. It's drawing only: collision,
-paths and the server keep the blocks, so a step of two still can't be walked up.
+top and underside drawn as a curved surface over the steps around it. On its own it's drawing only:
+collision, paths and the server keep the blocks, so a step of two still can't be walked up. A game
+with `solid_slopes` makes the tops solid as well (physics.md, "Solid slopes"), and then every client
+draws them smoothed.
 
 - **The shape.** Each face is a quadratic B-spline over the column heights, held as a 3x3 Bezier
   patch (`GroundPatch`): the middle is the face's own height, each edge the mean of it and the

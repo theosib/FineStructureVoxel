@@ -61,6 +61,9 @@ struct GameManifest {
     int navMaxFall = 3;           ///< Largest drop path-following units will take
     int navMaxWade = -1;          ///< Deepest water they walk through, in blocks; -1 for any
     float stepHeight = 0.6f;      ///< Highest ledge the player walks up without jumping
+    /// Bodies stand on `smooth` ground as it's drawn smoothed, not on its cubes, and every client
+    /// draws it so (ground_surface.hpp)
+    bool solidSlopes = false;
     float walkSpeed = 4.5f;       ///< First-person walking speed in blocks/second
     float jumpVelocity = 7.0f;    ///< First-person vertical jump velocity in blocks/second
     float sneakSpeed = 0.4f;      ///< Walking speed while sneaking, as a fraction of walkSpeed

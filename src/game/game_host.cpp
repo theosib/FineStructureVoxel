@@ -1094,6 +1094,7 @@ Value GameHost::worldInfoValue(const Peer& peer) const {
     setField(world, "view_distance", Value::number(manifest.viewDistance));
     setField(world, "lod", Value::boolean(manifest.lod));
     setField(world, "step_height", Value::number(manifest.stepHeight));
+    setField(world, "solid_slopes", Value::boolean(manifest.solidSlopes));
     setField(world, "player_entity", Value::string(manifest.playerEntity));
     setField(world, "vision_cell", Value::integer(FactionVision::CELL_SIZE));
     setField(world, "vision_min",

@@ -35,6 +35,7 @@ class ColumnManager;
 class LightEngine;
 class UpdateScheduler;
 class FluidTickManager;
+class GroundSurface;
 struct LightingUpdate;
 struct BlockChange;  // Defined in batch_builder.hpp
 
@@ -323,6 +324,12 @@ public:
     void notifyColumnAdded(ColumnPos pos);
     void notifyColumnRemoved(ColumnPos pos);
 
+    /// Make smoothed ground solid (ground_surface.hpp), or null to keep it cubes. Set it before
+    /// anything collides; one set stays alive with the world, as other threads may still be
+    /// telling it of changes.
+    void setGroundSurface(std::shared_ptr<GroundSurface> surface);
+    [[nodiscard]] GroundSurface* groundSurface() const { return groundSurface_.load(std::memory_order_acquire); }
+
     /// Attach optional FluidTickManager for fluid notifications on direct/script mutations
     void setFluidTickManager(FluidTickManager* ftm) { fluidTickManager_ = ftm; }
     [[nodiscard]] FluidTickManager* fluidTickManager() { return fluidTickManager_; }
@@ -377,10 +384,15 @@ private:
     std::vector<std::shared_ptr<BlockObserver>> observers_;
     std::atomic<bool> hasObservers_{false};
     void notifyLocked(BlockCoord pos) {
+        if (groundSurface_.load(std::memory_order_acquire)) groundChanged(pos);
         if (!hasObservers_.load(std::memory_order_acquire)) return;
         std::lock_guard lock(observersMutex_);
         for (const auto& o : observers_) o->blockChanged(pos);
     }
+
+    std::atomic<GroundSurface*> groundSurface_{nullptr};
+    std::vector<std::shared_ptr<GroundSurface>> groundSurfaces_;  ///< Every one set, kept for writers still in one
+    void groundChanged(BlockCoord pos);
 
     // Optional fluid tick manager for fluid simulation notifications (not owned)
     FluidTickManager* fluidTickManager_ = nullptr;

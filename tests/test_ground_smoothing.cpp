@@ -10,6 +10,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -536,4 +537,53 @@ TEST(GroundSmoothing, MeshBendsOnlyWhatCurves) {
     // Away from the step it's the same flat ground as before, merged as before
     EXPECT_GT(bent.triangleCount(), cubes.triangleCount());
     EXPECT_LT(bent.triangleCount(), cubes.triangleCount() + 16 * 2 * 9 + 64);
+}
+
+// Ground level with something built beside it keeps its edge there level, but its corners can dip.
+// What shows down to them is the built thing's side, and it's drawn as that, not as the ground's.
+TEST(GroundSmoothing, ABuiltBlocksSideShowsWhereGroundBesideItDips) {
+    const BlockTypeId ground = BlockTypeId::fromName("test:smooth_ground");
+    const BlockTypeId post = BlockTypeId::fromName("test:built_post");
+    const glm::vec4 groundTile(0.0f, 0.0f, 0.25f, 0.25f), postTile(0.5f, 0.5f, 0.75f, 0.75f);
+    // Ground up to y = 5, one block of it a step higher at (8, 5, 7), against a post at (8, 5, 8)
+    std::map<BlockCoord, BlockTypeId> blocks;
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            for (int y = 0; y < 5; ++y) blocks[BlockCoord(x, y, z)] = ground;
+        }
+    }
+    blocks[BlockCoord(8, 5, 7)] = ground;
+    blocks[BlockCoord(8, 5, 8)] = post;
+    auto at = [&](const BlockCoord& p) {
+        auto it = blocks.find(p);
+        return it == blocks.end() ? AIR_BLOCK_TYPE : it->second;
+    };
+    Terrain t{[](int, int) { return 0; }, [&](const BlockCoord& p) {
+                  const BlockTypeId b = at(p);
+                  return b == ground ? GroundCell::Ground : b == post ? GroundCell::Solid : GroundCell::Open;
+              }};
+    const auto raised = groundPatch(t.cells(), BlockCoord(8, 5, 7), 1);
+    ASSERT_TRUE(raised.has_value());
+    ASSERT_EQ(raised->edge[GROUND_EDGE_Z_HIGH], GroundEdge::Pin);
+    ASSERT_LT(raised->edgeHeight(GROUND_EDGE_Z_HIGH, 0.0f), 0.0f) << "no dip by the post, so this checks nothing";
+
+    SubChunk sub;
+    for (const auto& [p, b] : blocks) sub.setBlock(p.x, p.y, p.z, b);
+    MeshBuilder builder;
+    builder.setGroundSmoothing(t.cells(), at);
+    BlockOpaqueProvider opaque = [&](const BlockCoord& p) { return !at(p).isAir(); };
+    MeshData mesh = builder.buildSubChunkMesh(sub, ChunkPos(0, 0, 0), opaque, [&](BlockTypeId b, Face) {
+        return b == post ? postTile : groundTile;
+    });
+
+    // Facing back over the ground, in the plane of the post's near side, below its top
+    int postSide = 0, groundSide = 0;
+    for (const ChunkVertex& v : mesh.vertices) {
+        if (v.normal != glm::vec3(0, 0, -1) || std::abs(v.position.z - 8.0f) > 1e-4f) continue;
+        if (v.position.x < 8.0f || v.position.x > 9.0f || v.position.y < 5.0f || v.position.y > 6.0f) continue;
+        postSide += v.tileBounds == postTile;
+        groundSide += v.tileBounds == groundTile;
+    }
+    EXPECT_GT(postSide, 0) << "nothing drawn where the ground dips below the post";
+    EXPECT_EQ(groundSide, 0) << "the post's side is drawn as the ground's";
 }

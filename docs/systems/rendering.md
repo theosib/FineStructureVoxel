@@ -120,6 +120,8 @@ drawn as the cubes it collides as.
   down, with room over it. `Up` and `Down` are steps of two or more: the face goes half a block
   toward them, so both sides round off and a block of wall stays between. `Pin` is anything else
   (built blocks): the edge stays level, with a wall wherever the corners dip below or rise above it.
+  Where they dip, the wall is the built block's own side showing down to the ground, drawn with its
+  texture (`setGroundSmoothing`'s block lookup), not the ground's.
   Plants count as open, and are raised to the surface under them. So does water: a bank runs down
   into it, and the fluid mesh draws the water's surface over the bank where it dips below it
   (fluids.md, "Banks").

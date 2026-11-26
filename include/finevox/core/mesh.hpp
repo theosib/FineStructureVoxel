@@ -324,8 +324,13 @@ public:
     }
 
     // Draws the open tops and undersides of ground blocks as a smooth surface over their steps
-    // (ground_smoothing.hpp), and plants on them at its height. Null draws cubes.
-    void setGroundSmoothing(GroundCellProvider cells) { groundCells_ = std::move(cells); }
+    // (ground_smoothing.hpp), and plants on them at its height. Null draws cubes. `blockAt` says
+    // what's beside the ground, so where it dips below something built, that block's side is drawn
+    // down to it; without it, the ground's own side is.
+    void setGroundSmoothing(GroundCellProvider cells, BlockTypeProvider blockAt = nullptr) {
+        groundCells_ = std::move(cells);
+        groundBlockAt_ = std::move(blockAt);
+    }
 
     // ========================================================================
     // LOD Mesh Generation
@@ -390,6 +395,7 @@ private:
     BlockTintProvider tintProvider_;
     BlockBlendProvider blendProvider_;
     BlockTypeProvider blockAt_;
+    BlockTypeProvider groundBlockAt_;
     GroundCellProvider groundCells_;
 
     // The ground around the subchunk being built, while a build with smoothing on runs

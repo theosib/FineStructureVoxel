@@ -1814,8 +1814,19 @@ void MeshBuilder::buildSmoothGround(MeshData& mesh, const SubChunk& subChunk, Ch
                         strip.tint = cubeTint(type, EDGE_FACE[e], pos);
                         if (outward) emitSmoothWall(mesh, local, pos.y, EDGE_FACE[e], out, strip);
                         if (inward) {
+                            // The side of what's in the cell beside, showing down to where this dips:
+                            // a palisade's own logs, not this ground's side
+                            const Face facing = oppositeFace(EDGE_FACE[e]);
+                            const BlockCoord at(pos.x + EDGE_STEP[e][0], pos.y, pos.z + EDGE_STEP[e][1]);
+                            SmoothLook side = strip;
+                            const BlockTypeId there = groundBlockAt_ ? groundBlockAt_(at) : AIR_BLOCK_TYPE;
+                            const BlockGeometry* shape = there.isAir() ? nullptr : geometryFor(there);
+                            if (!there.isAir() && (!shape || shape->isEmpty())) {
+                                side.uv = textureProvider(there, facing);
+                                side.tint = cubeTint(there, facing, at);
+                            }
                             const glm::vec3 beside = local + glm::vec3(float(EDGE_STEP[e][0]), 0.0f, float(EDGE_STEP[e][1]));
-                            emitSmoothWall(mesh, beside, pos.y, oppositeFace(EDGE_FACE[e]), back, strip);
+                            emitSmoothWall(mesh, beside, pos.y, facing, back, side);
                         }
                     }
                 }

@@ -178,7 +178,8 @@ bool MeshWorkerPool::buildMesh(ChunkPos pos, const MeshRebuildRequest& request) 
             builder.setBlending(blendProvider, [this](const BlockCoord& p) { return world_.getBlock(p); });
         }
         if (smoothProvider) {
-            builder.setGroundSmoothing(groundCells(world_, std::move(smoothProvider)));
+            builder.setGroundSmoothing(groundCells(world_, std::move(smoothProvider)),
+                                       [this](const BlockCoord& p) { return world_.getBlock(p); });
         }
         if (faceOccludesProvider) {
             builder.setFaceOccludesProvider(faceOccludesProvider);

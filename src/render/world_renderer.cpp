@@ -1003,7 +1003,11 @@ void WorldRenderer::setBlendProvider(BlockBlendProvider provider) {
 
 void WorldRenderer::setSmoothProvider(std::function<bool(BlockTypeId)> provider) {
     smoothProvider_ = provider;
-    meshBuilder_.setGroundSmoothing(provider ? groundCells(world_, provider) : nullptr);
+    if (provider) {
+        meshBuilder_.setGroundSmoothing(groundCells(world_, provider), [this](const BlockCoord& p) { return world_.getBlock(p); });
+    } else {
+        meshBuilder_.setGroundSmoothing(nullptr);
+    }
     if (meshWorkerPool_) {
         meshWorkerPool_->setSmoothProvider(std::move(provider));
     }

@@ -4,10 +4,10 @@
  * @file ground_surface.hpp
  * @brief Smoothed ground made solid: bodies stand on the slopes as they're drawn
  *
- * Where a world has one (World::setGroundSurface), the open top of every `smooth` block collides
- * as its smoothed surface (ground_smoothing.hpp) rather than as the cube: a grid of columns, each
- * as high as the surface over its middle. Where the surface dips, the block's cell is cut down;
- * where it rises, the open cell above gets the rest. Undersides stay drawing only, and picking
+ * Where a world has one (World::setGroundSurface), the open faces of every `smooth` block, its top
+ * and its underside, collide as its smoothed surface (ground_smoothing.hpp) rather than as the cube:
+ * a grid of columns, each as high as the surface over its middle. Where the surface goes into the
+ * block, its cell is cut away; where it comes out, the open cell beside gets the rest. Picking
  * (RaycastMode::Interaction) still hits the cubes, so placing and breaking keep to the grid.
  *
  * A face's columns are worked out the first time something collides with it and kept until a
@@ -73,13 +73,26 @@ public:
     [[nodiscard]] size_t facesKept() const;
 
 private:
-    /// A face's column heights above its block's top, in GROUND_QUANTUMs, [x][z]
+    /// A face's column heights out from it (up from a top, down from an underside), in
+    /// GROUND_QUANTUMs, [x][z]
     struct Face {
         std::array<std::array<int8_t, GROUND_COLUMNS>, GROUND_COLUMNS> height{};
-        bool dips = false;   ///< Some column is lower than the block's top
-        bool rises = false;  ///< Some column is higher
+        bool intoBlock = false;  ///< Some column goes into the face's own block
+        bool intoOpen = false;   ///< Some column comes out into the open cell it looks into
     };
     using Faces = std::unordered_map<uint32_t, Face>;
+    struct Column {
+        Faces tops;
+        Faces undersides;
+    };
+
+    /// What's solid up each column of a cell, in the cell's own heights: one run in a ground
+    /// block, cut from above or below, and up to two in an open cell, ground rising into it from
+    /// below and hanging into it from above
+    struct Solid {
+        std::array<std::array<std::array<glm::vec2, 2>, GROUND_COLUMNS>, GROUND_COLUMNS> runs{};
+        std::array<std::array<uint8_t, GROUND_COLUMNS>, GROUND_COLUMNS> count{};
+    };
 
     /// The cells to forget the faces of, inclusive, by the block under each face
     struct Range {
@@ -89,8 +102,10 @@ private:
 
     [[nodiscard]] GroundCell cellAt(const BlockCoord& pos);
     [[nodiscard]] GroundCell typeClass(BlockTypeId type);
-    /// The top face of a Ground block that's open above
-    [[nodiscard]] const Face& face(const BlockCoord& block);
+    /// The top (up 1) or underside (up -1) of a Ground block that's open that way
+    [[nodiscard]] const Face& face(const BlockCoord& block, int up);
+    /// Where the surface changes a cell from its block's own shape, what's solid in it
+    [[nodiscard]] std::optional<Solid> solidIn(BlockCoord pos, BlockTypeId type);
     void catchUp();
     void forget(const Range& range);
 
@@ -103,7 +118,7 @@ private:
         GroundCell cell = GroundCell::Open;
     };
     std::array<TypeSlot, 64> types_{};
-    std::unordered_map<uint64_t, Faces> columns_;
+    std::unordered_map<uint64_t, Column> columns_;
 
     std::mutex pendingMutex_;
     std::vector<Range> pending_;

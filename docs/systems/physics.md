@@ -151,12 +151,18 @@ hole you drop into. `GroundSurface` (`ground_surface.hpp`) does it, set on a Wor
 `World::setGroundSurface`. `GameRuntime` sets one on the server's world, and `GameClient` on its own
 for the Steward, whose physics runs there.
 
-- **The shape.** Each smoothed top collides as a 4x4 grid of columns (`GROUND_COLUMNS`), each as
-  high as the surface over its middle, to the nearest 1/16 (`GROUND_QUANTUM`). Where it dips, the
-  block's cell is cut down; where it rises, the open cell above gets the rest. Columns stop a block
-  either way from the face: where steps climb diagonally a corner is drawn up to 0.075 past that.
-- **What still keeps to the grid.** Undersides (ceilings) are drawing only, and picking
-  (`RaycastMode::Interaction`) hits the cubes, so placing and breaking work on whole blocks. Paths
+- **The shape.** Each smoothed top and underside collides as a 4x4 grid of columns
+  (`GROUND_COLUMNS`), each as far out as the surface over its middle, to the nearest 1/16
+  (`GROUND_QUANTUM`). Where the surface goes into its block, the block's cell is cut away; where it
+  comes out, the open cell it faces gets the rest. An open cell can have both, ground rising from
+  below and hanging from above. A block a cell thick keeps its two faces each on its own half, and
+  where they meet it keeps a sixteenth of a block, not a hole. Columns stop a block either way from
+  the face: where steps climb diagonally a corner is drawn up to 0.075 past that.
+- **Ceilings.** Heads meet a ceiling as it's drawn. Bodies are boxes, so in a tunnel two high whose
+  floor and ceiling slope together, a body touches the floor at its uphill edge and the ceiling at
+  its downhill one, and has less room than on cubes. Paths don't know that (below).
+- **What still keeps to the grid.** Picking (`RaycastMode::Interaction`) hits the cubes, so placing
+  and breaking work on whole blocks. Paths
   are still searched over cells (navigation.hpp); a body whose feet are inside a block where the
   ground dips starts its search from the cell above, as from a slab.
 - **What follows it.** Anything through `createBlockShapeProvider`: movement, `isClear`,
@@ -169,8 +175,8 @@ for the Steward, whose physics runs there.
   Path-following bodies step `GROUND_STEP_EXTRA` (half a block) higher with solid slopes. Routes
   still only climb a cell at a time.
 - **Kept, and forgotten.** A face's columns are worked out when something first collides with it
-  and kept per column. A face reads one cell across, three below and four above
-  (`groundPatch`), so a change in any of those forgets it: World's block writes, a cell getting wet
+  and kept per column. A face reads one cell across, and three behind and four in front of it
+  (`groundPatch`), so a change within four up or down forgets it: World's block writes, a cell getting wet
   or drying, a column coming or going, and on a client, each subchunk it's sent. Changes may come
   from any thread; queries come from the one that runs physics. Working out a face costs about 100
   cell lookups. `GroundSurface.KeepsUpWithChanges` checks that every face stays as drawn through

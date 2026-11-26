@@ -9,12 +9,12 @@ namespace finevox {
 
 namespace {
 
-// The cells a top face reads (groundPatch), from its block: one across, three below, four above.
-// The corners follow links a cell up or down from the columns beside, and the diagonal one a
-// cell further, and each looks a cell below itself and two above.
+// The cells a face reads (groundPatch), from its block: one across, and three behind it and four
+// out in front, which for a top is below and above, and for an underside the other way round. The
+// corners follow links a cell up or down from the columns beside, and the diagonal one a cell
+// further, and each looks a cell behind itself and two out.
 constexpr int READS_ACROSS = 1;
-constexpr int READS_BELOW = 3;
-constexpr int READS_ABOVE = 4;
+constexpr int READS_UP_DOWN = 4;
 
 // Past this many changes waiting, forgetting every face is quicker than going through them
 constexpr size_t MAX_PENDING = 4096;
@@ -42,8 +42,8 @@ void GroundSurface::cellChanged(BlockCoord pos) {
 }
 
 void GroundSurface::regionChanged(BlockCoord low, BlockCoord high) {
-    Range range{BlockCoord(low.x - READS_ACROSS, low.y - READS_ABOVE, low.z - READS_ACROSS),
-                BlockCoord(high.x + READS_ACROSS, high.y + READS_BELOW, high.z + READS_ACROSS)};
+    Range range{BlockCoord(low.x - READS_ACROSS, low.y - READS_UP_DOWN, low.z - READS_ACROSS),
+                BlockCoord(high.x + READS_ACROSS, high.y + READS_UP_DOWN, high.z + READS_ACROSS)};
     std::lock_guard lock(pendingMutex_);
     if (pending_.size() >= MAX_PENDING) {
         pending_.clear();
@@ -81,7 +81,6 @@ void GroundSurface::forget(const Range& range) {
         for (int32_t cz = lo.z >> 4; cz <= hi.z >> 4; ++cz) {
             auto column = columns_.find(ColumnPos(cx, cz).pack());
             if (column == columns_.end()) continue;
-            Faces& faces = column->second;
             const int32_t x0 = std::max(lo.x, cx * 16), x1 = std::min(hi.x, cx * 16 + 15);
             const int32_t z0 = std::max(lo.z, cz * 16), z1 = std::min(hi.z, cz * 16 + 15);
             const bool wholeColumn = x0 == cx * 16 && x1 == cx * 16 + 15 && z0 == cz * 16 && z1 == cz * 16 + 15;
@@ -89,23 +88,25 @@ void GroundSurface::forget(const Range& range) {
                 columns_.erase(column);
                 continue;
             }
-            const int64_t cells = int64_t(x1 - x0 + 1) * (z1 - z0 + 1) * (int64_t(hi.y) - lo.y + 1);
-            if (cells <= static_cast<int64_t>(faces.size())) {
-                for (int32_t y = lo.y; y <= hi.y; ++y) {
-                    for (int32_t z = z0; z <= z1; ++z) {
-                        for (int32_t x = x0; x <= x1; ++x) faces.erase(faceKey(BlockCoord(x, y, z)));
+            for (Faces* faces : {&column->second.tops, &column->second.undersides}) {
+                const int64_t cells = int64_t(x1 - x0 + 1) * (z1 - z0 + 1) * (int64_t(hi.y) - lo.y + 1);
+                if (cells <= static_cast<int64_t>(faces->size())) {
+                    for (int32_t y = lo.y; y <= hi.y; ++y) {
+                        for (int32_t z = z0; z <= z1; ++z) {
+                            for (int32_t x = x0; x <= x1; ++x) faces->erase(faceKey(BlockCoord(x, y, z)));
+                        }
                     }
+                } else {
+                    std::erase_if(*faces, [&](const auto& entry) {
+                        const uint32_t key = entry.first;
+                        const int32_t y = static_cast<int32_t>(key) >> 8;
+                        const int32_t x = cx * 16 + int32_t(key & 0xF);
+                        const int32_t z = cz * 16 + int32_t((key >> 4) & 0xF);
+                        return y >= lo.y && y <= hi.y && x >= x0 && x <= x1 && z >= z0 && z <= z1;
+                    });
                 }
-            } else {
-                std::erase_if(faces, [&](const auto& entry) {
-                    const uint32_t key = entry.first;
-                    const int32_t y = static_cast<int32_t>(key) >> 8;
-                    const int32_t x = cx * 16 + int32_t(key & 0xF);
-                    const int32_t z = cz * 16 + int32_t((key >> 4) & 0xF);
-                    return y >= lo.y && y <= hi.y && x >= x0 && x <= x1 && z >= z0 && z <= z1;
-                });
             }
-            if (faces.empty()) columns_.erase(column);
+            if (column->second.tops.empty() && column->second.undersides.empty()) columns_.erase(column);
         }
     }
 }
@@ -122,13 +123,14 @@ GroundCell GroundSurface::cellAt(const BlockCoord& pos) {
     return world_.hasFluid(pos) ? GroundCell::Wet : GroundCell::Open;
 }
 
-const GroundSurface::Face& GroundSurface::face(const BlockCoord& block) {
-    Faces& faces = columns_[ColumnPos::fromBlock(block).pack()];
+const GroundSurface::Face& GroundSurface::face(const BlockCoord& block, int up) {
+    Column& column = columns_[ColumnPos::fromBlock(block).pack()];
+    Faces& faces = up > 0 ? column.tops : column.undersides;
     auto [it, inserted] = faces.try_emplace(faceKey(block));
     Face& f = it->second;
     if (!inserted) return f;
 
-    const auto patch = groundPatch(cells_, block, 1);
+    const auto patch = groundPatch(cells_, block, up);
     if (!patch || patch->flat()) return f;
     for (int i = 0; i < GROUND_COLUMNS; ++i) {
         for (int j = 0; j < GROUND_COLUMNS; ++j) {
@@ -137,49 +139,82 @@ const GroundSurface::Face& GroundSurface::face(const BlockCoord& block) {
             const long q = std::lround(patch->height(u, v) * float(GROUND_QUANTUM));
             const auto h = static_cast<int8_t>(std::clamp<long>(q, -GROUND_QUANTUM, GROUND_QUANTUM));
             f.height[i][j] = h;
-            f.dips |= h < 0;
-            f.rises |= h > 0;
+            f.intoBlock |= h < 0;
+            f.intoOpen |= h > 0;
         }
     }
     return f;
 }
 
-const CollisionShape* GroundSurface::shape(BlockCoord pos, BlockTypeId type) {
+std::optional<GroundSurface::Solid> GroundSurface::solidIn(BlockCoord pos, BlockTypeId type) {
     catchUp();
-    const GroundCell cell = typeClass(type);
-    const Face* f = nullptr;
-    float base = 0.0f;  // What a column's height counts up from, in the cell
-    if (cell == GroundCell::Ground) {
-        if (!isOpen(cellAt(BlockCoord(pos.x, pos.y + 1, pos.z)))) return nullptr;
-        f = &face(pos);
-        if (!f->dips) return nullptr;
-        base = 1.0f;
-    } else if (cell == GroundCell::Open) {
-        const BlockCoord below(pos.x, pos.y - 1, pos.z);
-        if (typeClass(world_.getBlock(below)) != GroundCell::Ground) return nullptr;
-        f = &face(below);
-        if (!f->rises) return nullptr;
-    } else {
-        return nullptr;
-    }
-
-    // In the cell: a dip cuts the block down, a rise stands in the open cell over it
-    auto top = [&](int i, int j) {
-        const float h = float(f->height[i][j]) / float(GROUND_QUANTUM);
-        return base > 0.0f ? base + std::min(h, 0.0f) : std::max(h, 0.0f);
+    auto blocks = [](int8_t h) { return float(h) / float(GROUND_QUANTUM); };
+    Solid solid;
+    auto add = [&](int i, int j, float low, float high) {
+        if (high > low) solid.runs[i][j][solid.count[i][j]++] = glm::vec2(low, high);
     };
+
+    const GroundCell cell = typeClass(type);
+    if (cell == GroundCell::Ground) {
+        // Its own faces: a top cuts it down from above, an underside up from below
+        const Face* top = isOpen(cellAt(BlockCoord(pos.x, pos.y + 1, pos.z))) ? &face(pos, 1) : nullptr;
+        const Face* under = isOpen(cellAt(BlockCoord(pos.x, pos.y - 1, pos.z))) ? &face(pos, -1) : nullptr;
+        if (!(top && top->intoBlock) && !(under && under->intoBlock)) return std::nullopt;
+        for (int i = 0; i < GROUND_COLUMNS; ++i) {
+            for (int j = 0; j < GROUND_COLUMNS; ++j) {
+                float low = under ? std::max(-blocks(under->height[i][j]), 0.0f) : 0.0f;
+                float high = top ? 1.0f + std::min(blocks(top->height[i][j]), 0.0f) : 1.0f;
+                // A block a cell thick keeps its top and underside each on its own half, and they
+                // can meet: drawn, an edge; solid, the thinnest step, or there'd be a hole there
+                constexpr float THINNEST = 1.0f / float(GROUND_QUANTUM);
+                if (high - low < THINNEST) {
+                    const float middle = (low + high) * 0.5f;
+                    low = middle - THINNEST * 0.5f;
+                    high = middle + THINNEST * 0.5f;
+                }
+                add(i, j, low, high);
+            }
+        }
+        return solid;
+    }
+    if (cell != GroundCell::Open) return std::nullopt;
+
+    // The faces round it: ground rising into it from below, and hanging into it from above
+    const BlockCoord below(pos.x, pos.y - 1, pos.z), above(pos.x, pos.y + 1, pos.z);
+    const Face* floor = typeClass(world_.getBlock(below)) == GroundCell::Ground ? &face(below, 1) : nullptr;
+    const Face* roof = typeClass(world_.getBlock(above)) == GroundCell::Ground ? &face(above, -1) : nullptr;
+    if (!(floor && floor->intoOpen) && !(roof && roof->intoOpen)) return std::nullopt;
+    for (int i = 0; i < GROUND_COLUMNS; ++i) {
+        for (int j = 0; j < GROUND_COLUMNS; ++j) {
+            if (floor) add(i, j, 0.0f, std::max(blocks(floor->height[i][j]), 0.0f));
+            if (roof) add(i, j, 1.0f - std::max(blocks(roof->height[i][j]), 0.0f), 1.0f);
+        }
+    }
+    return solid;
+}
+
+const CollisionShape* GroundSurface::shape(BlockCoord pos, BlockTypeId type) {
+    const auto solid = solidIn(pos, type);
+    if (!solid) return nullptr;
     thread_local CollisionShape scratch;
     scratch.clear();
     constexpr float SIDE = 1.0f / float(GROUND_COLUMNS);
+    auto same = [&](int i, int a, int b) {
+        if (solid->count[i][a] != solid->count[i][b]) return false;
+        for (int r = 0; r < solid->count[i][a]; ++r) {
+            if (solid->runs[i][a][r] != solid->runs[i][b][r]) return false;
+        }
+        return true;
+    };
     for (int i = 0; i < GROUND_COLUMNS; ++i) {
-        // Columns as high as the one before make one box
+        // Columns solid over the same heights as the one before make one box
         int j = 0;
         while (j < GROUND_COLUMNS) {
-            const float height = top(i, j);
             int end = j + 1;
-            while (end < GROUND_COLUMNS && top(i, end) == height) ++end;
-            if (height > 0.0f) {
-                scratch.addBox(AABB(float(i) * SIDE, 0.0f, float(j) * SIDE, float(i + 1) * SIDE, height, float(end) * SIDE));
+            while (end < GROUND_COLUMNS && same(i, j, end)) ++end;
+            for (int r = 0; r < solid->count[i][j]; ++r) {
+                const glm::vec2 run = solid->runs[i][j][r];
+                scratch.addBox(AABB(float(i) * SIDE, run.x, float(j) * SIDE, float(i + 1) * SIDE, run.y, float(end) * SIDE));
             }
             j = end;
         }
@@ -188,30 +223,32 @@ const CollisionShape* GroundSurface::shape(BlockCoord pos, BlockTypeId type) {
 }
 
 std::optional<bool> GroundSurface::solidAt(const glm::dvec3& point) {
-    catchUp();
     const BlockCoord cell(static_cast<int32_t>(std::floor(point.x)), static_cast<int32_t>(std::floor(point.y)),
                           static_cast<int32_t>(std::floor(point.z)));
+    const auto solid = solidIn(cell, world_.getBlock(cell));
+    if (!solid) {
+        // A ground block the surface leaves whole, or open ground with nothing reaching into it
+        const GroundCell here = typeClass(world_.getBlock(cell));
+        if (here != GroundCell::Ground && here != GroundCell::Open) return std::nullopt;
+        const bool faced = here == GroundCell::Ground
+            ? isOpen(cellAt(BlockCoord(cell.x, cell.y + 1, cell.z))) || isOpen(cellAt(BlockCoord(cell.x, cell.y - 1, cell.z)))
+            : typeClass(world_.getBlock(BlockCoord(cell.x, cell.y - 1, cell.z))) == GroundCell::Ground ||
+              typeClass(world_.getBlock(BlockCoord(cell.x, cell.y + 1, cell.z))) == GroundCell::Ground;
+        if (!faced) return std::nullopt;
+        return here == GroundCell::Ground;
+    }
     const int i = std::clamp(int((point.x - cell.x) * GROUND_COLUMNS), 0, GROUND_COLUMNS - 1);
     const int j = std::clamp(int((point.z - cell.z) * GROUND_COLUMNS), 0, GROUND_COLUMNS - 1);
-    const double up = point.y - cell.y;
-    const GroundCell here = typeClass(world_.getBlock(cell));
-    if (here == GroundCell::Ground) {
-        if (!isOpen(cellAt(BlockCoord(cell.x, cell.y + 1, cell.z)))) return std::nullopt;
-        const int h = face(cell).height[i][j];
-        return up < 1.0 + double(std::min(h, 0)) / GROUND_QUANTUM;
+    const float up = float(point.y - cell.y);
+    for (int r = 0; r < solid->count[i][j]; ++r) {
+        if (up >= solid->runs[i][j][r].x && up < solid->runs[i][j][r].y) return true;
     }
-    if (here == GroundCell::Open) {
-        const BlockCoord below(cell.x, cell.y - 1, cell.z);
-        if (typeClass(world_.getBlock(below)) != GroundCell::Ground) return std::nullopt;
-        const int h = face(below).height[i][j];
-        return up < double(std::max(h, 0)) / GROUND_QUANTUM;
-    }
-    return std::nullopt;
+    return false;
 }
 
 size_t GroundSurface::facesKept() const {
     size_t count = 0;
-    for (const auto& [key, faces] : columns_) count += faces.size();
+    for (const auto& [key, column] : columns_) count += column.tops.size() + column.undersides.size();
     return count;
 }
 

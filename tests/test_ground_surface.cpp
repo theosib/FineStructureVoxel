@@ -92,9 +92,9 @@ protected:
         return !world->getBlock(BlockCoord(int(std::floor(p.x)), int(std::floor(p.y)), int(std::floor(p.z)))).isAir();
     }
 
-    /// Every drawn top face of a block in [0, size) across and [0, 16) up keeps to the drawn
-    /// surface at the middle of each of its columns, by what's solid and by what a ray straight
-    /// down hits
+    /// Every drawn face of a block in [0, size) across and [0, 16) up, top and underside, keeps to
+    /// the drawn surface at the middle of each of its columns, by what's solid and by what a ray
+    /// from the open side hits
     void expectSurfaceAsDrawn(int size, const std::string& when) {
         int checked = expectSurfaceAsDrawn(BlockCoord(0, 0, 0), BlockCoord(size - 1, 15, size - 1), when);
         EXPECT_GT(checked, size * size * GROUND_COLUMNS * GROUND_COLUMNS / 2) << when;
@@ -106,36 +106,59 @@ protected:
         for (int x = low.x; x <= high.x; ++x) {
             for (int z = low.z; z <= high.z; ++z) {
                 for (int y = low.y; y <= high.y; ++y) {
-                    const BlockCoord block(x, y, z);
-                    const auto patch = drawnTop(block);
-                    if (!patch) continue;
-                    for (int i = 0; i < GROUND_COLUMNS; ++i) {
-                        for (int j = 0; j < GROUND_COLUMNS; ++j) {
-                            const float u = (i + 0.5f) / GROUND_COLUMNS, v = (j + 0.5f) / GROUND_COLUMNS;
-                            const double surface = clampedY(*patch, u, v);
-                            beyondABlock = std::max(beyondABlock, std::abs(patch->worldY(u, v) - surface));
-                            const glm::dvec3 at(x + u, surface, z + v);
-                            EXPECT_TRUE(solid(at - glm::dvec3(0, KEPT_WITHIN, 0)))
-                                << when << ": open under the surface at " << x << "," << y << "," << z << " [" << i
-                                << "][" << j << "], drawn at " << surface;
-                            // Above it is open, unless that's past the cell over the face
-                            const glm::dvec3 over = at + glm::dvec3(0, KEPT_WITHIN, 0);
-                            if (over.y < y + 2) {
-                                EXPECT_FALSE(solid(over)) << when << ": solid over the surface at " << x << "," << y
-                                                          << "," << z << " [" << i << "][" << j << "], drawn at "
-                                                          << surface;
+                    for (int up : {1, -1}) {
+                        const BlockCoord block(x, y, z);
+                        const auto patch = groundPatch(groundCells(*world, smooth), block, up);
+                        if (!patch) continue;
+                        const char* side = up > 0 ? "top" : "underside";
+                        for (int i = 0; i < GROUND_COLUMNS; ++i) {
+                            for (int j = 0; j < GROUND_COLUMNS; ++j) {
+                                const float u = (i + 0.5f) / GROUND_COLUMNS, v = (j + 0.5f) / GROUND_COLUMNS;
+                                const double surface = clampedY(*patch, u, v);
+                                beyondABlock = std::max(beyondABlock, std::abs(patch->worldY(u, v) - surface));
+                                const glm::dvec3 at(x + u, surface, z + v);
+                                const glm::dvec3 out(0, up * KEPT_WITHIN, 0);
+                                // A block a cell thick can have its two faces meet: solid, it's then
+                                // the thinnest step, a little either side of them
+                                double thickness = 1.0;
+                                if (auto back = groundPatch(groundCells(*world, smooth), block, -up)) {
+                                    thickness = std::abs(surface - clampedY(*back, u, v));
+                                }
+                                const bool thin = thickness < 2.0 * KEPT_WITHIN;
+                                EXPECT_TRUE(thin || solid(at - out)) << when << ": open behind the " << side << " at " << x
+                                                             << "," << y << "," << z << " [" << i << "][" << j
+                                                             << "], drawn at " << surface;
+                                // In front of it is open, unless that's past the cell it looks into,
+                                // or past the face across a gap a cell high, which can meet it
+                                const glm::dvec3 front = at + out;
+                                bool inGap = up > 0 ? front.y < y + 2 : front.y > y - 1;
+                                double gap = 1.0;  // To the face across, if there is one
+                                if (auto across = groundPatch(groundCells(*world, smooth), BlockCoord(x, y + 2 * up, z), -up)) {
+                                    const double facing = clampedY(*across, u, v);
+                                    gap = std::abs(facing - surface);
+                                    // Each is kept to within KEPT_WITHIN, so a gap narrower than both can close
+                                    if (gap < 2.0 * KEPT_WITHIN || (up > 0 ? front.y >= facing : front.y <= facing)) {
+                                        inGap = false;
+                                    }
+                                }
+                                if (inGap) {
+                                    EXPECT_FALSE(solid(front)) << when << ": solid in front of the " << side << " at "
+                                                               << x << "," << y << "," << z << " [" << i << "][" << j
+                                                               << "], drawn at " << surface;
+                                }
+                                // A ray from a little way out in the open meets it
+                                const glm::dvec3 from = at + glm::dvec3(0, up * std::min(0.25, gap * 0.5), 0);
+                                if (gap > 2.0 * KEPT_WITHIN && !solid(from)) {
+                                    const RaycastResult hit = raycastBlocks(Vec3(glm::vec3(from)), Vec3(0, float(-up), 0),
+                                                                            1.0f, RaycastMode::Collision, shapes);
+                                    EXPECT_TRUE(hit.hit) << when;
+                                    EXPECT_NEAR(hit.hitPoint.y, surface, thin ? 2.0 * KEPT_WITHIN : KEPT_WITHIN)
+                                        << when << ": " << side << " at " << x << "," << y << "," << z << " [" << i
+                                        << "][" << j << "]";
+                                }
+                                ++checked;
+                                if (HasFailure()) return checked;
                             }
-                            // Straight down from high in the cell over it: it's what the ray meets
-                            if (surface < y + 1.9) {
-                                const Vec3 from(float(at.x), float(y) + 1.95f, float(at.z));
-                                const RaycastResult hit =
-                                    raycastBlocks(from, Vec3(0, -1, 0), 4.0f, RaycastMode::Collision, shapes);
-                                EXPECT_TRUE(hit.hit) << when;
-                                EXPECT_NEAR(hit.hitPoint.y, surface, KEPT_WITHIN)
-                                    << when << ": at " << x << "," << y << "," << z << " [" << i << "][" << j << "]";
-                            }
-                            ++checked;
-                            if (HasFailure()) return checked;
                         }
                     }
                 }
@@ -250,8 +273,15 @@ TEST_F(GroundSurfaceTest, CollidesWhereItsDrawnOnRandomGround) {
                 for (int y = heights[z * SIZE + x]; y < 5; ++y) world->setFluid(BlockCoord(x, y, z), water, 8);
             }
         }
-        // And a few posts, which pin the ground round them
+        // A shelf of ground hanging over part of it, its underside stepping
         std::mt19937 rng(seed);
+        const int shelfX = int(rng() % 8), shelfZ = int(rng() % 8);
+        for (int x = shelfX; x < shelfX + 9; ++x) {
+            for (int z = shelfZ; z < shelfZ + 8; ++z) {
+                for (int y = 13 + int((x * 7 + z * 3 + seed) % 2); y < 16; ++y) world->setBlock(x, y, z, dirt);
+            }
+        }
+        // And a few posts, which pin the ground round them
         for (int i = 0; i < 8; ++i) {
             int x = 2 + int(rng() % (SIZE - 4)), z = 2 + int(rng() % (SIZE - 4));
             world->setBlock(x, heights[z * SIZE + x], z, stone);
@@ -424,4 +454,34 @@ TEST_F(GroundSurfaceTest, UnitsStepUpOntoBuiltBlocksFromADip) {
     Walker walker(*world, Vec3(9.5f, 9.0f, 3.5f));
     EXPECT_EQ(walker.go(glm::dvec3(9.5, 11.0, 9.5), 15.0f), NavState::Arrived);
     EXPECT_GT(walker.mob().position().y, 10.95f) << "it isn't on the post";
+}
+
+// A ceiling is solid as it's drawn too. A block hanging a step lower than the ceiling round it is
+// drawn as a shallow dome, and a body jumping under it goes up into the dome, past where the cube's
+// underside was, and stops at the drawn ceiling.
+TEST_F(GroundSurfaceTest, HeadsMeetTheCeilingAsDrawn) {
+    fill(16, [](int, int) { return 10; });
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            for (int y = 14; y < 17; ++y) world->setBlock(x, y, z, dirt);
+        }
+    }
+    world->setBlock(8, 13, 8, dirt);
+    makeSolid();
+
+    const auto dome = groundPatch(groundCells(*world, smooth), BlockCoord(8, 13, 8), -1);
+    ASSERT_TRUE(dome.has_value());
+    const double middle = dome->worldY(0.5f, 0.5f);
+    ASSERT_GT(middle, 13.3) << "it isn't drawn as a dome, so this checks nothing";
+
+    PhysicsSystem physics(shapes);
+    SimplePhysicsBody body(Vec3(8.5f, 10.0f, 8.5f), Vec3(0.3f, 0.9f, 0.3f));
+    body.setVelocity(Vec3(0.0f, 12.0f, 0.0f));
+    float peak = 0.0f;
+    for (int t = 0; t < 30; ++t) {
+        physics.update(body, DT);
+        peak = std::max(peak, body.position().y + 1.8f);
+    }
+    EXPECT_GT(peak, 13.2f) << "its head stopped at the cube's underside, at 13";
+    EXPECT_LT(peak, middle + KEPT_WITHIN) << "its head went past the drawn ceiling";
 }

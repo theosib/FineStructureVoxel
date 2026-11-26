@@ -89,6 +89,8 @@ private:
 
     // Rebuild a subchunk's mesh, and with `changed`, the meshes around it that those cells reach
     void remesh(ChunkPos chunk, const Changed* changed);
+    // Rebuild at once every mesh one cell changed here reaches: a prediction, or its end
+    void remeshCell(BlockCoord pos);
 
     World world_;
 

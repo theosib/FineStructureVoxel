@@ -6,6 +6,8 @@
 #include "finevox/core/fluid_type_id.hpp"
 #include "finevox/core/subchunk.hpp"
 #include "finevox/net/client_world.hpp"
+#include "finevox/core/ground_smoothing.hpp"
+#include "finevox/core/mesh_rebuild_queue.hpp"
 #include "finevox/net/content.hpp"
 #include "finevox/net/protocol.hpp"
 #include "finevox/net/subchunk_codec.hpp"
@@ -235,6 +237,29 @@ TEST_F(ClientWorldTest, APredictionShowsAtOnceAndStaysIfTheServerAgrees) {
     world.apply(stoneWith(spot, 2));
     world.settle(ClientWorld::Clock::now() + 200ms);
     EXPECT_EQ(world.world().getBlock(spot), marker);
+}
+
+// A cell this client changes rebuilds at once every mesh it reaches. With smoothed ground that's 3
+// across and 6 up or down: the faces next door read it, and the server's word on the cell later
+// matches the prediction, so it would never rebuild them.
+TEST_F(ClientWorldTest, APredictionRebuildsEveryMeshItReaches) {
+    MeshRebuildQueue queue = createMeshRebuildQueue();
+    world.world().setMeshRebuildQueue(&queue);
+    world.apply(stoneWith(spot, 2));
+    queue.drainAll();
+
+    const BlockCoord nearCorner(14, 11, 5);  // 2 from +x, 5 from +y, the middle in z
+    world.predict(nearCorner, marker, 100ms);
+    EXPECT_EQ(queue.size(), 1u) << "cubes: a face only reaches its own subchunk from inside";
+    queue.drainAll();
+
+    world.setMeshReach(GROUND_REACH_ACROSS, GROUND_REACH_UP_DOWN);
+    world.predict(nearCorner, stone, 100ms);
+    for (const ChunkPos& reached : {ChunkPos(0, 0, 0), ChunkPos(1, 0, 0), ChunkPos(0, 1, 0), ChunkPos(1, 1, 0)}) {
+        EXPECT_TRUE(queue.contains(reached)) << reached.x << "," << reached.y << "," << reached.z;
+    }
+    EXPECT_EQ(queue.size(), 4u) << "nothing it doesn't reach";
+    world.world().setMeshRebuildQueue(nullptr);
 }
 
 TEST_F(ClientWorldTest, APredictionTheServerNeverAgreedToGoesBack) {

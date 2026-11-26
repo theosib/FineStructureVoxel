@@ -63,6 +63,31 @@ void ClientWorld::remesh(ChunkPos chunk, const Changed* changed) {
     }
 }
 
+void ClientWorld::remeshCell(BlockCoord pos) {
+    auto* queue = world_.meshRebuildQueue();
+    if (!queue) return;
+    // Every subchunk round it that its reach crosses into, at once: the player's own action. Smoothed
+    // faces next door read this cell too, and left as they were they'd show a tear until something
+    // else rebuilt them; the server's word on it later matches, so changes nothing.
+    const ChunkPos chunk = ChunkPos::fromBlock(pos);
+    const int at[3] = {pos.x & 0xF, pos.y & 0xF, pos.z & 0xF};
+    const int reach[3] = {reachAcross_.load(), reachUpDown_.load(), reachAcross_.load()};
+    auto touches = [&](int axis, int side) {
+        if (side < 0) return at[axis] - reach[axis] < 0;
+        if (side > 0) return at[axis] + reach[axis] > 15;
+        return true;
+    };
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (touches(0, dx) && touches(1, dy) && touches(2, dz)) {
+                    queue->push(ChunkPos(chunk.x + dx, chunk.y + dy, chunk.z + dz), MeshRebuildRequest::immediate());
+                }
+            }
+        }
+    }
+}
+
 void ClientWorld::apply(const SubchunkData& data) {
     ++subchunksReceived_;
     const ChunkPos& chunk = data.pos;
@@ -165,11 +190,7 @@ void ClientWorld::predict(BlockCoord pos, BlockTypeId block, std::chrono::millis
         it->second.until = Clock::now() + hold;
     }
     world_.setBlock(pos, block);
-    if (auto* queue = world_.meshRebuildQueue()) {
-        for (const ChunkPos& affected : world_.getAffectedSubChunks(pos)) {
-            queue->push(affected, MeshRebuildRequest::immediate());
-        }
-    }
+    remeshCell(pos);
 }
 
 void ClientWorld::settle(Clock::time_point now) {
@@ -188,11 +209,7 @@ void ClientWorld::settle(Clock::time_point now) {
     for (const auto& [pos, block] : ended) {
         if (world_.getBlock(pos) == block) continue;
         world_.setBlock(pos, block);
-        if (auto* queue = world_.meshRebuildQueue()) {
-            for (const ChunkPos& affected : world_.getAffectedSubChunks(pos)) {
-                queue->push(affected, MeshRebuildRequest::immediate());
-            }
-        }
+        remeshCell(pos);
     }
 }
 

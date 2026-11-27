@@ -281,21 +281,22 @@ public:
     bool waitForMeshUploads(std::chrono::milliseconds timeout);
 
     /**
-     * @brief Record frame timing for adaptive deadline calculation
+     * @brief Record frame timing
      *
      * Call at the start of each frame to track actual frame intervals.
-     * This data is used to estimate how much time is available for
-     * mesh processing before the next frame deadline.
      *
-     * @return Estimated time until next frame deadline (based on vsync timing)
+     * The intervals are measured, so they include any time the frame spent
+     * waiting. Don't size a wait from them: a frame that waits for a share of
+     * its own period grows until the wait is that share of it.
+     *
+     * @return Estimated frame period (see estimatedFramePeriod())
      */
     std::chrono::microseconds recordFrameStart();
 
     /**
      * @brief Get the estimated frame period based on vsync timing
      *
-     * Returns a smoothed average of recent frame intervals.
-     * Useful for calculating deadlines.
+     * Returns the shortest of the recent frame intervals.
      *
      * @return Estimated frame period, or 16.67ms if no data available
      */

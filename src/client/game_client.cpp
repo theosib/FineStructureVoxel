@@ -596,8 +596,6 @@ void GameClient::Impl::setupShell() {
 
         if (!inWorld) return;
 
-        auto framePeriod = worldRenderer->recordFrameStart();
-
         sky = computeSkyParameters(session->timeOfDay(), content->skyConfig());
         worldRenderer->setSkyParameters(sky);
         if (worldRenderer->fogDynamicColor()) worldRenderer->setFogColor(sky.fogColor);
@@ -630,12 +628,11 @@ void GameClient::Impl::setupShell() {
             session->sendViewHint(where.x, where.z);
         }
 
-        auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::microseconds(framePeriod.count() / 2);
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (!worldRenderer->waitForMeshUploads(deadline)) break;
-            worldRenderer->updateMeshes(0);
-        }
+        // Take whatever meshes are ready, without waiting for more: what lands
+        // later is taken by the next frame's preRender, which waits on the GPU
+        // anyway. Waiting here for a share of the measured frame time fed back
+        // into it, and every frame doubled to twice its work.
+        worldRenderer->updateMeshes(0);
     };
     callbacks.onResize = [this](uint32_t width, uint32_t height) {
         if (height > 0) {

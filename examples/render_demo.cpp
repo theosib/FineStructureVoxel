@@ -2355,15 +2355,8 @@ int main(int argc, char* argv[]) {
 
             worldRenderer.updateCamera(camera.state(), camera.positionD());
 
-            // Deadline-based mesh processing
-            {
-                auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::microseconds(framePeriod.count() / 2);
-                while (std::chrono::steady_clock::now() < deadline) {
-                    if (!worldRenderer.waitForMeshUploads(deadline)) break;
-                    worldRenderer.updateMeshes(0);
-                }
-            }
+            // Take whatever meshes are ready; the next frame's preRender takes the rest
+            worldRenderer.updateMeshes(0);
         };
         callbacks.onResize = [&](uint32_t width, uint32_t height) {
             camera.setPerspective(fovDegrees, float(width) / float(height), 0.1f, 500.0f);

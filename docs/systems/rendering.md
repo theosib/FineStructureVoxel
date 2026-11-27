@@ -315,7 +315,7 @@ Overlaps mesh processing with GPU fence wait to reduce frame idle time:
 ```cpp
 // 3-phase render loop:
 // Phase 1: fence wait (GPU) + mesh processing (CPU) overlap
-// Phase 2: input/world updates + deadline meshes
+// Phase 2: input/world updates, and the meshes ready by then (no waiting)
 // Phase 3: render
 
 FrameFenceWaiter fenceWaiter(meshWorkerPool);

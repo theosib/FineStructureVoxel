@@ -129,6 +129,7 @@ struct NodeInfo {
     BlockCoord pos;
     float g = 0.0f;
     bool closed = false;
+    bool deep = false;  ///< Too deep to wade, and so was every cell back to the start
     uint8_t actionCount = 0;
     NavAction actions[2]{NavAction::Walk, NavAction::Walk};
     BlockCoord actionPos[2];
@@ -159,6 +160,7 @@ public:
         NodeInfo& start = nodes_[startKey];
         start.pos = startCell_;
         start.parent = startKey;
+        start.deep = probe_.tooDeep(startCell_, query_.maxWade);
         open_.push({heuristic(startCell_), startKey});
 
         int expanded = 0;
@@ -213,7 +215,10 @@ private:
         return probe_.solid(down(feet)) && bodyClear(feet) && !tooDeep(feet);
     }
 
-    bool tooDeep(const BlockCoord& feet) { return probe_.tooDeep(feet, query_.maxWade); }
+    // A body already in water too deep to wade gets out through it: deep water is crossed only on
+    // the way out from the start, never back in. Otherwise every way out is too deep and nothing
+    // that falls in, or is left standing on a riverbed, ever finds a route again.
+    bool tooDeep(const BlockCoord& feet) { return !fromDeep_ && probe_.tooDeep(feet, query_.maxWade); }
 
     /// Where the feet are, standing in this cell: on top of what's below
     float floorHeight(const BlockCoord& feet) {
@@ -257,6 +262,7 @@ private:
         node.parent = fromKey;
         node.pos = cell;
         node.g = g;
+        node.deep = fromDeep_ && probe_.tooDeep(cell, query_.maxWade);
         node.actionCount = actionCount;
         node.actions[0] = a0;
         node.actionPos[0] = p0;
@@ -270,6 +276,7 @@ private:
     void expand(uint64_t key, const NodeInfo& current) {
         // nodes_ may rehash below; everything needed is copied out here
         const NodeInfo node = current;
+        fromDeep_ = node.deep;
         static constexpr int DX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
         static constexpr int DZ[8] = {0, 0, 1, -1, 1, -1, 1, -1};
 
@@ -386,6 +393,7 @@ private:
     int clearance_;
     BlockCoord startCell_;
     BlockCoord goalCell_;
+    bool fromDeep_ = false;  ///< The node being expanded is deep
     std::unordered_map<uint64_t, NodeInfo> nodes_;
     std::priority_queue<OpenEntry, std::vector<OpenEntry>, std::greater<>> open_;
 };

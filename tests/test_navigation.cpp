@@ -285,6 +285,21 @@ TEST_F(NavigationTest, DeepWaterIsABarrierButAFordIsNot) {
     }
     limited.maxNodes = 6000;
     EXPECT_FALSE(findNavPath(world, limited).has_value());
+
+    // A body standing on the bed gets out, to either bank, but only out: nothing walks back in
+    NavQuery out = limited;
+    out.start = cell(12, GROUND_Y - 2, 5);
+    out.goal = cell(0, GROUND_Y, 5);
+    auto climbed = findNavPath(world, out);
+    ASSERT_TRUE(climbed.has_value()) << "stranded on the bed";
+    replay(*climbed, {12, GROUND_Y - 2, 5});
+    out.goal = cell(24, GROUND_Y, 5);
+    EXPECT_TRUE(findNavPath(world, out).has_value()) << "stranded on the bed";
+    NavQuery back = limited;
+    back.start = cell(0, GROUND_Y, 5);
+    back.goal = cell(12, GROUND_Y - 2, 5);
+    back.goalRange = 0.0f;
+    EXPECT_FALSE(findNavPath(world, back).has_value()) << "walked back into deep water";
 }
 
 TEST_F(NavigationTest, ReachUpCountsAGoalAboveHeadHeight) {

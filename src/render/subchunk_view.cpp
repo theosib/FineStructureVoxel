@@ -5,6 +5,7 @@
 #include <finevk/device/logical_device.hpp>
 #include <finevk/device/buffer.hpp>
 #include <finevk/device/command.hpp>
+#include <finevk/device/upload_batch.hpp>
 
 namespace finevox::render {
 
@@ -23,11 +24,73 @@ finevk::RawMeshPtr SubChunkView::takeFluidMesh() {
     return std::move(fluidMesh_);
 }
 
+namespace {
+
+// 16-bit indices where the vertex count allows (half the index memory)
+std::vector<uint16_t> narrowIndices(const MeshData& meshData) {
+    std::vector<uint16_t> out(meshData.indices.size());
+    for (size_t i = 0; i < meshData.indices.size(); ++i) {
+        out[i] = static_cast<uint16_t>(meshData.indices[i]);
+    }
+    return out;
+}
+
+// A new GPU mesh holding meshData, uploaded now or staged in batch
+finevk::RawMeshPtr buildMesh(finevk::LogicalDevice& device, finevk::CommandPool& commandPool,
+                             const MeshData& meshData, float capacityMultiplier,
+                             finevk::UploadBatch* batch, size_t& gpuBytes) {
+    bool use16BitIndices = meshData.vertexCount() <= 65535;
+
+    auto builder = finevk::RawMesh::create(&device)
+        .vertexLayout(getChunkVertexBindingDescription(),
+                      getChunkVertexAttributeDescriptions())
+        .vertices(meshData.vertices.data(), meshData.vertices.size())
+        .reserveCapacity(capacityMultiplier);
+
+    // Kept alive until after build(): the builder holds a pointer
+    std::vector<uint16_t> indices16;
+    if (use16BitIndices) {
+        indices16 = narrowIndices(meshData);
+        builder.indices(indices16.data(), indices16.size());
+    } else {
+        builder.indices(meshData.indices.data(), meshData.indices.size());
+    }
+
+    size_t indexSize = use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t);
+    gpuBytes = static_cast<size_t>(
+        (meshData.vertices.size() * sizeof(ChunkVertex) +
+         meshData.indices.size() * indexSize) * capacityMultiplier);
+
+    return batch ? builder.build(batch) : builder.build(commandPool);
+}
+
+// New contents for an existing GPU mesh, uploaded now or staged in batch
+void updateMesh(finevk::RawMesh& mesh, finevk::CommandPool& commandPool,
+                const MeshData& meshData, finevk::UploadBatch* batch) {
+    // The index type is the one the mesh was built with
+    std::vector<uint16_t> indices16;
+    const void* indices = meshData.indices.data();
+    if (mesh.indexType() == VK_INDEX_TYPE_UINT16) {
+        indices16 = narrowIndices(meshData);
+        indices = indices16.data();
+    }
+    if (batch) {
+        mesh.update(batch, meshData.vertices.data(), meshData.vertices.size(),
+                    indices, meshData.indices.size());
+    } else {
+        mesh.update(commandPool, meshData.vertices.data(), meshData.vertices.size(),
+                    indices, meshData.indices.size());
+    }
+}
+
+}  // namespace
+
 void SubChunkView::upload(
     finevk::LogicalDevice& device,
     finevk::CommandPool& commandPool,
     const MeshData& meshData,
-    float capacityMultiplier
+    float capacityMultiplier,
+    finevk::UploadBatch* batch
 ) {
     // Empty mesh - release resources
     if (meshData.isEmpty()) {
@@ -35,42 +98,9 @@ void SubChunkView::upload(
         return;
     }
 
-    // Determine index type based on vertex count
-    // Use 16-bit indices if vertex count fits (more efficient)
-    bool use16BitIndices = meshData.vertexCount() <= 65535;
-
-    // Build the RawMesh
-    auto builder = finevk::RawMesh::create(&device)
-        .vertexLayout(getChunkVertexBindingDescription(),
-                      getChunkVertexAttributeDescriptions())
-        .vertices(meshData.vertices.data(), meshData.vertices.size())
-        .reserveCapacity(capacityMultiplier);
-
-    // Keep indices16 alive until after build() - the builder stores a pointer
-    std::vector<uint16_t> indices16;
-    if (use16BitIndices) {
-        // Convert indices to 16-bit
-        indices16.resize(meshData.indices.size());
-        for (size_t i = 0; i < meshData.indices.size(); ++i) {
-            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
-        }
-        builder.indices(indices16.data(), indices16.size());
-    } else {
-        builder.indices(meshData.indices.data(), meshData.indices.size());
-    }
-
-    mesh_ = builder.build(commandPool);
+    mesh_ = buildMesh(device, commandPool, meshData, capacityMultiplier, batch, gpuMemoryBytes_);
     indexCount_ = static_cast<uint32_t>(meshData.indices.size());
     vertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
-
-    // Calculate GPU memory usage
-    // Vertex buffer: vertices * sizeof(ChunkVertex) * capacityMultiplier
-    // Index buffer: indices * indexSize * capacityMultiplier
-    size_t indexSize = use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t);
-    gpuMemoryBytes_ = static_cast<size_t>(
-        (meshData.vertices.size() * sizeof(ChunkVertex) +
-         meshData.indices.size() * indexSize) * capacityMultiplier
-    );
 }
 
 bool SubChunkView::canUpdateInPlace(const MeshData& meshData) const {
@@ -80,40 +110,21 @@ bool SubChunkView::canUpdateInPlace(const MeshData& meshData) const {
     return mesh_->canUpdateInPlace(meshData.vertices.size(), meshData.indices.size());
 }
 
-void SubChunkView::update(finevk::CommandPool& commandPool, const MeshData& meshData) {
+void SubChunkView::update(finevk::CommandPool& commandPool, const MeshData& meshData,
+                          finevk::UploadBatch* batch) {
     // Empty mesh - release resources
     if (meshData.isEmpty()) {
         release();
         return;
     }
 
-    if (!mesh_) {
-        // Can't update without existing mesh - this shouldn't happen if
-        // caller checked canUpdateInPlace first
-        return;
-    }
+    // Can't update without existing mesh - the caller checks canUpdateInPlace first
+    if (!mesh_) return;
 
-    // Determine if we're using 16-bit indices (check stored type)
-    bool use16BitIndices = (mesh_->indexType() == VK_INDEX_TYPE_UINT16);
-
-    if (use16BitIndices) {
-        // Convert indices to 16-bit
-        std::vector<uint16_t> indices16(meshData.indices.size());
-        for (size_t i = 0; i < meshData.indices.size(); ++i) {
-            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
-        }
-        mesh_->update(commandPool,
-                      meshData.vertices.data(), meshData.vertices.size(),
-                      indices16.data(), indices16.size());
-    } else {
-        mesh_->update(commandPool,
-                      meshData.vertices.data(), meshData.vertices.size(),
-                      meshData.indices.data(), meshData.indices.size());
-    }
-
+    updateMesh(*mesh_, commandPool, meshData, batch);
     indexCount_ = static_cast<uint32_t>(meshData.indices.size());
     vertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
-    // Note: gpuMemoryBytes_ stays the same since capacity doesn't change on in-place update
+    // gpuMemoryBytes_ stays the same since capacity doesn't change on in-place update
 }
 
 void SubChunkView::release() {
@@ -144,41 +155,18 @@ void SubChunkView::uploadFluid(
     finevk::LogicalDevice& device,
     finevk::CommandPool& commandPool,
     const MeshData& meshData,
-    float capacityMultiplier
+    float capacityMultiplier,
+    finevk::UploadBatch* batch
 ) {
     if (meshData.isEmpty()) {
         releaseFluid();
         return;
     }
 
-    bool use16BitIndices = meshData.vertexCount() <= 65535;
-
-    auto builder = finevk::RawMesh::create(&device)
-        .vertexLayout(getChunkVertexBindingDescription(),
-                      getChunkVertexAttributeDescriptions())
-        .vertices(meshData.vertices.data(), meshData.vertices.size())
-        .reserveCapacity(capacityMultiplier);
-
-    std::vector<uint16_t> indices16;
-    if (use16BitIndices) {
-        indices16.resize(meshData.indices.size());
-        for (size_t i = 0; i < meshData.indices.size(); ++i) {
-            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
-        }
-        builder.indices(indices16.data(), indices16.size());
-    } else {
-        builder.indices(meshData.indices.data(), meshData.indices.size());
-    }
-
-    fluidMesh_ = builder.build(commandPool);
+    fluidMesh_ = buildMesh(device, commandPool, meshData, capacityMultiplier, batch,
+                           fluidGpuMemoryBytes_);
     fluidIndexCount_ = static_cast<uint32_t>(meshData.indices.size());
     fluidVertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
-
-    size_t indexSize = use16BitIndices ? sizeof(uint16_t) : sizeof(uint32_t);
-    fluidGpuMemoryBytes_ = static_cast<size_t>(
-        (meshData.vertices.size() * sizeof(ChunkVertex) +
-         meshData.indices.size() * indexSize) * capacityMultiplier
-    );
 }
 
 bool SubChunkView::canUpdateFluidInPlace(const MeshData& meshData) const {
@@ -186,7 +174,8 @@ bool SubChunkView::canUpdateFluidInPlace(const MeshData& meshData) const {
     return fluidMesh_->canUpdateInPlace(meshData.vertices.size(), meshData.indices.size());
 }
 
-void SubChunkView::updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData) {
+void SubChunkView::updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData,
+                               finevk::UploadBatch* batch) {
     if (meshData.isEmpty()) {
         releaseFluid();
         return;
@@ -194,22 +183,7 @@ void SubChunkView::updateFluid(finevk::CommandPool& commandPool, const MeshData&
 
     if (!fluidMesh_) return;
 
-    bool use16BitIndices = (fluidMesh_->indexType() == VK_INDEX_TYPE_UINT16);
-
-    if (use16BitIndices) {
-        std::vector<uint16_t> indices16(meshData.indices.size());
-        for (size_t i = 0; i < meshData.indices.size(); ++i) {
-            indices16[i] = static_cast<uint16_t>(meshData.indices[i]);
-        }
-        fluidMesh_->update(commandPool,
-                           meshData.vertices.data(), meshData.vertices.size(),
-                           indices16.data(), indices16.size());
-    } else {
-        fluidMesh_->update(commandPool,
-                           meshData.vertices.data(), meshData.vertices.size(),
-                           meshData.indices.data(), meshData.indices.size());
-    }
-
+    updateMesh(*fluidMesh_, commandPool, meshData, batch);
     fluidIndexCount_ = static_cast<uint32_t>(meshData.indices.size());
     fluidVertexCount_ = static_cast<uint32_t>(meshData.vertices.size());
 }

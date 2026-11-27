@@ -291,6 +291,23 @@ struct MeshUploadData {
 
 ---
 
+## Mesh uploads
+
+`updateMeshes()` stages each mesh in the renderer's `finevk::UploadBatch`
+(`RenderSurface::uploadBatch()`): the data is copied to staging memory at once, and every
+copy gathered since the last frame is recorded at the head of the next frame's command
+buffer, before its render pass. A blocking upload per mesh (a submit and a fence wait each)
+waited behind the frames in flight every time; while the world streams in, that cost most of
+the frame. A surface with no batch (`OffscreenSurface`) uploads each mesh at once as before.
+
+Because a staged copy still names its mesh's buffers until the next frame records it, a mesh
+leaves only through `retireMesh()` / `retireView()`, which hand it to the renderer's
+`deferDelete`. That holds it until the frame that records the copies, and any frame still
+drawing it, is done. Unloading, the memory budget, `unloadAll()` and the destructor all go
+that way; never erase a view with meshes in it.
+
+---
+
 ## FrameFenceWaiter
 
 Overlaps mesh processing with GPU fence wait to reduce frame idle time:

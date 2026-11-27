@@ -20,6 +20,7 @@ class LogicalDevice;
 class CommandPool;
 class CommandBuffer;
 class RawMesh;
+class UploadBatch;
 using RawMeshPtr = std::unique_ptr<RawMesh>;
 }
 
@@ -179,12 +180,16 @@ public:
      * @param commandPool Command pool for GPU upload
      * @param meshData CPU-side mesh data to upload
      * @param capacityMultiplier Extra capacity for updates (default 1.5 = 50% headroom)
+     * @param batch If given, the copies are staged there and land before the next
+     *        frame draws, instead of submitted and waited on here. The mesh then
+     *        must be retired through the renderer's deferDelete, never destroyed.
      */
     void upload(
         finevk::LogicalDevice& device,
         finevk::CommandPool& commandPool,
         const MeshData& meshData,
-        float capacityMultiplier = 1.5f
+        float capacityMultiplier = 1.5f,
+        finevk::UploadBatch* batch = nullptr
     );
 
     /**
@@ -202,8 +207,10 @@ public:
      *
      * @param commandPool Command pool for GPU upload
      * @param meshData New mesh data
+     * @param batch As for upload()
      */
-    void update(finevk::CommandPool& commandPool, const MeshData& meshData);
+    void update(finevk::CommandPool& commandPool, const MeshData& meshData,
+                finevk::UploadBatch* batch = nullptr);
 
     /**
      * @brief Release GPU resources
@@ -263,11 +270,13 @@ public:
         finevk::LogicalDevice& device,
         finevk::CommandPool& commandPool,
         const MeshData& meshData,
-        float capacityMultiplier = 1.5f
+        float capacityMultiplier = 1.5f,
+        finevk::UploadBatch* batch = nullptr
     );
 
     [[nodiscard]] bool canUpdateFluidInPlace(const MeshData& meshData) const;
-    void updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData);
+    void updateFluid(finevk::CommandPool& commandPool, const MeshData& meshData,
+                     finevk::UploadBatch* batch = nullptr);
     void releaseFluid();
 
     [[nodiscard]] bool hasFluidGeometry() const { return fluidMesh_ != nullptr && fluidIndexCount_ > 0; }

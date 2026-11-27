@@ -715,6 +715,10 @@ public:
     void unloadAll();
 
 private:
+    // A mesh no longer drawn, kept until no frame or staged copy needs it
+    void retireMesh(finevk::RawMeshPtr mesh);
+    // Retire both of a view's meshes, before the view goes
+    void retireView(SubChunkView& view);
     // Create pipeline and descriptors
     void createPipeline();
     void createDescriptorSets();

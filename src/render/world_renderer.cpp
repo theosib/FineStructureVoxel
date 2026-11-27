@@ -8,6 +8,7 @@
 #include <finevk/device/physical_device.hpp>
 #include <finevk/device/command.hpp>
 #include <finevk/device/sampler.hpp>
+#include <finevk/device/upload_batch.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -42,6 +43,10 @@ WorldRenderer::~WorldRenderer() {
     if (device_) {
         device_->waitIdle();
     }
+
+    // The GPU is idle, but copies staged for the next frame may still name
+    // these meshes: hand them to the renderer rather than destroy them here
+    unloadAll();
 }
 
 void WorldRenderer::loadShaders(const std::string& vertPath, const std::string& fragPath) {
@@ -404,6 +409,9 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
     // Pop completed meshes from the upload queue and send to GPU.
     // Rebuilds are triggered by game logic, lighting thread, and LOD checks
     // in render() — no polling or dirty list scanning needed here.
+    // Staged copies go at the head of the next frame: one submission, no wait each
+    finevk::UploadBatch* batch = renderer_->uploadBatch();
+
     uint32_t uploads = 0;
     while (maxUpdates == 0 || uploads < maxUpdates) {
         auto uploadData = meshWorkerPool_->tryPopUpload();
@@ -415,10 +423,7 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         if (uploadData->ticket < view->builtTicket()) continue;
         view->setBuiltTicket(uploadData->ticket);
 
-        // Frames in flight may still draw the old mesh, so it must outlive them
-        auto retire = [this](finevk::RawMeshPtr mesh) {
-            if (mesh) renderer_->deferDelete(std::move(mesh));
-        };
+        auto retire = [this](finevk::RawMeshPtr mesh) { retireMesh(std::move(mesh)); };
 
         if (uploadData->mesh.isEmpty() && uploadData->fluidMesh.isEmpty()) {
             retire(view->takeMesh());
@@ -433,20 +438,21 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         if (uploadData->mesh.isEmpty()) {
             retire(view->takeMesh());
         } else if (view->canUpdateInPlace(uploadData->mesh)) {
-            view->update(*renderer_->commandPool(), uploadData->mesh);
+            view->update(*renderer_->commandPool(), uploadData->mesh, batch);
         } else {
             retire(view->takeMesh());
-            view->upload(*device_, *renderer_->commandPool(), uploadData->mesh, config_.meshCapacityMultiplier);
+            view->upload(*device_, *renderer_->commandPool(), uploadData->mesh,
+                         config_.meshCapacityMultiplier, batch);
         }
 
         // Handle fluid mesh
         if (!uploadData->fluidMesh.isEmpty()) {
             if (view->canUpdateFluidInPlace(uploadData->fluidMesh)) {
-                view->updateFluid(*renderer_->commandPool(), uploadData->fluidMesh);
+                view->updateFluid(*renderer_->commandPool(), uploadData->fluidMesh, batch);
             } else {
                 retire(view->takeFluidMesh());
                 view->uploadFluid(*device_, *renderer_->commandPool(),
-                                  uploadData->fluidMesh, config_.meshCapacityMultiplier);
+                                  uploadData->fluidMesh, config_.meshCapacityMultiplier, batch);
             }
         } else {
             retire(view->takeFluidMesh());
@@ -457,6 +463,18 @@ void WorldRenderer::updateMeshes(uint32_t maxUpdates) {
         view->setBuiltDetail(uploadData->detailed, uploadData->hasFarForms);
         ++uploads;
     }
+}
+
+void WorldRenderer::retireMesh(finevk::RawMeshPtr mesh) {
+    // Frames in flight may still draw it, and a staged copy may still write to
+    // it: deferDelete holds it until both are done
+    if (mesh && renderer_) renderer_->deferDelete(std::move(mesh));
+}
+
+void WorldRenderer::retireView(SubChunkView& view) {
+    retireMesh(view.takeMesh());
+    retireMesh(view.takeFluidMesh());
+    view.release();
 }
 
 void WorldRenderer::markDirty(ChunkPos pos) {
@@ -759,7 +777,10 @@ glm::vec3 WorldRenderer::calculateViewRelativeOffset(ChunkPos pos) const {
 }
 
 void WorldRenderer::unloadChunk(ChunkPos pos) {
-    views_.erase(pos);
+    auto it = views_.find(pos);
+    if (it == views_.end()) return;
+    retireView(*it->second);
+    views_.erase(it);
 }
 
 uint32_t WorldRenderer::unloadDistantChunks() {
@@ -777,6 +798,7 @@ uint32_t WorldRenderer::unloadDistantChunks() {
         float dist = glm::length(chunkCenter - glm::vec2(cameraChunkPos_.x, cameraChunkPos_.z));
 
         if (dist > unloadDistChunks) {
+            retireView(*it->second);
             it = views_.erase(it);
             ++unloaded;
         } else {
@@ -837,7 +859,7 @@ uint32_t WorldRenderer::enforceMemoryBudget() {
         if (currentUsage <= config_.gpuMemoryBudget) break;
         if (unloaded >= config_.maxUnloadsPerFrame) break;
 
-        views_.erase(chunk.pos);
+        unloadChunk(chunk.pos);
         currentUsage -= chunk.memoryBytes;
         ++unloaded;
     }
@@ -857,6 +879,7 @@ void WorldRenderer::performCleanup() {
 }
 
 void WorldRenderer::unloadAll() {
+    for (auto& [pos, view] : views_) retireView(*view);
     views_.clear();
 }
 
